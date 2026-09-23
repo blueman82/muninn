@@ -8,6 +8,7 @@ import os
 import signal
 import socket
 import sqlite3
+import stat
 import tempfile
 import threading
 import time
@@ -34,7 +35,6 @@ REQUEST_TIMEOUT_SECONDS = 0.2
 
 
 def _json(value: object) -> bytes:
-    """Encode one bounded protocol payload."""
     encoded = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
     if len(encoded) > MAX_REQUEST_BYTES:
         return b'{"error":"response_too_large"}\n'
@@ -42,7 +42,6 @@ def _json(value: object) -> bytes:
 
 
 def _load_json(path: Path) -> dict[str, object]:
-    """Read an object JSON file, returning an empty object when absent."""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -51,7 +50,6 @@ def _load_json(path: Path) -> dict[str, object]:
 
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
-    """Atomically write an operational JSON artifact with private mode."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=path.parent, delete=False
@@ -65,7 +63,6 @@ def _write_json(path: Path, value: Mapping[str, object]) -> None:
 def _audit(
     state_dir: Path, event: str, trace_id: str, **fields: object
 ) -> None:
-    """Append redacted lifecycle data without prompt or source text."""
     record = {"at": time.time(), "event": event, "trace_id": trace_id} | fields
     audit_path = state_dir / "audit.jsonl"
     with audit_path.open("a", encoding="utf-8") as audit_file:
@@ -94,12 +91,14 @@ class Brain:
         self.last_error = ""
         self.pending = 0
         self.snapshot_hash = ""
+        self.reconciling = False
         self.lock = threading.Lock()
 
     def reconcile(self) -> None:
         """Publish a new snapshot when source fingerprints require it."""
         trace_id = uuid.uuid4().hex
         started = time.monotonic()
+        self.reconciling = True
         with self.lock:
             temporary, connection = open_snapshot(self.database)
             try:
@@ -189,9 +188,10 @@ class Brain:
                     trace_id,
                     error=self.last_error,
                 )
+            finally:
+                self.reconciling = False
 
     def _write_state(self) -> None:
-        """Write low-cardinality health state without raw source details."""
         sources: list[dict[str, object]] = []
         if self.database.exists():
             try:
@@ -240,7 +240,8 @@ class Brain:
         """Return bounded cited evidence from the published snapshot."""
         prompt = request.get("prompt")
         if (
-            self.last_error
+            self.reconciling
+            or self.last_error
             or not isinstance(prompt, str)
             or not self.database.exists()
         ):
@@ -264,7 +265,6 @@ class Brain:
         return packet
 
     def _provider_for(self, source: Mapping[str, object]) -> str:
-        """Find an event provider from its source reference."""
         if not self.database.exists():
             return "unknown"
         with sqlite3.connect(self.database) as connection:
@@ -282,8 +282,9 @@ class Brain:
         return str(row[0]) if row else "unknown"
 
     def status(self) -> dict[str, object]:
-        """Return public redacted health state."""
-        return _load_json(self.state_dir / "state.json") | {"available": True}
+        return _load_json(self.state_dir / "state.json") | {
+            "available": not self.reconciling and not bool(self.last_error)
+        }
 
 
 class RequestHandler(StreamRequestHandler):
@@ -334,7 +335,6 @@ class Server(ThreadingMixIn, UnixStreamServer):
 def request(
     socket_path: Path, payload: Mapping[str, object]
 ) -> dict[str, object]:
-    """Call the local service with a bounded unavailable-safe fallback."""
     try:
         private_directory(socket_path.parent, create=False)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -363,14 +363,15 @@ def serve(
     socket_path: Path,
     interval: float,
 ) -> int:
-    """Run the reconciler and Unix socket service until signalled to stop."""
     private_directory(state_dir, create=True)
     private_directory(socket_path.parent, create=True)
-    lock_path = acquire_lock(state_dir)
+    lock_path, lock_descriptor = acquire_lock(state_dir)
     socket_inode: int | None = None
     if socket_path.exists():
-        release_lock(lock_path)
-        raise RuntimeError("provenance socket path already exists")
+        if not stat.S_ISSOCK(socket_path.lstat().st_mode):
+            release_lock(lock_path, lock_descriptor)
+            raise RuntimeError("provenance socket path is not a socket")
+        socket_path.unlink()
     brain = Brain(codex_root, claude_root, database, state_dir)
     brain.reconcile()
     server = Server(str(socket_path), RequestHandler)
@@ -395,5 +396,5 @@ def serve(
                 socket_path.unlink()
         except OSError:
             pass
-        release_lock(lock_path)
+        release_lock(lock_path, lock_descriptor)
     return 0

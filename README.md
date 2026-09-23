@@ -5,7 +5,7 @@ untrusted data, never instructions. The normal operating mode is one local
 daemon; hooks only make bounded Unix-socket recall requests and never index.
 
 ```sh
-python3 scripts/context.py serve \
+/opt/homebrew/bin/python3.13 scripts/context.py serve \
   --codex-root "$HOME/.codex/sessions" \
   --claude-root "$HOME/.claude/projects" \
   --db "$HOME/.local/share/provenance-context/context.sqlite" \
@@ -64,7 +64,8 @@ adding an OTel exporter.
 
 ## launchd template
 
-`launchd/com.provenance-context.plist.template` is a template only; this
+`launchd/com.provenance-context.plist.template` is a template only; set
+`__PYTHON__` to `/opt/homebrew/bin/python3.13`. This
 repository never bootstraps a personal service. Copy it to
 `~/Library/LaunchAgents/com.provenance-context.plist`, replace each
 `__UPPERCASE__` value with an absolute path, then validate and control it:

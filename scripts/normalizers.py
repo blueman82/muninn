@@ -120,7 +120,11 @@ def parse_source(
     for line, raw in lines:
         try:
             record = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (
+            RecursionError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as error:
             return (
                 [],
                 f"invalid_json_line_{line}:{type(error).__name__}",
@@ -128,25 +132,28 @@ def parse_source(
             )
         if not isinstance(record, Mapping):
             continue
-        metadata = _metadata(record)
-        if provider == "codex":
-            messages = _codex_messages(record)
-            texts = (
-                (message.get("role"), text_content(message.get("content")))
-                for message in messages
-            )
-        else:
-            message = record.get("message")
-            role = record.get("type")
-            if not isinstance(message, Mapping) or role not in {
-                "user",
-                "assistant",
-            }:
-                continue
-            message_role = message.get("role")
-            if message_role not in {role, None}:
-                continue
-            texts = [(role, _claude_text(message.get("content")))]
+        try:
+            metadata = _metadata(record)
+            if provider == "codex":
+                messages = _codex_messages(record)
+                texts = (
+                    (message.get("role"), text_content(message.get("content")))
+                    for message in messages
+                )
+            else:
+                message = record.get("message")
+                role = record.get("type")
+                if not isinstance(message, Mapping) or role not in {
+                    "user",
+                    "assistant",
+                }:
+                    continue
+                message_role = message.get("role")
+                if message_role not in {role, None}:
+                    continue
+                texts = [(role, _claude_text(message.get("content")))]
+        except RecursionError:
+            return [], f"nested_source_line_{line}", pending
         for ordinal, (role, text) in enumerate(texts, start=1):
             if not isinstance(role, str):
                 continue

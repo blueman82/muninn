@@ -1,6 +1,6 @@
 {
   "include": ["scripts", "hooks", "tests"],
   "extraPaths": ["scripts", "hooks"],
-  "pythonVersion": "3.9",
+  "pythonVersion": "3.13",
   "typeCheckingMode": "basic"
 }

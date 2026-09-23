@@ -16,14 +16,16 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 SECRET_LINE = re.compile(
-    r"(?i)(?:api[_-]?key|access[_-]?token|auth(?:orization)?|bearer|"
-    r"password|passwd|secret|private[_-]?key)\s*(?:=|:)\s*\S+"
+    r"(?i)(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
+    r"auth(?:orization)?|bearer|password|passwd|secret|private[_-]?key)"
+    r"\s*(?:=|:)\s*\S+"
     r"|bearer\s+\S+|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}"
     r"|AKIA[0-9A-Z]{16}"
 )
 QUOTED_SECRET_FIELD = re.compile(
-    r'(?i)["\'](?:api[_-]?key|access[_-]?token|auth(?:orization)?|'
-    r'password|passwd|secret|private[_-]?key)["\']\s*:\s*["\'][^"\']+["\']'
+    r'(?i)["\'](?:api[_-]?key|access[_-]?token|client[_-]?secret|token|'
+    r'auth(?:orization)?|password|passwd|secret|private[_-]?key)["\']\s*:'
+    r'\s*["\'][^"\']+["\']'
 )
 HOSTILE_LINE = re.compile(
     r"(?i)(?:ignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior)\s+instructions|"
@@ -31,13 +33,14 @@ HOSTILE_LINE = re.compile(
     r"follow\s+these\s+instructions\s+instead)"
 )
 SPLIT_SECRET = re.compile(
-    r"(?is)(?:api[_-]?key|access[_-]?token|password|passwd|secret)\s*\n\s*[:=]\s*\S+"
+    r"(?is)(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
+    r"password|passwd|secret)\s*\n\s*[:=]\s*\S+"
 )
 QUERY_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 
 
 def sanitize_text(text: str) -> str:
-    """Remove lines containing secrets or instruction-like hostile text."""
+    """Suppress known credential and instruction patterns defensively."""
     if SPLIT_SECRET.search(text) or HOSTILE_LINE.search(text):
         return ""
     safe_lines = (

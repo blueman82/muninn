@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import stat
 from pathlib import Path
@@ -19,30 +20,24 @@ def private_directory(path: Path, create: bool) -> None:
         raise PermissionError("private runtime directory must be mode 0700")
 
 
-def acquire_lock(state_dir: Path) -> Path:
+def acquire_lock(state_dir: Path) -> tuple[Path, int]:
     """Create an exclusive daemon lock or fail while a live owner exists."""
     lock_path = state_dir / "daemon.lock"
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        descriptor = os.open(
-            lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
-        )
-    except FileExistsError:
-        try:
-            owner = int(lock_path.read_text().strip())
-            os.kill(owner, 0)
-        except (OSError, ValueError):
-            lock_path.unlink()
-            return acquire_lock(state_dir)
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(descriptor)
         raise RuntimeError("provenance daemon already running")
-    with os.fdopen(descriptor, "w") as stream:
-        stream.write(str(os.getpid()))
-    return lock_path
+    os.ftruncate(descriptor, 0)
+    os.write(descriptor, str(os.getpid()).encode())
+    return lock_path, descriptor
 
 
-def release_lock(lock_path: Path) -> None:
+def release_lock(_lock_path: Path, descriptor: int) -> None:
     """Remove only the lock created by this daemon process."""
     try:
-        if lock_path.read_text().strip() == str(os.getpid()):
-            lock_path.unlink()
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
     except OSError:
         return
