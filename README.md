@@ -59,8 +59,21 @@ returns redacted generation, source staleness, pending tails, and last error.
 `doctor` uses the same local health response. `audit.jsonl` contains only
 trace-compatible IDs, timings, counts, and snapshot hashes; it never contains
 prompts, evidence text, raw paths, secrets, or tool output. OpenTelemetry is
-not installed in this Python 3.9 slice: use a Python >=3.10 runtime before
-adding an OTel exporter.
+not installed in this Python 3.13 slice; add it only with independently tested
+instrumentation. Pattern filtering is defense in depth, not proof every secret
+representation is detected.
+
+## Quality commands
+
+Runtime tests use `/opt/homebrew/bin/python3.13`. Black, Ruff, and Pyright use
+the installed executables below; they are not installed into that interpreter.
+
+```sh
+/Users/garyharr/Library/Python/3.9/bin/black --check scripts hooks tests
+/Users/garyharr/Library/Python/3.9/bin/ruff check scripts hooks tests
+/Users/garyharr/Library/Python/3.9/bin/pyright
+/opt/homebrew/bin/python3.13 -m unittest discover -s tests -v
+```
 
 ## launchd template
 

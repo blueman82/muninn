@@ -3,9 +3,88 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
+import socket
 import stat
+import tempfile
+import time
+from collections.abc import Mapping
 from pathlib import Path
+
+MAX_AUDIT_BYTES = 1_048_576
+MAX_AUDIT_RECORD_BYTES = 4_096
+
+
+def load_json(path: Path) -> dict[str, object]:
+    """Read one local JSON object or return an empty safe state."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def write_json(path: Path, value: Mapping[str, object]) -> None:
+    """Atomically write a private local JSON object."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as temporary:
+        temporary.write(json.dumps(value, sort_keys=True))
+        temporary_path = Path(temporary.name)
+    os.chmod(temporary_path, 0o600)
+    os.replace(temporary_path, path)
+
+
+def append_audit(
+    state_dir: Path, event: str, trace_id: str, **fields: object
+) -> tuple[bool, bool]:
+    """Append one bounded redacted audit event and report rotation or drop."""
+    record = {"at": time.time(), "event": event, "trace_id": trace_id} | fields
+    encoded = (json.dumps(record, sort_keys=True) + "\n").encode("utf-8")
+    if len(encoded) > MAX_AUDIT_RECORD_BYTES:
+        return False, True
+    audit_path = state_dir / "audit.jsonl"
+    try:
+        rotated = audit_path.exists() and (
+            audit_path.stat().st_size + len(encoded) > MAX_AUDIT_BYTES
+        )
+        if rotated:
+            audit_path.replace(state_dir / "audit.previous.jsonl")
+        with audit_path.open("ab") as audit_file:
+            audit_file.write(encoded)
+        os.chmod(audit_path, 0o600)
+    except OSError:
+        return False, True
+    return rotated, False
+
+
+def request(
+    socket_path: Path,
+    payload: Mapping[str, object],
+    timeout_seconds: float,
+    max_bytes: int,
+) -> dict[str, object]:
+    """Request a private Unix socket and fail closed when it is unavailable."""
+    try:
+        private_directory(socket_path.parent, create=False)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(timeout_seconds)
+            client.connect(str(socket_path))
+            client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            with client.makefile("rb") as stream:
+                response = json.loads(stream.readline(max_bytes))
+        return dict(response) if isinstance(response, Mapping) else {}
+    except (OSError, ValueError, json.JSONDecodeError):
+        if payload.get("op") == "recall":
+            return {
+                "evidence": [],
+                "bytes": 0,
+                "untrusted": True,
+                "available": False,
+            }
+        return {"available": False, "status": "unavailable"}
 
 
 def private_directory(path: Path, create: bool) -> None:

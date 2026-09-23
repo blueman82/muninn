@@ -9,13 +9,15 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 from typing import Callable, cast
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from service import Brain
+from service import MAX_CLIENTS, Brain
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -459,6 +461,114 @@ class ServiceTest(unittest.TestCase):
                 "evidence"
             ]
         )
+
+    def test_recall_never_mixes_snapshots_during_reconciliation(self) -> None:
+        """A recall admitted during replacement returns no stale packet."""
+        source = self.codex / "atomic.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "atomic-needle",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        brain = Brain(self.codex, self.claude, self.database, self.state)
+        brain.reconcile()
+        self.assertTrue(
+            brain.recall({"prompt": "atomic-needle", "repo": "/repo"})[
+                "evidence"
+            ]
+        )
+        source.write_text("{malformed}\n")
+        entered = threading.Event()
+        release = threading.Event()
+        from service import open_snapshot as real_open_snapshot
+
+        def delayed_snapshot(database: Path) -> tuple[Path, object]:
+            temporary, connection = real_open_snapshot(database)
+            entered.set()
+            self.assertTrue(release.wait(2))
+            return temporary, connection
+
+        with patch("service.open_snapshot", side_effect=delayed_snapshot):
+            worker = threading.Thread(target=brain.reconcile)
+            worker.start()
+            self.assertTrue(entered.wait(2))
+            self.assertEqual(
+                brain.recall({"prompt": "atomic-needle", "repo": "/repo"})[
+                    "evidence"
+                ],
+                [],
+            )
+            release.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(
+            brain.recall({"prompt": "atomic-needle", "repo": "/repo"})[
+                "evidence"
+            ],
+            [],
+        )
+
+    def test_client_saturation_and_audit_status_are_bounded(self) -> None:
+        """Slow peers are capped and audit data is visible without content."""
+        peers = [
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            for _ in range(MAX_CLIENTS)
+        ]
+        try:
+            for peer in peers:
+                peer.connect(str(self.socket))
+            time.sleep(0.05)
+            saturated = run("status", "--socket", str(self.socket))
+            self.assertEqual(saturated.returncode, 0)
+            self.assertFalse(json.loads(saturated.stdout)["available"])
+            for peer in peers:
+                peer.close()
+            time.sleep(0.3)
+            status = self.wait_for_status(
+                lambda packet: isinstance(
+                    packet.get("requests_saturated"), int
+                )
+                and cast(int, packet["requests_saturated"]) >= 1
+            )
+            state = json.loads((self.state / "state.json").read_text())
+            for key in (
+                "audit_bytes",
+                "audit_rotations",
+                "audit_dropped",
+                "requests_rejected",
+                "requests_saturated",
+            ):
+                self.assertEqual(status[key], state[key])
+            self.assertGreaterEqual(cast(int, status["requests_rejected"]), 1)
+            self.assertGreaterEqual(cast(int, status["audit_bytes"]), 1)
+        finally:
+            for peer in peers:
+                peer.close()
+
+    def test_audit_rotation_and_drop_are_reflected_in_state(self) -> None:
+        """Rotation and oversized events retain only redacted counters."""
+        brain = Brain(self.codex, self.claude, self.database, self.state)
+        with patch("runtime.MAX_AUDIT_BYTES", 200):
+            for number in range(4):
+                brain.audit("test", str(number), count=number)
+        with patch("runtime.MAX_AUDIT_RECORD_BYTES", 50):
+            brain.audit("test", "oversized", count="x" * 100)
+        brain._write_state()
+        status = brain.status()
+        state = json.loads((self.state / "state.json").read_text())
+        self.assertGreaterEqual(cast(int, status["audit_rotations"]), 1)
+        self.assertGreaterEqual(cast(int, status["audit_dropped"]), 1)
+        self.assertLessEqual(cast(int, status["audit_bytes"]), 200)
+        for key in ("audit_bytes", "audit_rotations", "audit_dropped"):
+            self.assertEqual(status[key], state[key])
 
 
 if __name__ == "__main__":

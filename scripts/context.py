@@ -221,6 +221,7 @@ def fetch_matches(
     connection: sqlite3.Connection,
     prompt: str,
     repo: str | None,
+    include_provider: bool = False,
 ) -> list[sqlite3.Row]:
     """Fetch lexical matches, enforcing repository scope in SQL."""
     query = fts_query(prompt)
@@ -232,9 +233,13 @@ def fetch_matches(
         if repo
         else ""
     )
+    provider_column = (
+        "events.provider AS provider," if include_provider else ""
+    )
     return connection.execute(
         f"""SELECT events.source_path, events.source_line,
                    events.source_ordinal, events.source_hash,
+                   {provider_column}
                    events.timestamp,
                    events.cwd, events.repo, events.text
             FROM event_fts JOIN events ON events.id = event_fts.rowid
@@ -245,18 +250,18 @@ def fetch_matches(
     ).fetchall()
 
 
-def evidence_packet(
-    db_path: Path,
+def evidence_packet_from_connection(
+    connection: sqlite3.Connection,
     prompt: str,
     repo: str | None,
     max_bytes: int,
+    include_provider: bool = False,
 ) -> dict[str, object]:
-    """Return bounded, source-cited untrusted historical evidence."""
+    """Return bounded, cited evidence from one open SQLite snapshot."""
     if max_bytes < 1:
         raise ValueError("max bytes must be positive")
-    with sqlite3.connect(db_path) as connection:
-        connection.row_factory = sqlite3.Row
-        matches = fetch_matches(connection, prompt, repo)
+    connection.row_factory = sqlite3.Row
+    matches = fetch_matches(connection, prompt, repo, include_provider)
     evidence: list[dict[str, object]] = []
     used_bytes = 0
     for match in matches:
@@ -272,12 +277,27 @@ def evidence_packet(
             "cwd": match["cwd"],
             "repo": match["repo"],
         }
+        if include_provider:
+            item["source"]["provider"] = match["provider"]
         item_size = len(json.dumps(item, ensure_ascii=False).encode())
         if item_size > max_bytes - used_bytes:
             continue
         evidence.append(item)
         used_bytes += item_size
     return {"evidence": evidence, "bytes": used_bytes, "untrusted": True}
+
+
+def evidence_packet(
+    db_path: Path,
+    prompt: str,
+    repo: str | None,
+    max_bytes: int,
+) -> dict[str, object]:
+    """Return bounded, source-cited untrusted historical evidence."""
+    with sqlite3.connect(db_path) as connection:
+        return evidence_packet_from_connection(
+            connection, prompt, repo, max_bytes
+        )
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -343,7 +363,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(json.dumps(packet))
         else:
-            from service import request, serve
+            from runtime import request
+            from service import (
+                MAX_REQUEST_BYTES,
+                REQUEST_TIMEOUT_SECONDS,
+                serve,
+            )
 
             if args.command == "serve":
                 if args.interval <= 0:
@@ -367,11 +392,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 "repo": args.repo,
                                 "max_bytes": args.max_bytes,
                             },
+                            REQUEST_TIMEOUT_SECONDS,
+                            MAX_REQUEST_BYTES,
                         )
                     )
                 )
             else:
-                packet = request(args.socket, {"op": args.command})
+                packet = request(
+                    args.socket,
+                    {"op": args.command},
+                    REQUEST_TIMEOUT_SECONDS,
+                    MAX_REQUEST_BYTES,
+                )
                 print(json.dumps(packet))
                 if args.command == "doctor" and not doctor_is_healthy(packet):
                     return 1

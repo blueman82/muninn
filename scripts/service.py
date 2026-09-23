@@ -9,18 +9,24 @@ import signal
 import socket
 import sqlite3
 import stat
-import tempfile
 import threading
 import time
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from socketserver import StreamRequestHandler, ThreadingMixIn, UnixStreamServer
-from typing import cast
 
-from context import evidence_packet
+from context import evidence_packet_from_connection
 from normalizers import discover, parse_source
-from runtime import acquire_lock, private_directory, release_lock
+from runtime import (
+    acquire_lock,
+    append_audit,
+    load_json,
+    private_directory,
+    release_lock,
+    write_json,
+)
+from runtime import request as socket_request
 from snapshot import (
     delete_missing,
     mark_source_issue,
@@ -32,6 +38,7 @@ from snapshot import (
 MAX_PACKET_BYTES = 2_400
 MAX_REQUEST_BYTES = 8_192
 REQUEST_TIMEOUT_SECONDS = 0.2
+MAX_CLIENTS = 8
 
 
 def _json(value: object) -> bytes:
@@ -39,37 +46,6 @@ def _json(value: object) -> bytes:
     if len(encoded) > MAX_REQUEST_BYTES:
         return b'{"error":"response_too_large"}\n'
     return encoded
-
-
-def _load_json(path: Path) -> dict[str, object]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _write_json(path: Path, value: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as temporary:
-        temporary.write(json.dumps(value, sort_keys=True))
-        temporary_path = Path(temporary.name)
-    os.chmod(temporary_path, 0o600)
-    os.replace(temporary_path, path)
-
-
-def _audit(
-    state_dir: Path, event: str, trace_id: str, **fields: object
-) -> None:
-    record = {"at": time.time(), "event": event, "trace_id": trace_id} | fields
-    audit_path = state_dir / "audit.jsonl"
-    if audit_path.exists() and audit_path.stat().st_size > 1_048_576:
-        audit_path.replace(state_dir / "audit.previous.jsonl")
-    with audit_path.open("a", encoding="utf-8") as audit_file:
-        audit_file.write(json.dumps(record, sort_keys=True) + "\n")
-    os.chmod(audit_path, 0o600)
 
 
 class Brain:
@@ -96,6 +72,45 @@ class Brain:
         self.reconciling = False
         self.roots_unavailable = False
         self.lock = threading.Lock()
+        self.audit_lock = threading.Lock()
+        self.state_lock = threading.Lock()
+        self.metrics_lock = threading.Lock()
+        self.audit_rotations = 0
+        self.audit_dropped = 0
+        self.requests_rejected = 0
+        self.requests_saturated = 0
+
+    def audit(self, event: str, trace_id: str, **fields: object) -> None:
+        """Record a bounded operational event without retaining content."""
+        with self.audit_lock:
+            rotated, dropped = append_audit(
+                self.state_dir, event, trace_id, **fields
+            )
+        with self.metrics_lock:
+            self.audit_rotations += int(rotated)
+            self.audit_dropped += int(dropped)
+
+    def reject_request(self, saturated: bool) -> None:
+        """Expose a bounded client admission rejection in health state."""
+        with self.metrics_lock:
+            self.requests_rejected += 1
+            self.requests_saturated += int(saturated)
+        self.audit(
+            "client_rejected",
+            uuid.uuid4().hex,
+            reason="saturated" if saturated else "invalid",
+        )
+        self._write_state()
+
+    def _metrics(self) -> dict[str, int]:
+        """Return counters safe to expose in local state and status."""
+        with self.metrics_lock:
+            return {
+                "audit_rotations": self.audit_rotations,
+                "audit_dropped": self.audit_dropped,
+                "requests_rejected": self.requests_rejected,
+                "requests_saturated": self.requests_saturated,
+            }
 
     def reconcile(self) -> None:
         """Publish a new snapshot when source fingerprints require it."""
@@ -166,8 +181,7 @@ class Brain:
                     self.generation += 1
                     self.last_publish = time.time()
                     self.snapshot_hash = digest
-                    _audit(
-                        self.state_dir,
+                    self.audit(
                         "publish",
                         trace_id,
                         generation=self.generation,
@@ -187,8 +201,7 @@ class Brain:
                 self.roots_unavailable = True
                 self.last_scan = time.time()
                 self._write_state()
-                _audit(
-                    self.state_dir,
+                self.audit(
                     "reconcile_error",
                     trace_id,
                     error=self.last_error,
@@ -226,70 +239,73 @@ class Brain:
                         )
             except sqlite3.Error:
                 self.last_error = "legacy_snapshot"
-        _write_json(
-            self.state_dir / "state.json",
-            {
-                "generation": self.generation,
-                "last_scan": self.last_scan,
-                "last_publish": self.last_publish,
-                "snapshot_hash": self.snapshot_hash,
-                "pending_sources": self.pending,
-                "last_error": self.last_error,
-                "sources": sources,
-                "otel": "trace-compatible IDs only; exporter requires "
-                "Python >=3.10",
-            },
-        )
+        audit_path = self.state_dir / "audit.jsonl"
+        try:
+            audit_bytes = audit_path.stat().st_size
+        except OSError:
+            audit_bytes = 0
+        with self.state_lock:
+            write_json(
+                self.state_dir / "state.json",
+                {
+                    "generation": self.generation,
+                    "last_scan": self.last_scan,
+                    "last_publish": self.last_publish,
+                    "snapshot_hash": self.snapshot_hash,
+                    "pending_sources": self.pending,
+                    "last_error": self.last_error,
+                    "sources": sources,
+                    "audit_bytes": audit_bytes,
+                    **self._metrics(),
+                    "otel": "trace-compatible IDs only; exporter requires "
+                    "Python >=3.10",
+                },
+            )
 
     def recall(self, request: Mapping[str, object]) -> dict[str, object]:
         """Return bounded cited evidence from the published snapshot."""
         prompt = request.get("prompt")
-        if (
-            self.reconciling
-            or self.roots_unavailable
-            or not isinstance(prompt, str)
-            or not self.database.exists()
-        ):
+        if not self.lock.acquire(blocking=False):
             return {"evidence": [], "bytes": 0, "untrusted": True}
-        maximum = request.get("max_bytes", MAX_PACKET_BYTES)
-        maximum = maximum if isinstance(maximum, int) else MAX_PACKET_BYTES
-        repo = request.get("repo")
-        packet = evidence_packet(
-            self.database,
-            prompt,
-            repo if isinstance(repo, str) else None,
-            min(max(maximum, 1), MAX_PACKET_BYTES),
-        )
-        evidence = packet.get("evidence")
-        if not isinstance(evidence, list):
-            return packet
-        for item in evidence:
-            if isinstance(item, dict) and isinstance(item.get("source"), dict):
-                source = cast(dict[str, object], item["source"])
-                source["provider"] = self._provider_for(source)
-        return packet
-
-    def _provider_for(self, source: Mapping[str, object]) -> str:
-        if not self.database.exists():
-            return "unknown"
-        with sqlite3.connect(self.database) as connection:
-            row = connection.execute(
-                """SELECT provider FROM events WHERE source_path = ?
-                   AND source_line = ?
-                   AND source_ordinal = ? AND source_hash = ? LIMIT 1""",
-                (
-                    source.get("path"),
-                    source.get("line"),
-                    source.get("ordinal"),
-                    source.get("hash"),
-                ),
-            ).fetchone()
-        return str(row[0]) if row else "unknown"
+        try:
+            if (
+                self.reconciling
+                or self.roots_unavailable
+                or not isinstance(prompt, str)
+                or not self.database.exists()
+            ):
+                return {"evidence": [], "bytes": 0, "untrusted": True}
+            maximum = request.get("max_bytes", MAX_PACKET_BYTES)
+            maximum = maximum if isinstance(maximum, int) else MAX_PACKET_BYTES
+            repo = request.get("repo")
+            with sqlite3.connect(self.database) as connection:
+                return evidence_packet_from_connection(
+                    connection,
+                    prompt,
+                    repo if isinstance(repo, str) else None,
+                    min(max(maximum, 1), MAX_PACKET_BYTES),
+                    include_provider=True,
+                )
+        except sqlite3.Error:
+            return {"evidence": [], "bytes": 0, "untrusted": True}
+        finally:
+            self.lock.release()
 
     def status(self) -> dict[str, object]:
-        return _load_json(self.state_dir / "state.json") | {
-            "available": not self.reconciling and not self.roots_unavailable
-        }
+        audit_path = self.state_dir / "audit.jsonl"
+        try:
+            audit_bytes = audit_path.stat().st_size
+        except OSError:
+            audit_bytes = 0
+        return (
+            load_json(self.state_dir / "state.json")
+            | self._metrics()
+            | {
+                "audit_bytes": audit_bytes,
+                "available": not self.reconciling
+                and not self.roots_unavailable,
+            }
+        )
 
 
 class RequestHandler(StreamRequestHandler):
@@ -301,6 +317,7 @@ class RequestHandler(StreamRequestHandler):
         """Decode, service, and return a single bounded request."""
         started = time.monotonic()
         trace_id = uuid.uuid4().hex
+        operation: object = None
         try:
             self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
             raw = self.rfile.readline(MAX_REQUEST_BYTES)
@@ -319,45 +336,56 @@ class RequestHandler(StreamRequestHandler):
             else:
                 response = {"error": "unsupported_operation"}
         except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
+            self.brain.reject_request(saturated=False)
             response = {"error": "invalid_request"}
-        response["trace_id"] = trace_id
-        self.wfile.write(_json(response))
-        _audit(
-            self.brain.state_dir,
+        self.brain.audit(
             "client",
             trace_id,
             status="ok" if "error" not in response else "error",
             latency_ms=round((time.monotonic() - started) * 1000),
         )
+        self.brain._write_state()
+        if operation in {"status", "doctor"} and "error" not in response:
+            response = self.brain.status()
+        response["trace_id"] = trace_id
+        self.wfile.write(_json(response))
 
 
 class Server(ThreadingMixIn, UnixStreamServer):
     """Threaded readers around one Brain reconciliation writer."""
 
+    brain: Brain
+    slots: threading.BoundedSemaphore
     daemon_threads = True
+    request_queue_size = MAX_CLIENTS
+
+    def process_request(
+        self, request: socket.socket, client_address: str
+    ) -> None:
+        """Reject a peer immediately when all bounded client slots are busy."""
+        if not self.slots.acquire(blocking=False):
+            self.brain.reject_request(saturated=True)
+            self.shutdown_request(request)
+            return
+        super().process_request(request, client_address)
+
+    def process_request_thread(
+        self, request: socket.socket, client_address: str
+    ) -> None:
+        """Release the client slot after the standard request lifecycle."""
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.slots.release()
 
 
 def request(
     socket_path: Path, payload: Mapping[str, object]
 ) -> dict[str, object]:
-    try:
-        private_directory(socket_path.parent, create=False)
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(REQUEST_TIMEOUT_SECONDS)
-            client.connect(str(socket_path))
-            client.sendall(_json(payload))
-            with client.makefile("rb") as stream:
-                response = json.loads(stream.readline(MAX_REQUEST_BYTES))
-        return dict(response) if isinstance(response, Mapping) else {}
-    except (OSError, ValueError, json.JSONDecodeError):
-        if payload.get("op") == "recall":
-            return {
-                "evidence": [],
-                "bytes": 0,
-                "untrusted": True,
-                "available": False,
-            }
-        return {"available": False, "status": "unavailable"}
+    """Request this service through its bounded private socket client."""
+    return socket_request(
+        socket_path, payload, REQUEST_TIMEOUT_SECONDS, MAX_REQUEST_BYTES
+    )
 
 
 def serve(
@@ -381,6 +409,8 @@ def serve(
     brain.reconcile()
     server = Server(str(socket_path), RequestHandler)
     RequestHandler.brain = brain
+    server.brain = brain
+    server.slots = threading.BoundedSemaphore(MAX_CLIENTS)
     os.chmod(socket_path, 0o600)
     socket_inode = socket_path.stat().st_ino
     stop = threading.Event()
