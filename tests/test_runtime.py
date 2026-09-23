@@ -77,6 +77,15 @@ class RuntimeTest(unittest.TestCase):
             check=False,
         )
 
+    def wait_for_doctor(self, expected: int) -> None:
+        """Wait for the daemon to leave a bounded reconcile window."""
+        until = time.monotonic() + 2
+        while time.monotonic() < until:
+            if self.command("doctor").returncode == expected:
+                return
+            time.sleep(0.02)
+        self.fail(f"doctor did not reach exit status {expected}")
+
     def test_unavailable_root_withholds_recall_until_recovery(self) -> None:
         """A missing configured root degrades doctor without losing history."""
         (self.codex / "one.jsonl").write_text(
@@ -107,33 +116,34 @@ class RuntimeTest(unittest.TestCase):
 
     def test_competing_daemon_cannot_replace_live_socket(self) -> None:
         """A second process fails before it can take over the socket path."""
-        contender = subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "serve",
-                "--codex-root",
-                str(self.codex),
-                "--claude-root",
-                str(self.claude),
-                "--db",
-                str(self.database),
-                "--state-dir",
-                str(self.state),
-                "--socket",
-                str(self.socket),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertNotEqual(contender.returncode, 0)
-        self.assertTrue(self.socket.exists())
-        self.assertEqual(self.command("doctor").returncode, 0)
+        for _ in range(5):
+            contender = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLI),
+                    "serve",
+                    "--codex-root",
+                    str(self.codex),
+                    "--claude-root",
+                    str(self.claude),
+                    "--db",
+                    str(self.database),
+                    "--state-dir",
+                    str(self.state),
+                    "--socket",
+                    str(self.socket),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(contender.returncode, 0)
+            self.assertTrue(self.socket.exists())
+            self.wait_for_doctor(0)
         os.chmod(self.base, 0o755)
-        self.assertNotEqual(self.command("doctor").returncode, 0)
+        self.wait_for_doctor(1)
         os.chmod(self.base, 0o700)
-        self.assertEqual(self.command("doctor").returncode, 0)
+        self.wait_for_doctor(0)
 
     def test_sigkill_leaves_a_stale_socket_that_can_restart(self) -> None:
         """A killed owner leaves a stale socket that startup removes."""

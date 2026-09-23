@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/homebrew/bin/python3.13
 """Inject bounded, untrusted session evidence into supported Codex hooks."""
 
 from __future__ import annotations

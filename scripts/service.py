@@ -48,6 +48,12 @@ def _json(value: object) -> bytes:
     return encoded
 
 
+def _counter(state: Mapping[str, object], name: str) -> int:
+    """Read one non-negative persisted operational counter."""
+    value = state.get(name)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
 class Brain:
     """Own the service snapshot, reconciliation loop, and redacted state."""
 
@@ -75,10 +81,13 @@ class Brain:
         self.audit_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.metrics_lock = threading.Lock()
-        self.audit_rotations = 0
-        self.audit_dropped = 0
-        self.requests_rejected = 0
-        self.requests_saturated = 0
+        prior = load_json(self.state_dir / "state.json")
+        self.audit_rotations = _counter(prior, "audit_rotations")
+        self.audit_dropped = _counter(prior, "audit_dropped")
+        self.requests_rejected = _counter(prior, "requests_rejected")
+        self.requests_saturated = _counter(prior, "requests_saturated")
+        self.unreported_rejections = 0
+        self.unreported_saturation = 0
 
     def audit(self, event: str, trace_id: str, **fields: object) -> None:
         """Record a bounded operational event without retaining content."""
@@ -91,16 +100,27 @@ class Brain:
             self.audit_dropped += int(dropped)
 
     def reject_request(self, saturated: bool) -> None:
-        """Expose a bounded client admission rejection in health state."""
+        """Count a rejected client without synchronous audit or state I/O."""
         with self.metrics_lock:
             self.requests_rejected += 1
             self.requests_saturated += int(saturated)
-        self.audit(
-            "client_rejected",
-            uuid.uuid4().hex,
-            reason="saturated" if saturated else "invalid",
-        )
-        self._write_state()
+            self.unreported_rejections += 1
+            self.unreported_saturation += int(saturated)
+
+    def _flush_rejections(self) -> None:
+        """Write one coalesced rejection audit record outside admission."""
+        with self.metrics_lock:
+            rejected = self.unreported_rejections
+            saturated = self.unreported_saturation
+            self.unreported_rejections = 0
+            self.unreported_saturation = 0
+        if rejected:
+            self.audit(
+                "client_rejected",
+                uuid.uuid4().hex,
+                rejected=rejected,
+                saturated=saturated,
+            )
 
     def _metrics(self) -> dict[str, int]:
         """Return counters safe to expose in local state and status."""
@@ -210,6 +230,7 @@ class Brain:
                 self.reconciling = False
 
     def _write_state(self) -> None:
+        self._flush_rejections()
         sources: list[dict[str, object]] = []
         if self.database.exists():
             try:
@@ -266,15 +287,20 @@ class Brain:
         """Return bounded cited evidence from the published snapshot."""
         prompt = request.get("prompt")
         if not self.lock.acquire(blocking=False):
-            return {"evidence": [], "bytes": 0, "untrusted": True}
+            return {
+                "available": False,
+                "evidence": [],
+                "bytes": 0,
+                "untrusted": True,
+            }
         try:
-            if (
-                self.reconciling
-                or self.roots_unavailable
-                or not isinstance(prompt, str)
-                or not self.database.exists()
-            ):
-                return {"evidence": [], "bytes": 0, "untrusted": True}
+            if not self.available() or not isinstance(prompt, str):
+                return {
+                    "available": False,
+                    "evidence": [],
+                    "bytes": 0,
+                    "untrusted": True,
+                }
             maximum = request.get("max_bytes", MAX_PACKET_BYTES)
             maximum = maximum if isinstance(maximum, int) else MAX_PACKET_BYTES
             repo = request.get("repo")
@@ -285,11 +311,28 @@ class Brain:
                     repo if isinstance(repo, str) else None,
                     min(max(maximum, 1), MAX_PACKET_BYTES),
                     include_provider=True,
-                )
+                ) | {"available": True}
         except sqlite3.Error:
-            return {"evidence": [], "bytes": 0, "untrusted": True}
+            return {
+                "available": False,
+                "evidence": [],
+                "bytes": 0,
+                "untrusted": True,
+            }
         finally:
             self.lock.release()
+
+    def available(self) -> bool:
+        """Return the fail-closed health decision shared by all clients."""
+        return (
+            not self.reconciling
+            and not self.roots_unavailable
+            and self.database.exists()
+            and self.last_scan > 0
+            and time.time() - self.last_scan <= 5
+            and not self.pending
+            and not self.last_error
+        )
 
     def status(self) -> dict[str, object]:
         audit_path = self.state_dir / "audit.jsonl"
@@ -302,8 +345,7 @@ class Brain:
             | self._metrics()
             | {
                 "audit_bytes": audit_bytes,
-                "available": not self.reconciling
-                and not self.roots_unavailable,
+                "available": self.available(),
             }
         )
 

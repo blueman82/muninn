@@ -17,6 +17,7 @@ from typing import Callable, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from normalizers import parse_source
 from service import MAX_CLIENTS, Brain
 
 ROOT = Path(__file__).parents[1]
@@ -200,6 +201,35 @@ class ServiceTest(unittest.TestCase):
         self.assertNotIn("hidden", json.dumps(claude))
         self.assertEqual(self.socket.stat().st_mode & 0o777, 0o600)
 
+    def test_normalizer_ignores_tool_scope_for_direct_messages(self) -> None:
+        """Do not inherit a tool item's repository scope into evidence."""
+        source = self.codex / "scope.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "items": [
+                            {
+                                "type": "function_call_output",
+                                "cwd": "/repo-a",
+                            },
+                            {
+                                "type": "message",
+                                "role": "assistant",
+                                "cwd": "/repo-b",
+                                "content": "scope-needle",
+                            },
+                        ]
+                    }
+                }
+            )
+            + "\n"
+        )
+        events, error, pending = parse_source("codex", self.codex, source)
+        self.assertIsNone(error)
+        self.assertFalse(pending)
+        self.assertEqual(events[0]["cwd"], "/repo-b")
+
     def test_restart_partial_tail_and_unavailable_client_are_safe(
         self,
     ) -> None:
@@ -289,6 +319,7 @@ class ServiceTest(unittest.TestCase):
             lambda status: bool(status["last_error"])
         )
         self.assertEqual(degraded["pending_sources"], 1)
+        self.assertFalse(degraded["available"])
         self.assertEqual(self.recall("quarantine-needle")["evidence"], [])
         doctor = run("doctor", "--socket", str(self.socket))
         self.assertEqual(doctor.returncode, 1)
@@ -307,11 +338,21 @@ class ServiceTest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(json.loads(hook.stdout), {})
+        session_start = subprocess.run(
+            [sys.executable, str(CODEX_HOOK)],
+            input=json.dumps({"hook_event_name": "SessionStart"}),
+            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertIn("unavailable", session_start.stdout)
         source.write_text(json.dumps(valid) + "\n")
         self.wait_for("quarantine-needle")
-        self.assertEqual(
-            run("doctor", "--socket", str(self.socket)).returncode, 0
+        recovered = self.wait_for_status(
+            lambda status: status.get("available") is True
         )
+        self.assertTrue(recovered["available"])
 
     def test_doctor_and_stalled_client_contract(self) -> None:
         """Doctor is fail-closed and a stalled peer cannot block the daemon."""
@@ -372,10 +413,10 @@ class ServiceTest(unittest.TestCase):
             'chmod 700 "$HOME/.local/share/provenance-context"', instructions
         )
 
-    def test_nested_source_quarantines_without_hiding_other_sources(
+    def test_nested_source_quarantines_all_recall_until_repair(
         self,
     ) -> None:
-        """A deep line degrades doctor but keeps safe sources usable."""
+        """A deep source line disables recall until the source is repaired."""
         good = self.codex / "good.jsonl"
         good.write_text(
             json.dumps(
@@ -409,7 +450,7 @@ class ServiceTest(unittest.TestCase):
             + "\n"
         )
         self.wait_for_status(lambda status: bool(status["last_error"]))
-        self.assertTrue(self.recall("other-needle")["evidence"])
+        self.assertEqual(self.recall("other-needle")["evidence"], [])
         self.assertEqual(
             run("doctor", "--socket", str(self.socket)).returncode, 1
         )
@@ -447,7 +488,10 @@ class ServiceTest(unittest.TestCase):
             + "\n"
         )
         self.wait_for("fence-needle")
-        brain = Brain(self.codex, self.claude, self.database, self.state)
+        database = Path(self.temporary.name) / "fence-context.sqlite"
+        state = Path(self.temporary.name) / "fence-state"
+        brain = Brain(self.codex, self.claude, database, state)
+        brain.reconcile()
         brain.reconciling = True
         self.assertEqual(
             brain.recall({"prompt": "fence-needle", "repo": "/repo"})[
@@ -478,7 +522,9 @@ class ServiceTest(unittest.TestCase):
             )
             + "\n"
         )
-        brain = Brain(self.codex, self.claude, self.database, self.state)
+        database = Path(self.temporary.name) / "atomic-context.sqlite"
+        state = Path(self.temporary.name) / "atomic-state"
+        brain = Brain(self.codex, self.claude, database, state)
         brain.reconcile()
         self.assertTrue(
             brain.recall({"prompt": "atomic-needle", "repo": "/repo"})[
@@ -569,6 +615,38 @@ class ServiceTest(unittest.TestCase):
         self.assertLessEqual(cast(int, status["audit_bytes"]), 200)
         for key in ("audit_bytes", "audit_rotations", "audit_dropped"):
             self.assertEqual(status[key], state[key])
+
+    def test_audit_and_rejection_counters_survive_a_restart(self) -> None:
+        """Retain operational counters across a fresh Brain instance."""
+        brain = Brain(self.codex, self.claude, self.database, self.state)
+        with patch("runtime.MAX_AUDIT_RECORD_BYTES", 50):
+            brain.audit("test", "oversized", count="x" * 100)
+        brain.reject_request(saturated=True)
+        brain._write_state()
+        restarted = Brain(self.codex, self.claude, self.database, self.state)
+        metrics = restarted._metrics()
+        self.assertGreaterEqual(metrics["audit_dropped"], 1)
+        self.assertGreaterEqual(metrics["requests_rejected"], 1)
+        self.assertGreaterEqual(metrics["requests_saturated"], 1)
+
+    def test_saturation_rejections_coalesce_before_audit_and_state_write(
+        self,
+    ) -> None:
+        """Keep full client admission from creating synchronous I/O storms."""
+        brain = Brain(self.codex, self.claude, self.database, self.state)
+        with (
+            patch.object(brain, "audit") as audit,
+            patch("service.write_json") as write_state,
+        ):
+            for _ in range(100):
+                brain.reject_request(saturated=True)
+            audit.assert_not_called()
+            write_state.assert_not_called()
+            brain._write_state()
+        audit.assert_called_once()
+        self.assertEqual(audit.call_args.kwargs["rejected"], 100)
+        self.assertEqual(audit.call_args.kwargs["saturated"], 100)
+        write_state.assert_called_once()
 
 
 if __name__ == "__main__":

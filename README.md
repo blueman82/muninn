@@ -44,24 +44,26 @@ the local index is available. The pre-tool hook never changes, blocks, or
 authorizes an action.
 
 ```sh
-python3 scripts/context.py recall \
+/opt/homebrew/bin/python3.13 scripts/context.py recall \
   --socket "$PROVENANCE_CONTEXT_SOCKET" \
   --prompt 'why did this fail?' \
   --repo /path/to/repo
-python3 scripts/claude_context.py \
+/opt/homebrew/bin/python3.13 scripts/claude_context.py \
   --socket "$PROVENANCE_CONTEXT_SOCKET" \
   --prompt 'why did this fail?' \
   --repo /path/to/repo
 ```
 
-`python3 scripts/context.py status --socket "$PROVENANCE_CONTEXT_SOCKET"`
+`/opt/homebrew/bin/python3.13 scripts/context.py status --socket "$PROVENANCE_CONTEXT_SOCKET"`
 returns redacted generation, source staleness, pending tails, and last error.
 `doctor` uses the same local health response. `audit.jsonl` contains only
 trace-compatible IDs, timings, counts, and snapshot hashes; it never contains
 prompts, evidence text, raw paths, secrets, or tool output. OpenTelemetry is
 not installed in this Python 3.13 slice; add it only with independently tested
 instrumentation. Pattern filtering is defense in depth, not proof every secret
-representation is detected.
+representation is detected. It suppresses known GitHub tokens and URLs with
+userinfo or credential query parameters; ordinary URLs remain eligible
+evidence.
 
 ## Quality commands
 
@@ -77,9 +79,9 @@ the installed executables below; they are not installed into that interpreter.
 
 ## launchd template
 
-`launchd/com.provenance-context.plist.template` is a template only; set
-`__PYTHON__` to `/opt/homebrew/bin/python3.13`. This
-repository never bootstraps a personal service. Copy it to
+`launchd/com.provenance-context.plist.template` pins the same
+`/opt/homebrew/bin/python3.13` used by hooks. This repository never bootstraps
+a personal service. Copy it to
 `~/Library/LaunchAgents/com.provenance-context.plist`, replace each
 `__UPPERCASE__` value with an absolute path, then validate and control it:
 

@@ -20,7 +20,16 @@ SECRET_LINE = re.compile(
     r"auth(?:orization)?|bearer|password|passwd|secret|private[_-]?key)"
     r"\s*(?:=|:)\s*\S+"
     r"|bearer\s+\S+|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}"
-    r"|AKIA[0-9A-Z]{16}"
+    r"|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
+)
+URL_CREDENTIAL = re.compile(
+    r"(?i)(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)"
+    r"://[^/\s@]+@\S+"
+)
+URL_SECRET_QUERY = re.compile(
+    r"(?i)(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)"
+    r"://\S+[?&](?:api[_-]?key|access[_-]?token|token|password|secret)="
+    r"[^&\s]+"
 )
 QUOTED_SECRET_FIELD = re.compile(
     r'(?i)["\'](?:api[_-]?key|access[_-]?token|client[_-]?secret|token|'
@@ -47,6 +56,8 @@ def sanitize_text(text: str) -> str:
         line
         for line in text.splitlines()
         if not SECRET_LINE.search(line)
+        and not URL_CREDENTIAL.search(line)
+        and not URL_SECRET_QUERY.search(line)
         and not QUOTED_SECRET_FIELD.search(line)
         and not HOSTILE_LINE.search(line)
     )
@@ -66,28 +77,14 @@ def text_content(value: object) -> str:
 
 
 def scalars(value: object) -> dict[str, str]:
-    """Find the first supported provenance fields in a JSON value."""
-    found: dict[str, str] = {}
-
-    def visit(item: object) -> None:
-        if isinstance(item, Mapping):
-            for key in ("timestamp", "cwd", "repo", "repository"):
-                candidate = item.get(key)
-                if (
-                    key not in found
-                    and isinstance(candidate, str)
-                    and candidate
-                ):
-                    found[key] = candidate
-            for child in item.values():
-                if isinstance(child, (Mapping, list, tuple)):
-                    visit(child)
-        elif isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
-            for child in item:
-                visit(child)
-
-    visit(value)
-    return found
+    """Return trusted provenance fields from one direct record container."""
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        key: candidate
+        for key in ("timestamp", "cwd", "repo", "repository")
+        if isinstance(candidate := value.get(key), str) and candidate
+    }
 
 
 def messages(record: object) -> Iterator[Mapping[str, object]]:

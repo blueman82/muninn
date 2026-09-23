@@ -7,7 +7,7 @@
   <string>com.provenance-context</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__PYTHON__</string>
+    <string>/opt/homebrew/bin/python3.13</string>
     <string>__REPOSITORY__/scripts/context.py</string>
     <string>serve</string>
     <string>--codex-root</string>

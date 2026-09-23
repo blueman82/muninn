@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex.py\"",
+            "command": "/opt/homebrew/bin/python3.13 \"${PLUGIN_ROOT}/hooks/codex.py\"",
             "timeout": 5,
             "additionalContextLimit": 400
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex.py\"",
+            "command": "/opt/homebrew/bin/python3.13 \"${PLUGIN_ROOT}/hooks/codex.py\"",
             "timeout": 5,
             "additionalContextLimit": 2400
           }
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex.py\"",
+            "command": "/opt/homebrew/bin/python3.13 \"${PLUGIN_ROOT}/hooks/codex.py\"",
             "timeout": 5,
             "additionalContextLimit": 900
           }

@@ -205,6 +205,99 @@ class ContextCommandTest(unittest.TestCase):
         self.build()
         self.assertEqual(self.recall("nested-tool-needle")["evidence"], [])
 
+    def test_direct_message_scope_beats_ignored_tool_metadata(self) -> None:
+        """Use scope only from a record or selected direct message."""
+        record = {
+            "payload": {
+                "items": [
+                    {
+                        "type": "function_call_output",
+                        "cwd": "/repos/tool-a",
+                        "output": "not evidence",
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "cwd": "/repos/message-b",
+                        "content": "direct-scope-needle",
+                    },
+                ]
+            }
+        }
+        (self.root / "scope.jsonl").write_text(json.dumps(record) + "\n")
+        self.build()
+        self.assertTrue(
+            self.recall("direct-scope-needle", "/repos/message-b")["evidence"]
+        )
+        self.assertEqual(
+            self.recall("direct-scope-needle", "/repos/tool-a")["evidence"],
+            [],
+        )
+
+    def test_credential_urls_and_github_pat_are_never_indexed(self) -> None:
+        """Retain ordinary URLs while suppressing credential-bearing URLs."""
+        records = [
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "cwd": "/repos/alpha",
+                    "content": "ordinary-url https://example.test/docs/path",
+                }
+            },
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "cwd": "/repos/alpha",
+                    "content": (
+                        "postgresql://reader:dbcredential7@"
+                        "db.example.test/context"
+                    ),
+                }
+            },
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "cwd": "/repos/alpha",
+                    "content": (
+                        "https://api.example.test/v1?token=querycredential7"
+                    ),
+                }
+            },
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "cwd": "/repos/alpha",
+                    "content": ("https://urlcredential7@api.example.test/v1"),
+                }
+            },
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "cwd": "/repos/alpha",
+                    "content": (
+                        "github_pat_0123456789" "abcdefghijklmnopqrstuvwxyz"
+                    ),
+                }
+            },
+        ]
+        (self.root / "credentials.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n"
+        )
+        self.build()
+        self.assertTrue(self.recall("ordinary-url")["evidence"])
+        for prompt in (
+            "dbcredential7",
+            "urlcredential7",
+            "github_pat_0123456789abcdefghijklmnopqrstuvwxyz",
+            "querycredential7",
+        ):
+            self.assertEqual(self.recall(prompt)["evidence"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

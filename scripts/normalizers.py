@@ -11,29 +11,30 @@ from pathlib import Path
 from context import sanitize_text, text_content
 
 MAX_SOURCE_LINE_BYTES = 1_048_576
+MAX_SOURCE_DEPTH = 1_000
+
+
+def _within_depth(value: object) -> bool:
+    """Reject deeply nested source data before it reaches recursive parsing."""
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > MAX_SOURCE_DEPTH:
+            return False
+        if isinstance(item, Mapping):
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
+            pending.extend((child, depth + 1) for child in item)
+    return True
 
 
 def _metadata(record: Mapping[str, object]) -> dict[str, str]:
-    """Return first supported provenance fields from a session record."""
-    result: dict[str, str] = {}
-
-    def visit(value: object) -> None:
-        if isinstance(value, Mapping):
-            for key in ("timestamp", "cwd", "gitBranch", "sessionId", "uuid"):
-                item = value.get(key)
-                if key not in result and isinstance(item, str) and item:
-                    result[key] = item
-            for item in value.values():
-                if isinstance(item, (Mapping, list, tuple)):
-                    visit(item)
-        elif isinstance(value, Sequence) and not isinstance(
-            value, (str, bytes)
-        ):
-            for item in value:
-                visit(item)
-
-    visit(record)
-    return result
+    """Return direct provenance fields from a trusted record container."""
+    return {
+        key: value
+        for key in ("timestamp", "cwd", "gitBranch", "sessionId", "uuid")
+        if isinstance(value := record.get(key), str) and value
+    }
 
 
 def _codex_messages(
@@ -135,12 +136,18 @@ def parse_source(
             )
         if not isinstance(record, Mapping):
             continue
+        if not _within_depth(record):
+            return [], f"nested_source_line_{line}", pending
         try:
             metadata = _metadata(record)
             if provider == "codex":
                 messages = _codex_messages(record)
                 texts = (
-                    (message.get("role"), text_content(message.get("content")))
+                    (
+                        message.get("role"),
+                        text_content(message.get("content")),
+                        metadata | _metadata(message),
+                    )
                     for message in messages
                 )
             else:
@@ -154,10 +161,16 @@ def parse_source(
                 message_role = message.get("role")
                 if message_role not in {role, None}:
                     continue
-                texts = [(role, _claude_text(message.get("content")))]
+                texts = [
+                    (
+                        role,
+                        _claude_text(message.get("content")),
+                        metadata | _metadata(message),
+                    )
+                ]
         except RecursionError:
             return [], f"nested_source_line_{line}", pending
-        for ordinal, (role, text) in enumerate(texts, start=1):
+        for ordinal, (role, text, event_metadata) in enumerate(texts, start=1):
             if not isinstance(role, str):
                 continue
             if safe := sanitize_text(text):
@@ -168,7 +181,7 @@ def parse_source(
                         line,
                         ordinal,
                         raw,
-                        metadata,
+                        event_metadata,
                         role,
                         safe,
                     )

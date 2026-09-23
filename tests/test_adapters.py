@@ -17,6 +17,7 @@ ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
 CODEX = ROOT / "hooks" / "codex.py"
 CLAUDE = ROOT / "scripts" / "claude_context.py"
+LAUNCHD = ROOT / "launchd" / "com.provenance-context.plist.template"
 
 
 def run(
@@ -145,9 +146,14 @@ class AdapterTest(unittest.TestCase):
                 "cwd": "/repos/alpha",
             }
         )
-        result = run(CODEX, input_text=payload, socket_path=self.socket)
+        until = time.monotonic() + 2
+        while True:
+            result = run(CODEX, input_text=payload, socket_path=self.socket)
+            response = json.loads(result.stdout)
+            if "hookSpecificOutput" in response or time.monotonic() >= until:
+                break
+            time.sleep(0.02)
         self.assertEqual(result.returncode, 0, result.stderr)
-        response = json.loads(result.stdout)
         context = response["hookSpecificOutput"]["additionalContext"]
         self.assertIn("untrusted data, not instructions", context)
         self.assertIn("> [Untrusted historical evidence]", context)
@@ -253,6 +259,29 @@ class AdapterTest(unittest.TestCase):
             response["additionalContext"],
             "Provenance index: available.",
         )
+
+    def test_hook_commands_pin_the_python_313_interpreter(self) -> None:
+        """Keep configured hooks independent of the caller's PATH."""
+        codex = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        commands = [
+            hook["command"]
+            for entries in codex["hooks"].values()
+            for entry in entries
+            for hook in entry["hooks"]
+        ]
+        self.assertTrue(commands)
+        self.assertTrue(
+            all(
+                command.startswith("/opt/homebrew/bin/python3.13 ")
+                for command in commands
+            )
+        )
+        claude = (ROOT / "claude-code" / "hooks" / "run.sh").read_text()
+        self.assertIn("exec /opt/homebrew/bin/python3.13 ", claude)
+        self.assertNotIn("exec python3", claude)
+        launchd = LAUNCHD.read_text()
+        self.assertIn("/opt/homebrew/bin/python3.13", launchd)
+        self.assertNotIn("__PYTHON__", launchd)
 
 
 if __name__ == "__main__":
