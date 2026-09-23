@@ -58,6 +58,8 @@ SPLIT_SECRET = re.compile(
     r"password|passwd|secret)\s*\n\s*[:=]\s*\S+"
 )
 QUERY_TOKEN = re.compile(r"[A-Za-z0-9_]+")
+RELAXED_QUERY_MIN_TOKENS = 3
+RELAXED_QUERY_MAX_TOKENS = 4
 
 
 def sanitize_text(text: str) -> str:
@@ -227,14 +229,27 @@ def fts_query(prompt: str) -> str:
     return " AND ".join(f'"{token}"' for token in QUERY_TOKEN.findall(prompt))
 
 
+def relaxed_fts_query(prompt: str) -> str:
+    """Require a two-token lexical match when exact recall has no result."""
+    tokens = list(dict.fromkeys(QUERY_TOKEN.findall(prompt)))[
+        :RELAXED_QUERY_MAX_TOKENS
+    ]
+    if len(tokens) < RELAXED_QUERY_MIN_TOKENS:
+        return ""
+    return " OR ".join(
+        f'("{left}" AND "{right}")'
+        for index, left in enumerate(tokens)
+        for right in tokens[index + 1 :]
+    )
+
+
 def fetch_matches(
     connection: sqlite3.Connection,
-    prompt: str,
+    query: str,
     repo: str | None,
     include_provider: bool = False,
 ) -> list[sqlite3.Row]:
-    """Fetch lexical matches, enforcing repository scope in SQL."""
-    query = fts_query(prompt)
+    """Fetch one prebuilt lexical query, enforcing repository scope in SQL."""
     if not query:
         return []
     scope = (
@@ -290,10 +305,19 @@ def evidence_packet_from_connection(
     if max_bytes < 1:
         raise ValueError("max bytes must be positive")
     connection.row_factory = sqlite3.Row
-    matches = fetch_matches(connection, prompt, repo, include_provider)
+    exact_query = fts_query(prompt)
+    matches = fetch_matches(connection, exact_query, repo, include_provider)
     global_fallback = bool(repo and not matches)
     if global_fallback:
-        matches = fetch_matches(connection, prompt, None, include_provider)
+        matches = fetch_matches(
+            connection, exact_query, None, include_provider
+        )
+    relaxed = False
+    if global_fallback and not matches:
+        matches = fetch_matches(
+            connection, relaxed_fts_query(prompt), None, include_provider
+        )
+        relaxed = bool(matches)
     evidence: list[dict[str, object]] = []
     used_bytes = 0
     for match in matches:
@@ -323,6 +347,8 @@ def evidence_packet_from_connection(
     }
     if global_fallback and evidence:
         packet["retrieval_scope"] = "global_historical_fallback"
+        if relaxed:
+            packet["match_strategy"] = "lexical_relaxed"
     return packet
 
 

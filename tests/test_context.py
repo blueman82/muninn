@@ -155,7 +155,7 @@ class ContextCommandTest(unittest.TestCase):
                     "payload": {
                         "type": "message",
                         "role": "assistant",
-                        "content": "graph executor graph readiness marker",
+                        "content": "graph executor marker",
                         "cwd": "/repos/other",
                     }
                 }
@@ -170,9 +170,14 @@ class ContextCommandTest(unittest.TestCase):
         self.assertEqual(
             fallback["retrieval_scope"], "global_historical_fallback"
         )
+        self.assertEqual(fallback["match_strategy"], "lexical_relaxed")
         self.assertIn("graph executor", json.dumps(fallback))
         self.assertNotIn("retrieval_scope", scoped)
         self.assertNotIn("beta only", json.dumps(scoped))
+        self.assertEqual(
+            self.recall("unrelated novel absent", "/repos/coderails"),
+            {"evidence": [], "bytes": 0, "untrusted": True},
+        )
 
     def test_rebuild_replaces_generated_database(self) -> None:
         self.assertEqual(self.build(), {"indexed": 2})

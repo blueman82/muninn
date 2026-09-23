@@ -53,7 +53,10 @@ authorizes an action.
 Recall tries the supplied repository scope first. If it has no matches, it
 may return bounded cited evidence from another repository with
 `retrieval_scope: "global_historical_fallback"`; consumers must treat that as
-global history rather than project-local context.
+global history rather than project-local context. If exact global matching
+also misses, a query with at least three distinct terms may use a two-term
+lexical fallback marked `match_strategy: "lexical_relaxed"`; one-token
+relaxation is never used.
 
 ```sh
 /opt/homebrew/bin/python3.13 scripts/context.py recall \
