@@ -405,6 +405,26 @@ class ServiceTest(unittest.TestCase):
             run("doctor", "--socket", str(self.socket)).returncode, 0
         )
 
+    def test_session_start_reads_many_error_statuses_within_8k(self) -> None:
+        """Keep hook status usable when malformed sources fill diagnostics."""
+        for index in range(40):
+            (self.codex / f"broken-{index}.jsonl").write_text("{malformed}\n")
+        status = self.wait_for_status(
+            lambda packet: packet["error_sources"] == 40
+            and bool(packet["available"])
+        )
+        self.assertLess(len(json.dumps(status).encode()), MAX_REQUEST_BYTES)
+        hook = subprocess.run(
+            [sys.executable, str(CODEX_HOOK)],
+            input=json.dumps({"hook_event_name": "SessionStart"}),
+            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(hook.returncode, 0, hook.stderr)
+        self.assertIn("Provenance index: available.", hook.stdout)
+
     def test_malformed_source_quarantines_stale_evidence_and_recovers(
         self,
     ) -> None:

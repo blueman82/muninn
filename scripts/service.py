@@ -20,6 +20,7 @@ from runtime import acquire_lock, private_directory, release_lock
 from runtime import request as socket_request
 
 MAX_REQUEST_BYTES = 8_192
+MAX_STATUS_RESPONSE_BYTES = 7_000
 REQUEST_TIMEOUT_SECONDS = 0.2
 MAX_CLIENTS = 8
 
@@ -29,6 +30,22 @@ def _json(value: object) -> bytes:
     if len(encoded) > MAX_REQUEST_BYTES:
         return b'{"error":"response_too_large"}\n'
     return encoded
+
+
+def _bounded_status(packet: dict[str, object]) -> dict[str, object]:
+    """Trim redacted diagnostics so public status fits hook readers."""
+    sources = packet.get("sources")
+    if not isinstance(sources, list):
+        return packet
+    diagnostics = list(sources)
+    bounded = packet | {"sources": diagnostics}
+    while diagnostics and (
+        len(json.dumps(bounded, ensure_ascii=False).encode())
+        > MAX_STATUS_RESPONSE_BYTES
+    ):
+        diagnostics.pop()
+        bounded["sources_truncated"] = True
+    return bounded
 
 
 class RequestHandler(StreamRequestHandler):
@@ -64,7 +81,7 @@ class RequestHandler(StreamRequestHandler):
         )
         self.brain._write_state()
         if operation in {"status", "doctor"} and "error" not in response:
-            response = self.brain.status()
+            response = _bounded_status(self.brain.status())
         response["trace_id"] = trace_id
         self.wfile.write(_json(response))
 
