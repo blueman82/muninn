@@ -14,6 +14,9 @@ import unittest
 from pathlib import Path
 from typing import Callable, cast
 
+sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from service import Brain
+
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
 CODEX_HOOK = ROOT / "hooks" / "codex.py"
@@ -365,6 +368,96 @@ class ServiceTest(unittest.TestCase):
         )
         self.assertIn(
             'chmod 700 "$HOME/.local/share/provenance-context"', instructions
+        )
+
+    def test_nested_source_quarantines_without_hiding_other_sources(
+        self,
+    ) -> None:
+        """A deep line degrades doctor but keeps safe sources usable."""
+        good = self.codex / "good.jsonl"
+        good.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "other-needle",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for("other-needle")
+        nested: object = {}
+        for _ in range(1100):
+            nested = {"next": nested}
+        bad = self.codex / "deep.jsonl"
+        bad.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "deep",
+                        "deep": nested,
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for_status(lambda status: bool(status["last_error"]))
+        self.assertTrue(self.recall("other-needle")["evidence"])
+        self.assertEqual(
+            run("doctor", "--socket", str(self.socket)).returncode, 1
+        )
+        bad.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "repaired-deep",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for("repaired-deep")
+
+    def test_recall_fence_withholds_old_snapshot_during_reconcile(
+        self,
+    ) -> None:
+        """The admission fence returns empty rather than old evidence."""
+        source = self.codex / "fence.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "fence-needle",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for("fence-needle")
+        brain = Brain(self.codex, self.claude, self.database, self.state)
+        brain.reconciling = True
+        self.assertEqual(
+            brain.recall({"prompt": "fence-needle", "repo": "/repo"})[
+                "evidence"
+            ],
+            [],
+        )
+        brain.reconciling = False
+        self.assertTrue(
+            brain.recall({"prompt": "fence-needle", "repo": "/repo"})[
+                "evidence"
+            ]
         )
 
 

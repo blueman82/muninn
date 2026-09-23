@@ -92,6 +92,7 @@ class Brain:
         self.pending = 0
         self.snapshot_hash = ""
         self.reconciling = False
+        self.roots_unavailable = False
         self.lock = threading.Lock()
 
     def reconcile(self) -> None:
@@ -153,6 +154,7 @@ class Brain:
                 self.last_scan = time.time()
                 self.pending = pending
                 self.last_error = errors[0] if errors else ""
+                self.roots_unavailable = False
                 if changed or not self.database.exists():
                     connection.commit()
                     connection.close()
@@ -180,6 +182,7 @@ class Brain:
                 connection.close()
                 temporary.unlink(missing_ok=True)
                 self.last_error = type(error).__name__
+                self.roots_unavailable = True
                 self.last_scan = time.time()
                 self._write_state()
                 _audit(
@@ -241,7 +244,7 @@ class Brain:
         prompt = request.get("prompt")
         if (
             self.reconciling
-            or self.last_error
+            or self.roots_unavailable
             or not isinstance(prompt, str)
             or not self.database.exists()
         ):
@@ -283,7 +286,7 @@ class Brain:
 
     def status(self) -> dict[str, object]:
         return _load_json(self.state_dir / "state.json") | {
-            "available": not self.reconciling and not bool(self.last_error)
+            "available": not self.reconciling and not self.roots_unavailable
         }
 
 

@@ -135,6 +135,16 @@ class RuntimeTest(unittest.TestCase):
         os.chmod(self.base, 0o700)
         self.assertEqual(self.command("doctor").returncode, 0)
 
+    def test_sigkill_leaves_a_stale_socket_that_can_restart(self) -> None:
+        """A killed owner leaves a stale socket that startup removes."""
+        self.process.send_signal(signal.SIGKILL)
+        self.process.wait(timeout=5)
+        if self.process.stderr:
+            self.process.stderr.close()
+        self.assertTrue(self.socket.exists())
+        self.process = self.start()
+        self.assertEqual(self.command("status").returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
