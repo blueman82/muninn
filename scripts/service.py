@@ -73,17 +73,21 @@ class RequestHandler(StreamRequestHandler):
         except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
             self.brain.reject_request(saturated=False)
             response = {"error": "invalid_request"}
-        self.brain.audit(
-            "client",
-            trace_id,
-            status="ok" if "error" not in response else "error",
-            latency_ms=round((time.monotonic() - started) * 1000),
-        )
-        self.brain._write_state()
         if operation in {"status", "doctor"} and "error" not in response:
             response = _bounded_status(self.brain.status())
+        else:
+            self.brain.audit(
+                "client",
+                trace_id,
+                status="ok" if "error" not in response else "error",
+                latency_ms=round((time.monotonic() - started) * 1000),
+            )
+            self.brain._write_state()
         response["trace_id"] = trace_id
-        self.wfile.write(_json(response))
+        try:
+            self.wfile.write(_json(response))
+        except OSError:
+            return
 
     def _dispatch(
         self, operation: object, request: Mapping[str, object]

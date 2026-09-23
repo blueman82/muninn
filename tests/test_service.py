@@ -783,7 +783,18 @@ class ServiceTest(unittest.TestCase):
             )
             worker.start()
             self.assertTrue(entered.wait(2))
+            audit_path = state / "audit.jsonl"
+            audit_before = (
+                audit_path.stat().st_size if audit_path.exists() else 0
+            )
             status = service_request(socket_path, {"op": "status"})
+            statuses = [
+                service_request(socket_path, {"op": "status"})
+                for _ in range(20)
+            ]
+            audit_after = (
+                audit_path.stat().st_size if audit_path.exists() else 0
+            )
             recall = service_request(
                 socket_path, {"op": "recall", "prompt": "slow-needle"}
             )
@@ -792,6 +803,10 @@ class ServiceTest(unittest.TestCase):
             worker.join(timeout=2)
         self.assertFalse(worker.is_alive())
         self.assertEqual(status["state"], "reconciling")
+        self.assertTrue(
+            all(packet["state"] == "reconciling" for packet in statuses)
+        )
+        self.assertEqual(audit_after, audit_before)
         self.assertFalse(recall["available"])
         self.assertEqual(recall["unavailable_reason"], "reconciling")
 
