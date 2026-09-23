@@ -167,6 +167,17 @@ class Brain:
         trace_id: str,
         started: float,
     ) -> None:
+        self._refresh_source_health(connection)
+        self.storage = checkpoint(connection, self.database)
+        self.rebuilding = False
+        self.last_scan = time.time()
+        self.roots_unavailable = False
+        if changed:
+            self._publish(trace_id, indexed, started)
+        self._write_state()
+
+    def _refresh_source_health(self, connection: sqlite3.Connection) -> None:
+        """Synchronize health fields with the daemon-owned source rows."""
         rows = source_rows(connection).values()
         self.pending = sum(int(bool(row["pending"])) for row in rows)
         self.last_error = next(
@@ -177,13 +188,6 @@ class Brain:
             ),
             "",
         )
-        self.storage = checkpoint(connection, self.database)
-        self.rebuilding = False
-        self.last_scan = time.time()
-        self.roots_unavailable = False
-        if changed:
-            self._publish(trace_id, indexed, started)
-        self._write_state()
 
     def _publish(self, trace_id: str, indexed: int, started: float) -> None:
         self.generation += 1
@@ -286,6 +290,7 @@ class Brain:
             connection = open_store(self.database)
             try:
                 erased = erase_source(connection, provider, source_id)
+                self._refresh_source_health(connection)
                 self.storage = checkpoint(connection, self.database)
             finally:
                 connection.close()

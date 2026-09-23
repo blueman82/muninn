@@ -1089,53 +1089,53 @@ class ServiceTest(unittest.TestCase):
     def test_missing_source_is_tombstoned_and_explicit_erase_removes_it(
         self,
     ) -> None:
-        """Retain a disappearance as lifecycle state until explicit erasure."""
-        source = self.codex / "retention.jsonl"
-        source.write_text(
-            json.dumps(
-                {
-                    "payload": {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": "retention-needle",
-                        "cwd": "/repo",
-                    }
-                }
-            )
-            + "\n"
-        )
-        self.wait_for("retention-needle")
-        source_id = next(
-            item["source_id"]
-            for item in cast(list[dict[str, object]], self.status()["sources"])
-            if item["provider"] == "codex"
-        )
-        source.unlink()
-        status = self.wait_for_status(
-            lambda packet: any(
+        """Erase each provider's tombstone in one public request."""
+        sources = {
+            "codex": self.codex / "retention-codex.jsonl",
+            "claude": self.claude / "retention-claude.jsonl",
+        }
+        for provider, source in sources.items():
+            source.write_text(e6_record(provider, f"I prefer {provider}"))
+            self.wait_for(f"I prefer {provider}")
+        status = self.status()
+        source_ids = {
+            cast(str, item["provider"]): cast(str, item["source_id"])
+            for item in cast(list[dict[str, object]], status["sources"])
+            if item["provider"] in sources
+        }
+        self.assertEqual(set(source_ids), set(sources))
+        for source in sources.values():
+            source.unlink()
+        self.wait_for_status(
+            lambda packet: all(
                 item.get("status") == "missing"
                 for item in cast(list[dict[str, object]], packet["sources"])
+                if item.get("provider") in sources
             )
         )
-        self.assertFalse(status["available"])
-        until = time.monotonic() + 5
-        packet: dict[str, object] = {}
-        while time.monotonic() < until:
+        for index, provider in enumerate(sources):
             response = run(
                 "erase",
                 "--socket",
                 str(self.socket),
                 "--provider",
-                "codex",
+                provider,
                 "--source-id",
-                cast(str, source_id),
+                source_ids[provider],
             )
             self.assertEqual(response.returncode, 0, response.stderr)
             packet = json.loads(response.stdout)
-            if packet["erased"]:
-                break
-            time.sleep(0.05)
-        self.assertTrue(packet["erased"], packet)
+            self.assertTrue(packet["erased"], packet)
+            self.assertEqual(packet["available"], index == len(sources) - 1)
+        status = self.status()
+        self.assertTrue(status["available"])
+        self.assertEqual(status["pending_sources"], 0)
+        self.assertFalse(status["last_error"])
+        self.assertFalse(status["sources"])
+        self.assertEqual(
+            cast(dict[str, object], status["storage"])["derived_counts"],
+            {"events": 0, "assertions": 0, "sources": 0},
+        )
 
     def test_status_counts_prove_erasure_removes_linked_assertions(
         self,
