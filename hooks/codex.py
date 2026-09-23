@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -13,8 +12,7 @@ from pathlib import Path
 SCRIPT_ROOT = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_ROOT))
 
-from context import evidence_packet
-
+from service import request
 
 DEFAULT_MAX_BYTES = 1_800
 HARD_MAX_BYTES = 2_400
@@ -144,13 +142,19 @@ def recalled_packet(
     Returns:
         A core evidence packet or its empty equivalent.
     """
-    database = os.environ.get("PROVENANCE_CONTEXT_DB")
-    if not database or not prompt:
+    socket_path = os.environ.get("PROVENANCE_CONTEXT_SOCKET")
+    if not socket_path or not prompt:
         return empty_packet()
-    try:
-        return evidence_packet(Path(database), prompt, repo, max_bytes)
-    except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
-        return empty_packet()
+    packet = request(
+        Path(socket_path),
+        {
+            "op": "recall",
+            "prompt": prompt,
+            "repo": repo,
+            "max_bytes": max_bytes,
+        },
+    )
+    return packet if packet.get("available", True) else empty_packet()
 
 
 def index_status() -> str:
@@ -159,17 +163,11 @@ def index_status() -> str:
     Returns:
         A minimal status suitable for SessionStart context.
     """
-    database = os.environ.get("PROVENANCE_CONTEXT_DB")
-    if not database:
+    socket_path = os.environ.get("PROVENANCE_CONTEXT_SOCKET")
+    if not socket_path:
         return "unavailable"
-    try:
-        database_path = Path(database).resolve()
-        database_uri = f"{database_path.as_uri()}?mode=ro"
-        with sqlite3.connect(database_uri, uri=True) as db:
-            db.execute("SELECT 1 FROM events LIMIT 1").fetchone()
-    except (OSError, ValueError, sqlite3.Error):
-        return "unavailable"
-    return "available"
+    status = request(Path(socket_path), {"op": "status"})
+    return "available" if status.get("available") else "unavailable"
 
 
 def truncate_utf8(text: str, limit: int) -> str:

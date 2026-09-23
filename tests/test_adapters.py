@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -23,6 +24,7 @@ def run(
     *arguments: str,
     input_text: str = "",
     database: Path | None = None,
+    socket_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run an adapter subprocess with an optional local index.
 
@@ -35,9 +37,14 @@ def run(
     Returns:
         Completed subprocess output.
     """
-    environment = os.environ | (
-        {"PROVENANCE_CONTEXT_DB": str(database)} if database else {}
-    )
+    environment = os.environ | {
+        **({"PROVENANCE_CONTEXT_DB": str(database)} if database else {}),
+        **(
+            {"PROVENANCE_CONTEXT_SOCKET": str(socket_path)}
+            if socket_path
+            else {}
+        ),
+    }
     return subprocess.run(
         [sys.executable, str(script), *arguments],
         input=input_text,
@@ -85,8 +92,47 @@ class AdapterTest(unittest.TestCase):
         self.sessions.mkdir()
         self.database = Path(self.temporary.name) / "context.sqlite"
         build_corpus(self.sessions, self.database)
+        self.socket = Path(self.temporary.name) / "brain.sock"
+        self.daemon = subprocess.Popen(
+            [
+                sys.executable,
+                str(CONTEXT),
+                "serve",
+                "--codex-root",
+                str(self.sessions),
+                "--claude-root",
+                str(Path(self.temporary.name) / "claude"),
+                "--db",
+                str(self.database),
+                "--state-dir",
+                str(Path(self.temporary.name) / "state"),
+                "--socket",
+                str(self.socket),
+                "--interval",
+                "0.05",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(100):
+            if self.socket.exists():
+                break
+            if self.daemon.poll() is not None:
+                error = self.daemon.stderr
+                raise AssertionError(
+                    error.read() if error else "daemon failed"
+                )
+            time.sleep(0.02)
+        else:
+            self.daemon.kill()
+            raise AssertionError("daemon did not start")
 
     def tearDown(self) -> None:
+        self.daemon.send_signal(signal.SIGTERM)
+        self.daemon.wait(timeout=5)
+        if self.daemon.stderr:
+            self.daemon.stderr.close()
         self.temporary.cleanup()
 
     def test_prompt_hook_envelopes_cited_untrusted_evidence(self) -> None:
@@ -97,7 +143,7 @@ class AdapterTest(unittest.TestCase):
                 "cwd": "/repos/alpha",
             }
         )
-        result = run(CODEX, input_text=payload, database=self.database)
+        result = run(CODEX, input_text=payload, socket_path=self.socket)
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)
         context = response["hookSpecificOutput"]["additionalContext"]
@@ -116,7 +162,7 @@ class AdapterTest(unittest.TestCase):
                 "cwd": "/repos/alpha",
             }
         )
-        hook = run(CODEX, input_text=payload, database=self.database)
+        hook = run(CODEX, input_text=payload, socket_path=self.socket)
         self.assertEqual(hook.returncode, 0, hook.stderr)
         self.assertNotIn("permissionDecision", hook.stdout)
         self.assertNotIn("updatedInput", hook.stdout)
@@ -154,7 +200,7 @@ class AdapterTest(unittest.TestCase):
                 "cwd": "/repos/alpha",
             }
         )
-        available = run(CODEX, input_text=payload, database=self.database)
+        available = run(CODEX, input_text=payload, socket_path=self.socket)
         self.assertEqual(available.returncode, 0, available.stderr)
         context = json.loads(available.stdout)["hookSpecificOutput"]
         self.assertEqual(context["hookEventName"], "SessionStart")
@@ -187,7 +233,7 @@ class AdapterTest(unittest.TestCase):
         ]
         environment = os.environ | {
             "CLAUDE_PLUGIN_ROOT": str(plugin_root),
-            "PROVENANCE_CONTEXT_DB": str(self.database),
+            "PROVENANCE_CONTEXT_SOCKET": str(self.socket),
         }
         result = subprocess.run(
             command,

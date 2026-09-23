@@ -1,0 +1,14 @@
+[tool.black]
+line-length = 79
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"hooks/codex.py" = ["E402"]
+"scripts/claude_context.py" = ["E402"]

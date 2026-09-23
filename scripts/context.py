@@ -13,8 +13,6 @@ import sys
 import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any
-
 
 SECRET_LINE = re.compile(
     r"(?i)(?:api[_-]?key|access[_-]?token|auth(?:orization)?|bearer|"
@@ -80,10 +78,10 @@ def scalars(value: object) -> dict[str, str]:
 def messages(value: object) -> Iterator[Mapping[str, object]]:
     """Yield user and assistant message objects from nested JSON records."""
     if isinstance(value, Mapping):
-        if (
-            value.get("type") == "message"
-            and value.get("role") in {"user", "assistant"}
-        ):
+        if value.get("type") == "message" and value.get("role") in {
+            "user",
+            "assistant",
+        }:
             yield value
         for child in value.values():
             if isinstance(child, (Mapping, list, tuple)):
@@ -128,8 +126,7 @@ def source_records(
                         "timestamp": metadata.get("timestamp"),
                         "cwd": metadata.get("cwd"),
                         "repo": (
-                            metadata.get("repo")
-                            or metadata.get("repository")
+                            metadata.get("repo") or metadata.get("repository")
                         ),
                         "text": text,
                     }
@@ -273,10 +270,22 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     build.add_argument("--sessions-root", required=True, type=Path)
     build.add_argument("--db", required=True, type=Path)
     recall = commands.add_parser("recall")
-    recall.add_argument("--db", required=True, type=Path)
+    recall_group = recall.add_mutually_exclusive_group(required=True)
+    recall_group.add_argument("--db", type=Path)
+    recall_group.add_argument("--socket", type=Path)
     recall.add_argument("--prompt", required=True)
     recall.add_argument("--repo")
     recall.add_argument("--max-bytes", type=int, default=4000)
+    serve = commands.add_parser("serve")
+    serve.add_argument("--codex-root", required=True, type=Path)
+    serve.add_argument("--claude-root", required=True, type=Path)
+    serve.add_argument("--db", required=True, type=Path)
+    serve.add_argument("--state-dir", required=True, type=Path)
+    serve.add_argument("--socket", required=True, type=Path)
+    serve.add_argument("--interval", type=float, default=1.0)
+    for name in ("status", "doctor"):
+        command = commands.add_parser(name)
+        command.add_argument("--socket", required=True, type=Path)
     return parser.parse_args(argv)
 
 
@@ -290,7 +299,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     {"indexed": build_index(args.sessions_root, args.db)}
                 )
             )
-        else:
+        elif args.command == "recall" and args.db:
             packet = evidence_packet(
                 args.db,
                 args.prompt,
@@ -298,6 +307,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.max_bytes,
             )
             print(json.dumps(packet))
+        else:
+            from service import request, serve
+
+            if args.command == "serve":
+                if args.interval <= 0:
+                    raise ValueError("interval must be positive")
+                return serve(
+                    args.codex_root,
+                    args.claude_root,
+                    args.db,
+                    args.state_dir,
+                    args.socket,
+                    args.interval,
+                )
+            if args.command == "recall":
+                print(
+                    json.dumps(
+                        request(
+                            args.socket,
+                            {
+                                "op": "recall",
+                                "prompt": args.prompt,
+                                "repo": args.repo,
+                                "max_bytes": args.max_bytes,
+                            },
+                        )
+                    )
+                )
+            else:
+                print(json.dumps(request(args.socket, {"op": args.command})))
     except (OSError, sqlite3.Error, ValueError) as error:
         print(f"context: {error}", file=sys.stderr)
         return 2

@@ -8,7 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-
+from typing import cast
 
 CLI = Path(__file__).parents[1] / "scripts" / "context.py"
 
@@ -172,12 +172,22 @@ class ContextCommandTest(unittest.TestCase):
         }
         (self.root / "multiple.jsonl").write_text(json.dumps(record) + "\n")
         self.assertEqual(self.build(), {"indexed": 4})
-        first = self.recall("first-intra-line-message")["evidence"][0]
-        second = self.recall("second-intra-line-message")["evidence"][0]
-        self.assertEqual(first["source"]["line"], 1)
-        self.assertEqual(second["source"]["line"], 1)
-        self.assertEqual(first["source"]["ordinal"], 1)
-        self.assertEqual(second["source"]["ordinal"], 2)
+        first_packet = self.recall("first-intra-line-message")
+        second_packet = self.recall("second-intra-line-message")
+        first = first_packet["evidence"]
+        second = second_packet["evidence"]
+        self.assertIsInstance(first, list)
+        self.assertIsInstance(second, list)
+        first_items = cast(list[object], first)
+        second_items = cast(list[object], second)
+        first = cast(dict[str, object], first_items[0])
+        second = cast(dict[str, object], second_items[0])
+        first_source = cast(dict[str, object], first["source"])
+        second_source = cast(dict[str, object], second["source"])
+        self.assertEqual(first_source["line"], 1)
+        self.assertEqual(second_source["line"], 1)
+        self.assertEqual(first_source["ordinal"], 1)
+        self.assertEqual(second_source["ordinal"], 2)
 
 
 if __name__ == "__main__":
