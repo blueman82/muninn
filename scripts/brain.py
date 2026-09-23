@@ -24,8 +24,7 @@ from wal_store import (
 )
 
 MAX_PACKET_BYTES = 2_400
-MAX_DIRTY_FENCE_SECONDS = 5.0
-CHECKPOINT_PROBE_SECONDS = 0.15
+MAX_DIRTY_FENCE_SECONDS, CHECKPOINT_PROBE_SECONDS = 5.0, 0.15
 
 
 def _counter(state: Mapping[str, object], name: str) -> int:
@@ -272,6 +271,10 @@ class Brain:
                 return unavailable_packet(self._unavailable_reason())
             maximum = request.get("max_bytes", MAX_PACKET_BYTES)
             repo = request.get("repo")
+            role = request.get("role")
+            assistant_role = (
+                role if isinstance(role, str) and role == "assistant" else None
+            )
             with closing(sqlite3.connect(self.database)) as connection:
                 packet = evidence_packet_from_connection(
                     connection,
@@ -283,6 +286,7 @@ class Brain:
                         else MAX_PACKET_BYTES
                     ),
                     include_provider=True,
+                    role=assistant_role,
                 )
             return packet | {"available": True}
         except sqlite3.Error:

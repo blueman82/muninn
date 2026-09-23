@@ -157,6 +157,7 @@ def source_records(
                         "repo": (
                             metadata.get("repo") or metadata.get("repository")
                         ),
+                        "role": str(message["role"]),
                         "text": text,
                     }
 
@@ -174,6 +175,7 @@ def create_schema(connection: sqlite3.Connection) -> None:
             timestamp TEXT,
             cwd TEXT,
             repo TEXT,
+            role TEXT NOT NULL,
             text TEXT NOT NULL,
             UNIQUE(source_path, source_line, source_hash, source_ordinal)
         );
@@ -204,11 +206,11 @@ def build_index(sessions_root: Path, db_path: Path) -> int:
                         """INSERT INTO events(
                         source_path, source_line, source_ordinal, source_hash,
                         timestamp,
-                        cwd, repo, text
+                        cwd, repo, role, text
                     ) VALUES(
                         :source_path, :source_line, :source_ordinal,
                         :source_hash, :timestamp,
-                        :cwd, :repo, :text
+                        :cwd, :repo, :role, :text
                     )""",
                         event,
                     )
@@ -248,6 +250,7 @@ def fetch_matches(
     query: str,
     repo: str | None,
     include_provider: bool = False,
+    role: str | None = None,
 ) -> list[sqlite3.Row]:
     """Fetch one prebuilt lexical query, enforcing repository scope in SQL."""
     if not query:
@@ -279,6 +282,7 @@ def fetch_matches(
         if has_sources
         else ""
     )
+    role_filter = "AND events.role = :role" if role else ""
     return connection.execute(
         f"""SELECT events.source_path, events.source_line,
                    events.source_ordinal, events.source_hash,
@@ -287,10 +291,10 @@ def fetch_matches(
                    events.cwd, events.repo, events.text
             FROM event_fts JOIN events ON events.id = event_fts.rowid
             {source_filter} WHERE event_fts MATCH :query {scope}
-            {active_filter}
+            {active_filter} {role_filter}
             ORDER BY bm25(event_fts), events.source_path, events.source_line
             LIMIT 50""",
-        {"query": query, "repo": repo},
+        {"query": query, "repo": repo, "role": role},
     ).fetchall()
 
 
@@ -330,18 +334,21 @@ def evidence_packet_from_connection(
     repo: str | None,
     max_bytes: int,
     include_provider: bool = False,
+    role: str | None = None,
 ) -> dict[str, object]:
     """Return bounded, cited evidence from one open SQLite snapshot."""
     if max_bytes < 1:
         raise ValueError("max bytes must be positive")
     connection.row_factory = sqlite3.Row
     exact_query = fts_query(prompt)
-    matches = fetch_matches(connection, exact_query, repo, include_provider)
+    matches = fetch_matches(
+        connection, exact_query, repo, include_provider, role
+    )
     evidence, used_bytes = cited_evidence(matches, max_bytes, include_provider)
     global_fallback = bool(repo and not evidence)
     if global_fallback:
         matches = fetch_matches(
-            connection, exact_query, None, include_provider
+            connection, exact_query, None, include_provider, role
         )
         evidence, used_bytes = cited_evidence(
             matches, max_bytes, include_provider
@@ -349,7 +356,11 @@ def evidence_packet_from_connection(
     relaxed = False
     if global_fallback and not evidence:
         matches = fetch_matches(
-            connection, relaxed_fts_query(prompt), None, include_provider
+            connection,
+            relaxed_fts_query(prompt),
+            None,
+            include_provider,
+            role,
         )
         evidence, used_bytes = cited_evidence(
             matches, max_bytes, include_provider

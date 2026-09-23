@@ -210,13 +210,14 @@ class AdapterTest(unittest.TestCase):
             "retrieval_scope": "global_historical_fallback",
             "match_strategy": "lexical_relaxed",
         }
-        with patch("hook_core.request", return_value=fallback):
+        with patch("hook_core.request", return_value=fallback) as request:
             self.assertEqual(
                 codex.recalled_packet(
                     "coderails provenance", "/repos/coderails", 100
                 ),
                 codex.empty_packet(),
             )
+        self.assertEqual(request.call_args.args[1]["role"], "assistant")
 
     def test_automatic_hook_requires_repository_scope(self) -> None:
         with patch("hook_core.request") as request:

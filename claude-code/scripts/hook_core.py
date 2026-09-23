@@ -251,6 +251,7 @@ def recalled_packet(
             "prompt": prompt,
             "repo": repo,
             "max_bytes": max_bytes,
+            "role": "assistant",
         },
     )
     if not packet.get("available", True):
