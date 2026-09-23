@@ -1,0 +1,43 @@
+{
+  "description": "Inject local provenance context as advisory evidence.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex.py\"",
+            "timeout": 5,
+            "additionalContextLimit": 400
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex.py\"",
+            "timeout": 5,
+            "additionalContextLimit": 2400
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$|^apply_patch$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/hooks/codex.py\"",
+            "timeout": 5,
+            "additionalContextLimit": 900
+          }
+        ]
+      }
+    ]
+  }
+}

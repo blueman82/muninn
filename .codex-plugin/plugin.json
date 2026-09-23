@@ -1,18 +1,17 @@
 {
   "name": "provenance-context",
   "version": "0.1.0",
-  "description": "Provenance Context plugin",
+  "description": "Local, source-cited session evidence for Codex.",
   "author": {
     "name": "Local developer"
   },
-  "skills": "./skills/",
   "interface": {
     "displayName": "Provenance Context",
-    "shortDescription": "Use Provenance Context in Codex.",
-    "longDescription": "Provenance Context adds a local Codex plugin scaffold.",
+    "shortDescription": "Recall local source-cited session evidence",
+    "longDescription": "Inject bounded, untrusted historical evidence from a local SQLite index.",
     "developerName": "Local developer",
     "category": "Productivity",
-    "capabilities": [],
-    "defaultPrompt": "Help me use Provenance Context."
+    "capabilities": ["Lifecycle hooks"],
+    "defaultPrompt": "Use local provenance evidence for this task."
   }
 }
