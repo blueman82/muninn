@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -31,6 +32,26 @@ ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
 CODEX_HOOK = ROOT / "hooks" / "codex.py"
 README = ROOT / "README.md"
+
+CRASH_APPEND_POINTS = (
+    "after_event_insert",
+    "after_fts_insert",
+    "after_assertion_supersede",
+    "after_assertion_insert",
+    "after_source_state",
+    "after_meta_counts",
+    "before_commit",
+)
+CRASH_REPLACE_POINTS = (
+    "after_delete_assertions",
+    "after_delete_fts",
+    "after_delete_events",
+)
+CRASH_RENAME_POINTS = (
+    "after_rename_events",
+    "after_rename_source_state",
+    "before_rename_commit",
+)
 
 
 def run(
@@ -72,7 +93,11 @@ class ServiceTest(unittest.TestCase):
             self.process.stderr.close()
         self.temporary.cleanup()
 
-    def start(self) -> subprocess.Popen[str]:
+    def start(
+        self,
+        environment: dict[str, str] | None = None,
+        wait_for_socket: bool = True,
+    ) -> subprocess.Popen[str]:
         """Start the documented daemon command and wait for its socket."""
         process = subprocess.Popen(
             [
@@ -95,7 +120,10 @@ class ServiceTest(unittest.TestCase):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            env=os.environ | (environment or {}),
         )
+        if not wait_for_socket:
+            return process
         for _ in range(100):
             if self.socket.exists():
                 return process
@@ -792,6 +820,74 @@ class ServiceTest(unittest.TestCase):
                     (source.stat().st_size,),
                 )
 
+    def test_crash_failpoints_restart_with_exact_once_public_evidence(
+        self,
+    ) -> None:
+        """Crash every mutation boundary and recover cited markers once."""
+        for point in CRASH_APPEND_POINTS:
+            self._crash_case(point, "append")
+        for point in CRASH_REPLACE_POINTS:
+            self._crash_case(point, "replace")
+        for point in CRASH_RENAME_POINTS:
+            self._crash_case(point, "rename")
+
+    def _crash_case(self, point: str, mode: str) -> None:
+        """Exercise one deterministic crash boundary through the UDS daemon."""
+        prior = f"prior-{point}"
+        post = f"post-{point}"
+        prior_source = self.codex / f"prior-{point}.jsonl"
+        source = self.codex / f"crash-{point}-before.jsonl"
+        prior_source.write_text(self._codex_record(prior))
+        padding = "x" * 100 if mode == "replace" else ""
+        baseline = self._codex_record(f"I prefer baseline-{point} {padding}")
+        source.write_text(baseline)
+        self.wait_for(prior)
+        self.wait_for(f"baseline-{point}")
+        self._stop_daemon()
+        if mode == "replace":
+            source.write_text(self._codex_record(f"I prefer {post}"))
+        else:
+            with source.open("a") as stream:
+                stream.write(self._codex_record(f"I prefer {post}"))
+            if mode == "rename":
+                source.rename(self.codex / f"crash-{point}-after.jsonl")
+        self._restart_after_crash(point)
+        self._assert_exact_marker(prior)
+        self._assert_exact_marker(post)
+
+    def _restart_after_crash(self, point: str) -> None:
+        """Restart normally after one deterministic test-only crash."""
+        crashed = self.start(
+            {
+                "PROVENANCE_CONTEXT_TEST_CRASH_ARMED": "1",
+                "PROVENANCE_CONTEXT_CRASH_FAILPOINT": point,
+            },
+            wait_for_socket=False,
+        )
+        self.assertEqual(crashed.wait(timeout=5), 86)
+        if crashed.stderr:
+            crashed.stderr.close()
+        self.process = self.start()
+
+    def _stop_daemon(self) -> None:
+        """Stop the healthy daemon before mutating the crash fixture."""
+        self.process.send_signal(signal.SIGTERM)
+        self.process.wait(timeout=5)
+        if self.process.stderr:
+            self.process.stderr.close()
+
+    def _assert_exact_marker(self, marker: str) -> None:
+        """Assert a public recall reports one source-cited marker."""
+        packet = self.wait_for(marker)
+        evidence = cast(list[dict[str, object]], packet["evidence"])
+        self.assertEqual(
+            sum(
+                str(item.get("text", "")).endswith(marker) for item in evidence
+            ),
+            1,
+            evidence,
+        )
+
     def _codex_record(self, content: str) -> str:
         """Build one complete Codex user message for storage mutation tests."""
         return (
@@ -967,6 +1063,57 @@ class ServiceTest(unittest.TestCase):
                 break
             time.sleep(0.05)
         self.assertTrue(packet["erased"], packet)
+
+    def test_status_counts_prove_erasure_removes_linked_assertions(
+        self,
+    ) -> None:
+        """Expose aggregate counts while proving public erasure."""
+        preference = self.codex / "preference.jsonl"
+        unrelated = self.codex / "unrelated.jsonl"
+        preference.write_text(self._codex_record("I prefer terse replies"))
+        unrelated.write_text(self._codex_record("unrelated-needle"))
+        self.wait_for("terse replies")
+        self.wait_for("unrelated-needle")
+        status = self.status()
+        counts = cast(dict[str, object], status["storage"])["derived_counts"]
+        self.assertEqual(counts, {"events": 2, "assertions": 1, "sources": 2})
+        self.assertNotIn("preference.jsonl", json.dumps(status))
+        self.assertNotIn("terse replies", json.dumps(status))
+        source_id = hashlib.sha256(preference.name.encode()).hexdigest()[:16]
+        preference.unlink()
+        self.wait_for_status(
+            lambda packet: any(
+                item.get("source_id") == source_id
+                and item.get("status") == "missing"
+                for item in cast(list[dict[str, object]], packet["sources"])
+            )
+        )
+        until = time.monotonic() + 5
+        erased = False
+        while time.monotonic() < until:
+            result = run(
+                "erase",
+                "--socket",
+                str(self.socket),
+                "--provider",
+                "codex",
+                "--source-id",
+                source_id,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            erased = bool(json.loads(result.stdout)["erased"])
+            if erased:
+                break
+            time.sleep(0.05)
+        self.assertTrue(erased)
+        status = self.wait_for_status(
+            lambda packet: cast(dict[str, object], packet["storage"])[
+                "derived_counts"
+            ]
+            == {"events": 1, "assertions": 0, "sources": 1}
+        )
+        self.assertNotIn("preference.jsonl", json.dumps(status))
+        self._assert_exact_marker("unrelated-needle")
 
     def test_v1_database_is_backed_up_and_rebuilt_from_raw(self) -> None:
         """WAL cutover retains rollback data and reads the raw corpus."""

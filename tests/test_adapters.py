@@ -13,6 +13,9 @@ import time
 import unittest
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
+
+from hooks import codex
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -161,6 +164,33 @@ class AdapterTest(unittest.TestCase):
         self.assertIn("source=", context)
         self.assertIn("line=1", context)
         self.assertLessEqual(len(context.encode()), 1_800)
+
+    def test_prompt_hook_withholds_context_during_rebuild(self) -> None:
+        """Do not retry a rebuilding index after it becomes healthy."""
+        payload = {
+            "hook_event_name": "UserPromptSubmit",
+            "prompt": "needle-rose",
+        }
+        rebuilding = {
+            "available": False,
+            "evidence": [],
+            "bytes": 0,
+            "untrusted": True,
+            "unavailable_reason": "rebuilding",
+        }
+        with (
+            patch.dict(
+                os.environ,
+                {"PROVENANCE_CONTEXT_SOCKET": "/private/tmp/brain.sock"},
+            ),
+            patch(
+                "hooks.codex.request",
+                side_effect=[rebuilding, {"available": True}],
+            ) as request,
+        ):
+            response = codex.hook_response(payload)
+        self.assertEqual(response, {})
+        self.assertEqual(request.call_count, 1)
 
     def test_pretool_is_advisory_and_claude_cli_matches_core(self) -> None:
         payload = json.dumps(

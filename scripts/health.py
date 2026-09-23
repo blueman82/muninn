@@ -44,6 +44,12 @@ def source_statuses(database: Path) -> tuple[list[dict[str, object]], bool]:
         return [], True
 
 
-def unavailable_packet() -> dict[str, object]:
-    """Return the fail-closed response shared by unavailable recalls."""
-    return {"available": False, "evidence": [], "bytes": 0, "untrusted": True}
+def unavailable_packet(reason: str = "unavailable") -> dict[str, object]:
+    """Return a fail-closed recall packet with a redacted reason."""
+    return {
+        "available": False,
+        "evidence": [],
+        "bytes": 0,
+        "untrusted": True,
+        "unavailable_reason": reason,
+    }

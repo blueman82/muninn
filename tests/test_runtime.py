@@ -29,6 +29,7 @@ class RuntimeRequestTest(unittest.TestCase):
             "evidence": [],
             "bytes": 0,
             "untrusted": True,
+            "unavailable_reason": "reconciling",
         }
         recovered = {"available": True, "evidence": [{"text": "needle"}]}
         with patch(
@@ -44,26 +45,37 @@ class RuntimeRequestTest(unittest.TestCase):
         self.assertEqual(packet, recovered)
         self.assertEqual(request_once.call_count, 3)
 
-    def test_recall_does_not_retry_when_status_is_unavailable(self) -> None:
-        """Leave dirty, rebuilding, and failed services fail-closed."""
-        fenced = {
-            "available": False,
-            "evidence": [],
-            "bytes": 0,
-            "untrusted": True,
-        }
-        with patch(
-            "scripts.runtime._request_once",
-            side_effect=[fenced, {"available": False}],
-        ) as request_once:
-            packet = runtime.request(
-                Path("/private/tmp/brain.sock"),
-                {"op": "recall", "prompt": "needle"},
-                0.2,
-                8_192,
-            )
-        self.assertEqual(packet, fenced)
-        self.assertEqual(request_once.call_count, 2)
+    def test_recall_does_not_retry_nonreconciling_reasons(self) -> None:
+        """Leave unhealthy services fail-closed even if health changes."""
+        for reason in (
+            "rebuilding",
+            "pending",
+            "error",
+            "root_unavailable",
+            "unavailable",
+        ):
+            fenced = {
+                "available": False,
+                "evidence": [],
+                "bytes": 0,
+                "untrusted": True,
+                "unavailable_reason": reason,
+            }
+            with (
+                self.subTest(reason=reason),
+                patch(
+                    "scripts.runtime._request_once",
+                    side_effect=[fenced, {"available": True}],
+                ) as request_once,
+            ):
+                packet = runtime.request(
+                    Path("/private/tmp/brain.sock"),
+                    {"op": "recall", "prompt": "needle"},
+                    0.2,
+                    8_192,
+                )
+            self.assertEqual(packet, fenced)
+            self.assertEqual(request_once.call_count, 1)
 
     def test_transport_failure_does_not_retry(self) -> None:
         """Fail closed when the first UDS request cannot connect."""

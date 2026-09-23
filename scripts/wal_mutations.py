@@ -7,11 +7,18 @@ import sqlite3
 import time
 from collections.abc import Mapping
 
+CRASH_EXIT_STATUS = 86
+
 
 def failpoint(name: str) -> None:
     """Raise a named test-only failure at one transaction boundary."""
     if os.environ.get("PROVENANCE_CONTEXT_TEST_FAILPOINT") == name:
         raise RuntimeError(f"deterministic_failpoint_{name}")
+    if (
+        os.environ.get("PROVENANCE_CONTEXT_TEST_CRASH_ARMED") == "1"
+        and os.environ.get("PROVENANCE_CONTEXT_CRASH_FAILPOINT") == name
+    ):
+        os._exit(CRASH_EXIT_STATUS)
 
 
 def delete_events(

@@ -85,6 +85,14 @@ tombstoned source, copy its redacted `source_id` from status and use:
   --source-id REDACTED_SOURCE_ID
 ```
 
+`status.storage.derived_counts` contains only daemon-owned aggregate counts
+for `events`, `assertions`, and `sources`. It contains no assertion values,
+text, raw paths, or database path. A failed recall likewise contains only an
+`unavailable_reason`: `reconciling`, `rebuilding`, `pending`, `error`,
+`root_unavailable`, `unavailable`, or `transport`. The shared clients retry
+only a `reconciling` result after a fresh healthy status response; every other
+reason remains a fail-closed empty packet.
+
 To exercise reader/checkpoint contention without opening the database, run
 this fixed 150 ms daemon-owned read probe while another process appends or
 recalls. Inspect `status.storage` during the probe, then the probe response
@@ -98,11 +106,21 @@ interface; the command accepts no SQL, database path, or evidence content.
 
 On first WAL start, the daemon keeps a `v1-rollback.sqlite` copy in the state
 directory before rebuilding the disposable derived database from raw JSONL.
-Tests may set `PROVENANCE_CONTEXT_TEST_FAILPOINT` to one of
+In-process rollback tests may set `PROVENANCE_CONTEXT_TEST_FAILPOINT` to one of
 `after_event_insert`, `after_fts_insert`, `after_assertion_supersede`,
 `after_assertion_insert`, `after_delete_assertions`, `after_delete_fts`,
 `after_delete_events`, `after_source_state`, `after_meta_counts`, or
 `before_commit`; the transaction then rolls back before its cursor advances.
+
+Forced process-termination tests require two explicit test-only variables:
+`PROVENANCE_CONTEXT_TEST_CRASH_ARMED=1` and a named
+`PROVENANCE_CONTEXT_CRASH_FAILPOINT`. They exit the daemon with status 86 at
+the selected mutation boundary; neither variable is used by normal service or
+hook configuration. The crash-point names are the rollback names above plus
+`after_rename_events`, `after_rename_source_state`, and
+`before_rename_commit`. A black-box evaluator starts an armed daemon after
+changing a source, confirms exit 86, unsets both variables, restarts normally,
+and verifies its prior and post source markers are each cited exactly once.
 
 ## Quality commands
 

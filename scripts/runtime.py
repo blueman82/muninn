@@ -88,6 +88,7 @@ def _unavailable_response(operation: object) -> dict[str, object]:
             "bytes": 0,
             "untrusted": True,
             "available": False,
+            "unavailable_reason": "transport",
         }
     return {"available": False, "status": "unavailable"}
 
@@ -103,6 +104,8 @@ def request(
     if response is None:
         return _unavailable_response(payload.get("op"))
     if payload.get("op") != "recall" or response.get("available") is not False:
+        return response
+    if response.get("unavailable_reason") != "reconciling":
         return response
     status = _request_once(
         socket_path, {"op": "status"}, timeout_seconds, max_bytes

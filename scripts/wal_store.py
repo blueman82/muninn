@@ -362,6 +362,14 @@ def checkpoint(
     except OSError:
         wal_bytes = 0
     checkpoint_data = list(result) if result else []
+    derived_counts = {
+        table: int(
+            connection.execute(
+                "SELECT value FROM meta WHERE key = ?", (COUNT_KEYS[table],)
+            ).fetchone()[0]
+        )
+        for table in ("events", "assertions", "sources")
+    }
     return {
         "journal_mode": "wal",
         "wal_bytes": wal_bytes,
@@ -374,4 +382,5 @@ def checkpoint(
             checkpoint_data[2] if len(checkpoint_data) > 2 else 0
         ),
         "checkpoint_at": time.time(),
+        "derived_counts": derived_counts,
     }

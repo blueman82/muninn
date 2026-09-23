@@ -236,10 +236,10 @@ class Brain:
         """Return bounded cited evidence from the published snapshot."""
         prompt = request.get("prompt")
         if not self.lock.acquire(blocking=False):
-            return unavailable_packet()
+            return unavailable_packet(self._unavailable_reason())
         try:
             if not self.available() or not isinstance(prompt, str):
-                return unavailable_packet()
+                return unavailable_packet(self._unavailable_reason())
             maximum = request.get("max_bytes", MAX_PACKET_BYTES)
             repo = request.get("repo")
             with closing(sqlite3.connect(self.database)) as connection:
@@ -256,9 +256,21 @@ class Brain:
                 )
             return packet | {"available": True}
         except sqlite3.Error:
-            return unavailable_packet()
+            return unavailable_packet("error")
         finally:
             self.lock.release()
+
+    def _unavailable_reason(self) -> str:
+        """Return the current content-free reason that recall is fenced."""
+        if self.rebuilding:
+            return "rebuilding"
+        if self.roots_unavailable:
+            return "root_unavailable"
+        if self.pending:
+            return "pending"
+        if self.last_error:
+            return "error"
+        return "reconciling" if self.reconciling else "unavailable"
 
     def erase(self, request: Mapping[str, object]) -> dict[str, object]:
         """Erase one redacted source and all linked derived records."""
