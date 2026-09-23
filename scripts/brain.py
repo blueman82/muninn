@@ -25,6 +25,7 @@ from wal_store import (
 
 MAX_PACKET_BYTES = 2_400
 MAX_DIRTY_FENCE_SECONDS = 5.0
+CHECKPOINT_PROBE_SECONDS = 0.15
 
 
 def _counter(state: Mapping[str, object], name: str) -> int:
@@ -286,6 +287,32 @@ class Brain:
             return {"available": False, "erased": False}
         finally:
             self.lock.release()
+
+    def checkpoint_probe(self) -> dict[str, object]:
+        """Hold a daemon-owned reader for checkpoint diagnostics."""
+        if self.rebuilding or not self.database.exists():
+            return {"available": False, "reader": "unavailable"}
+        try:
+            database_uri = f"{self.database.resolve().as_uri()}?mode=ro"
+            with closing(
+                sqlite3.connect(database_uri, uri=True, timeout=0.2)
+            ) as connection:
+                try:
+                    connection.execute("PRAGMA query_only = ON")
+                    connection.execute("BEGIN")
+                    connection.execute(
+                        "SELECT 1 FROM sqlite_master LIMIT 1"
+                    ).fetchone()
+                    time.sleep(CHECKPOINT_PROBE_SECONDS)
+                finally:
+                    connection.rollback()
+            return {
+                "available": self.database.exists(),
+                "reader": "released",
+                "held_ms": int(CHECKPOINT_PROBE_SECONDS * 1_000),
+            }
+        except (OSError, sqlite3.Error):
+            return {"available": False, "reader": "unavailable"}
 
     def available(self) -> bool:
         """Return the fail-closed health decision shared by all clients."""

@@ -85,6 +85,17 @@ tombstoned source, copy its redacted `source_id` from status and use:
   --source-id REDACTED_SOURCE_ID
 ```
 
+To exercise reader/checkpoint contention without opening the database, run
+this fixed 150 ms daemon-owned read probe while another process appends or
+recalls. Inspect `status.storage` during the probe, then the probe response
+confirms that its reader was released. The UDS socket remains the only public
+interface; the command accepts no SQL, database path, or evidence content.
+
+```sh
+/opt/homebrew/bin/python3.13 scripts/context.py checkpoint-probe \
+  --socket "$PROVENANCE_CONTEXT_SOCKET"
+```
+
 On first WAL start, the daemon keeps a `v1-rollback.sqlite` copy in the state
 directory before rebuilding the disposable derived database from raw JSONL.
 Tests may set `PROVENANCE_CONTEXT_TEST_FAILPOINT` to one of

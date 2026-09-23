@@ -1099,6 +1099,54 @@ class ServiceTest(unittest.TestCase):
         self.assertIsInstance(storage["checkpointed_frames"], int)
         self.assertIsInstance(self.status()["dirty_fence_seconds"], float)
 
+    def test_checkpoint_probe_is_public_bounded_and_releases_reader(
+        self,
+    ) -> None:
+        """Hold a daemon reader while public append and recall clients run."""
+        source = self.codex / "probe.jsonl"
+        source.write_text(self._codex_record("probe-first"))
+        self.wait_for("probe-first")
+        probe = subprocess.Popen(
+            [
+                sys.executable,
+                str(CONTEXT),
+                "checkpoint-probe",
+                "--socket",
+                str(self.socket),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            time.sleep(0.05)
+            self.assertIsNone(probe.poll())
+            with source.open("a") as stream:
+                stream.write(self._codex_record("probe-second"))
+            packets = [self.recall("probe") for _ in range(4)]
+            for packet in packets:
+                if packet["available"]:
+                    self.assertIn("evidence", packet)
+                else:
+                    self.assertEqual(packet["evidence"], [])
+            storage = cast(dict[str, object], self.status()["storage"])
+            self.assertEqual(storage["journal_mode"], "wal")
+            output, error = probe.communicate(timeout=2)
+        finally:
+            if probe.poll() is None:
+                probe.kill()
+                probe.wait(timeout=2)
+            if probe.stdout:
+                probe.stdout.close()
+            if probe.stderr:
+                probe.stderr.close()
+        self.assertEqual(probe.returncode, 0, error)
+        response = json.loads(output)
+        self.assertEqual(response["reader"], "released")
+        self.assertEqual(response["held_ms"], 150)
+        self.assertNotIn("database", response)
+        self.wait_for("probe-second")
+
 
 if __name__ == "__main__":
     unittest.main()

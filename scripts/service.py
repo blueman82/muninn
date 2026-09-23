@@ -75,6 +75,8 @@ class RequestHandler(StreamRequestHandler):
             return self.brain.recall(request)
         if operation == "erase":
             return self.brain.erase(request)
+        if operation == "checkpoint-probe":
+            return self.brain.checkpoint_probe()
         if operation in {"status", "doctor"}:
             return self.brain.status()
         return {"error": "unsupported_operation"}

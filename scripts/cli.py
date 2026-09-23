@@ -41,6 +41,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     for name in ("status", "doctor"):
         command = commands.add_parser(name)
         command.add_argument("--socket", required=True, type=Path)
+    probe = commands.add_parser("checkpoint-probe")
+    probe.add_argument("--socket", required=True, type=Path)
     erase = commands.add_parser("erase")
     erase.add_argument("--socket", required=True, type=Path)
     erase.add_argument(
@@ -95,9 +97,10 @@ def _socket_request(args: argparse.Namespace) -> dict[str, object]:
         }
     if args.command == "erase":
         payload |= {"provider": args.provider, "source_id": args.source_id}
-    return request(
-        args.socket, payload, REQUEST_TIMEOUT_SECONDS, MAX_REQUEST_BYTES
+    timeout = (
+        0.5 if args.command == "checkpoint-probe" else REQUEST_TIMEOUT_SECONDS
     )
+    return request(args.socket, payload, timeout, MAX_REQUEST_BYTES)
 
 
 def main(
