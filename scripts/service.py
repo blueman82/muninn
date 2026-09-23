@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import signal
 import socket
 import sqlite3
@@ -13,13 +12,14 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from socketserver import StreamRequestHandler, ThreadingMixIn, UnixStreamServer
-from typing import Optional, cast
+from typing import cast
 
 from context import evidence_packet
 from normalizers import discover, parse_source
+from snapshot import delete_missing, open_snapshot, replace_source, source_rows
 
 MAX_PACKET_BYTES = 2_400
 
@@ -61,224 +61,6 @@ def _audit(
     os.chmod(audit_path, 0o600)
 
 
-def _create_schema(connection: sqlite3.Connection) -> None:
-    """Create the disposable snapshot schema."""
-    columns = {
-        row[1]
-        for row in connection.execute("PRAGMA table_info(events)").fetchall()
-    }
-    if columns and "provider" not in columns:
-        # The old archive snapshot is disposable and lacks source identities.
-        connection.executescript(
-            "DROP TABLE IF EXISTS assertions; DROP TABLE IF EXISTS sources;"
-            "DROP TABLE IF EXISTS event_fts; DROP TABLE IF EXISTS events;"
-        )
-    connection.executescript(
-        """
-        PRAGMA journal_mode=DELETE;
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY,
-            provider TEXT NOT NULL,
-            source_path TEXT NOT NULL,
-            source_line INTEGER NOT NULL,
-            source_ordinal INTEGER NOT NULL,
-            source_hash TEXT NOT NULL,
-            timestamp TEXT,
-            cwd TEXT,
-            repo TEXT,
-            role TEXT NOT NULL,
-            text TEXT NOT NULL,
-            UNIQUE(provider, source_path, source_line, source_hash,
-                   source_ordinal)
-        );
-        CREATE TABLE IF NOT EXISTS sources (
-            provider TEXT NOT NULL,
-            source_path TEXT NOT NULL,
-            fingerprint TEXT NOT NULL,
-            pending INTEGER NOT NULL DEFAULT 0,
-            error TEXT,
-            last_seen REAL NOT NULL,
-            PRIMARY KEY(provider, source_path)
-        );
-        CREATE TABLE IF NOT EXISTS assertions (
-            id INTEGER PRIMARY KEY,
-            event_id INTEGER NOT NULL REFERENCES events(id),
-            kind TEXT NOT NULL,
-            value TEXT NOT NULL,
-            state TEXT NOT NULL,
-            supersedes INTEGER REFERENCES assertions(id),
-            created_at REAL NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS events_cwd ON events(cwd);
-        CREATE VIRTUAL TABLE IF NOT EXISTS event_fts USING fts5(text);
-        """
-    )
-
-
-def _open_snapshot(destination: Path) -> tuple[Path, sqlite3.Connection]:
-    """Create a private replacement database, copying the prior snapshot."""
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=destination.parent, prefix=f".{destination.name}.", delete=False
-    ) as temporary:
-        temporary_path = Path(temporary.name)
-    if destination.exists():
-        shutil.copy2(destination, temporary_path)
-    connection = sqlite3.connect(temporary_path)
-    _create_schema(connection)
-    return temporary_path, connection
-
-
-def _source_rows(
-    connection: sqlite3.Connection,
-) -> dict[tuple[str, str], tuple[str, int]]:
-    """Return the last known source fingerprints and retry flags."""
-    return {
-        (provider, path): (fingerprint, pending)
-        for provider, path, fingerprint, pending in connection.execute(
-            "SELECT provider, source_path, fingerprint, pending FROM sources"
-        )
-    }
-
-
-def _insert_event(
-    connection: sqlite3.Connection, event: Mapping[str, object]
-) -> int:
-    """Insert an event and its lexical index row."""
-    cursor = connection.execute(
-        """INSERT INTO events(provider, source_path, source_line,
-           source_ordinal,
-           source_hash, timestamp, cwd, repo, role, text)
-           VALUES(:provider, :source_path, :source_line, :source_ordinal,
-                  :source_hash, :timestamp, :cwd, :repo, :role, :text)""",
-        event,
-    )
-    row_id = cursor.lastrowid
-    if row_id is None:
-        raise sqlite3.Error("event insert did not return a row id")
-    connection.execute(
-        "INSERT INTO event_fts(rowid, text) VALUES(?, ?)",
-        (row_id, event["text"]),
-    )
-    return int(row_id)
-
-
-def _preference(text: str) -> Optional[str]:
-    """Return a direct first-person preference, never an inferred fact."""
-    lowered = text.strip().lower()
-    for prefix in ("i prefer ", "please always ", "please never "):
-        if lowered.startswith(prefix) and len(text) > len(prefix):
-            return text.strip()
-    return None
-
-
-def _replace_source(
-    connection: sqlite3.Connection,
-    provider: str,
-    source_path: str,
-    fingerprint: str,
-    events: Sequence[Mapping[str, object]],
-    pending: bool,
-    error: str | None,
-) -> int:
-    """Replace one source atomically after its complete prefix was parsed."""
-    row_ids = [
-        row[0]
-        for row in connection.execute(
-            "SELECT id FROM events WHERE provider = ? AND source_path = ?",
-            (provider, source_path),
-        )
-    ]
-    if row_ids:
-        placeholders = ",".join("?" for _ in row_ids)
-        connection.execute(
-            f"DELETE FROM assertions WHERE event_id IN ({placeholders})",
-            row_ids,
-        )
-        connection.execute(
-            f"DELETE FROM event_fts WHERE rowid IN ({placeholders})", row_ids
-        )
-    connection.execute(
-        "DELETE FROM events WHERE provider = ? AND source_path = ?",
-        (provider, source_path),
-    )
-    count = 0
-    for event in events:
-        event_id = _insert_event(connection, event)
-        if event["role"] == "user" and (
-            value := _preference(str(event["text"]))
-        ):
-            previous = connection.execute(
-                """SELECT id FROM assertions WHERE kind = 'preference'
-                   AND state = 'active' ORDER BY id DESC LIMIT 1"""
-            ).fetchone()
-            if previous:
-                connection.execute(
-                    "UPDATE assertions SET state = 'superseded' WHERE id = ?",
-                    (previous[0],),
-                )
-            connection.execute(
-                """INSERT INTO assertions(event_id, kind, value, state,
-                   supersedes,
-                   created_at) VALUES(?, 'preference', ?, 'active', ?, ?)""",
-                (
-                    event_id,
-                    value,
-                    previous[0] if previous else None,
-                    time.time(),
-                ),
-            )
-        count += 1
-    connection.execute(
-        """INSERT INTO sources(provider, source_path, fingerprint, pending,
-           error,
-           last_seen) VALUES(?, ?, ?, ?, ?, ?)
-           ON CONFLICT(provider, source_path) DO UPDATE SET
-             fingerprint=excluded.fingerprint, pending=excluded.pending,
-             error=excluded.error, last_seen=excluded.last_seen""",
-        (provider, source_path, fingerprint, int(pending), error, time.time()),
-    )
-    return count
-
-
-def _delete_missing(
-    connection: sqlite3.Connection,
-    current: set[tuple[str, str]],
-) -> int:
-    """Remove sources that disappeared or were renamed from the snapshot."""
-    removed = 0
-    for provider, source_path in _source_rows(connection):
-        if (provider, source_path) in current:
-            continue
-        row_ids = [
-            row[0]
-            for row in connection.execute(
-                "SELECT id FROM events WHERE provider = ? AND source_path = ?",
-                (provider, source_path),
-            )
-        ]
-        if row_ids:
-            placeholders = ",".join("?" for _ in row_ids)
-            connection.execute(
-                f"DELETE FROM assertions WHERE event_id IN ({placeholders})",
-                row_ids,
-            )
-            connection.execute(
-                f"DELETE FROM event_fts WHERE rowid IN ({placeholders})",
-                row_ids,
-            )
-        connection.execute(
-            "DELETE FROM events WHERE provider = ? AND source_path = ?",
-            (provider, source_path),
-        )
-        connection.execute(
-            "DELETE FROM sources WHERE provider = ? AND source_path = ?",
-            (provider, source_path),
-        )
-        removed += 1
-    return removed
-
-
 class Brain:
     """Own the service snapshot, reconciliation loop, and redacted state."""
 
@@ -307,9 +89,9 @@ class Brain:
         trace_id = uuid.uuid4().hex
         started = time.monotonic()
         with self.lock:
-            temporary, connection = _open_snapshot(self.database)
+            temporary, connection = open_snapshot(self.database)
             try:
-                known = _source_rows(connection)
+                known = source_rows(connection)
                 current: set[tuple[str, str]] = set()
                 changed = False
                 indexed = 0
@@ -332,18 +114,17 @@ class Brain:
                             errors.append(error)
                             pending += 1
                             continue
-                        indexed += _replace_source(
+                        indexed += replace_source(
                             connection,
                             provider,
                             source_path,
                             fingerprint,
                             events,
                             source_pending,
-                            None,
                         )
                         changed = True
                         pending += int(source_pending)
-                if _delete_missing(connection, current):
+                if delete_missing(connection, current):
                     changed = True
                 self.last_scan = time.time()
                 self.pending = pending

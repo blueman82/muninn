@@ -39,9 +39,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     if not args.hook and (
         args.prompt is None or (args.db is None and args.socket is None)
     ):
-        parser.error(
-            "--socket and --prompt are required unless --hook is used"
-        )
+        parser.error("--socket and --prompt required unless --hook is used")
     return args
 
 
