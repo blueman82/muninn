@@ -26,7 +26,7 @@ from normalizers import (
     parse_source_incremental,
     source_fingerprint,
 )
-from service import MAX_CLIENTS, MAX_REQUEST_BYTES, serve
+from service import MAX_CLIENTS, MAX_REQUEST_BYTES, RequestHandler, serve
 from service import request as service_request
 
 ROOT = Path(__file__).parents[1]
@@ -795,9 +795,24 @@ class ServiceTest(unittest.TestCase):
             audit_after = (
                 audit_path.stat().st_size if audit_path.exists() else 0
             )
-            recall = service_request(
-                socket_path, {"op": "recall", "prompt": "slow-needle"}
-            )
+            brain = RequestHandler.brain
+            brain.pending = 1
+            self.assertTrue(brain.lock.acquire(blocking=False))
+            try:
+                status_started = time.monotonic()
+                fence_status = service_request(socket_path, {"op": "status"})
+                status_latency = time.monotonic() - status_started
+                started = time.monotonic()
+                recall = service_request(
+                    socket_path,
+                    {"op": "recall", "prompt": "slow-needle"},
+                )
+                recall_latency = time.monotonic() - started
+                fence_audit = (
+                    audit_path.stat().st_size if audit_path.exists() else 0
+                )
+            finally:
+                brain.lock.release()
             release.set()
             stopping.set()
             worker.join(timeout=2)
@@ -807,7 +822,12 @@ class ServiceTest(unittest.TestCase):
             all(packet["state"] == "reconciling" for packet in statuses)
         )
         self.assertEqual(audit_after, audit_before)
+        self.assertEqual(fence_audit, audit_before)
         self.assertFalse(recall["available"])
+        self.assertEqual(recall["unavailable_reason"], "reconciling")
+        self.assertEqual(fence_status["state"], "reconciling")
+        self.assertLess(status_latency, 0.2)
+        self.assertLess(recall_latency, 0.2)
         self.assertEqual(recall["unavailable_reason"], "reconciling")
 
     def test_client_saturation_and_audit_status_are_bounded(self) -> None:

@@ -75,7 +75,7 @@ class RequestHandler(StreamRequestHandler):
             response = {"error": "invalid_request"}
         if operation in {"status", "doctor"} and "error" not in response:
             response = _bounded_status(self.brain.status())
-        else:
+        elif response.get("unavailable_reason") != "reconciling":
             self.brain.audit(
                 "client",
                 trace_id,

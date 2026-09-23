@@ -261,9 +261,13 @@ class Brain:
     def recall(self, request: Mapping[str, object]) -> dict[str, object]:
         """Return bounded cited evidence from the published snapshot."""
         prompt = request.get("prompt")
+        if self.reconciling or self.scan_lock.locked():
+            return unavailable_packet("reconciling")
         if not self.lock.acquire(blocking=False):
             return unavailable_packet(self._unavailable_reason())
         try:
+            if self.reconciling or self.scan_lock.locked():
+                return unavailable_packet("reconciling")
             if not self.available() or not isinstance(prompt, str):
                 return unavailable_packet(self._unavailable_reason())
             maximum = request.get("max_bytes", MAX_PACKET_BYTES)
@@ -290,13 +294,15 @@ class Brain:
         """Return the current content-free reason that recall is fenced."""
         if self.rebuilding:
             return "rebuilding"
+        if self.reconciling or self.scan_lock.locked():
+            return "reconciling"
         if self.roots_unavailable:
             return "root_unavailable"
         if self.pending:
             return "pending"
         if self.last_error:
             return "error"
-        return "reconciling" if self.reconciling else "unavailable"
+        return "unavailable"
 
     def erase(self, request: Mapping[str, object]) -> dict[str, object]:
         """Erase one redacted source and all linked derived records."""
