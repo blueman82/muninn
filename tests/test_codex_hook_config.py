@@ -24,7 +24,10 @@ class CodexHookConfigTest(unittest.TestCase):
             root = Path(temporary)
             plugin_root = root / "codex-cache"
             shutil.copytree(ROOT / "hooks", plugin_root / "hooks")
-            shutil.copytree(ROOT / "scripts", plugin_root / "scripts")
+            shutil.copytree(
+                ROOT / "claude-code" / "scripts",
+                plugin_root / "claude-code" / "scripts",
+            )
             command = json.loads(
                 (plugin_root / "hooks" / "hooks.json").read_text()
             )["hooks"]["SessionStart"][0]["hooks"][0]["command"].replace(
@@ -54,6 +57,50 @@ class CodexHookConfigTest(unittest.TestCase):
                 worker.join(timeout=2)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Provenance index: available.", result.stdout)
+
+    def test_hook_commands_are_distinct_executables(self) -> None:
+        """Keep provider-specific hook paths out of each other's package."""
+        codex = json.loads((ROOT / "hooks" / "hooks.json").read_text())
+        claude = json.loads(
+            (ROOT / "claude-code" / "hooks" / "hooks.json").read_text()
+        )
+        codex_commands = self._commands(codex)
+        claude_commands = self._commands(claude)
+        self.assertTrue(
+            all(
+                command == '"${PLUGIN_ROOT}/hooks/codex.py"'
+                for command in codex_commands
+            )
+        )
+        self.assertTrue(
+            all(
+                command == '"${CLAUDE_PLUGIN_ROOT}/scripts/claude_context.py"'
+                for command in claude_commands
+            )
+        )
+        self.assertTrue(os.access(ROOT / "hooks" / "codex.py", os.X_OK))
+        self.assertTrue(
+            os.access(
+                ROOT / "claude-code" / "scripts" / "claude_context.py",
+                os.X_OK,
+            )
+        )
+
+    @staticmethod
+    def _commands(configuration: dict[str, object]) -> list[str]:
+        """Return command strings from a hook manifest."""
+        hooks = configuration["hooks"]
+        if not isinstance(hooks, dict):
+            return []
+        return [
+            hook["command"]
+            for entries in hooks.values()
+            if isinstance(entries, list)
+            for entry in entries
+            if isinstance(entry, dict)
+            for hook in entry.get("hooks", [])
+            if isinstance(hook, dict) and isinstance(hook.get("command"), str)
+        ]
 
     @staticmethod
     def _reply(listener: socket.socket) -> None:

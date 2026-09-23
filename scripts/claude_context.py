@@ -10,11 +10,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 SCRIPT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(SCRIPT_ROOT / "hooks"))
+sys.path.insert(0, str(SCRIPT_ROOT / "claude-code" / "scripts"))
 
-from codex import HARD_MAX_BYTES
-from codex import main as hook_main
 from context import evidence_packet
+from hook_core import HARD_MAX_BYTES
+from hook_core import main as hook_main
 from service import request
 
 

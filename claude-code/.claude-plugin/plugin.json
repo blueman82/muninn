@@ -1,9 +1,9 @@
 {
   "name": "provenance-context",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local, source-cited session evidence for Claude Code.",
   "author": {
     "name": "Local developer"
   },
-  "hooks": "./claude-code/hooks/hooks.json"
+  "hooks": "./hooks/hooks.json"
 }

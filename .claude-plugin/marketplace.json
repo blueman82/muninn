@@ -8,7 +8,7 @@
     {
       "name": "provenance-context",
       "description": "Inject bounded local source-cited evidence.",
-      "source": "./",
+      "source": "./claude-code",
       "category": "productivity"
     }
   ]

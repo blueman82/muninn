@@ -1,6 +1,6 @@
 {
   "include": ["scripts", "hooks", "tests"],
-  "extraPaths": ["scripts", "hooks"],
+  "extraPaths": ["scripts", "hooks", "claude-code/scripts"],
   "pythonVersion": "3.13",
   "typeCheckingMode": "basic"
 }

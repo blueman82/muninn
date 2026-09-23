@@ -33,7 +33,7 @@ class RuntimeRequestTest(unittest.TestCase):
         }
         recovered = {"available": True, "evidence": [{"text": "needle"}]}
         with patch(
-            "scripts.runtime._request_once",
+            "hook_core._request_once",
             side_effect=[fenced, {"available": True}, recovered],
         ) as request_once:
             packet = runtime.request(
@@ -64,7 +64,7 @@ class RuntimeRequestTest(unittest.TestCase):
             with (
                 self.subTest(reason=reason),
                 patch(
-                    "scripts.runtime._request_once",
+                    "hook_core._request_once",
                     side_effect=[fenced, {"available": True}],
                 ) as request_once,
             ):
@@ -80,7 +80,7 @@ class RuntimeRequestTest(unittest.TestCase):
     def test_transport_failure_does_not_retry(self) -> None:
         """Fail closed when the first UDS request cannot connect."""
         with patch(
-            "scripts.runtime._request_once", return_value=None
+            "hook_core._request_once", return_value=None
         ) as request_once:
             packet = runtime.request(
                 Path("/private/tmp/brain.sock"),

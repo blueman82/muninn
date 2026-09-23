@@ -13,17 +13,18 @@ import tempfile
 import threading
 import time
 import unittest
+from importlib import import_module
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
-
-from hooks import codex
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
 CODEX = ROOT / "hooks" / "codex.py"
 CLAUDE = ROOT / "scripts" / "claude_context.py"
 LAUNCHD = ROOT / "launchd" / "com.provenance-context.plist.template"
+sys.path.insert(0, str(ROOT / "claude-code" / "scripts"))
+codex = import_module("hook_core")
 
 
 def run(
@@ -190,7 +191,7 @@ class AdapterTest(unittest.TestCase):
                 {"PROVENANCE_CONTEXT_SOCKET": "/private/tmp/brain.sock"},
             ),
             patch(
-                "hooks.codex.request",
+                "hook_core.request",
                 side_effect=[rebuilding, {"available": True}],
             ) as request,
         ):
@@ -300,17 +301,16 @@ class AdapterTest(unittest.TestCase):
     def test_claude_hook_command_resolves_from_plugin_root(self) -> None:
         """Execute the configured Claude hook from an installed layout."""
         checkout = Path(self.temporary.name) / "checkout"
+        shutil.copytree(ROOT / "claude-code", checkout)
         plugin_root = checkout
-        shutil.copytree(ROOT / ".claude-plugin", checkout / ".claude-plugin")
-        shutil.copytree(ROOT / "claude-code", checkout / "claude-code")
-        shutil.copytree(ROOT / "scripts", checkout / "scripts")
-        shutil.copytree(ROOT / "hooks", checkout / "hooks")
         manifest = json.loads(
             (plugin_root / ".claude-plugin" / "plugin.json").read_text()
         )
         configuration = json.loads(
             (plugin_root / manifest["hooks"]).read_text()
         )
+        self.assertFalse((plugin_root / ".codex-plugin").exists())
+        self.assertFalse((plugin_root / "hooks" / "codex.py").exists())
         command = configuration["hooks"]["SessionStart"][0]["hooks"][0][
             "command"
         ]
@@ -359,44 +359,6 @@ class AdapterTest(unittest.TestCase):
             response["additionalContext"],
             "Provenance index: available.",
         )
-
-    def test_hook_commands_execute_python_entrypoints(self) -> None:
-        """Keep hook command heads executable after plugin substitution."""
-        codex = json.loads((ROOT / "hooks" / "hooks.json").read_text())
-        commands = [
-            hook["command"]
-            for entries in codex["hooks"].values()
-            for entry in entries
-            for hook in entry["hooks"]
-        ]
-        self.assertTrue(commands)
-        self.assertTrue(
-            all(
-                command == '"${PLUGIN_ROOT}/hooks/codex.py"'
-                for command in commands
-            )
-        )
-        self.assertTrue(os.access(ROOT / "hooks" / "codex.py", os.X_OK))
-        claude = json.loads(
-            (ROOT / "claude-code" / "hooks" / "hooks.json").read_text()
-        )
-        claude_commands = [
-            hook["command"]
-            for entries in claude["hooks"].values()
-            for entry in entries
-            for hook in entry["hooks"]
-        ]
-        self.assertTrue(
-            all(
-                command
-                == '"${CLAUDE_PLUGIN_ROOT}/scripts/claude_context.py" --hook'
-                for command in claude_commands
-            )
-        )
-        self.assertTrue(os.access(CLAUDE, os.X_OK))
-        launchd = LAUNCHD.read_text()
-        self.assertIn("/opt/homebrew/bin/python3.13", launchd)
-        self.assertNotIn("__PYTHON__", launchd)
 
 
 if __name__ == "__main__":

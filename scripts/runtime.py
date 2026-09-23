@@ -5,15 +5,31 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-import socket
 import stat
+import sys
 import tempfile
 import time
 from collections.abc import Mapping
+from importlib import import_module
 from pathlib import Path
+
+CORE_ROOT = Path(__file__).resolve().parents[1] / "claude-code" / "scripts"
+sys.path.insert(0, str(CORE_ROOT))
+core_request = import_module("hook_core").request
+
 
 MAX_AUDIT_BYTES = 1_048_576
 MAX_AUDIT_RECORD_BYTES = 4_096
+
+
+def request(
+    socket_path: Path,
+    payload: Mapping[str, object],
+    timeout_seconds: float,
+    max_bytes: int,
+) -> dict[str, object]:
+    """Delegate bounded UDS requests to the shared hook client."""
+    return core_request(socket_path, payload, timeout_seconds, max_bytes)
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -58,62 +74,6 @@ def append_audit(
     except OSError:
         return False, True
     return rotated, False
-
-
-def _request_once(
-    socket_path: Path,
-    payload: Mapping[str, object],
-    timeout_seconds: float,
-    max_bytes: int,
-) -> dict[str, object] | None:
-    """Send one bounded private-socket request or return None on failure."""
-    try:
-        private_directory(socket_path.parent, create=False)
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(timeout_seconds)
-            client.connect(str(socket_path))
-            client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-            with client.makefile("rb") as stream:
-                response = json.loads(stream.readline(max_bytes))
-        return dict(response) if isinstance(response, Mapping) else {}
-    except (OSError, ValueError, json.JSONDecodeError):
-        return None
-
-
-def _unavailable_response(operation: object) -> dict[str, object]:
-    """Return the public fail-closed response for one unavailable operation."""
-    if operation == "recall":
-        return {
-            "evidence": [],
-            "bytes": 0,
-            "untrusted": True,
-            "available": False,
-            "unavailable_reason": "transport",
-        }
-    return {"available": False, "status": "unavailable"}
-
-
-def request(
-    socket_path: Path,
-    payload: Mapping[str, object],
-    timeout_seconds: float,
-    max_bytes: int,
-) -> dict[str, object]:
-    """Request a private socket with one health-gated recall retry."""
-    response = _request_once(socket_path, payload, timeout_seconds, max_bytes)
-    if response is None:
-        return _unavailable_response(payload.get("op"))
-    if payload.get("op") != "recall" or response.get("available") is not False:
-        return response
-    if response.get("unavailable_reason") != "reconciling":
-        return response
-    status = _request_once(
-        socket_path, {"op": "status"}, timeout_seconds, max_bytes
-    )
-    if status is None or status.get("available") is not True:
-        return response
-    retried = _request_once(socket_path, payload, timeout_seconds, max_bytes)
-    return retried or _unavailable_response("recall")
 
 
 def private_directory(path: Path, create: bool) -> None:
