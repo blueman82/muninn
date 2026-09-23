@@ -242,7 +242,7 @@ def recalled_packet(
     Returns:
         A core evidence packet or its empty equivalent.
     """
-    if not prompt:
+    if not prompt or not repo:
         return empty_packet()
     packet = request(
         context_socket(),
@@ -253,7 +253,11 @@ def recalled_packet(
             "max_bytes": max_bytes,
         },
     )
-    return packet if packet.get("available", True) else empty_packet()
+    if not packet.get("available", True):
+        return empty_packet()
+    if packet.get("retrieval_scope") == "global_historical_fallback":
+        return empty_packet()
+    return packet
 
 
 def index_status() -> str:

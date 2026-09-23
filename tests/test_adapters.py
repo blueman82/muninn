@@ -177,6 +177,7 @@ class AdapterTest(unittest.TestCase):
         payload = {
             "hook_event_name": "UserPromptSubmit",
             "prompt": "needle-rose",
+            "cwd": "/repos/alpha",
         }
         rebuilding = {
             "available": False,
@@ -198,6 +199,32 @@ class AdapterTest(unittest.TestCase):
             response = codex.hook_response(payload)
         self.assertEqual(response, {})
         self.assertEqual(request.call_count, 1)
+
+    def test_automatic_hook_never_uses_global_fallback(self) -> None:
+        """Keep automatic context inside its current repository."""
+        fallback = {
+            "available": True,
+            "evidence": [{"text": "wrong project"}],
+            "bytes": 13,
+            "untrusted": True,
+            "retrieval_scope": "global_historical_fallback",
+            "match_strategy": "lexical_relaxed",
+        }
+        with patch("hook_core.request", return_value=fallback):
+            self.assertEqual(
+                codex.recalled_packet(
+                    "coderails provenance", "/repos/coderails", 100
+                ),
+                codex.empty_packet(),
+            )
+
+    def test_automatic_hook_requires_repository_scope(self) -> None:
+        with patch("hook_core.request") as request:
+            self.assertEqual(
+                codex.recalled_packet("coderails provenance", None, 100),
+                codex.empty_packet(),
+            )
+        request.assert_not_called()
 
     def test_pretool_is_advisory_and_claude_cli_matches_core(self) -> None:
         payload = json.dumps(
