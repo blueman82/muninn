@@ -294,30 +294,12 @@ def fetch_matches(
     ).fetchall()
 
 
-def evidence_packet_from_connection(
-    connection: sqlite3.Connection,
-    prompt: str,
-    repo: str | None,
+def cited_evidence(
+    matches: Sequence[sqlite3.Row],
     max_bytes: int,
-    include_provider: bool = False,
-) -> dict[str, object]:
-    """Return bounded, cited evidence from one open SQLite snapshot."""
-    if max_bytes < 1:
-        raise ValueError("max bytes must be positive")
-    connection.row_factory = sqlite3.Row
-    exact_query = fts_query(prompt)
-    matches = fetch_matches(connection, exact_query, repo, include_provider)
-    global_fallback = bool(repo and not matches)
-    if global_fallback:
-        matches = fetch_matches(
-            connection, exact_query, None, include_provider
-        )
-    relaxed = False
-    if global_fallback and not matches:
-        matches = fetch_matches(
-            connection, relaxed_fts_query(prompt), None, include_provider
-        )
-        relaxed = bool(matches)
+    include_provider: bool,
+) -> tuple[list[dict[str, object]], int]:
+    """Keep only whole cited records that fit the caller's byte budget."""
     evidence: list[dict[str, object]] = []
     used_bytes = 0
     for match in matches:
@@ -336,10 +318,43 @@ def evidence_packet_from_connection(
         if include_provider:
             item["source"]["provider"] = match["provider"]
         item_size = len(json.dumps(item, ensure_ascii=False).encode())
-        if item_size > max_bytes - used_bytes:
-            continue
-        evidence.append(item)
-        used_bytes += item_size
+        if item_size <= max_bytes - used_bytes:
+            evidence.append(item)
+            used_bytes += item_size
+    return evidence, used_bytes
+
+
+def evidence_packet_from_connection(
+    connection: sqlite3.Connection,
+    prompt: str,
+    repo: str | None,
+    max_bytes: int,
+    include_provider: bool = False,
+) -> dict[str, object]:
+    """Return bounded, cited evidence from one open SQLite snapshot."""
+    if max_bytes < 1:
+        raise ValueError("max bytes must be positive")
+    connection.row_factory = sqlite3.Row
+    exact_query = fts_query(prompt)
+    matches = fetch_matches(connection, exact_query, repo, include_provider)
+    evidence, used_bytes = cited_evidence(matches, max_bytes, include_provider)
+    global_fallback = bool(repo and not evidence)
+    if global_fallback:
+        matches = fetch_matches(
+            connection, exact_query, None, include_provider
+        )
+        evidence, used_bytes = cited_evidence(
+            matches, max_bytes, include_provider
+        )
+    relaxed = False
+    if global_fallback and not evidence:
+        matches = fetch_matches(
+            connection, relaxed_fts_query(prompt), None, include_provider
+        )
+        evidence, used_bytes = cited_evidence(
+            matches, max_bytes, include_provider
+        )
+        relaxed = bool(evidence)
     packet: dict[str, object] = {
         "evidence": evidence,
         "bytes": used_bytes,

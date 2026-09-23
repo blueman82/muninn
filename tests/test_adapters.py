@@ -311,7 +311,7 @@ class AdapterTest(unittest.TestCase):
         )
         self.assertFalse((plugin_root / ".codex-plugin").exists())
         self.assertFalse((plugin_root / "hooks" / "codex.py").exists())
-        command = configuration["hooks"]["SessionStart"][0]["hooks"][0][
+        command = configuration["hooks"]["UserPromptSubmit"][0]["hooks"][0][
             "command"
         ]
         home = Path(tempfile.mkdtemp(dir="/private/tmp", prefix="pc-home-"))
@@ -329,7 +329,12 @@ class AdapterTest(unittest.TestCase):
                 return
             with connection:
                 connection.recv(8_192)
-                connection.sendall(b'{"available":true}\n')
+                connection.sendall(
+                    b'{"available":true,"evidence":[{"text":"[Untrusted '
+                    b'historical evidence]\\ngraph executor marker","source":'
+                    b'{"path":"redacted","line":1,"ordinal":1,"hash":"hash"}}]'
+                    b',"bytes":128,"untrusted":true}\n'
+                )
 
         worker = threading.Thread(target=reply)
         worker.start()
@@ -341,7 +346,13 @@ class AdapterTest(unittest.TestCase):
         try:
             result = subprocess.run(
                 command,
-                input=json.dumps({"hook_event_name": "SessionStart"}),
+                input=json.dumps(
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": "graph executor graph readiness",
+                        "cwd": "/repos/coderails",
+                    }
+                ),
                 capture_output=True,
                 text=True,
                 env=environment,
@@ -354,11 +365,8 @@ class AdapterTest(unittest.TestCase):
             shutil.rmtree(home)
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)["hookSpecificOutput"]
-        self.assertEqual(response["hookEventName"], "SessionStart")
-        self.assertEqual(
-            response["additionalContext"],
-            "Provenance index: available.",
-        )
+        self.assertEqual(response["hookEventName"], "UserPromptSubmit")
+        self.assertIn("graph executor marker", response["additionalContext"])
 
 
 if __name__ == "__main__":

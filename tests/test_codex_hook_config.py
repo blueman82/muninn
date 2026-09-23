@@ -58,6 +58,56 @@ class CodexHookConfigTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Provenance index: available.", result.stdout)
 
+    def test_prompt_hook_renders_cited_evidence_from_installed_layout(
+        self,
+    ) -> None:
+        """Run the cached UserPromptSubmit command without socket overrides."""
+        with tempfile.TemporaryDirectory(dir="/private/tmp") as temporary:
+            root = Path(temporary)
+            plugin_root = root / "codex-cache"
+            shutil.copytree(ROOT / "hooks", plugin_root / "hooks")
+            shutil.copytree(
+                ROOT / "claude-code" / "scripts",
+                plugin_root / "claude-code" / "scripts",
+            )
+            command = json.loads(
+                (plugin_root / "hooks" / "hooks.json").read_text()
+            )["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"].replace(
+                "${PLUGIN_ROOT}", str(plugin_root)
+            )
+            home = root / "home"
+            socket_path = home / ".local/share/provenance-context/brain.sock"
+            socket_path.parent.mkdir(parents=True)
+            os.chmod(socket_path.parent, 0o700)
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(socket_path))
+            listener.listen(1)
+            worker = threading.Thread(
+                target=self._reply, args=(listener, self._recall_packet())
+            )
+            worker.start()
+            try:
+                result = subprocess.run(
+                    command,
+                    input=json.dumps(
+                        {
+                            "hook_event_name": "UserPromptSubmit",
+                            "prompt": "graph executor graph readiness",
+                            "cwd": "/repos/coderails",
+                        }
+                    ),
+                    capture_output=True,
+                    text=True,
+                    env={"HOME": str(home)},
+                    shell=True,
+                    check=False,
+                )
+            finally:
+                listener.close()
+                worker.join(timeout=2)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("graph executor marker", result.stdout)
+
     def test_hook_commands_are_distinct_executables(self) -> None:
         """Keep provider-specific hook paths out of each other's package."""
         codex = json.loads((ROOT / "hooks" / "hooks.json").read_text())
@@ -103,11 +153,24 @@ class CodexHookConfigTest(unittest.TestCase):
         ]
 
     @staticmethod
-    def _reply(listener: socket.socket) -> None:
+    def _reply(
+        listener: socket.socket,
+        packet: bytes = b'{"available":true}\n',
+    ) -> None:
         try:
             connection, _ = listener.accept()
         except OSError:
             return
         with connection:
             connection.recv(8_192)
-            connection.sendall(b'{"available":true}\n')
+            connection.sendall(packet)
+
+    @staticmethod
+    def _recall_packet() -> bytes:
+        """Return one source-cited recall response for the cache contract."""
+        return (
+            b'{"available":true,"evidence":[{"text":"[Untrusted '
+            b'historical evidence]\\ngraph executor marker","source":'
+            b'{"path":"redacted","line":1,"ordinal":1,"hash":"hash"}}]'
+            b',"bytes":128,"untrusted":true}\n'
+        )

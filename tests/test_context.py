@@ -111,11 +111,14 @@ class ContextCommandTest(unittest.TestCase):
         self,
         prompt: str,
         repo: str | None = None,
+        max_bytes: int | None = None,
     ) -> dict[str, object]:
         """Recall a fixture prompt with an optional repository scope."""
         arguments = ["recall", "--db", str(self.db), "--prompt", prompt]
         if repo:
             arguments.extend(("--repo", repo))
+        if max_bytes is not None:
+            arguments.extend(("--max-bytes", str(max_bytes)))
         return command(*arguments)
 
     def test_recall_is_cited_safe_and_scoped(self) -> None:
@@ -178,6 +181,39 @@ class ContextCommandTest(unittest.TestCase):
             self.recall("unrelated novel absent", "/repos/coderails"),
             {"evidence": [], "bytes": 0, "untrusted": True},
         )
+
+    def test_scoped_oversize_match_uses_marked_eligible_fallback(self) -> None:
+        """Fall back when scoped rows exist but none can be cited whole."""
+        records = [
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "graph executor readiness " + "x" * 5_000,
+                    "cwd": "/repos/alpha",
+                }
+            },
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "graph executor marker",
+                    "cwd": "/repos/other",
+                }
+            },
+        ]
+        (self.root / "oversize.jsonl").write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n"
+        )
+        self.build()
+        packet = self.recall(
+            "graph executor graph readiness", "/repos/alpha", 1_800
+        )
+        self.assertEqual(
+            packet["retrieval_scope"], "global_historical_fallback"
+        )
+        self.assertEqual(packet["match_strategy"], "lexical_relaxed")
+        self.assertIn("graph executor marker", json.dumps(packet))
 
     def test_rebuild_replaces_generated_database(self) -> None:
         self.assertEqual(self.build(), {"indexed": 2})
