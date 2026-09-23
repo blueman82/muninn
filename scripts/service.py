@@ -126,6 +126,7 @@ def serve(
     state_dir: Path,
     socket_path: Path,
     interval: float,
+    stop: threading.Event | None = None,
 ) -> int:
     """Serve bounded requests while reconciling the owned evidence store."""
     private_directory(state_dir, create=True)
@@ -138,25 +139,29 @@ def serve(
             raise RuntimeError("provenance socket path is not a socket")
         socket_path.unlink()
     brain = Brain(codex_root, claude_root, database, state_dir)
-    brain.reconcile()
     server = Server(str(socket_path), RequestHandler)
     RequestHandler.brain = brain
     server.brain = brain
     server.slots = threading.BoundedSemaphore(MAX_CLIENTS)
     os.chmod(socket_path, 0o600)
     socket_inode = socket_path.stat().st_ino
-    stop = threading.Event()
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    stopping = stop or threading.Event()
+    if stop is None:
+        signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+        signal.signal(signal.SIGINT, lambda *_: stopping.set())
+    worker = brain.start_reconcile()
     next_scan = time.monotonic() + interval
     try:
-        while not stop.is_set():
+        while not stopping.is_set():
             server.timeout = min(0.2, max(0.01, next_scan - time.monotonic()))
             server.handle_request()
             if time.monotonic() >= next_scan:
-                brain.reconcile()
+                if worker is None or not worker.is_alive():
+                    worker = brain.start_reconcile()
                 next_scan = time.monotonic() + interval
     finally:
+        if worker is not None:
+            worker.join()
         server.server_close()
         try:
             if socket_path.stat().st_ino == socket_inode:

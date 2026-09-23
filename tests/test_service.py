@@ -26,7 +26,8 @@ from normalizers import (
     parse_source_incremental,
     source_fingerprint,
 )
-from service import MAX_CLIENTS, MAX_REQUEST_BYTES
+from service import MAX_CLIENTS, MAX_REQUEST_BYTES, serve
+from service import request as service_request
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -431,6 +432,7 @@ class ServiceTest(unittest.TestCase):
             stream.write("{malformed}\n")
         degraded = self.wait_for_status(
             lambda status: bool(status["last_error"])
+            and bool(status["available"])
         )
         self.assertEqual(degraded["pending_sources"], 1)
         self.assertEqual(degraded["error_sources"], 1)
@@ -592,8 +594,11 @@ class ServiceTest(unittest.TestCase):
             )
             + "\n"
         )
-        self.wait_for_status(lambda status: bool(status["last_error"]))
-        self.assertTrue(self.recall("other-needle")["evidence"])
+        self.wait_for_status(
+            lambda status: bool(status["last_error"])
+            and bool(status["available"])
+        )
+        self.assertTrue(self.wait_for("other-needle")["evidence"])
         self.assertEqual(
             run("doctor", "--socket", str(self.socket)).returncode, 1
         )
@@ -711,6 +716,64 @@ class ServiceTest(unittest.TestCase):
             ],
             [],
         )
+
+    def test_uds_serves_fenced_requests_during_background_reconcile(
+        self,
+    ) -> None:
+        """Keep UDS admission responsive while the sole writer is slow."""
+        base = Path(self.temporary.name) / "background"
+        codex, claude = base / "codex", base / "claude"
+        codex.mkdir(parents=True)
+        claude.mkdir()
+        database, state = base / "context.sqlite", base / "state"
+        Brain(codex, claude, database, state).reconcile()
+        (codex / "slow.jsonl").write_text(e6_record("codex", "slow-needle"))
+        socket_path = base / "brain.sock"
+        entered, release, stopping = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+
+        def delayed_parse(
+            provider: str,
+            root: Path,
+            path: Path,
+            offset: int,
+            line: int,
+        ) -> tuple[
+            list[dict[str, str | int | None]], str | None, bool, int, int
+        ]:
+            entered.set()
+            release.wait(2)
+            return parse_source_incremental(provider, root, path, offset, line)
+
+        with patch("scan.parse_source_incremental", side_effect=delayed_parse):
+            worker = threading.Thread(
+                target=serve,
+                args=(
+                    codex,
+                    claude,
+                    database,
+                    state,
+                    socket_path,
+                    60.0,
+                    stopping,
+                ),
+            )
+            worker.start()
+            self.assertTrue(entered.wait(2))
+            status = service_request(socket_path, {"op": "status"})
+            recall = service_request(
+                socket_path, {"op": "recall", "prompt": "slow-needle"}
+            )
+            release.set()
+            stopping.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(status["state"], "reconciling")
+        self.assertFalse(recall["available"])
+        self.assertEqual(recall["unavailable_reason"], "reconciling")
 
     def test_client_saturation_and_audit_status_are_bounded(self) -> None:
         """Slow peers are capped and audit data is visible without content."""

@@ -119,13 +119,30 @@ class Brain:
 
     def reconcile(self) -> None:
         """Advance changed cursors without replacing the whole database."""
+        if self._begin_reconcile():
+            self._reconcile_started()
+
+    def start_reconcile(self) -> threading.Thread | None:
+        """Start one owned reconciliation worker or return an active fence."""
+        if not self._begin_reconcile():
+            return None
+        worker = threading.Thread(target=self._reconcile_started)
+        worker.start()
+        return worker
+
+    def _begin_reconcile(self) -> bool:
+        """Fence recall before one writer begins reading source files."""
         if not self.scan_lock.acquire(blocking=False):
-            return
-        trace_id = uuid.uuid4().hex
-        started = time.monotonic()
+            return False
         with self.lock:
             self.reconciling = True
-            self.dirty_since = started
+            self.dirty_since = time.monotonic()
+        return True
+
+    def _reconcile_started(self) -> None:
+        """Run one already-fenced source reconciliation to completion."""
+        trace_id = uuid.uuid4().hex
+        started = time.monotonic()
         connection: sqlite3.Connection | None = None
         try:
             connection = self._open_reconcile_store()
@@ -355,7 +372,11 @@ class Brain:
             | {
                 "audit_bytes": audit_bytes(self.state_dir),
                 "available": self.available(),
-                "state": "rebuilding" if self.rebuilding else "ready",
+                "state": (
+                    "rebuilding"
+                    if self.rebuilding
+                    else "reconciling" if self.reconciling else "ready"
+                ),
                 "rebuilding": self.rebuilding,
                 "dirty_fence_seconds": self._dirty_fence_seconds(),
             }
