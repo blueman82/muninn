@@ -13,7 +13,10 @@ daemon; hooks only make bounded Unix-socket recall requests and never index.
   --socket "$HOME/.local/share/provenance-context/brain.sock"
 ```
 
-Set the same socket path for both plugins:
+Both plugins default to the current user's
+`~/.local/share/provenance-context/brain.sock`; launchd environment does not
+need to reach Codex or Claude. Set this only to override that user-scoped
+default:
 
 ```sh
 export PROVENANCE_CONTEXT_SOCKET=\

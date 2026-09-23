@@ -6,9 +6,11 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -30,6 +32,7 @@ def run(
     input_text: str = "",
     database: Path | None = None,
     socket_path: Path | None = None,
+    home: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run an adapter subprocess with an optional local index.
 
@@ -38,6 +41,8 @@ def run(
         arguments: Command arguments.
         input_text: Optional hook JSON written to standard input.
         database: Optional index path exposed to hook scripts.
+        socket_path: Optional private socket exposed to hook scripts.
+        home: Optional current-user home for default socket resolution.
 
     Returns:
         Completed subprocess output.
@@ -49,6 +54,7 @@ def run(
             if socket_path
             else {}
         ),
+        **({"HOME": str(home)} if home else {}),
     }
     return subprocess.run(
         [sys.executable, str(script), *arguments],
@@ -230,6 +236,28 @@ class AdapterTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), {})
 
+    def test_hook_socket_uses_current_home_default_and_env_override(
+        self,
+    ) -> None:
+        """Resolve hooks to a user-scoped path without leaking it."""
+        home = Path(self.temporary.name) / "home"
+        default = home / ".local/share/provenance-context/brain.sock"
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("hooks.codex.Path.home", return_value=home),
+        ):
+            self.assertEqual(codex.context_socket(), default)
+            self.assertEqual(
+                codex.recalled_packet("needle", None, 100),
+                codex.empty_packet(),
+            )
+        with patch.dict(
+            os.environ, {"PROVENANCE_CONTEXT_SOCKET": "/private/tmp/socket"}
+        ):
+            self.assertEqual(
+                codex.context_socket(), Path("/private/tmp/socket")
+            )
+
     def test_session_start_reports_index_status_without_recall(self) -> None:
         """Report only index availability when a Codex session starts."""
         payload = json.dumps(
@@ -257,7 +285,11 @@ class AdapterTest(unittest.TestCase):
             "needle-rose", cast(str, context["additionalContext"])
         )
 
-        unavailable = run(CODEX, input_text=payload)
+        unavailable = run(
+            CODEX,
+            input_text=payload,
+            home=Path(self.temporary.name) / "offline-home",
+        )
         self.assertEqual(unavailable.returncode, 0, unavailable.stderr)
         context = json.loads(unavailable.stdout)["hookSpecificOutput"]
         self.assertEqual(
@@ -278,19 +310,41 @@ class AdapterTest(unittest.TestCase):
         command = configuration["hooks"]["SessionStart"][0]["hooks"][0][
             "command"
         ]
+        home = Path(tempfile.mkdtemp(dir="/private/tmp", prefix="pc-home-"))
+        default_socket = home / ".local/share/provenance-context/brain.sock"
+        default_socket.parent.mkdir(parents=True)
+        os.chmod(default_socket.parent, 0o700)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(default_socket))
+        listener.listen(1)
+
+        def reply() -> None:
+            connection, _ = listener.accept()
+            with connection:
+                connection.recv(8_192)
+                connection.sendall(b'{"available":true}\n')
+
+        worker = threading.Thread(target=reply)
+        worker.start()
         environment = os.environ | {
             "CLAUDE_PLUGIN_ROOT": str(plugin_root),
-            "PROVENANCE_CONTEXT_SOCKET": str(self.socket),
+            "HOME": str(home),
         }
-        result = subprocess.run(
-            command,
-            input=json.dumps({"hook_event_name": "SessionStart"}),
-            capture_output=True,
-            text=True,
-            env=environment,
-            shell=True,
-            check=False,
-        )
+        environment.pop("PROVENANCE_CONTEXT_SOCKET", None)
+        try:
+            result = subprocess.run(
+                command,
+                input=json.dumps({"hook_event_name": "SessionStart"}),
+                capture_output=True,
+                text=True,
+                env=environment,
+                shell=True,
+                check=False,
+            )
+        finally:
+            listener.close()
+            worker.join(timeout=2)
+            shutil.rmtree(home)
         self.assertEqual(result.returncode, 0, result.stderr)
         response = json.loads(result.stdout)["hookSpecificOutput"]
         self.assertEqual(response["hookEventName"], "SessionStart")
