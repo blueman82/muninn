@@ -59,7 +59,13 @@ authorizes an action.
 
 `/opt/homebrew/bin/python3.13 scripts/context.py status --socket "$PROVENANCE_CONTEXT_SOCKET"`
 returns redacted generation, source staleness, pending tails, and last error.
-`doctor` uses the same local health response. `audit.jsonl` contains only
+It returns at most 24 source entries, prioritizing unhealthy sources, plus
+`source_count`, `error_sources`, and `sources_truncated`; this keeps local
+status bounded for a large corpus. `doctor` uses the same local health
+response. An active final write tail, malformed source, or missing source is
+degraded health and makes `doctor` non-zero, but recall may use fully indexed
+healthy sources and never uses the affected source.
+`audit.jsonl` contains only
 trace-compatible IDs, timings, counts, and snapshot hashes; it never contains
 prompts, evidence text, raw paths, secrets, or tool output. OpenTelemetry is
 not installed in this Python 3.13 slice; add it only with independently tested
@@ -75,7 +81,8 @@ contention through the public status command. `dirty_fence_seconds` is capped
 at five seconds while recall is fenced during reconciliation. `state` is
 `rebuilding` while raw JSONL is restoring a missing or inconsistent derived
 database. A malformed, incomplete, or missing source is excluded from recall
-and makes `doctor` non-zero until it is repaired or deliberately erased.
+and makes `doctor` non-zero until it is repaired or deliberately erased; it
+does not prevent cited recall from healthy sources.
 Missing files are tombstoned rather than silently deleted. To erase one
 tombstoned source, copy its redacted `source_id` from status and use:
 

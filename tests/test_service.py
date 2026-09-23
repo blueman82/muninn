@@ -26,7 +26,7 @@ from normalizers import (
     parse_source_incremental,
     source_fingerprint,
 )
-from service import MAX_CLIENTS
+from service import MAX_CLIENTS, MAX_REQUEST_BYTES
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -362,6 +362,48 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(hook.returncode, 0, hook.stderr)
         self.assertEqual(json.loads(hook.stdout), {})
 
+    def test_active_tail_excludes_its_source_without_fencing_healthy_recall(
+        self,
+    ) -> None:
+        """Serve healthy evidence while a separate source has a write tail."""
+        tail = self.codex / "active-tail.jsonl"
+        healthy = self.claude / "healthy.jsonl"
+        tail.write_text(e6_record("codex", "tail-prior"))
+        healthy.write_text(e6_record("claude", "healthy-during-tail"))
+        self.wait_for("tail-prior")
+        self.wait_for("healthy-during-tail")
+        with tail.open("a") as stream:
+            stream.write(e6_record("codex", "tail-incomplete")[:-1])
+        status = self.wait_for_status(
+            lambda packet: packet["pending_sources"] == 1
+            and bool(packet["available"])
+        )
+        self.assertFalse(status["last_error"])
+        self.assertTrue(self.recall("healthy-during-tail")["evidence"])
+        self.assertEqual(self.recall("tail-prior")["evidence"], [])
+        self.assertEqual(self.recall("tail-incomplete")["evidence"], [])
+        self.assertEqual(
+            run("doctor", "--socket", str(self.socket)).returncode, 1
+        )
+
+    def test_status_truncates_many_redacted_sources(self) -> None:
+        """Keep status and doctor bounded for a large healthy corpus."""
+        for index in range(80):
+            (self.codex / f"many-{index}.jsonl").write_text(
+                e6_record("codex", f"many-source-{index}")
+            )
+        self.wait_for("many-source-79")
+        status = run("status", "--socket", str(self.socket))
+        self.assertEqual(status.returncode, 0, status.stderr)
+        self.assertLess(len(status.stdout.encode()), MAX_REQUEST_BYTES)
+        packet = json.loads(status.stdout)
+        self.assertEqual(packet["source_count"], 80)
+        self.assertTrue(packet["sources_truncated"])
+        self.assertLess(len(packet["sources"]), packet["source_count"])
+        self.assertEqual(
+            run("doctor", "--socket", str(self.socket)).returncode, 0
+        )
+
     def test_malformed_source_quarantines_stale_evidence_and_recovers(
         self,
     ) -> None:
@@ -377,6 +419,13 @@ class ServiceTest(unittest.TestCase):
         }
         source.write_text(json.dumps(valid) + "\n")
         self.wait_for("quarantine-needle")
+        healthy = {
+            "codex": self.codex / "healthy-codex.jsonl",
+            "claude": self.claude / "healthy-claude.jsonl",
+        }
+        for provider, path in healthy.items():
+            path.write_text(e6_record(provider, f"healthy{provider}error"))
+            self.wait_for(f"healthy{provider}error")
 
         with source.open("a") as stream:
             stream.write("{malformed}\n")
@@ -384,38 +433,17 @@ class ServiceTest(unittest.TestCase):
             lambda status: bool(status["last_error"])
         )
         self.assertEqual(degraded["pending_sources"], 1)
-        self.assertFalse(degraded["available"])
+        self.assertEqual(degraded["error_sources"], 1)
+        self.assertTrue(degraded["available"])
         self.assertEqual(self.recall("quarantine-needle")["evidence"], [])
+        for provider in healthy:
+            self.assertTrue(self.recall(f"healthy{provider}error")["evidence"])
         doctor = run("doctor", "--socket", str(self.socket))
         self.assertEqual(doctor.returncode, 1)
-        hook = subprocess.run(
-            [sys.executable, str(CODEX_HOOK)],
-            input=json.dumps(
-                {
-                    "hook_event_name": "UserPromptSubmit",
-                    "prompt": "quarantine-needle",
-                    "cwd": "/repo",
-                }
-            ),
-            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(json.loads(hook.stdout), {})
-        session_start = subprocess.run(
-            [sys.executable, str(CODEX_HOOK)],
-            input=json.dumps({"hook_event_name": "SessionStart"}),
-            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertIn("unavailable", session_start.stdout)
         source.write_text(json.dumps(valid) + "\n")
         self.wait_for("quarantine-needle")
         recovered = self.wait_for_status(
-            lambda status: status.get("available") is True
+            lambda status: not status["last_error"]
         )
         self.assertTrue(recovered["available"])
 
@@ -528,10 +556,10 @@ class ServiceTest(unittest.TestCase):
             'chmod 700 "$HOME/.local/share/provenance-context"', instructions
         )
 
-    def test_nested_source_quarantines_all_recall_until_repair(
+    def test_nested_source_quarantines_only_its_own_evidence_until_repair(
         self,
     ) -> None:
-        """A deep source line disables recall until the source is repaired."""
+        """A deep source line leaves healthy evidence available."""
         good = self.codex / "good.jsonl"
         good.write_text(
             json.dumps(
@@ -565,7 +593,7 @@ class ServiceTest(unittest.TestCase):
             + "\n"
         )
         self.wait_for_status(lambda status: bool(status["last_error"]))
-        self.assertEqual(self.recall("other-needle")["evidence"], [])
+        self.assertTrue(self.recall("other-needle")["evidence"])
         self.assertEqual(
             run("doctor", "--socket", str(self.socket)).returncode, 1
         )
@@ -1113,7 +1141,7 @@ class ServiceTest(unittest.TestCase):
                 if item.get("provider") in sources
             )
         )
-        for index, provider in enumerate(sources):
+        for provider in sources:
             response = run(
                 "erase",
                 "--socket",
@@ -1126,7 +1154,7 @@ class ServiceTest(unittest.TestCase):
             self.assertEqual(response.returncode, 0, response.stderr)
             packet = json.loads(response.stdout)
             self.assertTrue(packet["erased"], packet)
-            self.assertEqual(packet["available"], index == len(sources) - 1)
+            self.assertTrue(packet["available"])
         status = self.status()
         self.assertTrue(status["available"])
         self.assertEqual(status["pending_sources"], 0)

@@ -213,7 +213,9 @@ class Brain:
 
     def _write_state(self) -> None:
         self._flush_rejections()
-        sources, legacy_snapshot = source_statuses(self.database)
+        sources, legacy_snapshot, source_count, error_sources = (
+            source_statuses(self.database)
+        )
         if legacy_snapshot:
             self.last_error = "legacy_snapshot"
         with self.state_lock:
@@ -228,6 +230,9 @@ class Brain:
                     "last_error": self.last_error,
                     "audit_index": self.audit_index,
                     "sources": sources,
+                    "source_count": source_count,
+                    "error_sources": error_sources,
+                    "sources_truncated": source_count > len(sources),
                     "audit_bytes": audit_bytes(self.state_dir),
                     "storage": self.storage,
                     **self._metrics(),
@@ -340,8 +345,6 @@ class Brain:
             and self.database.exists()
             and self.last_scan > 0
             and time.time() - self.last_scan <= 5
-            and not self.pending
-            and not self.last_error
         )
 
     def status(self) -> dict[str, object]:

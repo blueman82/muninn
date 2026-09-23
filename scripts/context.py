@@ -259,7 +259,11 @@ def fetch_matches(
             " JOIN sources ON sources.provider = events.provider "
             "AND sources.source_path = events.source_path "
         )
-    active_filter = "AND sources.status = 'active'" if has_sources else ""
+    active_filter = (
+        "AND sources.status = 'active' AND sources.pending = 0"
+        if has_sources
+        else ""
+    )
     return connection.execute(
         f"""SELECT events.source_path, events.source_line,
                    events.source_ordinal, events.source_hash,
