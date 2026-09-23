@@ -19,6 +19,7 @@ from typing import cast
 
 from context import evidence_packet
 from normalizers import discover, parse_source
+from runtime import acquire_lock, private_directory, release_lock
 from snapshot import (
     delete_missing,
     mark_source_issue,
@@ -34,7 +35,10 @@ REQUEST_TIMEOUT_SECONDS = 0.2
 
 def _json(value: object) -> bytes:
     """Encode one bounded protocol payload."""
-    return (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
+    encoded = (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8")
+    if len(encoded) > MAX_REQUEST_BYTES:
+        return b'{"error":"response_too_large"}\n'
+    return encoded
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -235,7 +239,11 @@ class Brain:
     def recall(self, request: Mapping[str, object]) -> dict[str, object]:
         """Return bounded cited evidence from the published snapshot."""
         prompt = request.get("prompt")
-        if not isinstance(prompt, str) or not self.database.exists():
+        if (
+            self.last_error
+            or not isinstance(prompt, str)
+            or not self.database.exists()
+        ):
             return {"evidence": [], "bytes": 0, "untrusted": True}
         maximum = request.get("max_bytes", MAX_PACKET_BYTES)
         maximum = maximum if isinstance(maximum, int) else MAX_PACKET_BYTES
@@ -328,6 +336,7 @@ def request(
 ) -> dict[str, object]:
     """Call the local service with a bounded unavailable-safe fallback."""
     try:
+        private_directory(socket_path.parent, create=False)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(REQUEST_TIMEOUT_SECONDS)
             client.connect(str(socket_path))
@@ -355,14 +364,19 @@ def serve(
     interval: float,
 ) -> int:
     """Run the reconciler and Unix socket service until signalled to stop."""
-    state_dir.mkdir(parents=True, exist_ok=True)
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
-    socket_path.unlink(missing_ok=True)
+    private_directory(state_dir, create=True)
+    private_directory(socket_path.parent, create=True)
+    lock_path = acquire_lock(state_dir)
+    socket_inode: int | None = None
+    if socket_path.exists():
+        release_lock(lock_path)
+        raise RuntimeError("provenance socket path already exists")
     brain = Brain(codex_root, claude_root, database, state_dir)
     brain.reconcile()
     server = Server(str(socket_path), RequestHandler)
     RequestHandler.brain = brain
     os.chmod(socket_path, 0o600)
+    socket_inode = socket_path.stat().st_ino
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -376,5 +390,10 @@ def serve(
                 next_scan = time.monotonic() + interval
     finally:
         server.server_close()
-        socket_path.unlink(missing_ok=True)
+        try:
+            if socket_path.stat().st_ino == socket_inode:
+                socket_path.unlink()
+        except OSError:
+            pass
+        release_lock(lock_path)
     return 0

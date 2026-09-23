@@ -93,6 +93,8 @@ class AdapterTest(unittest.TestCase):
         self.database = Path(self.temporary.name) / "context.sqlite"
         build_corpus(self.sessions, self.database)
         self.socket = Path(self.temporary.name) / "brain.sock"
+        self.claude_sessions = Path(self.temporary.name) / "claude"
+        self.claude_sessions.mkdir()
         self.daemon = subprocess.Popen(
             [
                 sys.executable,
@@ -101,7 +103,7 @@ class AdapterTest(unittest.TestCase):
                 "--codex-root",
                 str(self.sessions),
                 "--claude-root",
-                str(Path(self.temporary.name) / "claude"),
+                str(self.claude_sessions),
                 "--db",
                 str(self.database),
                 "--state-dir",

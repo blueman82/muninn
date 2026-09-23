@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 from context import sanitize_text, text_content
+
+MAX_SOURCE_LINE_BYTES = 1_048_576
 
 
 def _metadata(record: Mapping[str, object]) -> dict[str, str]:
@@ -90,12 +93,16 @@ def _event(
 
 def _complete_lines(path: Path) -> tuple[list[tuple[int, bytes]], bool]:
     """Read terminated lines and retain an unfinished tail for retry."""
-    raw = path.read_bytes()
-    if not raw:
-        return [], False
-    complete = raw.endswith(b"\n")
-    prefix = raw if complete else raw.rsplit(b"\n", 1)[0] + b"\n"
-    return list(enumerate(prefix.splitlines(), start=1)), not complete
+    lines: list[tuple[int, bytes]] = []
+    with path.open("rb") as source:
+        for number, raw in enumerate(source, start=1):
+            if len(raw) > MAX_SOURCE_LINE_BYTES:
+                raise ValueError("source_line_too_large")
+            if raw.endswith(b"\n"):
+                lines.append((number, raw.rstrip(b"\r\n")))
+            else:
+                return lines, True
+    return lines, False
 
 
 def parse_source(
@@ -105,7 +112,10 @@ def parse_source(
 ) -> tuple[list[dict[str, str | int | None]], str | None, bool]:
     """Parse one JSONL source with recoverable error and tail state."""
     source_key = str(path.relative_to(root))
-    lines, pending = _complete_lines(path)
+    try:
+        lines, pending = _complete_lines(path)
+    except (OSError, ValueError) as error:
+        return [], type(error).__name__, True
     events: list[dict[str, str | int | None]] = []
     for line, raw in lines:
         try:
@@ -173,8 +183,8 @@ def source_fingerprint(path: Path) -> str:
 
 def discover(root: Path) -> Iterator[tuple[str, Path, str]]:
     """Yield source-keyed JSONL paths with their current fingerprints."""
-    if not root.is_dir():
-        return
+    if not root.is_dir() or not os.access(root, os.R_OK | os.X_OK):
+        raise OSError("configured_source_root_unavailable")
     for path in sorted(root.rglob("*.jsonl")):
         if path.is_file():
             yield str(path.relative_to(root)), path, source_fingerprint(path)

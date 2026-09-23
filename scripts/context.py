@@ -26,15 +26,20 @@ QUOTED_SECRET_FIELD = re.compile(
     r'password|passwd|secret|private[_-]?key)["\']\s*:\s*["\'][^"\']+["\']'
 )
 HOSTILE_LINE = re.compile(
-    r"(?i)(?:ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions|"
+    r"(?i)(?:ignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior)\s+instructions|"
     r"reveal\s+(?:the\s+)?(?:system|developer)\s+(?:prompt|message)|"
     r"follow\s+these\s+instructions\s+instead)"
+)
+SPLIT_SECRET = re.compile(
+    r"(?is)(?:api[_-]?key|access[_-]?token|password|passwd|secret)\s*\n\s*[:=]\s*\S+"
 )
 QUERY_TOKEN = re.compile(r"[A-Za-z0-9_]+")
 
 
 def sanitize_text(text: str) -> str:
     """Remove lines containing secrets or instruction-like hostile text."""
+    if SPLIT_SECRET.search(text) or HOSTILE_LINE.search(text):
+        return ""
     safe_lines = (
         line
         for line in text.splitlines()
