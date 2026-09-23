@@ -34,7 +34,11 @@ class RuntimeRequestTest(unittest.TestCase):
         recovered = {"available": True, "evidence": [{"text": "needle"}]}
         with patch(
             "hook_core._request_once",
-            side_effect=[fenced, {"available": True}, recovered],
+            side_effect=[
+                fenced,
+                {"available": True, "state": "ready"},
+                recovered,
+            ],
         ) as request_once:
             packet = runtime.request(
                 Path("/private/tmp/brain.sock"),
@@ -44,6 +48,44 @@ class RuntimeRequestTest(unittest.TestCase):
             )
         self.assertEqual(packet, recovered)
         self.assertEqual(request_once.call_count, 3)
+
+    def test_recall_waits_for_recurring_reconcile_only(self) -> None:
+        """Retry only after a recurring scan publishes a ready snapshot."""
+        fenced = {"available": False, "unavailable_reason": "reconciling"}
+        recovered = {"available": True, "evidence": [{"text": "needle"}]}
+        with patch(
+            "hook_core._request_once",
+            side_effect=[
+                fenced,
+                {"available": False, "state": "reconciling"},
+                {"available": True, "state": "ready"},
+                recovered,
+            ],
+        ) as request_once:
+            packet = runtime.request(
+                Path("/private/tmp/brain.sock"),
+                {"op": "recall", "prompt": "needle"},
+                0.2,
+                8_192,
+            )
+        self.assertEqual(packet, recovered)
+        self.assertEqual(request_once.call_count, 4)
+
+    def test_recall_does_not_wait_through_rebuild(self) -> None:
+        """Keep startup recovery fenced even when it follows reconciliation."""
+        fenced = {"available": False, "unavailable_reason": "reconciling"}
+        with patch(
+            "hook_core._request_once",
+            side_effect=[fenced, {"available": False, "state": "rebuilding"}],
+        ) as request_once:
+            packet = runtime.request(
+                Path("/private/tmp/brain.sock"),
+                {"op": "recall", "prompt": "needle"},
+                0.2,
+                8_192,
+            )
+        self.assertEqual(packet, fenced)
+        self.assertEqual(request_once.call_count, 2)
 
     def test_recall_does_not_retry_nonreconciling_reasons(self) -> None:
         """Leave unhealthy services fail-closed even if health changes."""

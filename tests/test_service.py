@@ -837,8 +837,30 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(recall["unavailable_reason"], "reconciling")
         self.assertEqual(fence_status["state"], "reconciling")
         self.assertLess(status_latency, 0.2)
-        self.assertLess(recall_latency, 0.2)
+        self.assertLess(recall_latency, 0.35)
         self.assertEqual(recall["unavailable_reason"], "reconciling")
+
+    def test_client_retries_recurring_scan_fences_within_budget(self) -> None:
+        """Return cited evidence across recurring scans within budget."""
+        source = self.codex / "recurring.jsonl"
+        source.write_text(e6_record("codex", "recurring-scan-needle"))
+        self.wait_for("recurring-scan-needle")
+        latencies: list[float] = []
+        for _ in range(30):
+            started = time.monotonic()
+            packet = service_request(
+                self.socket,
+                {
+                    "op": "recall",
+                    "prompt": "recurring-scan-needle",
+                    "repo": "/repo",
+                },
+            )
+            latencies.append(time.monotonic() - started)
+            self.assertTrue(packet["available"])
+            self.assertTrue(packet["evidence"])
+            time.sleep(0.02)
+        self.assertLess(max(latencies), 0.35)
 
     def test_client_saturation_and_audit_status_are_bounded(self) -> None:
         """Slow peers are capped and audit data is visible without content."""
@@ -1253,7 +1275,7 @@ class ServiceTest(unittest.TestCase):
         for provider, source in sources.items():
             source.write_text(e6_record(provider, f"I prefer {provider}"))
             self.wait_for(f"I prefer {provider}")
-        status = self.status()
+        status = self.wait_for_status(lambda packet: bool(packet["available"]))
         source_ids = {
             cast(str, item["provider"]): cast(str, item["source_id"])
             for item in cast(list[dict[str, object]], status["sources"])
@@ -1283,7 +1305,7 @@ class ServiceTest(unittest.TestCase):
             packet = json.loads(response.stdout)
             self.assertTrue(packet["erased"], packet)
             self.assertTrue(packet["available"])
-        status = self.status()
+        status = self.wait_for_status(lambda packet: bool(packet["available"]))
         self.assertTrue(status["available"])
         self.assertEqual(status["pending_sources"], 0)
         self.assertFalse(status["last_error"])
