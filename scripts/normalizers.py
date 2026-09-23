@@ -10,7 +10,7 @@ from pathlib import Path
 
 from context import sanitize_text, text_content
 
-MAX_SOURCE_LINE_BYTES = 1_048_576
+MAX_SOURCE_LINE_BYTES = 8 * 1_048_576
 MAX_SOURCE_DEPTH = 1_000
 
 

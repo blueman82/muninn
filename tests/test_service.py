@@ -1394,6 +1394,38 @@ class ServiceTest(unittest.TestCase):
             ]
         )
 
+    def test_schema_upgrade_reindexes_newly_allowed_session_record(
+        self,
+    ) -> None:
+        """Rebuild prior derived state when the raw-record cap increases."""
+        marker = "oversized-session-needle"
+        self.process.send_signal(signal.SIGTERM)
+        self.process.wait(timeout=5)
+        if self.process.stderr:
+            self.process.stderr.close()
+        with sqlite3.connect(self.database) as connection:
+            connection.execute(
+                "UPDATE meta SET value = '4' WHERE key = 'schema_version'"
+            )
+        (self.codex / "oversized.jsonl").write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": marker,
+                        "cwd": "/repo",
+                        "ignored_metadata": "x" * 4_700_000,
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.process = self.start()
+        self.assertTrue(self.wait_for(marker)["evidence"])
+        self.assertTrue((self.state / "v1-rollback.sqlite").exists())
+        self.assertFalse(self.status()["last_error"])
+
     def test_corrupt_derived_database_rebuilds_from_raw_on_restart(
         self,
     ) -> None:

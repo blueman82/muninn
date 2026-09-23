@@ -14,7 +14,7 @@ from pathlib import Path
 from store_integrity import COUNT_KEYS, store_counts, store_is_consistent
 from wal_mutations import delete_events, failpoint, insert_event
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 BUSY_TIMEOUT_MS = 200
 
 
