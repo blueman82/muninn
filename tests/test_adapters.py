@@ -360,8 +360,8 @@ class AdapterTest(unittest.TestCase):
             "Provenance index: available.",
         )
 
-    def test_hook_commands_pin_the_python_313_interpreter(self) -> None:
-        """Keep configured hooks independent of the caller's PATH."""
+    def test_hook_commands_execute_python_entrypoints(self) -> None:
+        """Keep hook command heads executable after plugin substitution."""
         codex = json.loads((ROOT / "hooks" / "hooks.json").read_text())
         commands = [
             hook["command"]
@@ -372,13 +372,28 @@ class AdapterTest(unittest.TestCase):
         self.assertTrue(commands)
         self.assertTrue(
             all(
-                command.startswith("/opt/homebrew/bin/python3.13 ")
+                command == '"${PLUGIN_ROOT}/hooks/codex.py"'
                 for command in commands
             )
         )
-        claude = (ROOT / "claude-code" / "hooks" / "run.sh").read_text()
-        self.assertIn("exec /opt/homebrew/bin/python3.13 ", claude)
-        self.assertNotIn("exec python3", claude)
+        self.assertTrue(os.access(ROOT / "hooks" / "codex.py", os.X_OK))
+        claude = json.loads(
+            (ROOT / "claude-code" / "hooks" / "hooks.json").read_text()
+        )
+        claude_commands = [
+            hook["command"]
+            for entries in claude["hooks"].values()
+            for entry in entries
+            for hook in entry["hooks"]
+        ]
+        self.assertTrue(
+            all(
+                command
+                == '"${CLAUDE_PLUGIN_ROOT}/scripts/claude_context.py" --hook'
+                for command in claude_commands
+            )
+        )
+        self.assertTrue(os.access(CLAUDE, os.X_OK))
         launchd = LAUNCHD.read_text()
         self.assertIn("/opt/homebrew/bin/python3.13", launchd)
         self.assertNotIn("__PYTHON__", launchd)

@@ -34,15 +34,16 @@ use user-only mode `0600`; use the socket rather than opening the database.
 ## Enable Codex
 
 Install this repository as a local Codex plugin through your local marketplace.
-Its `hooks/hooks.json` invokes `hooks/codex.py` with `${PLUGIN_ROOT}`. Start a
-new Codex session after installation.
+Its `hooks/hooks.json` invokes executable `hooks/codex.py` with
+`${PLUGIN_ROOT}`. Start a new Codex session after installation.
 
 ## Enable Claude Code
 
 Use this checkout's root `.claude-plugin/marketplace.json` as a local Claude
 Code marketplace. Its `provenance-context` entry has source `./`, so the
-installed plugin retains the shared `scripts/claude_context.py` adapter and
-does not duplicate runtime code. Reload Claude Code after enabling it.
+installed plugin retains the executable shared `scripts/claude_context.py`
+adapter and does not duplicate runtime code. Reload Claude Code after enabling
+it.
 
 Both configurations use `SessionStart`, `UserPromptSubmit`, and advisory-only
 `PreToolUse` for `Bash` and `apply_patch`. `SessionStart` reports only whether

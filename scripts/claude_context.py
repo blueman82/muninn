@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/homebrew/bin/python3.13
 """Expose source-cited local session evidence to Claude Code."""
 
 from __future__ import annotations
