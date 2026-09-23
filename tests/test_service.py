@@ -17,9 +17,10 @@ from typing import Callable, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
+from brain import Brain
 from context import build_index
 from normalizers import parse_source, parse_source_incremental
-from service import MAX_CLIENTS, Brain
+from service import MAX_CLIENTS
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -541,7 +542,7 @@ class ServiceTest(unittest.TestCase):
         source.write_text("{malformed}\n")
         entered = threading.Event()
         release = threading.Event()
-        from service import parse_source_incremental as real_parse_source
+        from brain import parse_source_incremental as real_parse_source
 
         def delayed_parse(
             provider: str,
@@ -557,7 +558,7 @@ class ServiceTest(unittest.TestCase):
             return real_parse_source(provider, root, path, offset, line)
 
         with patch(
-            "service.parse_source_incremental", side_effect=delayed_parse
+            "brain.parse_source_incremental", side_effect=delayed_parse
         ):
             worker = threading.Thread(target=brain.reconcile)
             worker.start()
@@ -652,7 +653,7 @@ class ServiceTest(unittest.TestCase):
         brain = Brain(self.codex, self.claude, self.database, self.state)
         with (
             patch.object(brain, "audit") as audit,
-            patch("service.write_json") as write_state,
+            patch("brain.write_json") as write_state,
         ):
             for _ in range(100):
                 brain.reject_request(saturated=True)
@@ -693,7 +694,7 @@ class ServiceTest(unittest.TestCase):
         with source.open("a") as stream:
             stream.write(json.dumps(second) + "\n")
         with patch(
-            "service.parse_source_incremental", wraps=parse_source_incremental
+            "brain.parse_source_incremental", wraps=parse_source_incremental
         ) as parser:
             brain.reconcile()
         self.assertGreater(cast(int, parser.call_args.args[3]), 0)

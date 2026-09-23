@@ -3,18 +3,29 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
 import re
 import sqlite3
-import sys
 import tempfile
-import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import closing
 from pathlib import Path
+
+from cli import doctor_is_healthy, parse_args
+from cli import main as run_cli
+
+__all__ = [
+    "build_index",
+    "doctor_is_healthy",
+    "evidence_packet",
+    "evidence_packet_from_connection",
+    "main",
+    "parse_args",
+    "sanitize_text",
+    "text_content",
+]
 
 SECRET_LINE = re.compile(
     r"(?i)(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
@@ -314,129 +325,9 @@ def evidence_packet(
         )
 
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    """Parse the command-line interface."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    build = commands.add_parser("build")
-    build.add_argument("--sessions-root", required=True, type=Path)
-    build.add_argument("--db", required=True, type=Path)
-    recall = commands.add_parser("recall")
-    recall_group = recall.add_mutually_exclusive_group(required=True)
-    recall_group.add_argument("--db", type=Path)
-    recall_group.add_argument("--socket", type=Path)
-    recall.add_argument("--prompt", required=True)
-    recall.add_argument("--repo")
-    recall.add_argument("--max-bytes", type=int, default=4000)
-    serve = commands.add_parser("serve")
-    serve.add_argument("--codex-root", required=True, type=Path)
-    serve.add_argument("--claude-root", required=True, type=Path)
-    serve.add_argument("--db", required=True, type=Path)
-    serve.add_argument("--state-dir", required=True, type=Path)
-    serve.add_argument("--socket", required=True, type=Path)
-    serve.add_argument("--interval", type=float, default=1.0)
-    for name in ("status", "doctor"):
-        command = commands.add_parser(name)
-        command.add_argument("--socket", required=True, type=Path)
-    erase = commands.add_parser("erase")
-    erase.add_argument("--socket", required=True, type=Path)
-    erase.add_argument(
-        "--provider", required=True, choices=("codex", "claude")
-    )
-    erase.add_argument("--source-id", required=True)
-    return parser.parse_args(argv)
-
-
-def doctor_is_healthy(packet: Mapping[str, object]) -> bool:
-    """Return whether a public status packet permits a zero doctor exit."""
-    scanned = packet.get("last_scan")
-    sources = packet.get("sources")
-    if packet.get("available") is not True or not isinstance(scanned, float):
-        return False
-    if time.time() - scanned > 5 or packet.get("pending_sources"):
-        return False
-    if packet.get("last_error") or not isinstance(sources, Sequence):
-        return False
-    return not any(
-        isinstance(source, Mapping)
-        and (source.get("pending") or source.get("error"))
-        for source in sources
-    )
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the builder or evidence retrieval command."""
-    args = parse_args(sys.argv[1:] if argv is None else argv)
-    try:
-        if args.command == "build":
-            print(
-                json.dumps(
-                    {"indexed": build_index(args.sessions_root, args.db)}
-                )
-            )
-        elif args.command == "recall" and args.db:
-            packet = evidence_packet(
-                args.db,
-                args.prompt,
-                args.repo,
-                args.max_bytes,
-            )
-            print(json.dumps(packet))
-        else:
-            from runtime import request
-            from service import (
-                MAX_REQUEST_BYTES,
-                REQUEST_TIMEOUT_SECONDS,
-                serve,
-            )
-
-            if args.command == "serve":
-                if args.interval <= 0:
-                    raise ValueError("interval must be positive")
-                return serve(
-                    args.codex_root,
-                    args.claude_root,
-                    args.db,
-                    args.state_dir,
-                    args.socket,
-                    args.interval,
-                )
-            if args.command == "recall":
-                print(
-                    json.dumps(
-                        request(
-                            args.socket,
-                            {
-                                "op": "recall",
-                                "prompt": args.prompt,
-                                "repo": args.repo,
-                                "max_bytes": args.max_bytes,
-                            },
-                            REQUEST_TIMEOUT_SECONDS,
-                            MAX_REQUEST_BYTES,
-                        )
-                    )
-                )
-            else:
-                payload: dict[str, object] = {"op": args.command}
-                if args.command == "erase":
-                    payload |= {
-                        "provider": args.provider,
-                        "source_id": args.source_id,
-                    }
-                packet = request(
-                    args.socket,
-                    payload,
-                    REQUEST_TIMEOUT_SECONDS,
-                    MAX_REQUEST_BYTES,
-                )
-                print(json.dumps(packet))
-                if args.command == "doctor" and not doctor_is_healthy(packet):
-                    return 1
-    except (OSError, sqlite3.Error, ValueError) as error:
-        print(f"context: {error}", file=sys.stderr)
-        return 2
-    return 0
+    return run_cli(build_index, evidence_packet, argv)
 
 
 if __name__ == "__main__":
