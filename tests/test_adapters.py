@@ -300,12 +300,16 @@ class AdapterTest(unittest.TestCase):
     def test_claude_hook_command_resolves_from_plugin_root(self) -> None:
         """Execute the configured Claude hook from an installed layout."""
         checkout = Path(self.temporary.name) / "checkout"
-        plugin_root = checkout / "claude-code"
-        shutil.copytree(ROOT / "claude-code", plugin_root)
+        plugin_root = checkout
+        shutil.copytree(ROOT / ".claude-plugin", checkout / ".claude-plugin")
+        shutil.copytree(ROOT / "claude-code", checkout / "claude-code")
         shutil.copytree(ROOT / "scripts", checkout / "scripts")
         shutil.copytree(ROOT / "hooks", checkout / "hooks")
+        manifest = json.loads(
+            (plugin_root / ".claude-plugin" / "plugin.json").read_text()
+        )
         configuration = json.loads(
-            (plugin_root / "hooks" / "hooks.json").read_text()
+            (plugin_root / manifest["hooks"]).read_text()
         )
         command = configuration["hooks"]["SessionStart"][0]["hooks"][0][
             "command"
@@ -319,7 +323,10 @@ class AdapterTest(unittest.TestCase):
         listener.listen(1)
 
         def reply() -> None:
-            connection, _ = listener.accept()
+            try:
+                connection, _ = listener.accept()
+            except OSError:
+                return
             with connection:
                 connection.recv(8_192)
                 connection.sendall(b'{"available":true}\n')

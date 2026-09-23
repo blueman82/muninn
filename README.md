@@ -39,10 +39,10 @@ new Codex session after installation.
 
 ## Enable Claude Code
 
-Enable `claude-code/` as a local Claude Code plugin from this checkout; it
-contains the Claude plugin manifest and hook configuration. Keep that directory
-beside `scripts/`, because its hook invokes the shared adapter at
-`../scripts/claude_context.py`. Reload Claude Code after enabling it.
+Use this checkout's root `.claude-plugin/marketplace.json` as a local Claude
+Code marketplace. Its `provenance-context` entry has source `./`, so the
+installed plugin retains the shared `scripts/claude_context.py` adapter and
+does not duplicate runtime code. Reload Claude Code after enabling it.
 
 Both configurations use `SessionStart`, `UserPromptSubmit`, and advisory-only
 `PreToolUse` for `Bash` and `apply_patch`. `SessionStart` reports only whether

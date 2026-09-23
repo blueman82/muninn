@@ -1,0 +1,15 @@
+{
+  "name": "provenance-context-local",
+  "description": "Local source-cited session evidence for Claude Code.",
+  "owner": {
+    "name": "Local developer"
+  },
+  "plugins": [
+    {
+      "name": "provenance-context",
+      "description": "Inject bounded local source-cited evidence.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
