@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import cast
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
@@ -208,15 +209,23 @@ class AdapterTest(unittest.TestCase):
                 "cwd": "/repos/alpha",
             }
         )
-        available = run(CODEX, input_text=payload, socket_path=self.socket)
-        self.assertEqual(available.returncode, 0, available.stderr)
-        context = json.loads(available.stdout)["hookSpecificOutput"]
+        until = time.monotonic() + 1
+        context: dict[str, object] = {}
+        while time.monotonic() < until:
+            available = run(CODEX, input_text=payload, socket_path=self.socket)
+            self.assertEqual(available.returncode, 0, available.stderr)
+            context = json.loads(available.stdout)["hookSpecificOutput"]
+            if context["additionalContext"] == "Provenance index: available.":
+                break
+            time.sleep(0.02)
         self.assertEqual(context["hookEventName"], "SessionStart")
         self.assertEqual(
             context["additionalContext"],
             "Provenance index: available.",
         )
-        self.assertNotIn("needle-rose", context["additionalContext"])
+        self.assertNotIn(
+            "needle-rose", cast(str, context["additionalContext"])
+        )
 
         unavailable = run(CODEX, input_text=payload)
         self.assertEqual(unavailable.returncode, 0, unavailable.stderr)

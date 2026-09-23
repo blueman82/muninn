@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import closing
 from pathlib import Path
 
 SECRET_LINE = re.compile(
@@ -181,12 +182,13 @@ def build_index(sessions_root: Path, db_path: Path) -> int:
     ) as temporary:
         temporary_path = Path(temporary.name)
     try:
-        with sqlite3.connect(temporary_path) as connection:
-            create_schema(connection)
-            count = 0
-            for event in source_records(sessions_root):
-                cursor = connection.execute(
-                    """INSERT INTO events(
+        with closing(sqlite3.connect(temporary_path)) as connection:
+            with connection:
+                create_schema(connection)
+                count = 0
+                for event in source_records(sessions_root):
+                    cursor = connection.execute(
+                        """INSERT INTO events(
                         source_path, source_line, source_ordinal, source_hash,
                         timestamp,
                         cwd, repo, text
@@ -195,13 +197,13 @@ def build_index(sessions_root: Path, db_path: Path) -> int:
                         :source_hash, :timestamp,
                         :cwd, :repo, :text
                     )""",
-                    event,
-                )
-                connection.execute(
-                    "INSERT INTO event_fts(rowid, text) VALUES(?, ?)",
-                    (cursor.lastrowid, event["text"]),
-                )
-                count += 1
+                        event,
+                    )
+                    connection.execute(
+                        "INSERT INTO event_fts(rowid, text) VALUES(?, ?)",
+                        (cursor.lastrowid, event["text"]),
+                    )
+                    count += 1
         os.replace(temporary_path, db_path)
         return count
     except BaseException:
@@ -233,6 +235,20 @@ def fetch_matches(
     provider_column = (
         "events.provider AS provider," if include_provider else ""
     )
+    source_filter = ""
+    try:
+        has_sources = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'sources'"
+        ).fetchone()
+    except sqlite3.Error:
+        has_sources = None
+    if has_sources:
+        source_filter = (
+            " JOIN sources ON sources.provider = events.provider "
+            "AND sources.source_path = events.source_path "
+        )
+    active_filter = "AND sources.status = 'active'" if has_sources else ""
     return connection.execute(
         f"""SELECT events.source_path, events.source_line,
                    events.source_ordinal, events.source_hash,
@@ -240,7 +256,8 @@ def fetch_matches(
                    events.timestamp,
                    events.cwd, events.repo, events.text
             FROM event_fts JOIN events ON events.id = event_fts.rowid
-            WHERE event_fts MATCH :query {scope}
+            {source_filter} WHERE event_fts MATCH :query {scope}
+            {active_filter}
             ORDER BY bm25(event_fts), events.source_path, events.source_line
             LIMIT 50""",
         {"query": query, "repo": repo},
@@ -291,7 +308,7 @@ def evidence_packet(
     max_bytes: int,
 ) -> dict[str, object]:
     """Return bounded, source-cited untrusted historical evidence."""
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         return evidence_packet_from_connection(
             connection, prompt, repo, max_bytes
         )
@@ -321,6 +338,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     for name in ("status", "doctor"):
         command = commands.add_parser(name)
         command.add_argument("--socket", required=True, type=Path)
+    erase = commands.add_parser("erase")
+    erase.add_argument("--socket", required=True, type=Path)
+    erase.add_argument(
+        "--provider", required=True, choices=("codex", "claude")
+    )
+    erase.add_argument("--source-id", required=True)
     return parser.parse_args(argv)
 
 
@@ -395,9 +418,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
             else:
+                payload: dict[str, object] = {"op": args.command}
+                if args.command == "erase":
+                    payload |= {
+                        "provider": args.provider,
+                        "source_id": args.source_id,
+                    }
                 packet = request(
                     args.socket,
-                    {"op": args.command},
+                    payload,
                     REQUEST_TIMEOUT_SECONDS,
                     MAX_REQUEST_BYTES,
                 )

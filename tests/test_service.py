@@ -17,7 +17,8 @@ from typing import Callable, cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-from normalizers import parse_source
+from context import build_index
+from normalizers import parse_source, parse_source_incremental
 from service import MAX_CLIENTS, Brain
 
 ROOT = Path(__file__).parents[1]
@@ -200,6 +201,10 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(claude_source["provider"], "claude")
         self.assertNotIn("hidden", json.dumps(claude))
         self.assertEqual(self.socket.stat().st_mode & 0o777, 0o600)
+        storage = cast(dict[str, object], self.status()["storage"])
+        self.assertEqual(storage["journal_mode"], "wal")
+        self.assertIsInstance(storage["wal_bytes"], int)
+        self.assertIsInstance(storage["checkpoint"], list)
 
     def test_normalizer_ignores_tool_scope_for_direct_messages(self) -> None:
         """Do not inherit a tool item's repository scope into evidence."""
@@ -367,7 +372,9 @@ class ServiceTest(unittest.TestCase):
         stalled.connect(str(self.socket))
         stalled.sendall(b'{"op":"status"')
         started = time.monotonic()
-        healthy = self.status()
+        healthy = self.wait_for_status(
+            lambda packet: packet.get("available") is True
+        )
         stalled.close()
         self.assertTrue(healthy["available"])
         self.assertLess(time.monotonic() - started, 1)
@@ -534,15 +541,24 @@ class ServiceTest(unittest.TestCase):
         source.write_text("{malformed}\n")
         entered = threading.Event()
         release = threading.Event()
-        from service import open_snapshot as real_open_snapshot
+        from service import parse_source_incremental as real_parse_source
 
-        def delayed_snapshot(database: Path) -> tuple[Path, object]:
-            temporary, connection = real_open_snapshot(database)
+        def delayed_parse(
+            provider: str,
+            root: Path,
+            path: Path,
+            offset: int,
+            line: int,
+        ) -> tuple[
+            list[dict[str, str | int | None]], str | None, bool, int, int
+        ]:
             entered.set()
             self.assertTrue(release.wait(2))
-            return temporary, connection
+            return real_parse_source(provider, root, path, offset, line)
 
-        with patch("service.open_snapshot", side_effect=delayed_snapshot):
+        with patch(
+            "service.parse_source_incremental", side_effect=delayed_parse
+        ):
             worker = threading.Thread(target=brain.reconcile)
             worker.start()
             self.assertTrue(entered.wait(2))
@@ -647,6 +663,176 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs["rejected"], 100)
         self.assertEqual(audit.call_args.kwargs["saturated"], 100)
         write_state.assert_called_once()
+
+    def test_append_uses_cursor_and_failpoint_rolls_back_atomically(
+        self,
+    ) -> None:
+        """Append commits once and a failed transaction advances no cursor."""
+        source = self.codex / "cursor.jsonl"
+        first = {
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": "cursor-first",
+                "cwd": "/repo",
+            }
+        }
+        second = {
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": "cursor-second",
+                "cwd": "/repo",
+            }
+        }
+        source.write_text(json.dumps(first) + "\n")
+        database = Path(self.temporary.name) / "cursor.sqlite"
+        state = Path(self.temporary.name) / "cursor-state"
+        brain = Brain(self.codex, self.claude, database, state)
+        brain.reconcile()
+        with source.open("a") as stream:
+            stream.write(json.dumps(second) + "\n")
+        with patch(
+            "service.parse_source_incremental", wraps=parse_source_incremental
+        ) as parser:
+            brain.reconcile()
+        self.assertGreater(cast(int, parser.call_args.args[3]), 0)
+        self.assertTrue(
+            brain.recall({"prompt": "cursor-second", "repo": "/repo"})[
+                "evidence"
+            ]
+        )
+        third = {
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": "cursor-third",
+                "cwd": "/repo",
+            }
+        }
+        with source.open("a") as stream:
+            stream.write(json.dumps(third) + "\n")
+        with patch.dict(
+            os.environ,
+            {"PROVENANCE_CONTEXT_FAILPOINT": "before_source_commit"},
+        ):
+            brain.reconcile()
+        self.assertEqual(
+            brain.recall({"prompt": "cursor-third", "repo": "/repo"})[
+                "evidence"
+            ],
+            [],
+        )
+        brain.reconcile()
+        packet = brain.recall({"prompt": "cursor-third", "repo": "/repo"})
+        self.assertEqual(len(cast(list[object], packet["evidence"])), 1)
+
+    def test_missing_source_is_tombstoned_and_explicit_erase_removes_it(
+        self,
+    ) -> None:
+        """Retain a disappearance as lifecycle state until explicit erasure."""
+        source = self.codex / "retention.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "retention-needle",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for("retention-needle")
+        source_id = next(
+            item["source_id"]
+            for item in cast(list[dict[str, object]], self.status()["sources"])
+            if item["provider"] == "codex"
+        )
+        source.unlink()
+        status = self.wait_for_status(
+            lambda packet: any(
+                item.get("status") == "missing"
+                for item in cast(list[dict[str, object]], packet["sources"])
+            )
+        )
+        self.assertFalse(status["available"])
+        until = time.monotonic() + 5
+        packet: dict[str, object] = {}
+        while time.monotonic() < until:
+            response = run(
+                "erase",
+                "--socket",
+                str(self.socket),
+                "--provider",
+                "codex",
+                "--source-id",
+                cast(str, source_id),
+            )
+            self.assertEqual(response.returncode, 0, response.stderr)
+            packet = json.loads(response.stdout)
+            if packet["erased"]:
+                break
+            time.sleep(0.05)
+        self.assertTrue(packet["erased"], packet)
+
+    def test_v1_database_is_backed_up_and_rebuilt_from_raw(self) -> None:
+        """WAL cutover retains rollback data and reads the raw corpus."""
+        source = self.codex / "migration.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "migration-needle",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        database = Path(self.temporary.name) / "migration.sqlite"
+        state = Path(self.temporary.name) / "migration-state"
+        build_index(self.codex, database)
+        brain = Brain(self.codex, self.claude, database, state)
+        brain.reconcile()
+        self.assertTrue((state / "v1-rollback.sqlite").exists())
+        self.assertTrue(
+            brain.recall({"prompt": "migration-needle", "repo": "/repo"})[
+                "evidence"
+            ]
+        )
+
+    def test_corrupt_derived_database_rebuilds_from_raw_on_restart(
+        self,
+    ) -> None:
+        """Rebuild a disposable corrupted database from the raw source."""
+        source = self.codex / "rebuild.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "rebuild-needle",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for("rebuild-needle")
+        self.process.send_signal(signal.SIGTERM)
+        self.process.wait(timeout=5)
+        if self.process.stderr:
+            self.process.stderr.close()
+        self.database.write_bytes(b"not a sqlite database")
+        self.process = self.start()
+        self.wait_for("rebuild-needle")
+        self.assertTrue((self.state / "v1-rollback.sqlite").exists())
 
 
 if __name__ == "__main__":

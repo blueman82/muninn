@@ -22,8 +22,11 @@ export PROVENANCE_CONTEXT_SOCKET=\
 
 The daemon reconciles both roots at startup and every second. It reads only
 newline-complete JSONL records, retries an incomplete final line, and replaces
-its SQLite snapshot atomically. Raw JSONL is never changed. The socket and
-derived state use user-only mode `0600`.
+only the changed source's derived rows. It owns an in-place SQLite WAL store:
+an append parses bytes after its committed complete-line cursor, while a
+replacement, truncation, or repair reparses that one source. Raw JSONL is
+never changed and remains the recovery source. The socket and derived database
+use user-only mode `0600`; use the socket rather than opening the database.
 
 ## Enable Codex
 
@@ -64,6 +67,22 @@ instrumentation. Pattern filtering is defense in depth, not proof every secret
 representation is detected. It suppresses known GitHub tokens and URLs with
 userinfo or credential query parameters; ordinary URLs remain eligible
 evidence.
+
+`status.storage` reports WAL bytes, journal mode, and the latest passive
+checkpoint result without content or raw paths. A malformed, incomplete, or
+missing source is excluded from recall and makes `doctor` non-zero until it is
+repaired or deliberately erased. Missing files are tombstoned rather than
+silently deleted. To erase one tombstoned source, copy its redacted `source_id`
+from status and use:
+
+```sh
+/opt/homebrew/bin/python3.13 scripts/context.py erase \
+  --socket "$PROVENANCE_CONTEXT_SOCKET" --provider codex \
+  --source-id REDACTED_SOURCE_ID
+```
+
+On first WAL start, the daemon keeps a `v1-rollback.sqlite` copy in the state
+directory before rebuilding the disposable derived database from raw JSONL.
 
 ## Quality commands
 

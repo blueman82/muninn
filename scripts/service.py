@@ -13,11 +13,16 @@ import threading
 import time
 import uuid
 from collections.abc import Mapping
+from contextlib import closing
 from pathlib import Path
 from socketserver import StreamRequestHandler, ThreadingMixIn, UnixStreamServer
 
 from context import evidence_packet_from_connection
-from normalizers import discover, parse_source
+from normalizers import (
+    discover,
+    parse_source_incremental,
+    source_identity,
+)
 from runtime import (
     acquire_lock,
     append_audit,
@@ -27,11 +32,14 @@ from runtime import (
     write_json,
 )
 from runtime import request as socket_request
-from snapshot import (
-    delete_missing,
-    mark_source_issue,
-    open_snapshot,
-    replace_source,
+from wal_store import (
+    advance_source,
+    checkpoint,
+    erase_source,
+    initialize,
+    mark_issue,
+    mark_missing,
+    open_store,
     source_rows,
 )
 
@@ -51,6 +59,11 @@ def _json(value: object) -> bytes:
 def _counter(state: Mapping[str, object], name: str) -> int:
     """Read one non-negative persisted operational counter."""
     value = state.get(name)
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _integer(value: object) -> int:
+    """Return a non-negative persisted cursor component."""
     return value if isinstance(value, int) and value >= 0 else 0
 
 
@@ -88,6 +101,7 @@ class Brain:
         self.requests_saturated = _counter(prior, "requests_saturated")
         self.unreported_rejections = 0
         self.unreported_saturation = 0
+        self.storage: dict[str, object] = {}
 
     def audit(self, event: str, trace_id: str, **fields: object) -> None:
         """Record a bounded operational event without retaining content."""
@@ -133,100 +147,134 @@ class Brain:
             }
 
     def reconcile(self) -> None:
-        """Publish a new snapshot when source fingerprints require it."""
+        """Advance changed cursors without replacing the whole database."""
         trace_id = uuid.uuid4().hex
         started = time.monotonic()
-        self.reconciling = True
         with self.lock:
-            temporary, connection = open_snapshot(self.database)
-            try:
-                known = source_rows(connection)
-                current: set[tuple[str, str]] = set()
-                changed = False
-                indexed = 0
-                pending = 0
-                errors: list[str] = []
-                for provider, root in (
-                    ("codex", self.codex_root),
-                    ("claude", self.claude_root),
-                ):
-                    for source_path, path, fingerprint in discover(root):
-                        key = (provider, source_path)
-                        current.add(key)
-                        previous = known.get(key)
-                        if previous and previous[0] == fingerprint:
-                            pending += previous[1]
-                            if previous[2]:
-                                errors.append(previous[2])
-                            continue
-                        events, error, source_pending = parse_source(
-                            provider, root, path
+            self.reconciling = True
+        connection: sqlite3.Connection | None = None
+        try:
+            rollback = self.state_dir / "v1-rollback.sqlite"
+            migrated = initialize(self.database, rollback)
+            connection = open_store(self.database)
+            known = source_rows(connection)
+            current: set[tuple[str, str]] = set()
+            changed = migrated
+            indexed = 0
+            pending = 0
+            errors: list[str] = []
+            for provider, root in (
+                ("codex", self.codex_root),
+                ("claude", self.claude_root),
+            ):
+                for source_path, path, fingerprint in discover(root):
+                    key = (provider, source_path)
+                    current.add(key)
+                    previous = known.get(key)
+                    identity = source_identity(path)
+                    size = path.stat().st_size
+                    previous_offset = _integer(
+                        previous["cursor_bytes"] if previous else 0
+                    )
+                    previous_line = _integer(
+                        previous["cursor_line"] if previous else 0
+                    )
+                    if previous and previous["fingerprint"] == fingerprint:
+                        pending += int(bool(previous["pending"]))
+                        if error := previous["error"]:
+                            errors.append(str(error))
+                        continue
+                    append = bool(
+                        previous
+                        and previous["identity"] == identity
+                        and previous["status"] == "active"
+                        and size >= previous_offset
+                    )
+                    offset = previous_offset if append else 0
+                    line = previous_line if append else 0
+                    events, error, source_pending, end, end_line = (
+                        parse_source_incremental(
+                            provider, root, path, offset, line
                         )
-                        if error:
-                            errors.append(error)
-                            pending += 1
-                            changed = (
-                                mark_source_issue(
-                                    connection,
-                                    provider,
-                                    source_path,
-                                    fingerprint,
-                                    error,
-                                )
-                                or changed
+                    )
+                    if error:
+                        with connection:
+                            mark_issue(
+                                connection,
+                                provider,
+                                source_path,
+                                identity,
+                                fingerprint,
+                                error,
                             )
-                            continue
-                        indexed += replace_source(
+                        changed = True
+                        errors.append(error)
+                        pending += 1
+                        continue
+                    with connection:
+                        advance_source(
                             connection,
                             provider,
                             source_path,
+                            identity,
                             fingerprint,
                             events,
+                            end,
+                            end_line,
                             source_pending,
+                            not append,
                         )
-                        changed = True
-                        pending += int(source_pending)
-                if delete_missing(connection, current):
+                        if (
+                            os.environ.get("PROVENANCE_CONTEXT_FAILPOINT")
+                            == "before_source_commit"
+                        ):
+                            raise RuntimeError(
+                                "deterministic_failpoint_before_source_commit"
+                            )
+                    indexed += len(events)
                     changed = True
-                self.last_scan = time.time()
-                self.pending = pending
-                self.last_error = errors[0] if errors else ""
-                self.roots_unavailable = False
-                if changed or not self.database.exists():
-                    connection.commit()
-                    connection.close()
-                    digest = hashlib.sha256(temporary.read_bytes()).hexdigest()
-                    os.chmod(temporary, 0o600)
-                    os.replace(temporary, self.database)
-                    self.generation += 1
-                    self.last_publish = time.time()
-                    self.snapshot_hash = digest
-                    self.audit(
-                        "publish",
-                        trace_id,
-                        generation=self.generation,
-                        indexed=indexed,
-                        pending=pending,
-                        duration_ms=round((time.monotonic() - started) * 1000),
-                        snapshot_hash=digest,
-                    )
-                else:
-                    connection.close()
-                    temporary.unlink(missing_ok=True)
-                self._write_state()
-            except (OSError, sqlite3.Error, ValueError) as error:
-                connection.close()
-                temporary.unlink(missing_ok=True)
-                self.last_error = type(error).__name__
-                self.roots_unavailable = True
-                self.last_scan = time.time()
-                self._write_state()
+                    pending += int(source_pending)
+            with connection:
+                changed = bool(mark_missing(connection, current)) or changed
+            health_rows = source_rows(connection).values()
+            pending = sum(int(bool(row["pending"])) for row in health_rows)
+            errors = [
+                str(row["error"] or row["status"])
+                for row in health_rows
+                if row["status"] != "active"
+            ]
+            self.storage = checkpoint(connection, self.database)
+            self.last_scan = time.time()
+            self.pending = pending
+            self.last_error = errors[0] if errors else ""
+            self.roots_unavailable = False
+            if changed:
+                self.generation += 1
+                self.last_publish = time.time()
+                marker = f"{self.generation}:{self.database.stat().st_size}"
+                self.snapshot_hash = hashlib.sha256(
+                    marker.encode()
+                ).hexdigest()
                 self.audit(
-                    "reconcile_error",
+                    "publish",
                     trace_id,
-                    error=self.last_error,
+                    generation=self.generation,
+                    indexed=indexed,
+                    pending=pending,
+                    duration_ms=round((time.monotonic() - started) * 1000),
+                    snapshot_hash=self.snapshot_hash,
                 )
-            finally:
+            self._write_state()
+        except (OSError, RuntimeError, sqlite3.Error, ValueError) as error:
+            self.last_error = type(error).__name__
+            self.roots_unavailable = isinstance(error, OSError)
+            self.last_scan = time.time()
+            self._write_state()
+            self.audit("reconcile_error", trace_id, error=self.last_error)
+        finally:
+            if connection is not None:
+                connection.close()
+            with self.lock:
                 self.reconciling = False
 
     def _write_state(self) -> None:
@@ -234,15 +282,17 @@ class Brain:
         sources: list[dict[str, object]] = []
         if self.database.exists():
             try:
-                with sqlite3.connect(self.database) as connection:
+                with closing(sqlite3.connect(self.database)) as connection:
                     for (
                         provider,
                         path,
                         pending,
+                        status,
                         error,
                         seen,
                     ) in connection.execute(
-                        "SELECT provider, source_path, pending, error, "
+                        "SELECT provider, source_path, pending, status, "
+                        "error, "
                         "last_seen FROM sources"
                     ):
                         sources.append(
@@ -252,6 +302,7 @@ class Brain:
                                     path.encode()
                                 ).hexdigest()[:16],
                                 "pending": bool(pending),
+                                "status": status,
                                 "error": error,
                                 "staleness_seconds": round(
                                     max(0, time.time() - seen), 3
@@ -277,6 +328,7 @@ class Brain:
                     "last_error": self.last_error,
                     "sources": sources,
                     "audit_bytes": audit_bytes,
+                    "storage": self.storage,
                     **self._metrics(),
                     "otel": "trace-compatible IDs only; exporter requires "
                     "Python >=3.10",
@@ -304,7 +356,7 @@ class Brain:
             maximum = request.get("max_bytes", MAX_PACKET_BYTES)
             maximum = maximum if isinstance(maximum, int) else MAX_PACKET_BYTES
             repo = request.get("repo")
-            with sqlite3.connect(self.database) as connection:
+            with closing(sqlite3.connect(self.database)) as connection:
                 return evidence_packet_from_connection(
                     connection,
                     prompt,
@@ -319,6 +371,35 @@ class Brain:
                 "bytes": 0,
                 "untrusted": True,
             }
+        finally:
+            self.lock.release()
+
+    def erase(self, request: Mapping[str, object]) -> dict[str, object]:
+        """Erase one redacted source and all linked derived records."""
+        provider = request.get("provider")
+        source_id = request.get("source_id")
+        if not isinstance(provider, str) or not isinstance(source_id, str):
+            return {"error": "invalid_erase_request"}
+        if not self.lock.acquire(blocking=False):
+            return {"available": False, "erased": False}
+        try:
+            if self.reconciling or not self.database.exists():
+                return {"available": False, "erased": False}
+            connection = open_store(self.database)
+            try:
+                with connection:
+                    erased = erase_source(connection, provider, source_id)
+                self.storage = checkpoint(connection, self.database)
+            finally:
+                connection.close()
+            if erased:
+                self.generation += 1
+                self.last_publish = time.time()
+                self.audit("erase", uuid.uuid4().hex, provider=provider)
+            self._write_state()
+            return {"available": self.available(), "erased": erased}
+        except sqlite3.Error:
+            return {"available": False, "erased": False}
         finally:
             self.lock.release()
 
@@ -373,6 +454,8 @@ class RequestHandler(StreamRequestHandler):
             operation = request.get("op")
             if operation == "recall":
                 response = self.brain.recall(request)
+            elif operation == "erase":
+                response = self.brain.erase(request)
             elif operation in {"status", "doctor"}:
                 response = self.brain.status()
             else:
