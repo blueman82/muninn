@@ -11,7 +11,10 @@ from collections.abc import Mapping, Sequence
 from contextlib import closing
 from pathlib import Path
 
-SCHEMA_VERSION = "2"
+from store_integrity import COUNT_KEYS, store_counts, store_is_consistent
+from wal_mutations import delete_events, failpoint, insert_event
+
+SCHEMA_VERSION = "4"
 BUSY_TIMEOUT_MS = 200
 
 
@@ -43,6 +46,7 @@ def _schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS sources (
             provider TEXT NOT NULL, source_path TEXT NOT NULL,
             identity TEXT NOT NULL, fingerprint TEXT NOT NULL,
+            digest TEXT NOT NULL,
             cursor_bytes INTEGER NOT NULL DEFAULT 0,
             cursor_line INTEGER NOT NULL DEFAULT 0,
             pending INTEGER NOT NULL DEFAULT 0,
@@ -65,9 +69,13 @@ def _schema(connection: sqlite3.Connection) -> None:
         "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
         (SCHEMA_VERSION,),
     )
+    connection.executemany(
+        "INSERT OR IGNORE INTO meta(key, value) VALUES(?, '0')",
+        [(key,) for key in COUNT_KEYS.values()],
+    )
 
 
-def needs_migration(database: Path) -> bool:
+def needs_migration(database: Path, verify_sqlite: bool) -> bool:
     """Return whether the derived database is absent or not the WAL schema."""
     if not database.exists():
         return True
@@ -76,14 +84,16 @@ def needs_migration(database: Path) -> bool:
             row = connection.execute(
                 "SELECT value FROM meta WHERE key = 'schema_version'"
             ).fetchone()
+            return row != (SCHEMA_VERSION,) or not store_is_consistent(
+                connection, verify_sqlite
+            )
     except sqlite3.Error:
         return True
-    return row != (SCHEMA_VERSION,)
 
 
-def initialize(database: Path, rollback: Path) -> bool:
-    """Create v2 storage, retaining one v1/corrupt rollback artifact."""
-    migrating = needs_migration(database)
+def initialize(database: Path, rollback: Path, verify_sqlite: bool) -> bool:
+    """Create checked storage, retaining a rollback copy before raw rebuild."""
+    migrating = needs_migration(database, verify_sqlite)
     if migrating and database.exists():
         rollback.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(database, rollback)
@@ -107,88 +117,68 @@ def source_rows(
         (row[0], row[1]): {
             "identity": row[2],
             "fingerprint": row[3],
-            "cursor_bytes": row[4],
-            "cursor_line": row[5],
-            "pending": bool(row[6]),
-            "status": row[7],
-            "error": row[8],
+            "digest": row[4],
+            "cursor_bytes": row[5],
+            "cursor_line": row[6],
+            "pending": bool(row[7]),
+            "status": row[8],
+            "error": row[9],
         }
         for row in connection.execute(
-            "SELECT provider, source_path, identity, fingerprint, "
+            "SELECT provider, source_path, identity, fingerprint, digest, "
             "cursor_bytes, "
             "cursor_line, pending, status, error FROM sources"
         )
     }
 
 
-def _delete_events(
-    connection: sqlite3.Connection, provider: str, source_path: str
-) -> None:
-    row_ids = [
-        row[0]
-        for row in connection.execute(
-            "SELECT id FROM events WHERE provider = ? AND source_path = ?",
-            (provider, source_path),
-        )
+def source_cursor(
+    previous: Mapping[str, object] | None, identity: str, path: Path
+) -> tuple[int, int, bool]:
+    """Return the committed cursor only when an unchanged file was appended."""
+    offset = previous.get("cursor_bytes") if previous else 0
+    line = previous.get("cursor_line") if previous else 0
+    valid_offset = offset if isinstance(offset, int) and offset >= 0 else 0
+    valid_line = line if isinstance(line, int) and line >= 0 else 0
+    append = bool(
+        previous
+        and previous["identity"] == identity
+        and previous["status"] == "active"
+        and path.stat().st_size >= valid_offset
+    )
+    return (valid_offset, valid_line, append) if append else (0, 0, False)
+
+
+def renamed_previous(
+    connection: sqlite3.Connection,
+    known: dict[tuple[str, str], dict[str, object]],
+    provider: str,
+    source_path: str,
+    identity: str,
+    fingerprint: str,
+    digest: str | None,
+) -> Mapping[str, object] | None:
+    """Re-key one uniquely identified source after a path-only rename."""
+    matches = [
+        (key, row)
+        for key, row in known.items()
+        if key[0] == provider and row["identity"] == identity
     ]
-    if row_ids:
-        marks = ",".join("?" for _ in row_ids)
-        connection.execute(
-            f"DELETE FROM assertions WHERE event_id IN ({marks})", row_ids
-        )
-        connection.execute(
-            f"DELETE FROM event_fts WHERE rowid IN ({marks})", row_ids
-        )
-    connection.execute(
-        "DELETE FROM events WHERE provider = ? AND source_path = ?",
-        (provider, source_path),
+    if len(matches) != 1:
+        return None
+    old_key, previous = matches[0]
+    rename_source(
+        connection,
+        provider,
+        old_key[1],
+        source_path,
+        fingerprint,
+        digest or str(previous["digest"]),
     )
-
-
-def _preference(text: str) -> str | None:
-    lowered = text.strip().lower()
-    for prefix in ("i prefer ", "please always ", "please never "):
-        if lowered.startswith(prefix) and len(text) > len(prefix):
-            return text.strip()
-    return None
-
-
-def _insert_event(
-    connection: sqlite3.Connection, event: Mapping[str, object]
-) -> None:
-    cursor = connection.execute(
-        """INSERT INTO events(provider, source_path, source_line,
-           source_ordinal, source_hash, timestamp, cwd, repo, role, text)
-           VALUES(:provider, :source_path, :source_line, :source_ordinal,
-           :source_hash, :timestamp, :cwd, :repo, :role, :text)""",
-        event,
-    )
-    if cursor.lastrowid is None:
-        raise sqlite3.Error("event insert did not return a row id")
-    connection.execute(
-        "INSERT INTO event_fts(rowid, text) VALUES(?, ?)",
-        (cursor.lastrowid, event["text"]),
-    )
-    if event["role"] == "user" and (value := _preference(str(event["text"]))):
-        previous = connection.execute(
-            "SELECT id FROM assertions WHERE kind = 'preference' "
-            "AND state = 'active' ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if previous:
-            connection.execute(
-                "UPDATE assertions SET state = 'superseded' WHERE id = ?",
-                (previous[0],),
-            )
-        connection.execute(
-            """INSERT INTO assertions(event_id, kind, value, state, supersedes,
-               created_at) VALUES(?, 'preference', ?, 'active', ?, ?)""",
-            (
-                cursor.lastrowid,
-                value,
-                previous[0] if previous else None,
-                time.time(),
-            ),
-        )
+    known.pop(old_key)
+    renamed = dict(previous) | {"fingerprint": fingerprint}
+    known[(provider, source_path)] = renamed
+    return renamed
 
 
 def advance_source(
@@ -197,6 +187,7 @@ def advance_source(
     source_path: str,
     identity: str,
     fingerprint: str,
+    digest: str,
     events: Sequence[Mapping[str, object]],
     cursor_bytes: int,
     cursor_line: int,
@@ -204,31 +195,44 @@ def advance_source(
     replace: bool,
 ) -> int:
     """Commit source events, FTS, assertions, and cursor as one transaction."""
-    if replace:
-        _delete_events(connection, provider, source_path)
-    for event in events:
-        _insert_event(connection, event)
-    connection.execute(
-        """INSERT INTO sources(provider, source_path, identity, fingerprint,
-           cursor_bytes, cursor_line, pending, status, error, last_seen)
-           VALUES(?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?)
-           ON CONFLICT(provider, source_path) DO UPDATE SET
-             identity=excluded.identity, fingerprint=excluded.fingerprint,
-             cursor_bytes=excluded.cursor_bytes,
-             cursor_line=excluded.cursor_line,
-             pending=excluded.pending, status='active', error=NULL,
-             last_seen=excluded.last_seen""",
-        (
-            provider,
-            source_path,
-            identity,
-            fingerprint,
-            cursor_bytes,
-            cursor_line,
-            int(pending),
-            time.time(),
-        ),
-    )
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        if replace:
+            delete_events(connection, provider, source_path)
+        for event in events:
+            insert_event(connection, event)
+        connection.execute(
+            """INSERT INTO sources(provider, source_path, identity,
+               fingerprint, digest, cursor_bytes, cursor_line, pending,
+               status, error, last_seen)
+               VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?)
+               ON CONFLICT(provider, source_path) DO UPDATE SET
+                 identity=excluded.identity, fingerprint=excluded.fingerprint,
+                 digest=excluded.digest,
+                 cursor_bytes=excluded.cursor_bytes,
+                 cursor_line=excluded.cursor_line,
+                 pending=excluded.pending, status='active', error=NULL,
+                 last_seen=excluded.last_seen""",
+            (
+                provider,
+                source_path,
+                identity,
+                fingerprint,
+                digest,
+                cursor_bytes,
+                cursor_line,
+                int(pending),
+                time.time(),
+            ),
+        )
+        failpoint("after_source_state")
+        store_counts(connection)
+        failpoint("after_meta_counts")
+        failpoint("before_commit")
+    except BaseException:
+        connection.rollback()
+        raise
+    connection.commit()
     return len(events)
 
 
@@ -238,19 +242,31 @@ def mark_issue(
     source_path: str,
     identity: str,
     fingerprint: str,
+    digest: str,
     error: str,
 ) -> None:
     """Quarantine a dirty source while retaining rows for a later repair."""
     connection.execute(
         """INSERT INTO sources(provider, source_path, identity, fingerprint,
-           cursor_bytes, cursor_line, pending, status, error, last_seen)
-           VALUES(?, ?, ?, ?, 0, 0, 1, 'error', ?, ?)
+           digest, cursor_bytes, cursor_line, pending, status, error,
+           last_seen)
+           VALUES(?, ?, ?, ?, ?, 0, 0, 1, 'error', ?, ?)
            ON CONFLICT(provider, source_path) DO UPDATE SET
              identity=excluded.identity, fingerprint=excluded.fingerprint,
+             digest=excluded.digest,
              pending=1, status='error', error=excluded.error,
              last_seen=excluded.last_seen""",
-        (provider, source_path, identity, fingerprint, error, time.time()),
+        (
+            provider,
+            source_path,
+            identity,
+            fingerprint,
+            digest,
+            error,
+            time.time(),
+        ),
     )
+    store_counts(connection)
 
 
 def mark_missing(
@@ -270,21 +286,69 @@ def mark_missing(
     return changed
 
 
+def rename_source(
+    connection: sqlite3.Connection,
+    provider: str,
+    old_path: str,
+    new_path: str,
+    fingerprint: str,
+    digest: str,
+) -> None:
+    """Re-key a moved source without retaining a false missing tombstone."""
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        connection.execute(
+            "UPDATE events SET source_path = ? WHERE provider = ? "
+            "AND source_path = ?",
+            (new_path, provider, old_path),
+        )
+        failpoint("after_rename_events")
+        connection.execute(
+            "UPDATE sources SET source_path = ?, fingerprint = ?, digest = ?, "
+            "last_seen = ? WHERE provider = ? AND source_path = ?",
+            (new_path, fingerprint, digest, time.time(), provider, old_path),
+        )
+        failpoint("after_rename_source_state")
+        store_counts(connection)
+        failpoint("before_rename_commit")
+    except BaseException:
+        connection.rollback()
+        raise
+    connection.commit()
+
+
 def erase_source(
     connection: sqlite3.Connection, provider: str, source_id: str
 ) -> bool:
     """Erase one source and linked assertions by its redacted identity."""
-    for (path,) in connection.execute(
-        "SELECT source_path FROM sources WHERE provider = ?", (provider,)
-    ):
-        if hashlib.sha256(path.encode()).hexdigest()[:16] == source_id:
-            _delete_events(connection, provider, path)
-            connection.execute(
-                "DELETE FROM sources WHERE provider = ? AND source_path = ?",
-                (provider, path),
-            )
-            return True
-    return False
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        paths = connection.execute(
+            "SELECT source_path FROM sources WHERE provider = ?", (provider,)
+        )
+        path = next(
+            (
+                candidate
+                for (candidate,) in paths
+                if hashlib.sha256(candidate.encode()).hexdigest()[:16]
+                == source_id
+            ),
+            None,
+        )
+        if path is None:
+            connection.commit()
+            return False
+        delete_events(connection, provider, path)
+        connection.execute(
+            "DELETE FROM sources WHERE provider = ? AND source_path = ?",
+            (provider, path),
+        )
+        store_counts(connection)
+    except BaseException:
+        connection.rollback()
+        raise
+    connection.commit()
+    return True
 
 
 def checkpoint(
@@ -297,9 +361,17 @@ def checkpoint(
         wal_bytes = wal.stat().st_size
     except OSError:
         wal_bytes = 0
+    checkpoint_data = list(result) if result else []
     return {
         "journal_mode": "wal",
         "wal_bytes": wal_bytes,
-        "checkpoint": list(result) if result else [],
+        "checkpoint": checkpoint_data,
+        "checkpoint_busy": bool(checkpoint_data and checkpoint_data[0]),
+        "checkpoint_log_frames": (
+            checkpoint_data[1] if len(checkpoint_data) > 1 else 0
+        ),
+        "checkpointed_frames": (
+            checkpoint_data[2] if len(checkpoint_data) > 2 else 0
+        ),
         "checkpoint_at": time.time(),
     }

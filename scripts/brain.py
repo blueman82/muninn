@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import sqlite3
 import threading
 import time
@@ -14,30 +13,23 @@ from pathlib import Path
 
 from context import evidence_packet_from_connection
 from health import audit_bytes, source_statuses, unavailable_packet
-from normalizers import discover, parse_source_incremental, source_identity
 from runtime import append_audit, load_json, write_json
+from scan import reconcile_sources
 from wal_store import (
-    advance_source,
     checkpoint,
     erase_source,
     initialize,
-    mark_issue,
-    mark_missing,
     open_store,
     source_rows,
 )
 
 MAX_PACKET_BYTES = 2_400
+MAX_DIRTY_FENCE_SECONDS = 5.0
 
 
 def _counter(state: Mapping[str, object], name: str) -> int:
     """Read one non-negative persisted operational counter."""
     value = state.get(name)
-    return value if isinstance(value, int) and value >= 0 else 0
-
-
-def _integer(value: object) -> int:
-    """Return a non-negative persisted cursor component."""
     return value if isinstance(value, int) and value >= 0 else 0
 
 
@@ -63,8 +55,11 @@ class Brain:
         self.pending = 0
         self.snapshot_hash = ""
         self.reconciling = False
+        self.rebuilding = False
+        self.dirty_since = 0.0
         self.roots_unavailable = False
         self.lock = threading.Lock()
+        self.scan_lock = threading.Lock()
         self.audit_lock = threading.Lock()
         self.state_lock = threading.Lock()
         self.metrics_lock = threading.Lock()
@@ -75,6 +70,7 @@ class Brain:
         self.requests_saturated = _counter(prior, "requests_saturated")
         self.unreported_rejections = 0
         self.unreported_saturation = 0
+        self.audit_index = _counter(prior, "audit_index")
         self.storage: dict[str, object] = {}
 
     def audit(self, event: str, trace_id: str, **fields: object) -> None:
@@ -122,14 +118,23 @@ class Brain:
 
     def reconcile(self) -> None:
         """Advance changed cursors without replacing the whole database."""
+        if not self.scan_lock.acquire(blocking=False):
+            return
         trace_id = uuid.uuid4().hex
         started = time.monotonic()
         with self.lock:
             self.reconciling = True
+            self.dirty_since = started
         connection: sqlite3.Connection | None = None
         try:
             connection = self._open_reconcile_store()
-            changed, indexed = self._reconcile_sources(connection)
+            changed, indexed, self.audit_index = reconcile_sources(
+                connection,
+                self.codex_root,
+                self.claude_root,
+                self._migrated,
+                self.audit_index,
+            )
             self._finish_reconcile(
                 connection, changed, indexed, trace_id, started
             )
@@ -140,105 +145,18 @@ class Brain:
                 connection.close()
             with self.lock:
                 self.reconciling = False
+                self.dirty_since = 0.0
+            self.scan_lock.release()
 
     def _open_reconcile_store(self) -> sqlite3.Connection:
         rollback = self.state_dir / "v1-rollback.sqlite"
-        self._migrated = initialize(self.database, rollback)
+        self._migrated = initialize(
+            self.database, rollback, verify_sqlite=self.last_scan == 0
+        )
+        self.rebuilding = self._migrated
+        if self.rebuilding:
+            self._write_state()
         return open_store(self.database)
-
-    def _reconcile_sources(
-        self, connection: sqlite3.Connection
-    ) -> tuple[bool, int]:
-        known = source_rows(connection)
-        current: set[tuple[str, str]] = set()
-        changed = self._migrated
-        indexed = 0
-        for provider, root in (
-            ("codex", self.codex_root),
-            ("claude", self.claude_root),
-        ):
-            for source_path, path, fingerprint in discover(root):
-                current.add((provider, source_path))
-                source_changed, count = self._reconcile_source(
-                    connection,
-                    provider,
-                    root,
-                    source_path,
-                    path,
-                    fingerprint,
-                    known.get((provider, source_path)),
-                )
-                changed = changed or source_changed
-                indexed += count
-        with connection:
-            changed = bool(mark_missing(connection, current)) or changed
-        return changed, indexed
-
-    def _reconcile_source(
-        self,
-        connection: sqlite3.Connection,
-        provider: str,
-        root: Path,
-        source_path: str,
-        path: Path,
-        fingerprint: str,
-        previous: Mapping[str, object] | None,
-    ) -> tuple[bool, int]:
-        if previous and previous["fingerprint"] == fingerprint:
-            return False, 0
-        identity = source_identity(path)
-        offset, line, append = self._source_cursor(previous, identity, path)
-        events, error, pending, end, end_line = parse_source_incremental(
-            provider, root, path, offset, line
-        )
-        if error:
-            with connection:
-                mark_issue(
-                    connection,
-                    provider,
-                    source_path,
-                    identity,
-                    fingerprint,
-                    error,
-                )
-            return True, 0
-        with connection:
-            advance_source(
-                connection,
-                provider,
-                source_path,
-                identity,
-                fingerprint,
-                events,
-                end,
-                end_line,
-                pending,
-                not append,
-            )
-            if (
-                os.environ.get("PROVENANCE_CONTEXT_FAILPOINT")
-                == "before_source_commit"
-            ):
-                raise RuntimeError(
-                    "deterministic_failpoint_before_source_commit"
-                )
-        return True, len(events)
-
-    def _source_cursor(
-        self,
-        previous: Mapping[str, object] | None,
-        identity: str,
-        path: Path,
-    ) -> tuple[int, int, bool]:
-        offset = _integer(previous["cursor_bytes"] if previous else 0)
-        line = _integer(previous["cursor_line"] if previous else 0)
-        append = bool(
-            previous
-            and previous["identity"] == identity
-            and previous["status"] == "active"
-            and path.stat().st_size >= offset
-        )
-        return (offset, line, append) if append else (0, 0, False)
 
     def _finish_reconcile(
         self,
@@ -259,6 +177,7 @@ class Brain:
             "",
         )
         self.storage = checkpoint(connection, self.database)
+        self.rebuilding = False
         self.last_scan = time.time()
         self.roots_unavailable = False
         if changed:
@@ -302,6 +221,7 @@ class Brain:
                     "snapshot_hash": self.snapshot_hash,
                     "pending_sources": self.pending,
                     "last_error": self.last_error,
+                    "audit_index": self.audit_index,
                     "sources": sources,
                     "audit_bytes": audit_bytes(self.state_dir),
                     "storage": self.storage,
@@ -352,8 +272,7 @@ class Brain:
                 return {"available": False, "erased": False}
             connection = open_store(self.database)
             try:
-                with connection:
-                    erased = erase_source(connection, provider, source_id)
+                erased = erase_source(connection, provider, source_id)
                 self.storage = checkpoint(connection, self.database)
             finally:
                 connection.close()
@@ -372,6 +291,7 @@ class Brain:
         """Return the fail-closed health decision shared by all clients."""
         return (
             not self.reconciling
+            and not self.rebuilding
             and not self.roots_unavailable
             and self.database.exists()
             and self.last_scan > 0
@@ -388,5 +308,17 @@ class Brain:
             | {
                 "audit_bytes": audit_bytes(self.state_dir),
                 "available": self.available(),
+                "state": "rebuilding" if self.rebuilding else "ready",
+                "rebuilding": self.rebuilding,
+                "dirty_fence_seconds": self._dirty_fence_seconds(),
             }
+        )
+
+    def _dirty_fence_seconds(self) -> float:
+        """Return the bounded age of recall's current reconciliation fence."""
+        if not self.reconciling or not self.dirty_since:
+            return 0.0
+        return round(
+            min(MAX_DIRTY_FENCE_SECONDS, time.monotonic() - self.dirty_since),
+            3,
         )

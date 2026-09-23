@@ -313,6 +313,15 @@ def source_identity(path: Path) -> str:
     return f"{source_stat.st_dev}:{source_stat.st_ino}"
 
 
+def source_digest(path: Path) -> str:
+    """Return a content digest for amortized edit audits."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while block := source.read(1_048_576):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def discover(root: Path) -> Iterator[tuple[str, Path, str]]:
     """Yield source-keyed JSONL paths with their current fingerprints."""
     if not root.is_dir() or not os.access(root, os.R_OK | os.X_OK):

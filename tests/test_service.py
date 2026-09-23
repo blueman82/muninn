@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,11 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 from brain import Brain
 from context import build_index
-from normalizers import parse_source, parse_source_incremental
+from normalizers import (
+    parse_source,
+    parse_source_incremental,
+    source_fingerprint,
+)
 from service import MAX_CLIENTS
 
 ROOT = Path(__file__).parents[1]
@@ -362,6 +367,7 @@ class ServiceTest(unittest.TestCase):
 
     def test_doctor_and_stalled_client_contract(self) -> None:
         """Doctor is fail-closed and a stalled peer cannot block the daemon."""
+        self.wait_for_status(lambda packet: packet.get("available") is True)
         self.assertEqual(
             run("doctor", "--socket", str(self.socket)).returncode, 0
         )
@@ -542,7 +548,7 @@ class ServiceTest(unittest.TestCase):
         source.write_text("{malformed}\n")
         entered = threading.Event()
         release = threading.Event()
-        from brain import parse_source_incremental as real_parse_source
+        from scan import parse_source_incremental as real_parse_source
 
         def delayed_parse(
             provider: str,
@@ -557,9 +563,7 @@ class ServiceTest(unittest.TestCase):
             self.assertTrue(release.wait(2))
             return real_parse_source(provider, root, path, offset, line)
 
-        with patch(
-            "brain.parse_source_incremental", side_effect=delayed_parse
-        ):
+        with patch("scan.parse_source_incremental", side_effect=delayed_parse):
             worker = threading.Thread(target=brain.reconcile)
             worker.start()
             self.assertTrue(entered.wait(2))
@@ -694,7 +698,7 @@ class ServiceTest(unittest.TestCase):
         with source.open("a") as stream:
             stream.write(json.dumps(second) + "\n")
         with patch(
-            "brain.parse_source_incremental", wraps=parse_source_incremental
+            "scan.parse_source_incremental", wraps=parse_source_incremental
         ) as parser:
             brain.reconcile()
         self.assertGreater(cast(int, parser.call_args.args[3]), 0)
@@ -715,7 +719,7 @@ class ServiceTest(unittest.TestCase):
             stream.write(json.dumps(third) + "\n")
         with patch.dict(
             os.environ,
-            {"PROVENANCE_CONTEXT_FAILPOINT": "before_source_commit"},
+            {"PROVENANCE_CONTEXT_TEST_FAILPOINT": "before_commit"},
         ):
             brain.reconcile()
         self.assertEqual(
@@ -727,6 +731,191 @@ class ServiceTest(unittest.TestCase):
         brain.reconcile()
         packet = brain.recall({"prompt": "cursor-third", "repo": "/repo"})
         self.assertEqual(len(cast(list[object], packet["evidence"])), 1)
+
+    def test_named_failpoints_rollback_and_restart_exactly_once(self) -> None:
+        """Rollback each event boundary before a restarted writer recovers."""
+        append_points = (
+            "after_event_insert",
+            "after_fts_insert",
+            "after_assertion_supersede",
+            "after_assertion_insert",
+            "after_source_state",
+            "after_meta_counts",
+            "before_commit",
+        )
+        replace_points = (
+            "after_delete_assertions",
+            "after_delete_fts",
+            "after_delete_events",
+        )
+        for point in append_points + replace_points:
+            source = self.codex / f"failpoint-{point}.jsonl"
+            padding = "x" * 100 if point in replace_points else ""
+            baseline = self._codex_record(
+                f"I prefer baseline-{point}{padding}"
+            )
+            source.write_text(baseline)
+            database = Path(self.temporary.name) / f"{point}.sqlite"
+            state = Path(self.temporary.name) / f"{point}-state"
+            brain = Brain(self.codex, self.claude, database, state)
+            brain.reconcile()
+            before = self._store_state(database, source.name)
+            replacement = self._codex_record(f"I prefer recovered-{point}")
+            if point in replace_points:
+                self.assertLess(len(replacement), len(baseline))
+                source.write_text(replacement)
+            else:
+                with source.open("a") as stream:
+                    stream.write(replacement)
+            with patch.dict(
+                os.environ,
+                {"PROVENANCE_CONTEXT_TEST_FAILPOINT": point},
+            ):
+                brain.reconcile()
+            self.assertEqual(self._store_state(database, source.name), before)
+            restarted = Brain(self.codex, self.claude, database, state)
+            restarted.reconcile()
+            with sqlite3.connect(database) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM events WHERE text = ?",
+                        (f"I prefer recovered-{point}",),
+                    ).fetchone(),
+                    (1,),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT cursor_bytes FROM sources "
+                        "WHERE provider = 'codex' AND source_path = ?",
+                        (source.name,),
+                    ).fetchone(),
+                    (source.stat().st_size,),
+                )
+
+    def _codex_record(self, content: str) -> str:
+        """Build one complete Codex user message for storage mutation tests."""
+        return (
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": content,
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+
+    def _store_state(
+        self, database: Path, source_path: str
+    ) -> tuple[object, ...]:
+        """Read only cursor and derived counts needed to prove rollback."""
+        with sqlite3.connect(database) as connection:
+            cursor = connection.execute(
+                "SELECT cursor_bytes, cursor_line FROM sources "
+                "WHERE provider = 'codex' AND source_path = ?",
+                (source_path,),
+            ).fetchone()
+            counts = tuple(
+                connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[
+                    0
+                ]
+                for table in ("events", "event_fts", "assertions")
+            )
+        return cursor + counts if cursor else counts
+
+    def test_rename_preserves_evidence_without_a_missing_tombstone(
+        self,
+    ) -> None:
+        """Re-key a moved JSONL file by identity instead of fencing recall."""
+        source = self.codex / "rename-before.jsonl"
+        source.write_text(self._codex_record("rename-needle"))
+        self.wait_for("rename-needle")
+        source.rename(self.codex / "rename-after.jsonl")
+        self.wait_for("rename-needle")
+        status = self.wait_for_status(
+            lambda packet: bool(packet["available"])
+            and not any(
+                item.get("status") == "missing"
+                for item in cast(list[dict[str, object]], packet["sources"])
+            )
+        )
+        self.assertTrue(status["available"])
+
+    def test_metadata_preserving_rewrite_is_reparsed_by_digest_audit(
+        self,
+    ) -> None:
+        """Detect a same-fingerprint correction through the rotating digest."""
+        source = self.codex / "digest-audit.jsonl"
+        old = self._codex_record("digest-before")
+        new = self._codex_record("digest-after!")
+        self.assertEqual(len(old), len(new))
+        source.write_text(old)
+        database = Path(self.temporary.name) / "digest-audit.sqlite"
+        state = Path(self.temporary.name) / "digest-audit-state"
+        brain = Brain(self.codex, self.claude, database, state)
+        brain.reconcile()
+        original = source_fingerprint(source)
+        source.write_text(new)
+        with patch(
+            "scan.discover",
+            side_effect=lambda root: (
+                [(source.name, source, original)] if root == self.codex else []
+            ),
+        ):
+            brain.reconcile()
+        self.assertTrue(
+            brain.recall({"prompt": "digest-after", "repo": "/repo"})[
+                "evidence"
+            ]
+        )
+
+    def test_rebuild_state_is_visible_while_raw_recovery_is_fenced(
+        self,
+    ) -> None:
+        """Expose rebuilding before a slow raw-backed recovery can finish."""
+        source = self.codex / "rebuilding.jsonl"
+        source.write_text(self._codex_record("rebuilding-needle"))
+        database = Path(self.temporary.name) / "rebuilding.sqlite"
+        state = Path(self.temporary.name) / "rebuilding-state"
+        Brain(self.codex, self.claude, database, state).reconcile()
+        with sqlite3.connect(database) as connection:
+            connection.execute("DELETE FROM event_fts")
+            connection.execute("DELETE FROM events")
+        entered = threading.Event()
+        release = threading.Event()
+        from scan import parse_source_incremental as real_parse_source
+
+        def delayed_parse(
+            provider: str,
+            root: Path,
+            path: Path,
+            offset: int,
+            line: int,
+        ) -> tuple[
+            list[dict[str, str | int | None]], str | None, bool, int, int
+        ]:
+            entered.set()
+            self.assertTrue(release.wait(2))
+            return real_parse_source(provider, root, path, offset, line)
+
+        restarted = Brain(self.codex, self.claude, database, state)
+        with patch("scan.parse_source_incremental", side_effect=delayed_parse):
+            worker = threading.Thread(target=restarted.reconcile)
+            worker.start()
+            self.assertTrue(entered.wait(2))
+            status = restarted.status()
+            self.assertEqual(status["state"], "rebuilding")
+            self.assertTrue(status["rebuilding"])
+            self.assertFalse(status["available"])
+            self.assertGreaterEqual(
+                cast(float, status["dirty_fence_seconds"]), 0
+            )
+            release.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
 
     def test_missing_source_is_tombstoned_and_explicit_erase_removes_it(
         self,
@@ -835,6 +1024,29 @@ class ServiceTest(unittest.TestCase):
         self.wait_for("rebuild-needle")
         self.assertTrue((self.state / "v1-rollback.sqlite").exists())
 
+    def test_partial_derived_loss_rebuilds_from_raw_on_restart(self) -> None:
+        """Reject intact cursors missing events instead of serving empty."""
+        source = self.codex / "partial-loss.jsonl"
+        source.write_text(self._codex_record("partial-loss-needle"))
+        self.wait_for("partial-loss-needle")
+        self.process.send_signal(signal.SIGTERM)
+        self.process.wait(timeout=5)
+        if self.process.stderr:
+            self.process.stderr.close()
+        with sqlite3.connect(self.database) as connection:
+            self.assertTrue(
+                connection.execute("SELECT COUNT(*) FROM sources").fetchone()[
+                    0
+                ]
+            )
+            connection.execute("DELETE FROM event_fts")
+            connection.execute("DELETE FROM events")
+        self.process = self.start()
+        packet = self.wait_for("partial-loss-needle")
+        self.assertTrue(packet["available"])
+        self.assertEqual(len(cast(list[object], packet["evidence"])), 1)
+        self.assertTrue((self.state / "v1-rollback.sqlite").exists())
+
     def test_wal_readers_observe_only_cited_packets_or_fenced_unavailable(
         self,
     ) -> None:
@@ -882,6 +1094,10 @@ class ServiceTest(unittest.TestCase):
         storage = cast(dict[str, object], self.status()["storage"])
         self.assertEqual(storage["journal_mode"], "wal")
         self.assertIsInstance(storage["checkpoint_at"], float)
+        self.assertIsInstance(storage["checkpoint_busy"], bool)
+        self.assertIsInstance(storage["checkpoint_log_frames"], int)
+        self.assertIsInstance(storage["checkpointed_frames"], int)
+        self.assertIsInstance(self.status()["dirty_fence_seconds"], float)
 
 
 if __name__ == "__main__":

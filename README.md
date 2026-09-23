@@ -69,11 +69,15 @@ userinfo or credential query parameters; ordinary URLs remain eligible
 evidence.
 
 `status.storage` reports WAL bytes, journal mode, and the latest passive
-checkpoint result without content or raw paths. A malformed, incomplete, or
-missing source is excluded from recall and makes `doctor` non-zero until it is
-repaired or deliberately erased. Missing files are tombstoned rather than
-silently deleted. To erase one tombstoned source, copy its redacted `source_id`
-from status and use:
+checkpoint result without content or raw paths. `checkpoint_busy`,
+`checkpoint_log_frames`, and `checkpointed_frames` expose reader/checkpoint
+contention through the public status command. `dirty_fence_seconds` is capped
+at five seconds while recall is fenced during reconciliation. `state` is
+`rebuilding` while raw JSONL is restoring a missing or inconsistent derived
+database. A malformed, incomplete, or missing source is excluded from recall
+and makes `doctor` non-zero until it is repaired or deliberately erased.
+Missing files are tombstoned rather than silently deleted. To erase one
+tombstoned source, copy its redacted `source_id` from status and use:
 
 ```sh
 /opt/homebrew/bin/python3.13 scripts/context.py erase \
@@ -83,6 +87,11 @@ from status and use:
 
 On first WAL start, the daemon keeps a `v1-rollback.sqlite` copy in the state
 directory before rebuilding the disposable derived database from raw JSONL.
+Tests may set `PROVENANCE_CONTEXT_TEST_FAILPOINT` to one of
+`after_event_insert`, `after_fts_insert`, `after_assertion_supersede`,
+`after_assertion_insert`, `after_delete_assertions`, `after_delete_fts`,
+`after_delete_events`, `after_source_state`, `after_meta_counts`, or
+`before_commit`; the transaction then rolls back before its cursor advances.
 
 ## Quality commands
 
