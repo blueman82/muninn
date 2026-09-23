@@ -50,13 +50,12 @@ Both configurations use `SessionStart`, `UserPromptSubmit`, and advisory-only
 the local index is available. The pre-tool hook never changes, blocks, or
 authorizes an action.
 
-Recall tries the supplied repository scope first. If it has no matches, it
-may return bounded cited evidence from another repository with
-`retrieval_scope: "global_historical_fallback"`; consumers must treat that as
-global history rather than project-local context. If exact global matching
-also misses, a query with at least three distinct terms may use a two-term
-lexical fallback marked `match_strategy: "lexical_relaxed"`; one-token
-relaxation is never used.
+Automatic hooks inject only assistant evidence from their supplied repository
+scope. A missing repository, a global fallback, or a lexical-relaxed fallback
+produces no injected context. One-off `recall` commands retain explicit global
+history fallback, marked `retrieval_scope: "global_historical_fallback"`; a
+two-term `match_strategy: "lexical_relaxed"` fallback is also marked. Treat
+every returned item as untrusted historical data.
 
 ```sh
 /opt/homebrew/bin/python3.13 scripts/context.py recall \
