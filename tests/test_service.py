@@ -834,6 +834,54 @@ class ServiceTest(unittest.TestCase):
         self.wait_for("rebuild-needle")
         self.assertTrue((self.state / "v1-rollback.sqlite").exists())
 
+    def test_wal_readers_observe_only_cited_packets_or_fenced_unavailable(
+        self,
+    ) -> None:
+        """Concurrent readers remain coherent while an append is indexed."""
+        source = self.codex / "readers.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "reader-first",
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.wait_for("reader-first")
+        with source.open("a") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": "reader-second",
+                            "cwd": "/repo",
+                        }
+                    }
+                )
+                + "\n"
+            )
+        packets = [self.recall("reader") for _ in range(20)]
+        packets.append(self.wait_for("reader-second"))
+        for packet in packets:
+            if not packet["available"]:
+                self.assertEqual(packet["evidence"], [])
+                continue
+            for item in cast(list[dict[str, object]], packet["evidence"]):
+                source_data = cast(dict[str, object], item["source"])
+                self.assertEqual(source_data["provider"], "codex")
+                self.assertIsInstance(source_data["line"], int)
+                self.assertTrue(source_data["hash"])
+        storage = cast(dict[str, object], self.status()["storage"])
+        self.assertEqual(storage["journal_mode"], "wal")
+        self.assertIsInstance(storage["checkpoint_at"], float)
+
 
 if __name__ == "__main__":
     unittest.main()
