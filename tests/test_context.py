@@ -189,6 +189,22 @@ class ContextCommandTest(unittest.TestCase):
         self.assertEqual(first_source["ordinal"], 1)
         self.assertEqual(second_source["ordinal"], 2)
 
+    def test_nested_tool_payload_cannot_become_evidence(self) -> None:
+        """Ignore message-shaped values nested beneath a tool result."""
+        record = {
+            "payload": {
+                "type": "function_call_output",
+                "output": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": "nested-tool-needle",
+                },
+            }
+        }
+        (self.root / "tool.jsonl").write_text(json.dumps(record) + "\n")
+        self.build()
+        self.assertEqual(self.recall("nested-tool-needle")["evidence"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

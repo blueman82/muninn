@@ -90,20 +90,23 @@ def scalars(value: object) -> dict[str, str]:
     return found
 
 
-def messages(value: object) -> Iterator[Mapping[str, object]]:
-    """Yield user and assistant message objects from nested JSON records."""
-    if isinstance(value, Mapping):
+def messages(record: object) -> Iterator[Mapping[str, object]]:
+    """Yield direct provider messages, never message-shaped tool output."""
+    if not isinstance(record, Mapping):
+        return
+    payload = record.get("payload")
+    if not isinstance(payload, Mapping):
+        return
+    candidates = [payload]
+    items = payload.get("items")
+    if isinstance(items, Sequence) and not isinstance(items, (str, bytes)):
+        candidates.extend(item for item in items if isinstance(item, Mapping))
+    for value in candidates:
         if value.get("type") == "message" and value.get("role") in {
             "user",
             "assistant",
         }:
             yield value
-        for child in value.values():
-            if isinstance(child, (Mapping, list, tuple)):
-                yield from messages(child)
-    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        for child in value:
-            yield from messages(child)
 
 
 def source_records(

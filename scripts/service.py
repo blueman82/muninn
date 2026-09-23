@@ -65,6 +65,8 @@ def _audit(
 ) -> None:
     record = {"at": time.time(), "event": event, "trace_id": trace_id} | fields
     audit_path = state_dir / "audit.jsonl"
+    if audit_path.exists() and audit_path.stat().st_size > 1_048_576:
+        audit_path.replace(state_dir / "audit.previous.jsonl")
     with audit_path.open("a", encoding="utf-8") as audit_file:
         audit_file.write(json.dumps(record, sort_keys=True) + "\n")
     os.chmod(audit_path, 0o600)

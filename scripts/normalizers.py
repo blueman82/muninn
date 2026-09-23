@@ -36,20 +36,23 @@ def _metadata(record: Mapping[str, object]) -> dict[str, str]:
     return result
 
 
-def _codex_messages(value: object) -> Iterator[Mapping[str, object]]:
-    """Yield only user and assistant message objects from a Codex record."""
-    if isinstance(value, Mapping):
+def _codex_messages(
+    record: Mapping[str, object],
+) -> Iterator[Mapping[str, object]]:
+    """Yield only direct Codex response messages, never nested tool data."""
+    payload = record.get("payload")
+    if not isinstance(payload, Mapping):
+        return
+    candidates = [payload]
+    items = payload.get("items")
+    if isinstance(items, Sequence) and not isinstance(items, (str, bytes)):
+        candidates.extend(item for item in items if isinstance(item, Mapping))
+    for value in candidates:
         if value.get("type") == "message" and value.get("role") in {
             "user",
             "assistant",
         }:
             yield value
-        for child in value.values():
-            if isinstance(child, (Mapping, list, tuple)):
-                yield from _codex_messages(child)
-    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        for child in value:
-            yield from _codex_messages(child)
 
 
 def _claude_text(content: object) -> str:
@@ -193,5 +196,5 @@ def discover(root: Path) -> Iterator[tuple[str, Path, str]]:
     if not root.is_dir() or not os.access(root, os.R_OK | os.X_OK):
         raise OSError("configured_source_root_unavailable")
     for path in sorted(root.rglob("*.jsonl")):
-        if path.is_file():
+        if path.is_file() and not path.is_symlink():
             yield str(path.relative_to(root)), path, source_fingerprint(path)
