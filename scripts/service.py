@@ -174,12 +174,13 @@ def serve(
     next_scan = time.monotonic() + interval
     try:
         while not stopping.is_set():
+            if worker is not None and not worker.is_alive():
+                worker = None
+                next_scan = time.monotonic() + interval
             server.timeout = min(0.2, max(0.01, next_scan - time.monotonic()))
             server.handle_request()
-            if time.monotonic() >= next_scan:
-                if worker is None or not worker.is_alive():
-                    worker = brain.start_reconcile()
-                next_scan = time.monotonic() + interval
+            if worker is None and time.monotonic() >= next_scan:
+                worker = brain.start_reconcile()
     finally:
         if worker is not None:
             worker.join()
