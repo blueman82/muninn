@@ -144,6 +144,7 @@ def source_cursor(
         previous
         and previous["identity"] == identity
         and previous["status"] == "active"
+        and not previous["pending"]
         and path.stat().st_size >= valid_offset
     )
     return (valid_offset, valid_line, append) if append else (0, 0, False)

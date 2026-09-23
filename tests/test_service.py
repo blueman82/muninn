@@ -70,6 +70,31 @@ def run(
     )
 
 
+def e6_record(provider: str, content: str) -> str:
+    """Build one complete provider-specific assistant record."""
+    if provider == "codex":
+        return json.dumps(
+            {
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": content,
+                    "cwd": "/repo",
+                }
+            }
+        )
+    return json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": content}],
+            },
+            "cwd": "/repo",
+        }
+    )
+
+
 class ServiceTest(unittest.TestCase):
     """Exercise append freshness, recovery, and client safety over UDS."""
 
@@ -352,6 +377,7 @@ class ServiceTest(unittest.TestCase):
         }
         source.write_text(json.dumps(valid) + "\n")
         self.wait_for("quarantine-needle")
+
         with source.open("a") as stream:
             stream.write("{malformed}\n")
         degraded = self.wait_for_status(
@@ -392,6 +418,53 @@ class ServiceTest(unittest.TestCase):
             lambda status: status.get("available") is True
         )
         self.assertTrue(recovered["available"])
+
+    def test_repaired_sources_accept_terminal_json_replacements(self) -> None:
+        """Recover both providers when a replacement omits its final LF."""
+        sources = {
+            "codex": self.codex / "e6-codex.jsonl",
+            "claude": self.claude / "e6-claude.jsonl",
+        }
+        for source in sources.values():
+            source.write_text("{malformed}\n")
+        self.wait_for_status(
+            lambda status: status["pending_sources"] == 2
+            and bool(status["last_error"])
+        )
+        for provider, source in sources.items():
+            source.write_text(
+                e6_record(provider, f"{provider}-e6-repair-" + "x" * 100)
+                + "\n"
+            )
+        for provider in sources:
+            self.wait_for(f"{provider}-e6-repair")
+        for source in sources.values():
+            with source.open("a") as stream:
+                stream.write("{")
+        self.wait_for_status(
+            lambda status: status["pending_sources"] == 2
+            and not status["last_error"]
+        )
+        for provider, source in sources.items():
+            source.write_text(
+                e6_record(provider, f"{provider}-e6-repair-" + "x" * 100)
+                + "\n"
+            )
+        for provider, source in sources.items():
+            source.write_text(
+                e6_record(provider, f"{provider}-e6-replacement")
+            )
+        for provider in sources:
+            self.wait_for(f"{provider}-e6-replacement")
+            self.assertNotIn(
+                f"{provider}-e6-repair",
+                json.dumps(self.recall(f"{provider}-e6-repair")),
+            )
+        status = self.wait_for_status(
+            lambda packet: bool(packet["available"])
+            and packet["pending_sources"] == 0
+        )
+        self.assertFalse(status["last_error"])
 
     def test_doctor_and_stalled_client_contract(self) -> None:
         """Doctor is fail-closed and a stalled peer cannot block the daemon."""

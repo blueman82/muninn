@@ -110,7 +110,15 @@ def _complete_lines(
             if raw.endswith(b"\n"):
                 lines.append((number, raw.rstrip(b"\r\n")))
             else:
-                return lines, True, source.tell() - len(raw)
+                try:
+                    json.loads(raw)
+                except (
+                    RecursionError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                ):
+                    return lines, True, source.tell() - len(raw)
+                lines.append((number, raw))
         end = source.tell()
     return lines, False, end
 
@@ -128,6 +136,8 @@ def parse_source(
         return [], type(error).__name__, True
     events: list[dict[str, str | int | None]] = []
     for line, raw in lines:
+        if not raw:
+            continue
         try:
             record = json.loads(raw)
         except (
@@ -212,6 +222,8 @@ def parse_source_incremental(
         return [], type(error).__name__, True, offset, line_start
     events: list[dict[str, str | int | None]] = []
     for line, raw in lines:
+        if not raw:
+            continue
         try:
             record = json.loads(raw)
         except (
