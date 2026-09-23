@@ -60,13 +60,13 @@ def append_audit(
     return rotated, False
 
 
-def request(
+def _request_once(
     socket_path: Path,
     payload: Mapping[str, object],
     timeout_seconds: float,
     max_bytes: int,
-) -> dict[str, object]:
-    """Request a private Unix socket and fail closed when it is unavailable."""
+) -> dict[str, object] | None:
+    """Send one bounded private-socket request or return None on failure."""
     try:
         private_directory(socket_path.parent, create=False)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -77,14 +77,40 @@ def request(
                 response = json.loads(stream.readline(max_bytes))
         return dict(response) if isinstance(response, Mapping) else {}
     except (OSError, ValueError, json.JSONDecodeError):
-        if payload.get("op") == "recall":
-            return {
-                "evidence": [],
-                "bytes": 0,
-                "untrusted": True,
-                "available": False,
-            }
-        return {"available": False, "status": "unavailable"}
+        return None
+
+
+def _unavailable_response(operation: object) -> dict[str, object]:
+    """Return the public fail-closed response for one unavailable operation."""
+    if operation == "recall":
+        return {
+            "evidence": [],
+            "bytes": 0,
+            "untrusted": True,
+            "available": False,
+        }
+    return {"available": False, "status": "unavailable"}
+
+
+def request(
+    socket_path: Path,
+    payload: Mapping[str, object],
+    timeout_seconds: float,
+    max_bytes: int,
+) -> dict[str, object]:
+    """Request a private socket with one health-gated recall retry."""
+    response = _request_once(socket_path, payload, timeout_seconds, max_bytes)
+    if response is None:
+        return _unavailable_response(payload.get("op"))
+    if payload.get("op") != "recall" or response.get("available") is not False:
+        return response
+    status = _request_once(
+        socket_path, {"op": "status"}, timeout_seconds, max_bytes
+    )
+    if status is None or status.get("available") is not True:
+        return response
+    retried = _request_once(socket_path, payload, timeout_seconds, max_bytes)
+    return retried or _unavailable_response("recall")
 
 
 def private_directory(path: Path, create: bool) -> None:
