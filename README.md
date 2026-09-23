@@ -116,11 +116,28 @@ Forced process-termination tests require two explicit test-only variables:
 `PROVENANCE_CONTEXT_TEST_CRASH_ARMED=1` and a named
 `PROVENANCE_CONTEXT_CRASH_FAILPOINT`. They exit the daemon with status 86 at
 the selected mutation boundary; neither variable is used by normal service or
-hook configuration. The crash-point names are the rollback names above plus
+hook configuration. Never set them for a real corpus, hook, or LaunchAgent.
+
+For a public black-box crash evaluation, use new temporary roots and only
+synthetic JSONL. First index a source containing one safe direct user message
+such as `{"payload":{"type":"message","role":"user","content":"I prefer prior-marker"}}`.
+The `I prefer ` prefix creates the sole source-linked preference assertion.
+Stop the healthy daemon before changing the fixture, then arm the next daemon
+with `PROVENANCE_CONTEXT_TEST_CRASH_ARMED=1` and
+`PROVENANCE_CONTEXT_CRASH_FAILPOINT=<name>`. Append a distinct post marker for
+insert phases; replace or truncate the source with a shorter post record for
+delete/assertion phases; rename it after appending the post marker for rename
+phases. To test explicit deletion, remove the synthetic source, read its
+redacted `source_id` from status, and use the public `erase` command. Confirm
+the armed daemon exits 86, unset both variables, restart normally, and verify
+the prior and post markers are cited exactly once.
+
+The 13 advertised crash boundaries are: `after_event_insert`,
+`after_fts_insert`, `after_assertion_supersede`, `after_assertion_insert`,
+`after_delete_assertions`, `after_delete_fts`, `after_delete_events`,
+`after_source_state`, `after_meta_counts`, `before_commit`,
 `after_rename_events`, `after_rename_source_state`, and
-`before_rename_commit`. A black-box evaluator starts an armed daemon after
-changing a source, confirms exit 86, unsets both variables, restarts normally,
-and verifies its prior and post source markers are each cited exactly once.
+`before_rename_commit`.
 
 ## Quality commands
 
