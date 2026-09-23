@@ -19,9 +19,17 @@ from typing import cast
 
 from context import evidence_packet
 from normalizers import discover, parse_source
-from snapshot import delete_missing, open_snapshot, replace_source, source_rows
+from snapshot import (
+    delete_missing,
+    mark_source_issue,
+    open_snapshot,
+    replace_source,
+    source_rows,
+)
 
 MAX_PACKET_BYTES = 2_400
+MAX_REQUEST_BYTES = 8_192
+REQUEST_TIMEOUT_SECONDS = 0.2
 
 
 def _json(value: object) -> bytes:
@@ -105,7 +113,10 @@ class Brain:
                         key = (provider, source_path)
                         current.add(key)
                         previous = known.get(key)
-                        if previous == (fingerprint, 0):
+                        if previous and previous[0] == fingerprint:
+                            pending += previous[1]
+                            if previous[2]:
+                                errors.append(previous[2])
                             continue
                         events, error, source_pending = parse_source(
                             provider, root, path
@@ -113,6 +124,16 @@ class Brain:
                         if error:
                             errors.append(error)
                             pending += 1
+                            changed = (
+                                mark_source_issue(
+                                    connection,
+                                    provider,
+                                    source_path,
+                                    fingerprint,
+                                    error,
+                                )
+                                or changed
+                            )
                             continue
                         indexed += replace_source(
                             connection,
@@ -267,7 +288,12 @@ class RequestHandler(StreamRequestHandler):
         started = time.monotonic()
         trace_id = uuid.uuid4().hex
         try:
-            raw = self.rfile.readline(8192)
+            self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+            raw = self.rfile.readline(MAX_REQUEST_BYTES)
+            if not raw or (
+                len(raw) == MAX_REQUEST_BYTES and not raw.endswith(b"\n")
+            ):
+                raise ValueError("request_too_large_or_incomplete")
             request = json.loads(raw)
             if not isinstance(request, Mapping):
                 raise ValueError("request")
@@ -303,10 +329,11 @@ def request(
     """Call the local service with a bounded unavailable-safe fallback."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(0.2)
+            client.settimeout(REQUEST_TIMEOUT_SECONDS)
             client.connect(str(socket_path))
             client.sendall(_json(payload))
-            response = json.loads(client.makefile("rb").readline(8192))
+            with client.makefile("rb") as stream:
+                response = json.loads(stream.readline(MAX_REQUEST_BYTES))
         return dict(response) if isinstance(response, Mapping) else {}
     except (OSError, ValueError, json.JSONDecodeError):
         if payload.get("op") == "recall":

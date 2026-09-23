@@ -69,12 +69,13 @@ def open_snapshot(destination: Path) -> tuple[Path, sqlite3.Connection]:
 
 def source_rows(
     connection: sqlite3.Connection,
-) -> dict[tuple[str, str], tuple[str, int]]:
+) -> dict[tuple[str, str], tuple[str, int, str | None]]:
     """Return known source fingerprints and retry flags."""
     return {
-        (provider, path): (fingerprint, pending)
-        for provider, path, fingerprint, pending in connection.execute(
-            "SELECT provider, source_path, fingerprint, pending FROM sources"
+        (provider, path): (fingerprint, pending, error)
+        for provider, path, fingerprint, pending, error in connection.execute(
+            "SELECT provider, source_path, fingerprint, pending, error "
+            "FROM sources"
         )
     }
 
@@ -174,6 +175,48 @@ def replace_source(
         (provider, source_path, fingerprint, int(pending), time.time()),
     )
     return count
+
+
+def mark_source_issue(
+    connection: sqlite3.Connection,
+    provider: str,
+    source_path: str,
+    fingerprint: str,
+    error: str,
+) -> bool:
+    """Quarantine a malformed source so stale evidence cannot be recalled."""
+    previous = source_rows(connection).get((provider, source_path))
+    if previous == (fingerprint, 1, error):
+        return False
+    row_ids = [
+        row[0]
+        for row in connection.execute(
+            "SELECT id FROM events WHERE provider = ? AND source_path = ?",
+            (provider, source_path),
+        )
+    ]
+    if row_ids:
+        placeholders = ",".join("?" for _ in row_ids)
+        connection.execute(
+            f"DELETE FROM assertions WHERE event_id IN ({placeholders})",
+            row_ids,
+        )
+        connection.execute(
+            f"DELETE FROM event_fts WHERE rowid IN ({placeholders})", row_ids
+        )
+    connection.execute(
+        "DELETE FROM events WHERE provider = ? AND source_path = ?",
+        (provider, source_path),
+    )
+    connection.execute(
+        """INSERT INTO sources(provider, source_path, fingerprint, pending,
+           error, last_seen) VALUES(?, ?, ?, 1, ?, ?)
+           ON CONFLICT(provider, source_path) DO UPDATE SET
+             fingerprint=excluded.fingerprint, pending=1,
+             error=excluded.error, last_seen=excluded.last_seen""",
+        (provider, source_path, fingerprint, error, time.time()),
+    )
+    return True
 
 
 def delete_missing(

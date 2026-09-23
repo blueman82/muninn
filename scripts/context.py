@@ -11,6 +11,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
@@ -19,6 +20,10 @@ SECRET_LINE = re.compile(
     r"password|passwd|secret|private[_-]?key)\s*(?:=|:)\s*\S+"
     r"|bearer\s+\S+|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}"
     r"|AKIA[0-9A-Z]{16}"
+)
+QUOTED_SECRET_FIELD = re.compile(
+    r'(?i)["\'](?:api[_-]?key|access[_-]?token|auth(?:orization)?|'
+    r'password|passwd|secret|private[_-]?key)["\']\s*:\s*["\'][^"\']+["\']'
 )
 HOSTILE_LINE = re.compile(
     r"(?i)(?:ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions|"
@@ -33,7 +38,9 @@ def sanitize_text(text: str) -> str:
     safe_lines = (
         line
         for line in text.splitlines()
-        if not SECRET_LINE.search(line) and not HOSTILE_LINE.search(line)
+        if not SECRET_LINE.search(line)
+        and not QUOTED_SECRET_FIELD.search(line)
+        and not HOSTILE_LINE.search(line)
     )
     return "\n".join(safe_lines).strip()
 
@@ -289,6 +296,23 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def doctor_is_healthy(packet: Mapping[str, object]) -> bool:
+    """Return whether a public status packet permits a zero doctor exit."""
+    scanned = packet.get("last_scan")
+    sources = packet.get("sources")
+    if packet.get("available") is not True or not isinstance(scanned, float):
+        return False
+    if time.time() - scanned > 5 or packet.get("pending_sources"):
+        return False
+    if packet.get("last_error") or not isinstance(sources, Sequence):
+        return False
+    return not any(
+        isinstance(source, Mapping)
+        and (source.get("pending") or source.get("error"))
+        for source in sources
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the builder or evidence retrieval command."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
@@ -336,7 +360,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 )
             else:
-                print(json.dumps(request(args.socket, {"op": args.command})))
+                packet = request(args.socket, {"op": args.command})
+                print(json.dumps(packet))
+                if args.command == "doctor" and not doctor_is_healthy(packet):
+                    return 1
     except (OSError, sqlite3.Error, ValueError) as error:
         print(f"context: {error}", file=sys.stderr)
         return 2

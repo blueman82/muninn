@@ -5,17 +5,19 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 ROOT = Path(__file__).parents[1]
 CONTEXT = ROOT / "scripts" / "context.py"
 CODEX_HOOK = ROOT / "hooks" / "codex.py"
+README = ROOT / "README.md"
 
 
 def run(
@@ -117,6 +119,31 @@ class ServiceTest(unittest.TestCase):
             time.sleep(0.05)
         raise AssertionError(f"timed out waiting for {prompt}")
 
+    def status(self) -> dict[str, object]:
+        """Read public daemon status and require a valid response."""
+        result = run("status", "--socket", str(self.socket))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def wait_for_status(
+        self, predicate: Callable[[dict[str, object]], bool]
+    ) -> dict[str, object]:
+        """Wait for a status predicate to observe reconciliation."""
+        until = time.monotonic() + 5
+        while time.monotonic() < until:
+            status = self.status()
+            if predicate(status):
+                return status
+            time.sleep(0.05)
+        raise AssertionError("timed out waiting for status")
+
+    def publish_count(self) -> int:
+        """Count snapshot publications without client audit entries."""
+        return sum(
+            json.loads(line)["event"] == "publish"
+            for line in (self.state / "audit.jsonl").read_text().splitlines()
+        )
+
     def test_dual_append_recall_is_cited_and_sanitized(self) -> None:
         """Index complete Codex and Claude records without manual sync."""
         (self.codex / "one.jsonl").write_text(
@@ -200,9 +227,14 @@ class ServiceTest(unittest.TestCase):
         )
         with source.open("a") as stream:
             stream.write(partial[:-1])
+        pending = self.wait_for_status(
+            lambda status: status["pending_sources"] == 1
+        )
+        audit_count = self.publish_count()
         time.sleep(0.15)
-        status = run("status", "--socket", str(self.socket))
-        self.assertIn("pending_sources", status.stdout)
+        stable = self.status()
+        self.assertEqual(stable["generation"], pending["generation"])
+        self.assertEqual(self.publish_count(), audit_count)
         self.assertNotIn("tail-needle", json.dumps(self.recall("tail-needle")))
         with source.open("a") as stream:
             stream.write(partial[-1:] + "\n")
@@ -230,6 +262,110 @@ class ServiceTest(unittest.TestCase):
         )
         self.assertEqual(hook.returncode, 0, hook.stderr)
         self.assertEqual(json.loads(hook.stdout), {})
+
+    def test_malformed_source_quarantines_stale_evidence_and_recovers(
+        self,
+    ) -> None:
+        """Never inject a source after a complete malformed JSON line."""
+        source = self.codex / "broken.jsonl"
+        valid = {
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": "quarantine-needle ready",
+                "cwd": "/repo",
+            }
+        }
+        source.write_text(json.dumps(valid) + "\n")
+        self.wait_for("quarantine-needle")
+        with source.open("a") as stream:
+            stream.write("{malformed}\n")
+        degraded = self.wait_for_status(
+            lambda status: bool(status["last_error"])
+        )
+        self.assertEqual(degraded["pending_sources"], 1)
+        self.assertEqual(self.recall("quarantine-needle")["evidence"], [])
+        doctor = run("doctor", "--socket", str(self.socket))
+        self.assertEqual(doctor.returncode, 1)
+        hook = subprocess.run(
+            [sys.executable, str(CODEX_HOOK)],
+            input=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "quarantine-needle",
+                    "cwd": "/repo",
+                }
+            ),
+            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(json.loads(hook.stdout), {})
+        source.write_text(json.dumps(valid) + "\n")
+        self.wait_for("quarantine-needle")
+        self.assertEqual(
+            run("doctor", "--socket", str(self.socket)).returncode, 0
+        )
+
+    def test_doctor_and_stalled_client_contract(self) -> None:
+        """Doctor is fail-closed and a stalled peer cannot block the daemon."""
+        self.assertEqual(
+            run("doctor", "--socket", str(self.socket)).returncode, 0
+        )
+        unavailable = run(
+            "doctor", "--socket", str(self.socket.parent / "none")
+        )
+        self.assertEqual(unavailable.returncode, 1)
+        stalled = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stalled.connect(str(self.socket))
+        stalled.sendall(b'{"op":"status"')
+        started = time.monotonic()
+        healthy = self.status()
+        stalled.close()
+        self.assertTrue(healthy["available"])
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_quoted_secret_and_launchd_setup_are_safe(self) -> None:
+        """Suppress quoted credentials and document launchd state setup."""
+        source = self.codex / "quoted.jsonl"
+        source.write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": '{"password":"quoted-secret-value"}',
+                        "cwd": "/repo",
+                    }
+                }
+            )
+            + "\n"
+        )
+        time.sleep(0.15)
+        self.assertEqual(self.recall("quoted-secret-value")["evidence"], [])
+        hook = subprocess.run(
+            [sys.executable, str(CODEX_HOOK)],
+            input=json.dumps(
+                {
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "quoted-secret-value",
+                    "cwd": "/repo",
+                }
+            ),
+            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotIn("quoted-secret-value", hook.stdout)
+        instructions = README.read_text()
+        self.assertIn(
+            'mkdir -p "$HOME/.local/share/provenance-context"', instructions
+        )
+        self.assertIn(
+            'chmod 700 "$HOME/.local/share/provenance-context"', instructions
+        )
 
 
 if __name__ == "__main__":

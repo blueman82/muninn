@@ -70,6 +70,8 @@ repository never bootstraps a personal service. Copy it to
 `__UPPERCASE__` value with an absolute path, then validate and control it:
 
 ```sh
+mkdir -p "$HOME/.local/share/provenance-context"
+chmod 700 "$HOME/.local/share/provenance-context"
 plutil -lint ~/Library/LaunchAgents/com.provenance-context.plist
 launchctl bootstrap "gui/$(id -u)" \
   ~/Library/LaunchAgents/com.provenance-context.plist
