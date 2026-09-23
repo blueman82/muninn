@@ -143,9 +143,36 @@ class ContextCommandTest(unittest.TestCase):
     def test_no_match_is_empty(self) -> None:
         self.build()
         self.assertEqual(
-            self.recall("absent-symbol"),
+            self.recall("absent-symbol", "/repos/unknown"),
             {"evidence": [], "bytes": 0, "untrusted": True},
         )
+
+    def test_scoped_recall_uses_marked_global_fallback(self) -> None:
+        """Expose global evidence only after a scoped query has no match."""
+        (self.root / "global.jsonl").write_text(
+            json.dumps(
+                {
+                    "payload": {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": "graph executor graph readiness marker",
+                        "cwd": "/repos/other",
+                    }
+                }
+            )
+            + "\n"
+        )
+        self.build()
+        fallback = self.recall(
+            "graph executor graph readiness", "/repos/coderails"
+        )
+        scoped = self.recall("needle-rose", "/repos/alpha")
+        self.assertEqual(
+            fallback["retrieval_scope"], "global_historical_fallback"
+        )
+        self.assertIn("graph executor", json.dumps(fallback))
+        self.assertNotIn("retrieval_scope", scoped)
+        self.assertNotIn("beta only", json.dumps(scoped))
 
     def test_rebuild_replaces_generated_database(self) -> None:
         self.assertEqual(self.build(), {"indexed": 2})
@@ -229,9 +256,9 @@ class ContextCommandTest(unittest.TestCase):
         self.assertTrue(
             self.recall("direct-scope-needle", "/repos/message-b")["evidence"]
         )
+        fallback = self.recall("direct-scope-needle", "/repos/tool-a")
         self.assertEqual(
-            self.recall("direct-scope-needle", "/repos/tool-a")["evidence"],
-            [],
+            fallback["retrieval_scope"], "global_historical_fallback"
         )
 
     def test_credential_urls_and_github_pat_are_never_indexed(self) -> None:

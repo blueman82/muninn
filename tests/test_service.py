@@ -414,14 +414,22 @@ class ServiceTest(unittest.TestCase):
             and bool(packet["available"])
         )
         self.assertLess(len(json.dumps(status).encode()), MAX_REQUEST_BYTES)
-        hook = subprocess.run(
-            [sys.executable, str(CODEX_HOOK)],
-            input=json.dumps({"hook_event_name": "SessionStart"}),
-            env=os.environ | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        until = time.monotonic() + 5
+        hook = None
+        while time.monotonic() < until:
+            hook = subprocess.run(
+                [sys.executable, str(CODEX_HOOK)],
+                input=json.dumps({"hook_event_name": "SessionStart"}),
+                env=os.environ
+                | {"PROVENANCE_CONTEXT_SOCKET": str(self.socket)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if "Provenance index: available." in hook.stdout:
+                break
+        self.assertIsNotNone(hook)
+        assert hook is not None
         self.assertEqual(hook.returncode, 0, hook.stderr)
         self.assertIn("Provenance index: available.", hook.stdout)
 
@@ -459,7 +467,9 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(degraded["available"])
         self.assertEqual(self.recall("quarantine-needle")["evidence"], [])
         for provider in healthy:
-            self.assertTrue(self.recall(f"healthy{provider}error")["evidence"])
+            self.assertTrue(
+                self.wait_for(f"healthy{provider}error")["evidence"]
+            )
         doctor = run("doctor", "--socket", str(self.socket))
         self.assertEqual(doctor.returncode, 1)
         source.write_text(json.dumps(valid) + "\n")

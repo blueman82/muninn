@@ -50,6 +50,11 @@ Both configurations use `SessionStart`, `UserPromptSubmit`, and advisory-only
 the local index is available. The pre-tool hook never changes, blocks, or
 authorizes an action.
 
+Recall tries the supplied repository scope first. If it has no matches, it
+may return bounded cited evidence from another repository with
+`retrieval_scope: "global_historical_fallback"`; consumers must treat that as
+global history rather than project-local context.
+
 ```sh
 /opt/homebrew/bin/python3.13 scripts/context.py recall \
   --socket "$PROVENANCE_CONTEXT_SOCKET" \

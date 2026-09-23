@@ -291,6 +291,9 @@ def evidence_packet_from_connection(
         raise ValueError("max bytes must be positive")
     connection.row_factory = sqlite3.Row
     matches = fetch_matches(connection, prompt, repo, include_provider)
+    global_fallback = bool(repo and not matches)
+    if global_fallback:
+        matches = fetch_matches(connection, prompt, None, include_provider)
     evidence: list[dict[str, object]] = []
     used_bytes = 0
     for match in matches:
@@ -313,7 +316,14 @@ def evidence_packet_from_connection(
             continue
         evidence.append(item)
         used_bytes += item_size
-    return {"evidence": evidence, "bytes": used_bytes, "untrusted": True}
+    packet: dict[str, object] = {
+        "evidence": evidence,
+        "bytes": used_bytes,
+        "untrusted": True,
+    }
+    if global_fallback and evidence:
+        packet["retrieval_scope"] = "global_historical_fallback"
+    return packet
 
 
 def evidence_packet(
