@@ -80,13 +80,18 @@
         "--permission-mode",
         "dontAsk",
         "--permission-prompts",
-        "none"
+        "none",
+        "--system-prompt",
+        "You are Claude Code, Anthropic's official CLI for Claude."
       ],
       "settings": {
         "disableAllHooks": true,
         "autoMemoryEnabled": false,
         "includeGitInstructions": false,
-        "disableBundledSkills": true
+        "disableBundledSkills": true,
+        "enabledPlugins": {
+          "cc-plugin-agents-md@builtin": false
+        }
       }
     },
     "default": {
@@ -126,6 +131,8 @@
     "--disable-slash-commands": "no skills or commands",
     "--permission-mode dontAsk / --permission-prompts none": "anything not pre-allowed is denied; only trial_tool is allowed",
     "env": "allowlist only: no parent CLAUDE_*/CODEX_*/ANTHROPIC_* variables, so no reader can address a session",
-    "alwaysLoad": "trial_tool is loaded upfront, not deferred behind ToolSearch"
+    "alwaysLoad": "trial_tool is loaded upfront, not deferred behind ToolSearch",
+    "--system-prompt": "probe P04 experiment: does a replaced system prompt drop the userEmail session_context?",
+    "enabledPlugins": "the built-in cc-plugin-agents-md plugin loads even under --restricted"
   }
 }

@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import time
@@ -372,7 +373,8 @@ class Wrapper:
         return text, done.returncode != 0
 
     def _append(self, record: dict) -> None:
-        with open(self.log_path, "ab") as handle:
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+        with os.fdopen(os.open(self.log_path, flags, 0o600), "ab") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             self.seq, self.prev = last_record(self.log_path)
             record["seq"] = self.seq + 1

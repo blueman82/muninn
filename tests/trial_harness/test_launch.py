@@ -238,6 +238,7 @@ class OldWrapperTest(WrapperFixture):
         self.wrapper().call({"token": self.token, "args": ["files"]})
         self.wrapper().call({"token": self.token, "args": ["events", "1"]})
         self.assertEqual(mcp_reader.verify_chain(self.log), 2)
+        self.assertEqual(os.stat(self.log).st_mode & 0o777, 0o600)
         records = self.records()
         self.assertEqual([record["seq"] for record in records], [1, 2])
         self.assertEqual(records[0]["prev_sha256"], mcp_reader.GENESIS)
@@ -520,6 +521,9 @@ class ArgvEnvTest(unittest.TestCase):
         settings = json.loads(argv[argv.index("--settings") + 1])
         self.assertIs(settings["disableAllHooks"], True)
         self.assertIs(settings["autoMemoryEnabled"], False)
+        self.assertEqual(
+            settings["enabledPlugins"], {"cc-plugin-agents-md@builtin": False}
+        )
 
     def test_isolated_grader_has_no_tools_or_mcp(self) -> None:
         argv = launch.claude_argv(
