@@ -4,9 +4,9 @@ Every entry carries at least one citation: the immutable identity of a
 primary prompt, reply or tool_call event plus a verbatim quote of it, checked
 when the entry is written. Writers (add, retract) must run under
 store.writer_lock with a store.connect_rw connection; run_add and run_retract
-do that. Readers (list_entries, show, check, verify_citation, block_entries)
-work on a connect_ro connection. A refused write raises Refused and leaves
-nothing behind.
+do that. Readers (list_entries, show, check, verify_citation, block_entries,
+user_cited) work on a connect_ro connection. A refused write raises Refused
+and leaves nothing behind.
 """
 
 import re
@@ -29,6 +29,9 @@ CALLER_ENV = ("CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID")
 CHAIN_MAX = 100  # hops followed along a supersede chain
 PROBLEMS_MAX = 100  # broken citations named by check()
 BLOCK_QUOTE = 120  # characters of a quote pushed in the SessionStart block
+# The citation rows (alias m) that let an entry be pushed into a prompt or a
+# session (O5b): live, and of a user prompt. Anything else stays pull-only.
+_PUSHABLE_CITE = "m.state = 'live' AND m.role = 'user' AND m.kind = 'prompt'"
 
 # `<` of a frame delimiter, however spaced or cased (design 4.8)
 _FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
@@ -545,8 +548,7 @@ def block_entries(
         " c.provider, c.thread_id, c.line, c.part, c.quote"
         " FROM knowledge k JOIN scope sc ON sc.id = k.scope_id"
         " JOIN citation c ON c.id = (SELECT min(m.id) FROM citation m"
-        " WHERE m.knowledge_id = k.id AND m.state = 'live'"
-        " AND m.role = 'user' AND m.kind = 'prompt')"
+        f" WHERE m.knowledge_id = k.id AND {_PUSHABLE_CITE})"
         f" WHERE k.status = 'current' AND k.scope_id IN"
         f" ({','.join('?' * len(scope_ids))})"
         " ORDER BY k.created_at DESC, k.id DESC LIMIT ?",
@@ -565,6 +567,19 @@ def block_entries(
         }
         for r in rows
     ]
+
+
+@_guarded
+def user_cited(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
+    """Which of these entry numbers may be pushed (spec O5b): those with at
+    least one live user-prompt citation, the rule block_entries applies."""
+    rows = conn.execute(
+        "SELECT k.id FROM knowledge k WHERE k.id IN"
+        f" ({','.join('?' * len(ids))}) AND EXISTS (SELECT 1 FROM citation m"
+        f" WHERE m.knowledge_id = k.id AND {_PUSHABLE_CITE})",
+        ids,
+    )
+    return {row[0] for row in rows}
 
 
 def run_add(home: Path, *, wait_s: float = 15.0, **kw) -> dict:

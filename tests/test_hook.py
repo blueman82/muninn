@@ -806,6 +806,37 @@ class HookEndToEndTests(HookCliCase):
         )
         self.assertEqual(self.parsed(done), {})
 
+    def test_a_reply_cited_entry_is_pull_only_through_the_commands(self):
+        self.session(
+            "thr-two", "how do we retry", f"{CANARY} means three attempts"
+        )
+        self.run_ingest()
+
+        def note(text, ref, quote):
+            return knowledge.run_add(
+                self.home,
+                kind="fact",
+                text=text,
+                cites=[(ref, quote)],
+                cwd=str(self.repo),
+                actor="user",
+                roots=self.roots,
+                env={},
+            )
+
+        note("Reply-backed canaryalpha note", "codex:thr-two:3.1", CANARY)
+        note("User-backed canaryalpha note", f"codex:{ti.TID}:2.1", CANARY)
+        done = self.run_hook("prompt", "claude", self.payload(prompt=ASK))
+        text = self.parsed(done)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("User-backed canaryalpha note", text)
+        self.assertNotIn("Reply-backed", text)
+        code, listed, _ = self.pctx("know", "list")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            sorted(e["text"] for e in listed["entries"]),
+            ["Reply-backed canaryalpha note", "User-backed canaryalpha note"],
+        )
+
     def test_session_start_end_to_end(self):
         added = knowledge.run_add(
             self.home,
@@ -1151,3 +1182,72 @@ class HookCliEdgeTests(HookCliCase):
         code, text = self.main_hook(stdin=None)  # sys.stdin is None
         self.assertEqual(code, 0)
         self.assertIn(USAGE, context(text))
+
+
+class UserCitedKnowledgeTests(RecallCase):
+    """O5b at prompt time: only entries with a live user-prompt citation
+    are pushed; the others stay pull-only (`pctx search`, `pctx know`)."""
+
+    def via(self, event_id, quote, **kw):
+        return tk.kid(self.add(cites=[(self.ref(event_id), quote)], **kw))
+
+    def test_user_cited_names_entries_with_a_live_user_prompt_cite(self):
+        reply = self.via(self.reply, "wire the zebra cache", text="a reply")
+        call = self.via(self.call, "pytest -q tests/test_lookup.py", text="c")
+        user = self.via(self.prompt, "use the zebra cache", text="a prompt")
+        both = tk.kid(
+            self.add(
+                cites=[
+                    (self.ref(self.reply), "wire the zebra cache"),
+                    (self.ref(self.prompt), "use the zebra cache"),
+                ],
+                text="both",
+            )
+        )
+        # both halves of "role user, kind prompt" count, not either alone
+        odd_a = self.talk(
+            "oa", "an assistant wrote this prompt", role="assistant"
+        )
+        odd_b = self.talk("ob", "a user wrote this reply", kind="reply")
+        a = self.via(odd_a, "an assistant wrote this", text="odd a")
+        b = self.via(odd_b, "a user wrote this", text="odd b")
+        ids = [reply, call, user, both, a, b]
+        self.assertEqual(knowledge.user_cited(self.ro(), ids), {user, both})
+        self.assertEqual(knowledge.user_cited(self.ro(), []), set())
+        self.assertEqual(knowledge.user_cited(self.ro(), [999]), set())
+        self.rw.execute(
+            "UPDATE citation SET state = 'erased', quote = NULL"
+            " WHERE knowledge_id = ?",
+            (user,),
+        )
+        self.assertEqual(knowledge.user_cited(self.ro(), ids), {both})
+
+    def test_prompt_hook_pushes_only_user_cited_knowledge(self):
+        said = self.talk(
+            "r",
+            "alphaterm betaterm gammaterm deltaterm noted",
+            kind="reply",
+            role="assistant",
+        )
+        hidden = self.via(
+            said,
+            "alphaterm betaterm gammaterm",
+            text="Reply note on alphaterm",
+        )
+        shown = tk.kid(self.add(text="User decision on alphaterm"))
+        self.noise(self.repo)
+        text = self.body(self.ask())
+        self.assertIn(f"- K{shown} ", text)
+        self.assertNotIn(f"K{hidden} ", text)
+        self.assertNotIn("Reply note", text)
+        listed = knowledge.list_entries(self.ro(), cwd="/repo")["entries"]
+        self.assertIn(f"K{hidden}", [e["id"] for e in listed])  # pull-only
+
+    def test_only_reply_cited_matches_push_nothing_at_prompt_time(self):
+        self.via(
+            self.reply,
+            "wire the zebra cache",
+            text="Note on alphaterm betaterm gammaterm",
+        )
+        self.noise(self.repo)
+        self.assertEqual(self.ask("alphaterm betaterm gammaterm"), {})
