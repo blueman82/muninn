@@ -15,7 +15,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from pctx import classify, ingest, query, scope
+from pctx import classify, ingest, query, scope, store
 from pctx.query import NOTICE, _guarded  # one guard for every reader
 
 KINDS = ("decision", "fact", "preference", "procedure")
@@ -28,6 +28,7 @@ QUOTE_MAX = 300
 CALLER_ENV = ("CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID")
 CHAIN_MAX = 100  # hops followed along a supersede chain
 PROBLEMS_MAX = 100  # broken citations named by check()
+BLOCK_QUOTE = 120  # characters of a quote pushed in the SessionStart block
 
 # `<` of a frame delimiter, however spaced or cased (design 4.8)
 _FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
@@ -527,3 +528,61 @@ def check(conn: sqlite3.Connection) -> dict:
     if len(problems) > PROBLEMS_MAX:
         out["problems_omitted"] = len(problems) - PROBLEMS_MAX
     return out
+
+
+@_guarded
+def block_entries(
+    conn: sqlite3.Connection, scope_ids: list[int], limit: int = 8
+) -> list[dict]:
+    """What the SessionStart block may push (spec O5b): current entries of
+    these scopes with at least one live user-prompt citation, newest first,
+    each with its actor and the first such verbatim quote, cut to
+    BLOCK_QUOTE characters. Reply- and tool-only-cited entries stay
+    pull-only."""
+    if not scope_ids or limit < 1:
+        return []
+    rows = conn.execute(
+        "SELECT k.id, k.kind, k.text, k.actor, k.created_at, sc.label,"
+        " c.provider, c.thread_id, c.line, c.part, c.quote"
+        " FROM knowledge k JOIN scope sc ON sc.id = k.scope_id"
+        " JOIN citation c ON c.id = (SELECT min(m.id) FROM citation m"
+        " WHERE m.knowledge_id = k.id AND m.state = 'live'"
+        " AND m.role = 'user' AND m.kind = 'prompt')"
+        f" WHERE k.status = 'current' AND k.scope_id IN"
+        f" ({','.join('?' * len(scope_ids))})"
+        " ORDER BY k.created_at DESC, k.id DESC LIMIT ?",
+        [*scope_ids, limit],
+    )
+    return [
+        {
+            "id": f"K{r['id']}",
+            "kind": r["kind"],
+            "scope": r["label"],
+            "text": r["text"],
+            "actor": r["actor"],
+            "date": _date(r["created_at"]),
+            "cite": _ref(r),
+            "quote": r["quote"][:BLOCK_QUOTE],
+        }
+        for r in rows
+    ]
+
+
+def run_add(home: Path, *, wait_s: float = 15.0, **kw) -> dict:
+    """Take the writer lock, open the store (fullfsync on, O4d), add."""
+    with store.writer_lock(home, wait_s=wait_s):
+        conn = store.connect_rw(store.db_path(home))
+        try:
+            return add(conn, **kw)
+        finally:
+            conn.close()
+
+
+def run_retract(home: Path, *, wait_s: float = 15.0, **kw) -> dict:
+    """Take the writer lock, open the store (fullfsync on, O4d), retract."""
+    with store.writer_lock(home, wait_s=wait_s):
+        conn = store.connect_rw(store.db_path(home))
+        try:
+            return retract(conn, **kw)
+        finally:
+            conn.close()

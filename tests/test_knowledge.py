@@ -14,6 +14,7 @@ from pctx import erase, ingest, knowledge, store
 from tests import test_classify as tc
 from tests import test_ingest as ti
 from tests import test_query as tq
+from tests import test_store as tst
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -996,3 +997,176 @@ class QuoteOnlyTests(ti.IngestCase):
         cite = self.add(env=env)["entry"]["cites"][0]
         self.assertEqual(cite["ref"], f"claude:{tc.SESSION}:2.1")
         self.assertEqual(cite["quote"], self.QUOTE)
+
+
+class BlockTests(KnowCase):
+    """block_entries: what the SessionStart block may push (O5b)."""
+
+    def cites(self, *pairs):
+        return [(self.ref(event), quote) for event, quote in pairs]
+
+    def test_block_entries_user_cited_only_limit8_with_quote(self):
+        user = self.cites((self.prompt, "use the zebra cache"))
+        reply = self.cites((self.reply, "wire the zebra cache"))
+        call = self.cites((self.call, "pytest -q tests"))
+        pushed = [
+            kid(self.add(text=f"Decision {i}", cites=user)) for i in range(10)
+        ]
+        self.add(text="Reply only", cites=reply)
+        self.add(text="Call only", cites=call)
+        mixed = kid(
+            self.add(
+                text="Reply then prompt",
+                cites=reply
+                + self.cites((self.prompt, "decided to use the zebra")),
+            )
+        )
+        wide = self.add_scope("/other")  # an entry of another repo
+        self.add(text="Elsewhere", cites=user, cwd="/other")
+        got = knowledge.block_entries(self.ro(), [self.repo])
+        ids = [e["id"] for e in got]
+        self.assertEqual(len(got), 8)  # the default limit
+        self.assertEqual(
+            ids, [f"K{k}" for k in [mixed, *reversed(pushed)][:8]]
+        )
+        first = got[0]
+        self.assertEqual(
+            first,
+            {
+                "id": f"K{mixed}", "kind": "decision", "scope": "repo",
+                "text": "Reply then prompt", "actor": "claude:abc123",
+                "date": first["date"], "cite": self.ref(self.prompt),
+                "quote": "decided to use the zebra",
+            },
+        )  # fmt: skip
+        self.assertNotIn("Reply only", [e["text"] for e in got])
+        every = knowledge.block_entries(self.ro(), [self.repo, wide], limit=30)
+        self.assertEqual(
+            len(every), 12
+        )  # 10 + mixed + elsewhere; no reply/call-only
+        self.assertEqual(
+            len(knowledge.block_entries(self.ro(), [self.repo], limit=3)), 3
+        )
+        self.assertEqual(knowledge.block_entries(self.ro(), []), [])
+        self.assertEqual(
+            knowledge.block_entries(self.ro(), [self.repo], limit=0), []
+        )
+
+    def test_block_entries_current_only_newest_first_limit(self):
+        user = self.cites((self.prompt, "use the zebra cache"))
+        a = kid(self.add(text="A", cites=user))
+        b = kid(self.add(text="B", cites=user))
+        c = kid(self.add(text="C", cites=user))
+        d = kid(self.add(text="D", cites=user))
+        e = kid(self.add(text="E", cites=user, supersedes=a))  # a: superseded
+        knowledge.retract(self.rw, b, reason="wrong", actor="user")
+        self.rw.execute(
+            "UPDATE knowledge SET text = NULL, status = 'erased' WHERE id = ?",
+            (d,),
+        )
+        wide = kid(self.add(text="G", cites=user, global_scope=True))
+        scopes = self.rw.execute(
+            "SELECT id FROM scope WHERE key = 'global'"
+        ).fetchone()[0]
+        got = knowledge.block_entries(self.ro(), [self.repo, scopes])
+        self.assertEqual(
+            [x["id"] for x in got], [f"K{wide}", f"K{e}", f"K{c}"]
+        )
+        self.assertEqual(got[0]["scope"], "global")
+        self.assertEqual(
+            [
+                x["id"]
+                for x in knowledge.block_entries(
+                    self.ro(), [self.repo], limit=1
+                )
+            ],
+            [f"K{e}"],
+        )
+
+    def test_the_quote_is_cut_to_120_and_erased_cites_do_not_count(self):
+        event = self.add_event(self.src, self.repo, "w" * 200)
+        self.add(text="Long quote", cites=self.cites((event, "w" * 150)))
+        got = knowledge.block_entries(self.ro(), [self.repo])
+        self.assertEqual(got[0]["quote"], "w" * 120)
+        stored = self.rw.execute("SELECT length(quote) FROM citation")
+        self.assertEqual(stored.fetchone()[0], 150)  # only the block cuts it
+        self.rw.execute(
+            "UPDATE citation SET quote = NULL, span_start = NULL,"
+            " span_end = NULL, state = 'erased'"
+        )
+        self.assertEqual(knowledge.block_entries(self.ro(), [self.repo]), [])
+
+
+class RunnerTests(KnowCase):
+    """run_add / run_retract: the lock, a fullfsync connection, closed."""
+
+    def kw(self, **extra):
+        kw = {
+            "kind": "decision", "text": "Use the zebra cache",
+            "cites": [(self.ref(self.prompt), "use the zebra cache")],
+            "cwd": "/repo", "actor": "claude:abc123", "roots": {}, "env": {},
+        }  # fmt: skip
+        return kw | extra
+
+    def test_run_add_and_run_retract_lock_write_and_close(self):
+        opened = []
+        real = store.connect_rw
+
+        def spy(path, *args, **kw):
+            opened.append((path, args, kw))
+            return real(path, *args, **kw)
+
+        with mock.patch.object(store, "connect_rw", side_effect=spy):
+            got = knowledge.run_add(self.home, **self.kw())
+            number = int(got["entry"]["id"][1:])
+            knowledge.run_retract(
+                self.home, kid=number, reason="no", actor="user"
+            )
+        self.assertEqual([o[0] for o in opened], [self.db, self.db])
+        for _, args, kw in opened:
+            self.assertTrue(kw.get("fullfsync", True) and not args)  # O4d
+        shown = knowledge.show(self.ro(), number)["entry"]
+        self.assertEqual(shown["status"], "retracted")
+        with store.writer_lock(self.home, wait_s=0):  # both released it
+            pass
+
+    def test_a_refusal_still_releases_the_lock(self):
+        with self.assertRaises(knowledge.Refused):
+            knowledge.run_add(self.home, **self.kw(cites=[]))
+        with self.assertRaises(knowledge.Refused):
+            knowledge.run_retract(self.home, kid=999, reason="x", actor="user")
+        with store.writer_lock(self.home, wait_s=0):
+            pass
+        self.assertEqual(self.counts()["knowledge"], 0)
+
+    def test_run_add_is_busy_while_another_writer_holds_the_lock(self):
+        holder = tst.Child(self, tst.HOLD_LOCK, self.home, 60)
+        holder.wait_ready()
+        with self.assertRaises(store.Busy):
+            knowledge.run_add(self.home, wait_s=0, **self.kw())
+        with self.assertRaises(store.Busy):
+            knowledge.run_retract(
+                self.home, wait_s=0, kid=1, reason="x", actor="user"
+            )
+        self.assertEqual(self.counts()["knowledge"], 0)
+
+
+class SearchSeesKnowledgeTests(KnowCase):
+    """The entries add() writes are what query.search's knowledge shows."""
+
+    def hits(self, text="zebra"):
+        found = tq.query.search(self.ro(), text, cwd="/repo", env={})
+        return [(k["id"], k["text"], k["cites"]) for k in found["knowledge"]]
+
+    def test_search_shows_current_entries_until_superseded_or_retracted(self):
+        ref = self.ref(self.prompt)
+        one = kid(self.add(text="Use the zebra cache"))
+        self.assertEqual(
+            self.hits(), [(f"K{one}", "Use the zebra cache", [ref])]
+        )
+        two = kid(
+            self.add(text="Use the zebra cache and more", supersedes=one)
+        )
+        self.assertEqual([h[0] for h in self.hits()], [f"K{two}"])
+        knowledge.retract(self.rw, two, reason="wrong", actor="user")
+        self.assertEqual(self.hits(), [])
