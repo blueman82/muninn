@@ -424,3 +424,11 @@ class ResidueFilterTests(EraseCase):
             )
         ]
         self.assertEqual(quotes, ["q one"])  # the surviving session's quote
+
+
+class RefFormatTests(EraseCase):
+    def test_event_ref_uses_the_query_ref_format(self):
+        self.write(rollout(), primary())
+        self.run_ingest()
+        out = self.erase(event_ref=f"codex:{TID}:2")  # part defaults to 1
+        self.assertEqual((out["lines"], out["events"]), (1, 1))
