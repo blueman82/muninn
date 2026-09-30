@@ -7,6 +7,7 @@ Codex rollouts and Claude transcripts; no transcript text is used.
 import hashlib
 import json
 import unittest
+from pathlib import Path
 
 from pctx import classify as c
 
@@ -1385,3 +1386,72 @@ class CommitHintTests(unittest.TestCase):
             "codex", "t", "t", None, None, "primary", "r", "none", None
         )
         self.assertIsNone(positional.commit_hash)
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "classify"
+
+
+def classify_file(name):
+    """(thread, [(event, raw line)]) for a fixture read as raw JSONL."""
+    raws = (FIXTURES / name).read_bytes().splitlines(keepends=True)
+    first, state = json.loads(raws[0]), c.CodexState()
+    if name.startswith("codex"):
+        thread = c.codex_thread(first)
+        events = c.codex_events
+    else:
+        thread = c.claude_thread(f"-work-repo/{name}", first)
+        events = c.claude_events
+    found = []
+    for line, raw in enumerate(raws, start=1):
+        found += [(e, raw) for e in events(json.loads(raw), line, state)]
+    return thread, found
+
+
+class CanaryScenarioTests(unittest.TestCase):
+    """E7 (a)-(c) at the classification layer, from raw fixture bytes."""
+
+    NAMES = (
+        "codex-parent.jsonl",
+        "codex-fork.jsonl",
+        "codex-guardian.jsonl",
+        "claude-main.jsonl",
+    )
+
+    def test_default_eligible_canary_is_only_the_native_parent_prompt(self):
+        eligible, seen = [], {}
+        for name in self.NAMES:
+            thread, found = classify_file(name)
+            for event, raw in found:
+                for canary in ("CANARY-A", "CANARY-B", "CANARY-C", "CANARY-D"):
+                    if canary in event.text:
+                        seen.setdefault(canary, []).append(
+                            (
+                                name,
+                                thread.thread_class,
+                                event.kind,
+                                event.flags,
+                            )
+                        )
+                if (
+                    thread.thread_class == "primary"
+                    and event.kind in ("prompt", "reply", "tool_call")
+                    and not event.flags & 1
+                    and "CANARY" in event.text
+                ):
+                    digest = hashlib.sha256(raw.rstrip(b"\r\n")).hexdigest()
+                    self.assertEqual(c.record_hash(raw), digest)
+                    eligible.append((name, event.line, event.part))
+        self.assertEqual(eligible, [("codex-parent.jsonl", 3, 1)])
+        self.assertEqual(
+            seen,
+            {
+                "CANARY-A": [
+                    ("codex-guardian.jsonl", "reviewer", "prompt", 0)
+                ],
+                "CANARY-B": [("codex-parent.jsonl", "primary", "prompt", 0)],
+                "CANARY-C": [
+                    ("codex-fork.jsonl", "subagent", "delegation", 0)
+                ],
+                "CANARY-D": [("claude-main.jsonl", "primary", "prompt", 1)],
+            },
+        )
