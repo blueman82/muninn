@@ -582,6 +582,19 @@ class RehearsalTest(unittest.TestCase):
         self.assertTrue(homes)
 
 
+class CliTest(unittest.TestCase):
+    def test_foreign_home_is_dry_run_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            argv = ["--repo", tmp, "--sha", "0" * 40, "--home", tmp]
+            with self.assertRaises(SystemExit) as cm:
+                co.main(argv)
+            self.assertEqual(cm.exception.code, 2)
+            with self.assertRaises(SystemExit):
+                rb.main(
+                    ["--record", str(Path(tmp) / "none.json"), "--residue"]
+                )
+
+
 class CodexContractTest(unittest.TestCase):
     def test_hash_matches_real_codex_0_159_2(self):
         data = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
