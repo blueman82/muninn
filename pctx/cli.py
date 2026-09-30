@@ -15,15 +15,27 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import signal
 import sqlite3
 import sys
 import time
 from pathlib import Path
 
-from pctx import __version__, classify, erase, ingest, obs, query, store
+from pctx import (
+    __version__,
+    classify,
+    erase,
+    hook,
+    ingest,
+    obs,
+    query,
+    store,
+)
 
 NOTICE = classify.NOTICE
+PROVIDERS = ("claude", "codex")
+HOOKS = {"session-start": hook.session_start, "prompt": hook.prompt_submit}
 WRITER_WAIT_S = 15.0  # CLI writers wait this long for the lock (design 4.1)
 HELP = """environment:
   PCTX_HOME             data dir (default ~/.local/share/provenance-context)
@@ -110,10 +122,18 @@ def _parser() -> _Parser:
     p = cmd("doctor", help="health checks (exit 1 when unhealthy)")
     p.add_argument("--cutover", action="store_true")
     cmd("rebuild", help="rebuild the store from the transcripts")
+    p = cmd("hook", help="provider hook: payload on stdin, JSON on stdout")
+    events = p.add_subparsers(dest="hook_event", required=True)
+    for name in HOOKS:
+        e = events.add_parser(name, allow_abbrev=False)
+        e.add_argument("--provider", choices=PROVIDERS, required=True)
     return top
 
 
 def main(argv=None) -> int:
+    given = sys.argv[1:] if argv is None else list(argv)
+    if given[:1] == ["hook"] and not {"-h", "--help"} & set(given):
+        return _hook_main(given[1:], os.environ)  # never an argparse exit 2
     parser = _parser()
     try:
         args = parser.parse_args(argv)
@@ -129,6 +149,65 @@ def main(argv=None) -> int:
         parser.print_usage(sys.stderr)
         return 2
     return _run(args, os.environ)
+
+
+def _provider(args: list[str]) -> str | None:
+    """--provider VALUE or --provider=VALUE from a hook command line."""
+    for n, arg in enumerate(args):
+        if arg.startswith("--provider="):
+            value = arg.partition("=")[2]
+        elif arg == "--provider" and n + 1 < len(args):
+            value = args[n + 1]
+        else:
+            continue
+        return value if value in PROVIDERS else None
+    return None
+
+
+def _hook_actor(provider: str, payload: dict, env) -> str:
+    actor = obs.actor(env)
+    session = payload.get("session_id")
+    if actor == "user" and isinstance(session, str) and session:
+        return f"{provider}:{re.sub(r'[^\w-]', '', session)[:12] or 'unknown'}"
+    return actor
+
+
+def _hook_main(argv: list[str], env) -> int:
+    """pctx hook EVENT --provider P (design 4.8): the provider's payload on
+    stdin, its hook JSON (or {}) on stdout, exit 0 whatever happens. A hook
+    must never fail its provider; exit 2 would even block a prompt."""
+    started = time.monotonic()
+    payload = hook.read_input(sys.stdin.buffer)
+    run = HOOKS.get(argv[0]) if argv else None
+    provider = _provider(argv[1:])
+    trace: dict = {}
+    out: dict = {}
+    if run and provider:
+        try:
+            out = run(payload, provider, env, trace=trace)
+        except Exception:  # the hook functions are fail-open already
+            out = {}
+    body = json.dumps(out)
+    try:
+        print(body)
+        sys.stdout.flush()
+    except OSError:
+        pass
+    if run and provider and trace.get("skipped") != "disabled":
+        stage = {k: v for k, v in trace.items() if k != "skipped"}
+        obs.log_call(
+            store.data_home(env),
+            stage
+            | {
+                "cmd": f"hook {argv[0]}",
+                "actor": _hook_actor(provider, payload, env),
+                "exit": 0,
+                "bytes_out": len(body),
+                "ms": round((time.monotonic() - started) * 1000, 1),
+            },
+            env,
+        )
+    return 0
 
 
 _TEXT_KEYS = frozenset({"text", "snippet", "preview", "quote", "first_prompt"})
