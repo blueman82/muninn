@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pctx import ingest, store
+from pctx import ingest, query, store
 
 MIN_MATCH = 4  # a 1-3 character match would erase nearly everything
 TOMBSTONE_FILE = "tombstones.jsonl"
@@ -174,21 +174,8 @@ def _collect_session(conn, t: _Target, session: str) -> None:
         ]
 
 
-def _parse_ref(ref: str) -> tuple[str, str, int, int]:
-    """provider:thread_id:line.part; the thread id may be a unique prefix.
-    ponytail: WU5's query.parse_ref owns this format once it lands."""
-    try:
-        provider, thread, position = ref.split(":")
-        line, part = (int(n) for n in position.split("."))
-    except ValueError:
-        raise ValueError("event ref must be provider:thread_id:line.part")
-    if provider not in ("codex", "claude") or not thread:
-        raise ValueError("event ref must be provider:thread_id:line.part")
-    return provider, thread, line, part
-
-
 def _collect_event(conn, t: _Target, ref: str) -> None:
-    provider, thread, line, part = _parse_ref(ref)
+    provider, thread, line, part = query.parse_ref(ref)  # WU5 format
     sources = conn.execute(
         "SELECT * FROM source WHERE provider = ? AND substr(thread_id, 1, ?)"
         " = ?",
