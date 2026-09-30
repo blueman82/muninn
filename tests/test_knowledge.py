@@ -4,7 +4,10 @@ Synthetic rows only, in temp dirs; the cited text is invented. Rows go in
 through the query test builders and are read back with plain SQL.
 """
 
+import inspect
 import json
+import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -155,8 +158,13 @@ class AddCitationTests(KnowCase):
         self.refused(
             "not_citable", cites=[good, (self.ref(pasted), "pasted block")]
         )
-        self.add(cites=[(self.ref(self.reply), "wire the zebra cache")])
-        self.add(cites=[(self.ref(self.call), "pytest -q tests")])
+        for event, quote, role, kind in (
+            (self.reply, "wire the zebra cache", "assistant", "reply"),
+            (self.call, "pytest -q tests", "assistant", "tool_call"),
+        ):
+            got = self.add(cites=[(self.ref(event), quote)])
+            (cite,) = got["entry"]["cites"]
+            self.assertEqual((cite["role"], cite["kind"]), (role, kind))
 
     def test_ref_forms_and_error_codes(self):
         quote = "use the zebra cache"
@@ -504,7 +512,7 @@ class ListShowTests(KnowCase):
                 self.assertEqual(
                     knowledge.show(ro, ref)["entry"]["id"], f"K{self.new}"
                 )
-        for ref in (999, "junk", "K", None):
+        for ref in (999, "junk", "K", None, True, False, "9" * 30):
             with self.subTest(ref):
                 self.assertEqual(
                     knowledge.show(ro, ref),
@@ -566,9 +574,12 @@ class VerifyTests(KnowCase):
         )  # the kept event still says so
         self.reparse(self.prompt, digest="h2")
         self.assertEqual(self.state(), "changed")  # a change outranks missing
-        self.rw.execute("DELETE FROM event")
+        self.rw.execute("DELETE FROM event")  # the source row is left
+        self.assertEqual(self.state(), "missing")
         self.rw.execute("DELETE FROM source")  # nothing left to look at
         self.assertEqual(self.state(), "missing")
+        self.rw.execute("UPDATE citation SET quote = NULL")  # state untouched
+        self.assertEqual(self.state(), "erased")
         self.rw.execute(
             "UPDATE citation SET quote = NULL, span_start = NULL,"
             " span_end = NULL, state = 'erased'"
@@ -743,6 +754,7 @@ class ApprovalTests(KnowCase):
             "I propose to cache lookups in the zebra cache. Shall I?"
         )
         self.c1 = say("Bash: ls src", kind="tool_call", role="assistant")
+        self.hold = say("hold on, let me look at it")
         self.yes = say("yes, do it")
         self.r2 = bot("Done, the zebra cache is wired in.")
         self.short_reply = bot("Done.")
@@ -751,12 +763,8 @@ class ApprovalTests(KnowCase):
         solo = self.add_source("thr-solo", session="sess-solo")
         self.first = self.add_event(solo, self.repo, "go ahead")
         other = self.add_source("thr-other", session="sess-other")
-        self.add_event(
-            other,
-            self.repo,
-            "an unrelated question",
-            ts="2026-09-02T08:00:00.000Z",
-        )
+        for filler in ("an unrelated question", "more filler", "and more"):
+            self.add_event(other, self.repo, filler)
         self.r_other = self.add_event(
             other,
             self.repo,
@@ -920,10 +928,34 @@ class QuoteOnlyTests(ti.IngestCase):
         cite = self.add()["entry"]["cites"][0]
         self.assertEqual(cite["kind"], "prompt")
         self.assertTrue(cite["ref"].endswith(":5.1"))  # the appended prompt
-        only_old = self.add(
-            quote_only="we decided the zebra cache stays in place, old"
-        )
+        # the newer prompt shares the first word but not the quote: skipped
+        only_old = self.add(quote_only="the zebra cache stays in place, old")
         self.assertTrue(only_old["entry"]["cites"][0]["ref"].endswith(":2.1"))
+
+    def test_targeted_ingest_reaches_the_callers_sibling_threads(self):
+        fork = "0199aaaa-bbbb-4ccc-8ddd-333333333333"
+        self.write(
+            ti.rollout(fork),
+            [
+                tc.codex_meta("user", fork, session_id=self.tid),
+                tc.user_msg(1, "forked talk"),
+            ],
+        )
+        self.run_ingest(only_threads={fork})  # known, in the session of tid
+        self.append(self.path, [tc.user_msg(5, f"sibling: {self.QUOTE}")])
+        got = self.add(
+            env={"CODEX_THREAD_ID": fork}, quote_only=f"sibling: {self.QUOTE}"
+        )
+        ref = got["entry"]["cites"][0]["ref"]
+        self.assertTrue(ref.startswith(f"codex:{self.tid}:"))
+
+    def test_explicit_and_quote_only_citations_of_one_event_merge(self):
+        got = self.add()
+        (cite,) = got["entry"]["cites"]
+        again = self.add(cites=[(cite["ref"], f"  {self.QUOTE}  ")])
+        self.assertEqual(
+            [c["ref"] for c in again["entry"]["cites"]], [cite["ref"]]
+        )
 
     def test_quote_only_errors(self):
         self.refused_add("no_caller_session", env={})
@@ -1113,8 +1145,9 @@ class RunnerTests(KnowCase):
         real = store.connect_rw
 
         def spy(path, *args, **kw):
-            opened.append((path, args, kw))
-            return real(path, *args, **kw)
+            conn = real(path, *args, **kw)
+            opened.append((path, args, kw, conn))
+            return conn
 
         with mock.patch.object(store, "connect_rw", side_effect=spy):
             got = knowledge.run_add(self.home, **self.kw())
@@ -1123,12 +1156,17 @@ class RunnerTests(KnowCase):
                 self.home, kid=number, reason="no", actor="user"
             )
         self.assertEqual([o[0] for o in opened], [self.db, self.db])
-        for _, args, kw in opened:
+        for _, args, kw, conn in opened:
             self.assertTrue(kw.get("fullfsync", True) and not args)  # O4d
+            with self.assertRaises(sqlite3.ProgrammingError):  # closed
+                conn.execute("SELECT 1")
         shown = knowledge.show(self.ro(), number)["entry"]
         self.assertEqual(shown["status"], "retracted")
         with store.writer_lock(self.home, wait_s=0):  # both released it
             pass
+        for run in (knowledge.run_add, knowledge.run_retract):
+            waits = inspect.signature(run).parameters["wait_s"]
+            self.assertEqual(waits.default, 15.0)
 
     def test_a_refusal_still_releases_the_lock(self):
         with self.assertRaises(knowledge.Refused):
@@ -1170,3 +1208,189 @@ class SearchSeesKnowledgeTests(KnowCase):
         self.assertEqual([h[0] for h in self.hits()], [f"K{two}"])
         knowledge.retract(self.rw, two, reason="wrong", actor="user")
         self.assertEqual(self.hits(), [])
+
+
+class EdgeTests(KnowCase):
+    def test_duplicate_citations_are_stored_once(self):
+        ref, quote = self.ref(self.prompt), "use the zebra cache"
+        got = self.add(
+            cites=[
+                (ref, quote),
+                (ref, "  use   the zebra cache "),
+                (ref, quote),
+            ]
+        )
+        self.assertEqual(len(got["entry"]["cites"]), 1)
+        two = self.add(cites=[(ref, quote), (ref, "decided to use")])
+        self.assertEqual(len(two["entry"]["cites"]), 2)  # other words: kept
+
+    def test_check_names_at_most_100_broken_citations(self):
+        cite = (self.ref(self.prompt), "use the zebra cache")
+        for i in range(101):
+            self.add(text=f"Entry {i}", cites=[cite])
+        VerifyTests.reparse(self, self.prompt, digest="h2")
+        got = knowledge.check(self.ro())
+        self.assertEqual((got["citations"], got["changed"]), (101, 101))
+        self.assertEqual(len(got["problems"]), 100)
+        self.assertEqual(got["problems_omitted"], 1)
+
+    def test_list_for_an_unknown_cwd_with_no_global_entries_is_empty(self):
+        self.add()
+        got = knowledge.list_entries(self.ro(), cwd="/nowhere")
+        self.assertEqual((got["count"], got["entries"]), (0, []))
+        self.assertEqual(
+            knowledge.list_entries(self.ro(), cwd="/repo")["count"], 1
+        )
+
+    def test_the_first_user_prompt_quote_is_shown(self):
+        first = (self.ref(self.prompt), "decided to use the zebra")
+        second = (self.ref(self.prompt), "for every lookup")
+        reply = (self.ref(self.reply), "wire the zebra cache")
+        self.add(text="Two quotes", cites=[reply, first, second])
+        got = knowledge.block_entries(self.ro(), [self.repo])
+        self.assertEqual(got[0]["quote"], "decided to use the zebra")
+        self.assertEqual(got[0]["cite"], self.ref(self.prompt))
+        for limit in (-1, 0):
+            self.assertEqual(
+                knowledge.block_entries(self.ro(), [self.repo], limit=limit),
+                [],
+            )
+
+    def test_quote_only_skips_what_cannot_be_cited(self):
+        text = "we agreed the yak cache is fine for now"
+
+        def prompt(name, ts, session="sess-x", cls="primary", **kw):
+            src = self.add_source(name, session=session, cls=cls)
+            return self.add_event(src, self.repo, text, ts=ts, **kw)
+
+        good = prompt("thr-good", "2026-09-03T10:00:10.000Z")
+        prompt("thr-rev", "2026-09-03T10:00:20.000Z", cls="reviewer")
+        prompt("thr-sub", "2026-09-03T10:00:30.000Z", cls="subagent")
+        prompt("thr-flag", "2026-09-03T10:00:40.000Z", flags=1)
+        prompt(
+            "thr-reply",
+            "2026-09-03T10:00:50.000Z",
+            kind="reply",
+            role="assistant",
+        )
+        prompt("thr-harness", "2026-09-03T10:00:55.000Z", kind="harness")
+        prompt(
+            "thr-delegation",
+            "2026-09-03T10:00:58.000Z",
+            cls="subagent",
+            kind="delegation",
+        )
+        prompt("thr-other", "2026-09-03T10:01:00.000Z", session="sess-y")
+        got = self.add(
+            cites=[],
+            quote_only="we agreed the yak cache",
+            env={"CODEX_SESSION_ID": "sess-x"},
+        )
+        self.assertEqual(
+            [c["ref"] for c in got["entry"]["cites"]], [self.ref(good)]
+        )
+
+
+class StoreTroubleTests(KnowCase):
+    """A store that cannot be read is StoreUnavailable (exit 4), not a
+    sqlite traceback, for every public reader and writer."""
+
+    def test_store_lost_mid_call(self):
+        self.add()
+        reader = self.ro()
+        cites = [(self.ref(self.prompt), "use the zebra cache")]
+        citation = reader.execute("SELECT * FROM citation").fetchone()
+        calls = {
+            "list_entries": lambda: knowledge.list_entries(
+                reader, cwd="/repo"
+            ),
+            "show": lambda: knowledge.show(reader, 1),
+            "check": lambda: knowledge.check(reader),
+            "verify_citation": lambda: knowledge.verify_citation(
+                reader, citation
+            ),
+            "block_entries": lambda: knowledge.block_entries(
+                reader, [self.repo]
+            ),
+            "add": lambda: knowledge.add(
+                self.rw,
+                kind="decision",
+                text="Again",
+                cites=cites,
+                cwd="/repo",
+                actor="user",
+                roots={},
+                env={},
+            ),
+            "retract": lambda: knowledge.retract(
+                self.rw, 1, reason="x", actor="user"
+            ),
+        }
+        self.db.write_bytes(os.urandom(8192))  # no database any more
+        for name, call in calls.items():
+            with self.subTest(name), self.assertRaises(store.StoreUnavailable):
+                call()
+
+
+class LifecycleTests(ti.IngestCase):
+    """The E8 flow on real ingest output: cite, find, correct, refuse."""
+
+    def setUp(self):
+        super().setUp()
+        self.tid = ti.TID
+        self.write(
+            ti.rollout(self.tid),
+            [
+                tc.codex_meta("user", self.tid),
+                tc.user_msg(1, "the canary build flag is off for now"),
+                tc.reply(2, "noted"),
+            ],
+        )
+        main = f"-work-repo/{tc.SESSION}.jsonl"
+        self.write(
+            main,
+            [tc.claude_rec("user", "correction: the canary build flag is on")],
+            root="claude-projects",
+        )
+        self.run_ingest()
+
+    def add(self, **kw):
+        args = {
+            "kind": "fact", "text": "The build flag is off", "cites": [],
+            "cwd": tc.CWD, "actor": "user", "roots": self.roots, "env": {},
+        }  # fmt: skip
+        return knowledge.add(self.conn, **(args | kw))
+
+    def test_cite_find_correct_and_refuse(self):
+        codex = f"codex:{self.tid}:2.1"
+        claude = f"claude:{tc.SESSION}:1.1"
+        one = self.add(cites=[(codex, "build flag is off")])["entry"]
+        found = tq.query.search(self.conn, "build flag", cwd=tc.CWD, env={})
+        self.assertEqual([k["id"] for k in found["knowledge"]], [one["id"]])
+        self.assertEqual(found["knowledge"][0]["cites"], [codex])
+        opened = tq.query.open_event(
+            self.conn, codex, roots=self.roots, raw=True
+        )
+        self.assertTrue(opened["hash_ok"])  # the citation opens the original
+        two = self.add(
+            text="The build flag is on",
+            cites=[(claude, "build flag is on")],
+            supersedes=one["id"],
+        )["entry"]
+        found = tq.query.search(self.conn, "build flag", cwd=tc.CWD, env={})
+        self.assertEqual([k["id"] for k in found["knowledge"]], [two["id"]])
+        history = knowledge.show(self.conn, one["id"])
+        self.assertEqual(history["entry"]["text"], "The build flag is off")
+        self.assertEqual(history["entry"]["status"], "superseded")
+        self.assertEqual(history["entry"]["cites"][0]["ref"], codex)
+        self.assertEqual(
+            [e["id"] for e in history["chain"]["superseded_by"]], [two["id"]]
+        )
+        for cites, code in (
+            ([], "uncited"),
+            ([(f"codex:{self.tid}:99.1", "a made up citation")], "not_found"),
+            ([(codex, "a quote that is not there")], "quote_not_found"),
+        ):
+            with self.subTest(code), self.assertRaises(knowledge.Refused) as c:
+                self.add(cites=cites)
+            self.assertEqual(c.exception.code, code)

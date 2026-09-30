@@ -137,22 +137,22 @@ def _caller(conn, roots, env) -> str | None:
     threads so the prompt just typed is there. It runs on this connection:
     the caller of add holds the writer lock, which is not reentrant."""
     ids = {env.get(name) for name in CALLER_ENV} - {None, ""}
-    root = query.caller_root(conn, env)
     if ids and roots:
-        ingest.ingest(conn, roots, only_threads=ids | {root})
-        root = query.caller_root(conn, env)
-    return root
+        # never None in the set: ingest matches a continuation file's None
+        ingest.ingest(
+            conn, roots, only_threads=ids | {query.caller_root(conn, env)}
+        )
+    return query.caller_root(conn, env)
 
 
 def _caller_prompt(conn: sqlite3.Connection, root: str, quote: str) -> dict:
-    """The caller's latest user prompt that holds the quote."""
+    """The caller's latest citable user prompt that holds the quote."""
     wanted = " ".join(quote.split())
     if not wanted or len(wanted) > QUOTE_MAX:
         raise Refused("quote_length")
     rows = conn.execute(
         "SELECT e.id FROM event e JOIN source s ON s.id = e.source_id"
-        " WHERE s.session_root = ? AND s.thread_class = 'primary'"
-        " AND e.kind = 'prompt' AND e.role = 'user' AND e.flags & 1 = 0"
+        " WHERE s.session_root = ? AND e.kind = 'prompt' AND e.role = 'user'"
         " AND instr(e.text, ?) > 0"
         " ORDER BY COALESCE(e.ts, '') DESC, s.thread_id DESC,"
         " e.line DESC, e.part DESC",
@@ -161,9 +161,8 @@ def _caller_prompt(conn: sqlite3.Connection, root: str, quote: str) -> dict:
     for row in rows:
         try:
             return _cite(conn, str(row["id"]), quote)
-        except Refused as refused:
-            if refused.code not in ("quote_not_found", "quote_length"):
-                raise
+        except Refused:  # not this prompt: not citable, or another wording
+            continue
     raise Refused("quote_not_found")
 
 
