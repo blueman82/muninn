@@ -834,3 +834,14 @@ class SegmentTests(IngestCase):
         self.run_ingest()
         count = self.conn.execute("SELECT count(*) FROM source").fetchone()[0]
         self.assertEqual(count, 0)
+
+
+class CopyTests(IngestCase):
+    def test_same_pass_copies_indexed_once(self):
+        self.write(rollout(), primary())
+        self.write(Path(rollout()).name, primary(), root="codex-archived")
+        stats = self.run_ingest()
+        self.assertEqual((stats.failed, stats.skipped_files), (0, 1))
+        count = self.conn.execute("SELECT count(*) FROM source").fetchone()[0]
+        self.assertEqual(count, 1)
+        self.assertEqual(len(self.events()), 2)

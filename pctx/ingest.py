@@ -389,6 +389,9 @@ def _process(conn, w: _Work, stats: PassStats, scopes, seen) -> None:
     """One source in one transaction; an error rolls back only it."""
     if w.row is not None:
         seen.add(w.row["id"])  # never marked missing because it failed
+    elif _source_id(conn, PROVIDER[w.name], w.info.thread_id):
+        stats.skipped_files += 1  # a copy that arrived earlier this pass
+        return
     try:
         conn.execute("BEGIN IMMEDIATE")
         source_id, added, removed, skipped = _write(conn, w, scopes)
