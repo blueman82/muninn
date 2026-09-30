@@ -12,3 +12,10 @@ select = ["E", "F", "I"]
 [tool.ruff.lint.per-file-ignores]
 "hooks/codex.py" = ["E402"]
 "scripts/claude_context.py" = ["E402"]
+
+[tool.isort]
+profile = "black"
+line_length = 79
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

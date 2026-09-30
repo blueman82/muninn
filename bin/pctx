@@ -1,0 +1,12 @@
+#!/bin/sh
+# ponytail: interpreter path is pinned to Homebrew python3.13; make it
+# configurable if pctx must run on a machine without that path.
+set -eu
+self=$(realpath "$0")
+root=$(dirname "$(dirname "$self")")
+exec /opt/homebrew/bin/python3.13 -I -B -c '
+import sys
+sys.path.insert(0, sys.argv.pop(1))
+from pctx.cli import main
+raise SystemExit(main(sys.argv[1:]))
+' "$root" "$@"
