@@ -4,6 +4,7 @@ Synthetic rows in temp dirs; the providers' payloads are built by hand.
 Nothing touches a live data dir or a provider root.
 """
 
+import contextlib
 import io
 import json
 import os
@@ -729,6 +730,16 @@ class HookCommandTests(HookCliCase):
             (self.tmp / "gone").exists()
         )  # a hook creates nothing
 
+    def test_an_oversize_payload_is_ignored_not_read_on(self):
+        sub = self.tmp / "sub.jsonl"
+        sub.write_text(json.dumps(tc.subagent_meta("thr-sub")) + "\n")
+        small = {"cwd": str(self.repo), "transcript_path": str(sub)}
+        done = self.run_hook("session-start", "codex", small)
+        self.assertEqual(self.parsed(done), {})  # a subagent: silent
+        big = small | {"pad": "x" * (hook.MAX_INPUT + 10)}
+        done = self.run_hook("session-start", "codex", big)
+        self.assertIn("hookSpecificOutput", self.parsed(done))  # unread
+
 
 CANARY = "canaryalpha canarybeta canarygamma"
 ASK = "where is the canaryalpha canarybeta canarygamma setup"
@@ -1096,19 +1107,47 @@ class HookCliEdgeTests(HookCliCase):
         self.assertEqual((code, out), (2, ""))  # the skeleton help contract
         self.assertIn("session-start", err)
 
+    def main_hook(self, stdin=b"{}", patches=()):
+        """(exit code, stdout text) of an in-process session-start call."""
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            for patch in patches:
+                stack.enter_context(patch)
+            stack.enter_context(
+                mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(stdin)))
+                if stdin is not None
+                else mock.patch("sys.stdin", None)
+            )
+            stack.enter_context(
+                mock.patch.dict(os.environ, self.env, clear=True)
+            )
+            stack.enter_context(mock.patch("sys.stdout", out))
+            code = tcli.cli.main(
+                ["hook", "session-start", "--provider", "claude"]
+            )
+        return code, out.getvalue()
+
     def test_a_crashing_hook_function_still_prints_json_and_exits_0(self):
         def boom(payload, provider, env, trace=None):
             raise RuntimeError("boom")
 
-        stdin = io.TextIOWrapper(io.BytesIO(b"{}"))
-        with (
-            mock.patch.dict(tcli.cli.HOOKS, {"session-start": boom}),
-            mock.patch("sys.stdin", stdin),
-            mock.patch.dict(os.environ, self.env, clear=True),
-        ):
-            out = io.StringIO()
-            with mock.patch("sys.stdout", out):
-                code = tcli.cli.main(
-                    ["hook", "session-start", "--provider", "claude"]
-                )
-        self.assertEqual((code, json.loads(out.getvalue())), (0, {}))
+        patch = mock.patch.dict(tcli.cli.HOOKS, {"session-start": boom})
+        code, text = self.main_hook(patches=[patch])
+        self.assertEqual((code, json.loads(text)), (0, {}))
+
+    def test_a_failing_stage_log_or_missing_stdin_never_fails_the_hook(self):
+        self.session(tcli.TID, "a prompt", "a reply")
+        self.run_ingest()  # the store exists
+        log = mock.patch.object(
+            tcli.cli.obs, "log_call", side_effect=RuntimeError("log")
+        )
+
+        def context(text):
+            return json.loads(text)["hookSpecificOutput"]["additionalContext"]
+
+        code, text = self.main_hook(patches=[log])
+        self.assertEqual(code, 0)
+        self.assertIn(USAGE, context(text))  # printed before the log ran
+        code, text = self.main_hook(stdin=None)  # sys.stdin is None
+        self.assertEqual(code, 0)
+        self.assertIn(USAGE, context(text))

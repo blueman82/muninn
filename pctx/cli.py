@@ -221,7 +221,10 @@ def _hook_main(argv: list[str], env) -> int:
     stdin, its hook JSON (or {}) on stdout, exit 0 whatever happens. A hook
     must never fail its provider; exit 2 would even block a prompt."""
     started = time.monotonic()
-    payload = hook.read_input(sys.stdin.buffer)
+    try:
+        payload = hook.read_input(sys.stdin.buffer)
+    except Exception:  # e.g. no stdin at all
+        payload = {}
     run = HOOKS.get(argv[0]) if argv else None
     provider = _provider(argv[1:])
     trace: dict = {}
@@ -239,18 +242,21 @@ def _hook_main(argv: list[str], env) -> int:
         pass
     if run and provider and trace.get("skipped") != "disabled":
         stage = {k: v for k, v in trace.items() if k != "skipped"}
-        obs.log_call(
-            store.data_home(env),
-            stage
-            | {
-                "cmd": f"hook {argv[0]}",
-                "actor": _hook_actor(provider, payload, env),
-                "exit": 0,
-                "bytes_out": len(body),
-                "ms": round((time.monotonic() - started) * 1000, 1),
-            },
-            env,
-        )
+        try:
+            obs.log_call(
+                store.data_home(env),
+                stage
+                | {
+                    "cmd": f"hook {argv[0]}",
+                    "actor": _hook_actor(provider, payload, env),
+                    "exit": 0,
+                    "bytes_out": len(body),
+                    "ms": round((time.monotonic() - started) * 1000, 1),
+                },
+                env,
+            )
+        except Exception:  # the stage line is best-effort
+            pass
     return 0
 
 
