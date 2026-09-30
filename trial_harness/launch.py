@@ -28,6 +28,11 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+if __package__:
+    from . import mcp_reader
+else:  # run as a script: python3.13 -B trial_harness/launch.py ...
+    import mcp_reader
+
 HERE = Path(__file__).resolve().parent
 CONFIG_PATH = HERE / "launcher_config.json"
 SERVER = HERE / "mcp_reader.py"
@@ -249,6 +254,11 @@ def launch_reader(
         "call_timeout_s": ceilings["call_timeout_s"],
         "exec_cwd": cfg["exec_cwd"],
     } | backend
+    if arm == "OLD":  # §4.1: native trace counts are reconciled per unit
+        trace = native_trace_path(backend["old"]["cli"])
+        binding["native_trace_offset"] = (
+            trace.stat().st_size if trace.exists() else 0
+        )
     binding_path = write_private(out_dir / "binding.json", json.dumps(binding))
     mcp_path = write_private(
         out_dir / "mcp.json", json.dumps(mcp_config(cfg, binding_path))
@@ -343,6 +353,30 @@ def extract_final_answer(text: str) -> dict | None:
     return found
 
 
+def native_trace_path(cli: str) -> Path:
+    """The frozen CLI appends its own trace next to itself."""
+    return Path(cli).with_name("reader_trace.jsonl")
+
+
+def reconcile(unit_dir: Path) -> dict:
+    """Verify the wrapper log chain and, for OLD, the native trace count."""
+    binding = json.loads((unit_dir / "binding.json").read_text())
+    log = unit_dir / "wrapper-log.jsonl"
+    records = mcp_reader.verify_chain(log) if log.exists() else 0
+    result = {"wrapper_records": records, "chain_ok": True}
+    if binding["arm"] == "OLD":
+        lines = log.read_text().splitlines() if log.exists() else []
+        executed = sum(json.loads(line)["exit_code"] == 0 for line in lines)
+        native = mcp_reader.native_trace_count(
+            native_trace_path(binding["old"]["cli"]),
+            binding["qid"],
+            binding["native_trace_offset"],
+        )
+        result |= {"wrapper_ok_calls": executed, "native_trace": native}
+        result["native_trace_match"] = executed == native
+    return result
+
+
 def close_unit(unit_dir: Path, index_path: Path, unit_id: str) -> dict:
     """Write final message and extracted JSON; append hashes (§4.2)."""
     unit_dir = Path(unit_dir)
@@ -363,6 +397,8 @@ def close_unit(unit_dir: Path, index_path: Path, unit_id: str) -> dict:
         path = unit_dir / name
         key = name.split(".")[0].replace("-", "_") + "_sha256"
         entry[key] = sha256_file(path) if path.exists() else None
+    if (unit_dir / "binding.json").exists():
+        entry["reconcile"] = reconcile(unit_dir)
     with open(index_path, "a") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
     os.chmod(index_path, 0o600)

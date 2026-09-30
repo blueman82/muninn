@@ -247,6 +247,20 @@ class OldWrapperTest(WrapperFixture):
         with self.assertRaises(ValueError):
             mcp_reader.verify_chain(self.log)
 
+    def test_reconcile_checks_chain_and_native_trace(self) -> None:
+        self.binding["native_trace_offset"] = 0
+        (self.tmp / "binding.json").write_text(json.dumps(self.binding))
+        wrapper = self.wrapper()
+        for args in (["files"], ["question"], ["open", "1"]):
+            wrapper.call({"token": self.token, "args": args})
+        result = launch.reconcile(self.tmp)
+        self.assertEqual(result["wrapper_records"], 3)
+        self.assertEqual(result["wrapper_ok_calls"], 2)
+        self.assertTrue(result["native_trace_match"])
+        with (self.tmp / "reader_trace.jsonl").open("a") as handle:
+            handle.write(json.dumps({"question": "T1"}) + "\n")
+        self.assertFalse(launch.reconcile(self.tmp)["native_trace_match"])
+
     def test_native_trace_count_matches_successful_calls(self) -> None:
         wrapper = self.wrapper()
         for args in (["files"], ["question"], ["open", "bad"], ["open", "1"]):
