@@ -77,10 +77,11 @@ def claude_settings(old):
         "env": {"TOKEN": CRED},
         "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "s"}]}]},
         "enabledPlugins": {
-            "coderails@coderails": True,
+            "a@a": True,
             "provenance-context@provenance-context-local": False,
+            "coderails@coderails": True,
         },
-        "extraKnownMarketplaces": {"coderails": {}, co.MKT_NAME: mkt},
+        "extraKnownMarketplaces": {co.MKT_NAME: mkt, "coderails": {}},
     }
 
 
@@ -112,7 +113,7 @@ class Fake:
         self.calls, self.clock = [], [time.time()]
         self.loaded, self.pid = "old", 64653
         self.heartbeat, self.doctor, self.cutover_doctor = True, 0, 0
-        self.toml_writes = []
+        self.toml_writes, self.probe_mode, self.linger = [], "ok", False
 
     def now(self):
         return self.clock[0]
@@ -164,9 +165,12 @@ class Fake:
         }.get(self.loaded, "")
         if "-p" in args:
             return done(cmd.encode())
+        if self.linger:  # an old-tree process that survives bootout
+            cmd += f"\n99 python {self.old}/scripts/context.py serve"
         return done(f"  1 /sbin/launchd\n{self.pid} {cmd}\n".encode())
 
     def _pctx(self, args, env, input):
+        assert "PCTX_ROOTS" not in env, "inherited trial env reached pctx"
         if args[0] == "hook":
             assert env.get("PCTX_HOOK_DISABLE") == "1" and input == b"{}"
             return done(b"{}")
@@ -218,6 +222,8 @@ class Fake:
 
     def probe(self, ctx):
         """Shape of Codex app-server hooks/list entries for our plugin."""
+        if self.probe_mode == "error":
+            raise TimeoutError
         cache = self.home / ".codex/plugins/cache" / co.MKT_NAME
         (hooks_file,) = cache.glob("provenance-context/*/hooks/hooks.json")
         text = (self.home / ".codex/config.toml").read_text()
@@ -229,13 +235,22 @@ class Fake:
             status = "untrusted" if state is None else "modified"
             if state and state["trusted_hash"] == hook["hash"]:
                 status = "trusted"
+            if self.probe_mode == "untrusted":
+                status = "untrusted"
+            if self.probe_mode == "wrong":
+                hook["command"] = f"{self.old}/hooks/codex.py"
+            stale = str(hooks_file).replace("0.2.0", "0.1.5+codex.1")
             out.append(
                 {
                     "key": f"{co.PLUGIN_ID}:hooks/hooks.json:{hook['suffix']}",
                     "pluginId": co.PLUGIN_ID,
                     "command": hook["command"],
                     "currentHash": hook["hash"],
-                    "sourcePath": str(hooks_file),
+                    "sourcePath": (
+                        stale
+                        if self.probe_mode == "stale"
+                        else str(hooks_file)
+                    ),
                     "trustStatus": status,
                 }
             )
@@ -269,7 +284,7 @@ class World:
         self.sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
         h, old = self.home, str(self.old)
         mkt = {"source": {"source": "directory", "path": old}}
-        known = {"coderails": {}, co.MKT_NAME: dict(mkt, installLocation=old)}
+        known = {co.MKT_NAME: dict(mkt, installLocation=old), "coderails": {}}
         prog = [f"{h}/.local/share/provenance-context/runtime/bin/python"]
         prog += [f"{old}/scripts/context.py", "serve"]
         pcache = ".codex/plugins/cache/provenance-context-local/"
@@ -379,7 +394,8 @@ class RehearsalTest(unittest.TestCase):
             s["hooks"]["Stop"], claude_settings(w.old)["hooks"]["Stop"]
         )
         self.assertEqual(list(s["extraKnownMarketplaces"]), ["coderails"])
-        self.assertEqual(s["enabledPlugins"], {"coderails@coderails": True})
+        want = {"a@a": True, "coderails@coderails": True}
+        self.assertEqual(s["enabledPlugins"], want)
         text = (h / ".codex/config.toml").read_text()
         self.assertEqual(
             codex_view(text), (f"{lib}/integrations/codex", True, 2)
@@ -440,6 +456,13 @@ class RehearsalTest(unittest.TestCase):
         with self.assertRaises(co.StepFailed):
             co.cutover(self.w.ctx(), self.w.repo, self.w.sha)
         self.assertEqual(self.w.record()["failed"]["step"], "start_new")
+        self.assert_restored()
+
+    def test_old_process_surviving_bootout_rolls_back(self):
+        self.w.fake.linger = True
+        with self.assertRaises(co.StepFailed):
+            co.cutover(self.w.ctx(), self.w.repo, self.w.sha)
+        self.assertEqual(self.w.record()["failed"]["step"], "stop_old")
         self.assert_restored()
 
     def test_prebuild_doctor_failure_rolls_back(self):
@@ -530,6 +553,33 @@ class RehearsalTest(unittest.TestCase):
         expected = {"provenance-context-legacy-20261001T000000Z", "snapshot"}
         expected |= {"data", "codex-plugin-cache", "provenance-context-local"}
         self.assertLessEqual(expected, listed)
+
+    def test_untrusted_or_silent_probe_leaves_owner_step(self):
+        for mode in ("untrusted", "error"):
+            with self.subTest(mode):
+                w = World(self)
+                w.fake.probe_mode = mode
+                rec = co.cutover(w.ctx(), w.repo, w.sha)
+                self.assertEqual(
+                    (rec["trust"], w.fake.loaded), ("owner", "new")
+                )
+                self.assertTrue(any("OWNER STEP" in line for line in w.out))
+
+    def test_wrong_codex_answer_rolls_back(self):
+        for mode in ("wrong", "stale"):
+            with self.subTest(mode):
+                self.w = World(self)
+                self.w.fake.probe_mode = mode
+                with self.assertRaises(co.StepFailed):
+                    co.cutover(self.w.ctx(), self.w.repo, self.w.sha)
+                self.assert_restored()
+
+    def test_inherited_pctx_env_never_reaches_pctx(self):
+        trial = {"PCTX_ROOTS": '{"codex": "/trial"}', "PCTX_HOME": "/trial"}
+        with mock.patch.dict(os.environ, trial):
+            co.cutover(self.w.ctx(), self.w.repo, self.w.sha)
+        homes = {c[0] for c in self.w.fake.calls if c[0].endswith("pctx")}
+        self.assertTrue(homes)
 
 
 class CodexContractTest(unittest.TestCase):

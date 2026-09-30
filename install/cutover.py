@@ -509,8 +509,10 @@ def pin(ctx, rec):
     relink(ctx.pctx, ctx.lib / "current/bin/pctx", ctx.ts)
 
 
-def pctx_env(home):
-    return dict(os.environ, PCTX_HOME=str(home))
+def pctx_env(home, **extra):
+    """Environment for pctx: no inherited PCTX_* (e.g. trial PCTX_ROOTS)."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PCTX_")}
+    return dict(env, PCTX_HOME=str(home), **extra)
 
 
 def prebuild(ctx, rec):
@@ -641,6 +643,7 @@ def codex(ctx, rec):
     pinned = (
         ctx.lib / "current/integrations/codex/hooks/hooks.json"
     ).read_bytes()
+    rec["codex_plugin_version"] = out["version"]
     installed = Path(out["installedPath"]).resolve()
     if installed != (ctx.cache / out["version"]).resolve():
         raise StepFailed("codex installed the plugin somewhere unexpected")
@@ -695,7 +698,8 @@ def verify(ctx, rec):
     checks = []
 
     def check(name, ok, detail=""):
-        checks.append({"check": name, "ok": bool(ok), "detail": detail})
+        ok = None if ok is None else bool(ok)  # None: could not verify
+        checks.append({"check": name, "ok": ok, "detail": detail})
 
     check("old_tree_unchanged", tree_hash(ctx) == rec["old_tree_hash"])
     refs = old_refs(ctx)
@@ -704,42 +708,54 @@ def verify(ctx, rec):
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
     check("heartbeat_fresh", fresh(ctx, 0))
-    env = dict(os.environ, PCTX_HOOK_DISABLE="1")
+    env = pctx_env(ctx.data, PCTX_HOOK_DISABLE="1")
     for cmd in hook_commands(ctx):
         r = ctx.run(shlex.split(cmd), env=env, input=b"{}")
         check(
             "hook_runs", r.returncode == 0 and r.stdout.strip() == b"{}", cmd
         )
     if ctx.probe:
-        pinned = (
-            ctx.lib / "current/integrations/codex/hooks/hooks.json"
-        ).read_bytes()
-        want = {
-            f"{PLUGIN_ID}:hooks/hooks.json:{h['suffix']}": h
-            for h in codex_hooks(pinned)
-        }
-        got = {
-            e["key"]: e
-            for e in ctx.probe(ctx)
-            if e.get("pluginId") == PLUGIN_ID
-        }
-        same = set(got) == set(want) and all(
-            got[k]["command"] == want[k]["command"]
-            and got[k].get("currentHash") == want[k]["hash"]
-            and str(ctx.cache) in got[k]["sourcePath"]
-            for k in want
-        )
-        check("codex_resolves_new_hooks", same, ", ".join(sorted(got)))
-        if not all(e["trustStatus"] == "trusted" for e in got.values()):
-            rec["trust"] = "owner"
-            ctx.say(OWNER_STEP)
+        codex_checks(ctx, rec, check)
     r = ctx.run([ctx.pctx, "doctor", "--cutover"], env=pctx_env(ctx.data))
     check("doctor_cutover", r.returncode == 0)
     report = json.dumps({"checks": checks}, indent=1).encode()
     ce.atomic_write(ctx.legacy / "verify.json", report, 0o600)
-    failed = [c["check"] for c in checks if not c["ok"]]
+    failed = [c["check"] for c in checks if c["ok"] is False]
     if failed:
         raise StepFailed("verify failed: " + ", ".join(failed))
+
+
+def codex_checks(ctx, rec, check):
+    """Ask Codex which hooks it resolves. A wrong answer fails verify;
+    no answer or an untrusted hook only leaves the owner step."""
+    hooks = ctx.lib / "current/integrations/codex/hooks/hooks.json"
+    key = f"{PLUGIN_ID}:hooks/hooks.json:"
+    want = {key + h["suffix"]: h for h in codex_hooks(hooks.read_bytes())}
+    try:
+        entries = ctx.probe(ctx)
+    except Exception as exc:  # no answer is not a wrong answer
+        check("codex_resolves_new_hooks", None, f"probe: {type(exc).__name__}")
+        rec["trust"] = "owner"
+        ctx.say(f"WARNING: Codex hooks/list probe failed; {OWNER_STEP}")
+        return
+    got = {e["key"]: e for e in entries if e.get("pluginId") == PLUGIN_ID}
+    active = ctx.cache / rec["codex_plugin_version"] / "hooks/hooks.json"
+    same = set(got) == set(want) and all(
+        got[k]["command"] == want[k]["command"]
+        and Path(got[k]["sourcePath"]).resolve() == active.resolve()
+        for k in want
+    )
+    check("codex_resolves_new_hooks", same, ", ".join(sorted(got)))
+    rec["codex_hooks"] = {
+        k: {
+            "trust": e["trustStatus"],
+            "hash_match": e.get("currentHash") == want.get(k, {}).get("hash"),
+        }
+        for k, e in got.items()
+    }
+    if not all(v["trust"] == "trusted" for v in rec["codex_hooks"].values()):
+        rec["trust"] = "owner"
+        ctx.say(OWNER_STEP)
 
 
 STEPS = (
@@ -826,6 +842,7 @@ def codex_probe(ctx, timeout=60):
         result = call(2, "hooks/list", {"cwds": [str(ctx.home)]})["result"]
     finally:
         p.terminate()
+        p.wait(timeout=10)
     return [h for entry in result["data"] for h in entry["hooks"]]
 
 
