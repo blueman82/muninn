@@ -411,6 +411,18 @@ class RehearsalTest(unittest.TestCase):
         rb.rollback(w.ctx(), co.load_record(record))
         self.assert_restored()
 
+    def test_second_rollback_is_a_no_op(self):
+        w = self.w
+        rec = co.cutover(w.ctx(), w.repo, w.sha)
+        record = co.load_record(Path(rec["legacy"]) / "cutover-record.json")
+        self.assertEqual(rb.rollback(w.ctx(), record), [])
+        state, calls = snapshot(w.home), len(w.fake.calls)
+        self.assertEqual(rb.rollback(w.ctx(), record), [])
+        self.assertEqual(snapshot(w.home), state)
+        verbs = {c[1] for c in w.fake.calls[calls:] if "launchctl" in c[0]}
+        self.assertEqual(verbs, {"print"})
+        self.assert_restored()
+
     def test_record_holds_only_the_named_keys(self):
         w = self.w
         rec = co.cutover(w.ctx(), w.repo, w.sha)
