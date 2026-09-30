@@ -13,7 +13,8 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 
 # Design 3.2 DDL plus the accepted amendments (event.cwd + event_cwd index,
-# event.kind delegation/tool_error, event.parent_event_id). Line-wrapped to
+# event.kind delegation/tool_error, event.parent_event_id, source.parse_state
+# and the per-source usage counts of O9). Line-wrapped to
 # 79 columns; source_issue lists `code` before its table-level PRIMARY KEY
 # because SQLite rejects a column definition after a table constraint.
 # knowledge_ai/ad/au are spelled out with NULL-text guards: an erased entry
@@ -51,8 +52,16 @@ CREATE TABLE source (id INTEGER PRIMARY KEY,
   skipped_lines INTEGER NOT NULL DEFAULT 0,
   classifier_version INTEGER NOT NULL,
   first_seen REAL NOT NULL, last_seen REAL NOT NULL,
+  parse_state TEXT,  -- ingest resume state (JSON ids and paths, no text)
   UNIQUE (provider, thread_id), UNIQUE (root, path));
 CREATE INDEX source_session ON source(provider, session_root);
+CREATE TABLE usage (  -- O9: pctx invocations seen at ingest; counts only
+  source_id INTEGER PRIMARY KEY REFERENCES source(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL CHECK (provider IN ('codex','claude')),
+  session_root TEXT NOT NULL,
+  calls INTEGER NOT NULL DEFAULT 0,
+  errors INTEGER NOT NULL DEFAULT 0,  -- codex outputs with a failed exit
+  last_ts TEXT);
 CREATE TABLE source_issue (
   source_id INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,
   line INTEGER NOT NULL, at REAL NOT NULL,  -- codes only, never text
