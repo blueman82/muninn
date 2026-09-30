@@ -1,0 +1,30 @@
+{
+  "description": "Inject bounded pctx memory blocks as untrusted data.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/pctx hook session-start --provider codex",
+            "timeout": 5,
+            "additionalContextLimit": 1500
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/pctx hook prompt --provider codex",
+            "timeout": 5,
+            "additionalContextLimit": 500
+          }
+        ]
+      }
+    ]
+  }
+}

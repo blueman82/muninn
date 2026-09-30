@@ -1,0 +1,16 @@
+{
+  "name": "provenance-context",
+  "version": "0.2.0",
+  "description": "Local cross-provider memory and knowledge (pctx) for Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "interface": {
+    "displayName": "Provenance Context",
+    "shortDescription": "Recall past Codex and Claude Code sessions",
+    "longDescription": "Adds bounded, untrusted-data memory blocks from the local pctx store at session start and on prompt submit.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": ["Lifecycle hooks"]
+  }
+}
