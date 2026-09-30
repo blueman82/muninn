@@ -259,6 +259,7 @@ class FailOpenTests(HookCase):
             with self.subTest(payload):
                 out = hook.session_start(payload, "claude", self.env)
                 self.assertIn(USAGE, self.body(out))
+        self.assertIn(USAGE, self.body(self.start(transcript_path="a\0b")))
         self.assertIn(
             USAGE, self.body(hook.session_start({}, "nonsense", self.env))
         )
@@ -331,6 +332,13 @@ class SuppressionTests(HookCase):
                 self.assertEqual(
                     self.start(provider, transcript_path=path), {}
                 )
+
+    def test_a_failing_transcript_check_does_not_silence_the_hook(self):
+        self.add()
+        boom = mock.patch.object(hook, "_subagent", side_effect=KeyError("x"))
+        with boom:
+            out = self.start()
+        self.assertIn("Project knowledge", self.body(out))
 
     def test_main_and_unknown_transcripts_get_the_block(self):
         main_codex = self.transcript(
@@ -873,6 +881,10 @@ class RenderTests(HookCase):
 
     def test_limits_are_the_documented_ones(self):
         self.assertEqual((hook.BLOCK_LIMIT, hook.RECALL_LIMIT), (4000, 1500))
+        self.assertEqual(
+            (hook.MAX_INPUT, hook.FIRST_LINE), (64 * 1024, 1024 * 1024)
+        )
+        self.assertEqual((hook.MIN_TERMS, hook.MAX_EVENTS), (3, 3))
 
     def test_clean_cuts_to_the_limit_and_keeps_shorter_text(self):
         self.assertEqual(hook._clean("x" * 300, 300), "x" * 300)
@@ -925,6 +937,41 @@ class RenderTests(HookCase):
             hook._first_record(str(small))["type"], "session_meta"
         )
 
+    def test_first_record_ignores_a_fifo_even_with_a_writer(self):
+        fifo = self.tmp / "live-pipe"
+        os.mkfifo(fifo)
+        fd = os.open(fifo, os.O_RDWR)  # both ends open: a read would work
+        self.addCleanup(os.close, fd)
+        os.write(fd, json.dumps(tc.subagent_meta("thr-p")).encode() + b"\n")
+        self.assertIsNone(hook._first_record(str(fifo)))
+        self.assertIsNone(hook._first_record("a\0b"))  # not a path
+
+    def test_first_record_line_cap_is_exact(self):
+        meta = tc.subagent_meta("thr-edge")
+        meta["payload"]["pad"] = ""
+        room = hook.FIRST_LINE - len(json.dumps(meta))
+        for extra, accepted in ((0, True), (1, False)):
+            meta["payload"]["pad"] = "z" * (room + extra)
+            self.assertEqual(len(json.dumps(meta)), hook.FIRST_LINE + extra)
+            path = self.tmp / f"edge{extra}.jsonl"
+            path.write_text(json.dumps(meta) + "\n")
+            found = hook._first_record(str(path))
+            self.assertEqual(found is not None, accepted, extra)
+
+    def test_first_record_closes_the_descriptor_it_opened(self):
+        small = self.tmp / "small.jsonl"
+        small.write_text(json.dumps(tc.subagent_meta("thr-s")) + "\n")
+
+        def open_fds():
+            return len(os.listdir("/dev/fd"))
+
+        before = open_fds()
+        for _ in range(25):
+            hook._first_record(str(small))  # read
+            hook._first_record(str(self.tmp))  # refused after the open
+            hook._first_record(str(self.tmp / "missing"))  # never opened
+        self.assertEqual(open_fds(), before)
+
     def test_scope_label_in_the_header_and_its_fallback(self):
         self.add()
         self.assertIn(
@@ -951,6 +998,27 @@ class RecallStressTests(RecallCase):
         self.assertTrue(rows[0].startswith("- K"))  # knowledge survived
         self.assertEqual(len(rows), 2)
         self.assertIn(self.ref(passing), rows[1])  # found on the second page
+
+    def test_recall_stops_paging_when_the_results_end(self):
+        self.talk("a", "alphaterm betaterm gammaterm deltaterm all here")
+        self.noise(self.repo)
+        with mock.patch.object(
+            hook.query, "search", wraps=hook.query.search
+        ) as spy:
+            self.assertIn("hookSpecificOutput", self.ask())
+        self.assertEqual(spy.call_count, 1)
+
+    def test_recall_reads_at_most_four_pages_of_five(self):
+        for i in range(30):  # all match two of the five terms: none pass
+            self.talk(f"two{i}", "rareone raretwo filler")
+        prompt = "rareone raretwo commonone commontwo commonthree"
+        with mock.patch.object(
+            hook.query, "search", wraps=hook.query.search
+        ) as spy:
+            self.assertEqual(self.ask(prompt), {})
+        calls = [c.kwargs for c in spy.call_args_list]
+        self.assertEqual([c["page"] for c in calls], [1, 2, 3, 4])
+        self.assertEqual({c["limit"] for c in calls}, {5})
 
     def test_a_phrase_of_identifier_parts_is_not_a_third_term(self):
         self.talk("a", "hook_core.py lives in the hooks dir")

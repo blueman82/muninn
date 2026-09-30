@@ -117,18 +117,18 @@ def _first_record(path: str) -> dict | None:
     through a symlink, never blocking on a FIFO, at most FIRST_LINE bytes."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except OSError:
+    except (OSError, ValueError):  # ValueError: a NUL in the path
         return None
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        line = os.fdopen(fd, "rb", closefd=False).readline(FIRST_LINE + 1)
+        line = os.fdopen(fd, "rb", closefd=False).readline(FIRST_LINE)
     except OSError:
         return None
     finally:
         os.close(fd)
     try:
-        record = json.loads(line) if len(line) <= FIRST_LINE else None
+        record = json.loads(line)  # a line cut at the cap is not JSON
     except (ValueError, RecursionError):
         return None
     return record if isinstance(record, dict) else None
@@ -266,15 +266,14 @@ def _terms(fts: str | None) -> list[str]:
 def _matched(conn, terms: list[str], ids: list[int]) -> Counter:
     """How many of the terms each event matches (FTS5, same tokenizer)."""
     counts = Counter()
-    if ids:
-        marks = ",".join("?" * len(ids))
-        for term in terms:
-            rows = conn.execute(
-                "SELECT rowid FROM event_fts WHERE event_fts MATCH ?"
-                f" AND rowid IN ({marks})",
-                (term, *ids),
-            )
-            counts.update(row[0] for row in rows)
+    marks = ",".join("?" * len(ids))
+    for term in terms:
+        rows = conn.execute(
+            "SELECT rowid FROM event_fts WHERE event_fts MATCH ?"
+            f" AND rowid IN ({marks})",
+            (term, *ids),
+        )
+        counts.update(row[0] for row in rows)
     return counts
 
 
@@ -334,7 +333,6 @@ def _prompt_terms(payload, trace) -> list[str] | None:
 
 def _recall_block(conn, home, payload, env, trace, terms) -> str:
     prompt = payload["prompt"]
-    floor = min(MIN_TERMS, len(terms))
     session = payload.get("session_id")
     entries, hits, dropped = [], [], 0
     for page in range(1, POOL_PAGES + 1):
@@ -354,7 +352,7 @@ def _recall_block(conn, home, payload, env, trace, terms) -> str:
             entries = found["knowledge"]
         counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
         for hit in found["hits"]:
-            if counts[hit["id"]] >= floor:
+            if counts[hit["id"]] >= MIN_TERMS:
                 hits.append(hit)
             else:
                 dropped += 1
@@ -376,8 +374,8 @@ def prompt_submit(
 
     Knowledge matches first, then at most MAX_EVENTS prompt/reply events
     of this repo, never the caller's own session, each matching at least
-    min(3, n_terms) distinct query terms. Prompts with fewer than
-    MIN_TERMS terms, slash commands and subagent transcripts recall nothing.
+    MIN_TERMS (3) distinct query terms. Prompts with fewer than MIN_TERMS
+    terms, slash commands and subagent transcripts recall nothing.
     """
     trace = {} if trace is None else trace
     terms = _prompt_terms(payload, trace)
