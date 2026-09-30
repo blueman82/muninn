@@ -1455,3 +1455,28 @@ class CanaryScenarioTests(unittest.TestCase):
                 "CANARY-D": [("claude-main.jsonl", "primary", "prompt", 1)],
             },
         )
+
+
+class AdversarialInputTests(unittest.TestCase):
+    """Transcript text is untrusted input to the poller: the regexes must
+    stay near-linear on pathological text (quadratic ones took minutes)."""
+
+    CASES = (
+        "http://x" * 40_000,  # URLs with no whitespace
+        '"a=' * 40_000,  # quote + env-assignment starts
+        "-----BEGIN PRIVATE KEY----- x " * 20_000,  # BEGIN without END
+        "token" + "\n" * 150_000,  # split-secret whitespace run
+        "x\n" + "\n" * 150_000 + "Tests",  # blank lines at line starts
+        "ok" + " \n" * 100_000,
+    )
+
+    def test_regexes_stay_fast_on_pathological_text(self):
+        import time
+
+        for text in self.CASES:
+            with self.subTest(text=text[:12]):
+                start = time.perf_counter()
+                c.redact(text)
+                c.PCTX_CALL.search(text)
+                c._is_error(text)
+                self.assertLess(time.perf_counter() - start, 5.0)

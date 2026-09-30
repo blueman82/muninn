@@ -26,7 +26,10 @@ FLAG_MARKERS = LEGACY_MARKERS + ("<pctx-memory", "<pctx-recall", NOTICE)
 
 # Span versions of the old line-drop regexes (context.py:29-49, 55-58) plus
 # PEM private-key blocks.  Group "v" is the secret value; patterns without
-# it redact the whole match.  HOSTILE_LINE is deliberately not ported.
+# it redact the whole match.  HOSTILE_LINE is deliberately not ported, and
+# URL_SECRET_QUERY is dropped: each of its spans lies inside a key=value
+# span of the first pattern.  Every pattern stays near-linear on hostile
+# text (bounded, tempered or horizontal-only repeats).
 REDACTED = "[redacted:secret]"
 _URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
 _KEYS = (
@@ -42,22 +45,19 @@ SECRET_PATTERNS = (
     ),
     re.compile(rf"(?i){_URL}(?P<v>[^/\s@]+)@\S+"),
     re.compile(
-        rf"(?i){_URL}\S+[?&](?:api[_-]?key|access[_-]?token|token|password"
-        r"|secret)=(?P<v>[^&\s]+)"
-    ),
-    re.compile(
         r"(?i)[\"'](?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
         r"auth(?:orization)?|password|passwd|secret|private[_-]?key)[\"']"
         r"\s*:\s*[\"'](?P<v>[^\"']+)[\"']"
     ),
     re.compile(
         r"(?is)(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
-        r"password|passwd|secret)\s*\n\s*[:=]\s*(?P<v>\S+)"
+        r"password|passwd|secret)[ \t]*\r?\n\s*[:=]\s*(?P<v>\S+)"
     ),
     # A block without its END line still loses the key lines that follow.
     re.compile(
         r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-        r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+        r"(?:(?:(?!-----BEGIN ).){0,16384}?"
+        r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
         r"|(?:(?:\r?\n|\\n)[A-Za-z0-9+/=]+)*)",
         re.S,
     ),
@@ -221,18 +221,18 @@ TOOL_ERROR_PATTERNS = (
     ),
     # test summary: pytest, unittest, jest and vitest, cargo, go test
     re.compile(
-        r"^=*\s*(?:\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed"
+        r"^=*[ \t\r]*(?:\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed"
         r"|deselected|warnings?),? )+in [\d.]+s\b"
         r"|^Ran \d+ tests? in [\d.]+s"
-        r"|^\s*Tests?:?\s+(?:\d+ \w+, )*\d+ (?:passed|failed|total)\b"
-        r"|^test result: |^ok\s+\S+\s+[\d.]+s$",
+        r"|^[ \t\r]*Tests?:?[ \t]+(?:\d+ \w+, )*\d+ (?:passed|failed|total)\b"
+        r"|^test result: |^ok[ \t]+\S+[ \t]+[\d.]+s\r?$",
         re.M,
     ),
 )
 # O11: the command word pctx (or a path to it, after env assignments) at a
 # command position, or python -m pctx.
 PCTX_CALL = re.compile(
-    r"(?:^|[;&|(`'\"]|\$\()\s*(?:\w+=\S*\s+)*"
+    r"(?:^|[;&|(`'\"]|\$\()[ \t]*(?:\w+=\S{0,256}+[ \t]+)*"
     r"(?:[^\s;&|()`'\"]*/)?pctx(?![\w./:-])|\s-m\s+pctx\b",
     re.M,
 )
