@@ -635,6 +635,14 @@ class ExtractTest(unittest.TestCase):
         self.assertEqual(launch.final_message(stream), "final text")
 
 
+class UnitDirTest(unittest.TestCase):
+    def test_unit_dir_and_new_parent_are_private(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        unit = launch.new_unit_dir(tmp / "runs" / "OLD-E1")
+        self.assertEqual(os.stat(unit).st_mode & 0o777, 0o700)
+        self.assertEqual(os.stat(unit.parent).st_mode & 0o777, 0o700)
+
+
 class CloseUnitTest(unittest.TestCase):
     def test_close_unit_appends_hashes(self) -> None:
         tmp = Path(tempfile.mkdtemp())

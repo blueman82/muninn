@@ -227,7 +227,8 @@ def run_claude(
 
 def new_unit_dir(out_dir: Path) -> Path:
     out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, mode=0o700)
+    out_dir.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    out_dir.mkdir(mode=0o700)
     return out_dir
 
 
