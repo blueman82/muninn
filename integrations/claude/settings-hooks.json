@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/pctx hook session-start --provider claude",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/pctx hook prompt --provider claude",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
