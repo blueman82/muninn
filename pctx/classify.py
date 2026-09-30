@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -96,6 +95,7 @@ class ThreadInfo:
     class_reason: str
     replay_mode: str  # none|ordinal|history_base|content_prefix|unverified
     replay_before: int | None
+    commit_hash: str | None = None  # Codex line-1 git hint (spec O7)
 
 
 def record_hash(raw_line: bytes) -> str:
@@ -104,15 +104,17 @@ def record_hash(raw_line: bytes) -> str:
 
 
 def within_depth(value: object) -> bool:
-    """Reject nesting deeper than MAX_DEPTH without recursing."""
+    """Reject nesting deeper than MAX_DEPTH without recursing (port of
+    normalizers.py _within_depth; json.loads only builds dicts and lists,
+    and concrete type checks are several times faster than the ABCs)."""
     pending = [(value, 0)]
     while pending:
         item, depth = pending.pop()
         if depth > MAX_DEPTH:
             return False
-        if isinstance(item, Mapping):
+        if isinstance(item, dict):
             pending.extend((child, depth + 1) for child in item.values())
-        elif isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
+        elif isinstance(item, list):
             pending.extend((child, depth + 1) for child in item)
     return True
 
@@ -153,6 +155,8 @@ def codex_thread(meta: dict) -> ThreadInfo:
         replay_mode, replay_before = "content_prefix", None
     else:
         replay_mode, replay_before = "none", None
+    git = payload.get("git")
+    commit = _str(git.get("commit_hash")) if isinstance(git, dict) else None
     return ThreadInfo(
         "codex",
         thread_id,
@@ -162,6 +166,7 @@ def codex_thread(meta: dict) -> ThreadInfo:
         *_codex_class(payload),
         replay_mode,
         replay_before,
+        commit,
     )
 
 

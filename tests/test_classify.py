@@ -88,6 +88,7 @@ class CodexThreadTests(unittest.TestCase):
                 class_reason="thread_source=user",
                 replay_mode="none",
                 replay_before=None,
+                commit_hash="0" * 40,
             ),
         )
 
@@ -127,6 +128,7 @@ class CodexThreadTests(unittest.TestCase):
                 class_reason="thread_source=subagent",
                 replay_mode="ordinal",
                 replay_before=7,
+                commit_hash="0" * 40,
             ),
         )
         fresh = c.codex_thread(subagent_meta("thr-fresh", k=None))
@@ -1362,3 +1364,24 @@ class ToolErrorLinkTests(unittest.TestCase):
                 self.assertEqual(codex[0][0].flags, want)
                 claude = run_claude([bash(command)])
                 self.assertEqual(claude[0].flags, want)
+
+
+class CommitHintTests(unittest.TestCase):
+    def test_codex_thread_carries_line1_git_commit_hash(self):
+        # Scope resolution for a missing cwd uses this hint (spec O7).
+        meta = codex_meta(git={"branch": "main", "commit_hash": "ab" * 20})
+        self.assertEqual(c.codex_thread(meta).commit_hash, "ab" * 20)
+        for git in ("absent", {"branch": "main"}, {"commit_hash": 5}, "x"):
+            with self.subTest(git=git):
+                meta = codex_meta()
+                if git == "absent":
+                    del meta["payload"]["git"]
+                else:
+                    meta["payload"]["git"] = git
+                self.assertIsNone(c.codex_thread(meta).commit_hash)
+        claude = c.claude_thread(MAIN, {"type": "mode", "sessionId": SESSION})
+        self.assertIsNone(claude.commit_hash)
+        positional = c.ThreadInfo(
+            "codex", "t", "t", None, None, "primary", "r", "none", None
+        )
+        self.assertIsNone(positional.commit_hash)
