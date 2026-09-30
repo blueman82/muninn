@@ -185,9 +185,10 @@ LABELS = {
 def codex_hooks(data: bytes) -> list:
     """Each command hook in a hooks.json with its Codex trust hash.
 
-    Port of rust-v0.159.2 hooks/src/engine/discovery.rs:509-563 (handler
-    normalisation), :765-792 (hook_hash) and config/src/fingerprint.rs
-    :54-84 (sha256 of key-sorted compact JSON). None fields are dropped
+    Port of rust-v0.159.2 hooks/src/engine/discovery.rs:505-566 (handler
+    normalisation; timeout default :762), :769-792 (hook_hash) and
+    config/src/fingerprint.rs:54-84 (sha256 of key-sorted compact
+    JSON). None fields are dropped
     (toml 0.9.11 table.rs:385-401); UserPromptSubmit has no matcher
     (hooks/src/events/common.rs:112-128). Checked against real Codex
     0.159.2 hooks/list output in tests.
@@ -627,13 +628,12 @@ def codex(ctx, rec):
         )
 
     edit(drop_trust)
-    if (
-        ctx.cache.exists()
-    ):  # a Codex install would delete it (store.rs:689-718)
+    # A Codex install deletes other cached versions (store.rs:689-718):
+    # keep the old copy as residue for the owner instead.
+    if ctx.cache.exists():
         (ctx.legacy / "codex-plugin-cache").mkdir()
-        os.rename(
-            ctx.cache, ctx.legacy / "codex-plugin-cache" / ctx.cache.name
-        )
+        stale = ctx.legacy / "codex-plugin-cache" / ctx.cache.name
+        os.rename(ctx.cache, stale)
     edit(lambda text: repoint(text, source))
     before = ctx.config.read_bytes()
     env = dict(os.environ, CODEX_HOME=str(ctx.codex_home))
