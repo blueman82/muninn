@@ -245,20 +245,18 @@ def get_section(text: str, header: str):
     return None if b is None else "".join(lines[b[1] : b[3]])
 
 
-def anchor_of(text: str, header: str):
-    """Header of the block before `header` ('' if first; None if absent)."""
+def index_of(text: str, header: str):
+    """Position of `header`'s block among all tables, or None."""
     _, blocks = _blocks(text)
-    for i, b in enumerate(blocks):
-        if b[0] == header:
-            return blocks[i - 1][0] if i else ""
-    return None
+    names = [b[0] for b in blocks]
+    return names.index(header) if header in names else None
 
 
-def put_section(text: str, header: str, block, after=None) -> str:
+def put_section(text: str, header: str, block, at=None) -> str:
     """Replace `header`'s block with `block` (None removes it).
 
-    A new block goes after the block headed `after` ('' = before the
-    first table); an unknown or repeated anchor means end of file.
+    A new block is inserted before the table now at index `at`, or at
+    the end of the file when `at` is None or past the last table.
     """
     lines, blocks = _blocks(text)
     b = _only(blocks, header)
@@ -267,11 +265,8 @@ def put_section(text: str, header: str, block, after=None) -> str:
         return "".join(lines)
     if not block:
         return text
-    anchors = [x for x in blocks if x[0] == after]
-    if after == "" and blocks:
-        pos = blocks[0][1]
-    elif len(anchors) == 1:
-        pos = anchors[0][3]
+    if at is not None and at < len(blocks):
+        pos = blocks[at][1]
     else:
         if lines and not lines[-1].endswith("\n"):
             raise Refused("file does not end with a newline")

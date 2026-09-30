@@ -65,11 +65,11 @@ class TomlSectionTest(unittest.TestCase):
         for header in NAMED:
             with self.subTest(header=header):
                 raw = ce.get_section(TOML, header)
-                after = ce.anchor_of(TOML, header)
+                at = ce.index_of(TOML, header)
                 gone = ce.put_section(TOML, header, None)
                 self.assertNotIn(header, gone)
                 ce.toml_check(TOML, gone, NAMED, MARKERS)
-                back = ce.put_section(gone, header, raw, after=after)
+                back = ce.put_section(gone, header, raw, at=at)
                 self.assertEqual(back, TOML)
 
     def test_parse_section_reads_only_that_block(self):
