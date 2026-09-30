@@ -8,6 +8,7 @@ pass parsed records and receive thread facts and events.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -161,3 +162,200 @@ def codex_thread(meta: dict) -> ThreadInfo:
         replay_mode,
         replay_before,
     )
+
+
+TEXT_LIMIT = 64 * 1024
+TOOL_CALL_LIMIT = 4 * 1024
+FLAG_MARKER, FLAG_REDACTED, FLAG_TRUNCATED = 1, 2, 4
+HARNESS_TAGS = (  # design 3.4: a Codex user text starting with one
+    "<environment_context>",
+    "# AGENTS.md instructions",
+    "<user_instructions>",
+    "<hook_prompt",
+    "<subagent_notification>",
+    "<turn_aborted>",
+    "<recommended_plugins>",
+    "<INSTRUCTIONS>",
+    "<codex_internal_context",
+    "<user_shell_command>",
+    "<skill",
+    "<task",
+)
+WAIT_TOOLS = frozenset(
+    {"wait", "wait_agent", "list_agents", "interrupt_agent", "sleep"}
+)
+_IMAGES = re.compile(r"\A\s*(?:<image\b[^>]*>\s*(?:</image>\s*)?)+")
+_TEXT_TYPES = ("input_text", "output_text", "text")
+
+
+@dataclass(frozen=True)
+class EventRec:
+    line: int
+    part: int
+    seq: int
+    ts: str | None
+    role: str  # user | assistant
+    kind: str  # prompt|reply|tool_call|harness|delegation|tool_error
+    tag: str | None
+    flags: int
+    text: str
+    call_id: str | None = None
+
+
+@dataclass
+class CodexState:
+    """Per-source parse state.  Feed every line to codex_events, line 1
+    included: line 1 sets cwd, replay_before and thread_class."""
+
+    cwd: str | None = None
+    replay_before: int | None = None
+    thread_class: str = "primary"
+
+
+def _finish(text: str, limit: int) -> tuple[str, int]:
+    """Flag markers (1), redact secrets (2), cap at limit bytes (4)."""
+    flags = FLAG_MARKER if any(m in text for m in FLAG_MARKERS) else 0
+    text, changed = redact(text)
+    flags |= FLAG_REDACTED if changed else 0
+    data = text.encode("utf-8", "surrogatepass")
+    if len(data) > limit:
+        text = data[:limit].decode("utf-8", "ignore")
+        flags |= FLAG_TRUNCATED
+    return text, flags
+
+
+def _event(
+    line,
+    seq,
+    ts,
+    role,
+    kind,
+    tag,
+    text,
+    *,
+    limit=TEXT_LIMIT,
+    part=1,
+    flags=0,
+    call_id=None,
+) -> EventRec:
+    text, found = _finish(text, limit)
+    return EventRec(
+        line, part, seq, ts, role, kind, tag, flags | found, text, call_id
+    )
+
+
+def _join(blocks: object) -> str:
+    """Text of the text-typed content blocks, joined with newlines."""
+    if not isinstance(blocks, list):
+        return ""
+    return "\n".join(
+        b["text"]
+        for b in blocks
+        if isinstance(b, dict)
+        and b.get("type") in _TEXT_TYPES
+        and isinstance(b.get("text"), str)
+        and b["text"]
+    )
+
+
+def _tag(text: str, tags: tuple[str, ...]) -> str | None:
+    head = text.lstrip()
+    return next((t for t in tags if head.startswith(t)), None)
+
+
+def _user_kind(tag: str | None, thread_class: str) -> str:
+    if tag:
+        return "harness"
+    # O2: parent-authored text in a subagent thread is never a prompt.
+    return "delegation" if thread_class == "subagent" else "prompt"
+
+
+def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
+    """Events of one Codex rollout record (design 3.4; spec O1, O2)."""
+    rtype, payload = record.get("type"), record.get("payload")
+    if not isinstance(payload, dict):
+        return []
+    if rtype == "session_meta":
+        if line == 1:  # a later session_meta is the parent's copy
+            info = codex_thread(record)
+            state.cwd = _str(payload.get("cwd")) or state.cwd
+            state.replay_before = info.replay_before
+            state.thread_class = info.thread_class
+        return []
+    ordinal = record.get("ordinal")
+    if state.replay_before is not None:
+        # K threads start at ordinal 0 and advance one per line (verified
+        # on the live corpus), so line - 1 stands in for a missing one.
+        at = ordinal if isinstance(ordinal, int) else line - 1
+        if at < state.replay_before:
+            return []  # inherited parent history
+    if rtype == "turn_context":
+        state.cwd = _str(payload.get("cwd")) or state.cwd
+        return []
+    if rtype != "response_item":
+        return []
+    at = (line, ordinal if isinstance(ordinal, int) else line)
+    ts = _str(record.get("timestamp"))
+    kind = payload.get("type")
+    if kind == "message":
+        text = _join(payload.get("content"))
+        role = payload.get("role")
+        if role == "user":
+            text = _IMAGES.sub("", text, count=1)
+            tag = _tag(text, HARNESS_TAGS)
+            kind = _user_kind(tag, state.thread_class)
+        elif role == "assistant":
+            tag, kind = None, "reply"
+        else:  # developer and system text is never stored
+            return []
+        if not text.strip():
+            return []
+        return [_event(*at, ts, role, kind, tag, text)]
+    if kind in ("function_call", "custom_tool_call"):
+        name = _str(payload.get("name")) or "unknown"
+        if name in WAIT_TOOLS:
+            return []
+        body = payload.get("arguments" if kind == "function_call" else "input")
+        if not isinstance(body, str):
+            body = json.dumps(body, ensure_ascii=False)
+        return [
+            _event(
+                *at,
+                ts,
+                "assistant",
+                "tool_call",
+                name,
+                f"{name}: {body}",
+                limit=TOOL_CALL_LIMIT,
+                call_id=_str(payload.get("call_id")),
+            )
+        ]
+    if kind == "agent_message":
+        # Delivered into the RECIPIENT's rollout.  A report from a
+        # descendant agent is harness text there; a message from an
+        # ancestor into a subagent thread is a delegation.
+        text = _join(payload.get("content"))
+        author = _str(payload.get("author")) or ""
+        to = _str(payload.get("recipient"))
+        report = bool(to) and author.startswith(to.rstrip("/") + "/")
+        subagent = state.thread_class == "subagent"
+        kind = "delegation" if subagent and not report else "harness"
+        if not text.strip():
+            return []
+        return [_event(*at, ts, "user", kind, "agent_message", text)]
+    return []
+
+
+def cwd_of(record: dict, state: CodexState | None) -> str | None:
+    """The cwd for a record's events.  With a Codex state: the cwd that
+    codex_events keeps from line 1 and post-replay turn_context records.
+    Otherwise the record's own cwd (Claude records carry one)."""
+    if state is not None and state.cwd:
+        return state.cwd
+    payload = record.get("payload")
+    if isinstance(payload, dict) and record.get("type") in (
+        "session_meta",
+        "turn_context",
+    ):
+        return _str(payload.get("cwd"))
+    return _str(record.get("cwd"))
