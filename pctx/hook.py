@@ -12,10 +12,11 @@ import json
 import os
 import re
 import stat
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
-from pctx import classify, knowledge, obs, scope, store
+from pctx import classify, knowledge, obs, query, scope, store
 
 BLOCK_LIMIT = 4000  # SessionStart block, characters
 RECALL_LIMIT = 1500  # prompt-time recall block, characters
@@ -23,6 +24,11 @@ MAX_INPUT = 64 * 1024  # bytes of hook payload read
 FIRST_LINE = 1024 * 1024  # bytes of a transcript's first line read
 ENTRY_TEXT = 300  # characters of one entry's text in a block
 SHOWN = 8  # knowledge entries a SessionStart block may push (O5b)
+MIN_TERMS = 3  # a prompt with fewer query terms recalls nothing (spec 9.2)
+MAX_EVENTS = 3  # events in a recall block
+EVENT_KINDS = frozenset({"prompt", "reply"})  # recalled at prompt time
+POOL_PAGE, POOL_PAGES = 5, 4  # search pages read to find MAX_EVENTS
+SNIPPET = 300  # characters of one recalled snippet
 
 OPEN = '<pctx-memory source="pctx" trust="untrusted-data"'
 CLOSE = "</pctx-memory>"
@@ -245,3 +251,135 @@ def session_start(
     return _respond(
         "SessionStart", payload, provider, env, trace, _start_block
     )
+
+
+def _terms(fts: str | None) -> list[str]:
+    """The quoted single-word terms of an FTS query, phrases left out."""
+    return [e for e in (fts or "").split(" OR ") if e and " " not in e]
+
+
+def _matched(conn, terms: list[str], ids: list[int]) -> Counter:
+    """How many of the terms each event matches (FTS5, same tokenizer)."""
+    counts = Counter()
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for term in terms:
+            rows = conn.execute(
+                "SELECT rowid FROM event_fts WHERE event_fts MATCH ?"
+                f" AND rowid IN ({marks})",
+                (term, *ids),
+            )
+            counts.update(row[0] for row in rows)
+    return counts
+
+
+def _knowledge_line(entry: Mapping) -> str:
+    cites = ", ".join(_clean(c, 120) for c in entry["cites"])
+    return (
+        f"- {entry['id']} [{entry['kind']} {entry['date']}"
+        f" by:{_clean(entry['actor'], 40)}]"
+        f" {_clean(entry['text'], ENTRY_TEXT)}"
+        + (f" (cites: {cites})" if cites else "")
+    )
+
+
+def _hit_line(hit: Mapping, cap: int) -> str:
+    plain = hit["snippet"].replace("«", "").replace("»", "")
+    head = " · ".join(
+        _clean(part, 120)
+        for part in (
+            f"{hit['provider']} {hit['role']} {hit['kind']}",
+            f"session {hit['session']}",
+            hit["ts"] or "no ts",
+            hit["ref"],
+        )
+    )
+    return f"- [{head}] {_clean(plain, cap)}"
+
+
+def _recall_text(entries, hits, notes) -> str:
+    """The recall block within RECALL_LIMIT: knowledge, then hits, the
+    last ones dropped (then the snippets shortened) until it fits."""
+    tail = [*(_clean(n, 200) for n in notes), OPEN_HINT]
+    for cap in (SNIPPET, 200, 120):
+        items = [_knowledge_line(e) for e in entries]
+        items += [_hit_line(h, cap) for h in hits]
+        for count in range(len(items), 0, -1):
+            lines = [classify.NOTICE, *items[:count], *tail]
+            block = _frame(' kind="recall"', lines)
+            if len(block) <= RECALL_LIMIT:
+                return block
+    return ""
+
+
+def _prompt_terms(payload, trace) -> list[str] | None:
+    """The query terms of the prompt, or None when it recalls nothing:
+    no prompt, a slash command, or fewer than MIN_TERMS terms."""
+    prompt = payload.get("prompt") if isinstance(payload, Mapping) else None
+    if not isinstance(prompt, str) or prompt.lstrip().startswith("/"):
+        trace["skipped"] = "prompt"
+        return None
+    terms = _terms(query.build_fts_query(prompt))
+    trace["n_terms"] = len(terms)
+    if len(terms) < MIN_TERMS:
+        trace["skipped"] = "short"
+        return None
+    return terms
+
+
+def _recall_block(conn, home, payload, env, trace, terms) -> str:
+    prompt = payload["prompt"]
+    floor = min(MIN_TERMS, len(terms))
+    session = payload.get("session_id")
+    entries, hits, dropped = [], [], 0
+    for page in range(1, POOL_PAGES + 1):
+        found = query.search(
+            conn,
+            prompt,
+            cwd=_cwd(payload),
+            env=env,
+            kinds=set(EVENT_KINDS),
+            limit=POOL_PAGE,
+            page=page,
+            current_session=session if isinstance(session, str) else None,
+        )
+        if "error" in found:
+            break
+        if page == 1:
+            entries = found["knowledge"]
+        counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
+        for hit in found["hits"]:
+            if counts[hit["id"]] >= floor:
+                hits.append(hit)
+            else:
+                dropped += 1
+        if len(hits) >= MAX_EVENTS or not found["has_more"]:
+            break
+    hits = hits[:MAX_EVENTS]
+    trace["returned_ids"] = [h["id"] for h in hits]
+    trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
+    trace["stages"] = {"floor_dropped": dropped, "returned": len(hits)}
+    if not entries and not hits:
+        return ""
+    return _recall_text(entries, hits, _stale(home))
+
+
+def prompt_submit(
+    payload: dict, provider: str, env: Mapping[str, str], *, trace=None
+) -> dict:
+    """UserPromptSubmit (spec 9.2): recall for the prompt, or {}.
+
+    Knowledge matches first, then at most MAX_EVENTS prompt/reply events
+    of this repo, never the caller's own session, each matching at least
+    min(3, n_terms) distinct query terms. Prompts with fewer than
+    MIN_TERMS terms, slash commands and subagent transcripts recall nothing.
+    """
+    trace = {} if trace is None else trace
+    terms = _prompt_terms(payload, trace)
+    if terms is None:  # nothing to recall: the store is not even opened
+        return {}
+
+    def build(conn, home, payload, env, trace):
+        return _recall_block(conn, home, payload, env, trace, terms)
+
+    return _respond("UserPromptSubmit", payload, provider, env, trace, build)
