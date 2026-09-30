@@ -141,7 +141,8 @@ def _codex_class(payload: dict) -> tuple[str, str]:
 
 def codex_thread(meta: dict) -> ThreadInfo:
     """Classify a Codex thread from its line-1 session_meta record only."""
-    payload = meta.get("payload") if meta.get("type") == "session_meta" else 0
+    is_meta = meta.get("type") == "session_meta"
+    payload = meta.get("payload") if is_meta else None
     if not isinstance(payload, dict) or not _str(payload.get("id")):
         raise ValueError("line 1 is not a session_meta record with an id")
     thread_id = payload["id"]
@@ -347,15 +348,14 @@ def _register(
 ) -> int:
     """Remember a call so its output can be linked; return its flags."""
     pctx = PCTX_CALL.search(body) is not None
-    if state is None or not call_id:
-        pass
-    elif name == "wait":  # an exec cell continuation: the exec call owns it
-        cell = _cell(body)
-        if cell in state.cells:
-            state.calls[call_id] = state.cells.pop(cell)
-    elif name not in WAIT_TOOLS:
-        tainted = pctx or any(root in body for root in TRANSCRIPT_ROOTS)
-        state.calls[call_id] = (call_id, None if tainted else name)
+    if state is not None and call_id:
+        if name == "wait":  # an exec cell continuation: the exec call owns it
+            cell = _cell(body)
+            if cell in state.cells:
+                state.calls[call_id] = state.cells.pop(cell)
+        elif name not in WAIT_TOOLS:
+            tainted = pctx or any(root in body for root in TRANSCRIPT_ROOTS)
+            state.calls[call_id] = (call_id, None if tainted else name)
     # ponytail: write_stdin continuations are not linked to their
     # exec_command; content markers still apply to their outputs.
     return FLAG_MARKER if pctx else 0
@@ -435,8 +435,8 @@ def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
     if state.replay_before is not None:
         # K threads start at ordinal 0 and advance one per line (verified
         # on the live corpus), so line - 1 stands in for a missing one.
-        at = ordinal if isinstance(ordinal, int) else line - 1
-        if at < state.replay_before:
+        position = ordinal if isinstance(ordinal, int) else line - 1
+        if position < state.replay_before:
             return []  # inherited parent history
     if rtype == "turn_context":
         state.cwd = _str(payload.get("cwd")) or state.cwd
@@ -631,6 +631,7 @@ def claude_events(
     for flag in ("isCompactSummary", "isMeta"):
         if tag is None and record.get(flag) is True:
             tag = flag
-    thread_class = "subagent" if record.get("isSidechain") is True else ""
+    side = record.get("isSidechain") is True
+    thread_class = "subagent" if side else "primary"
     kind = _user_kind(tag, thread_class)
     return [_event(line, line, ts, "user", kind, tag, text)]
