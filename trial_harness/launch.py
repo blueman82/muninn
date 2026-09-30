@@ -10,6 +10,10 @@ Each run writes, under its unit directory (mode 0700): prompt.txt,
 command.json, binding.json and mcp.json (readers), stream.jsonl (the
 stream-json output), stderr.txt, wrapper-log.jsonl (readers) and
 transcript.jsonl (a copy of Claude Code's own session transcript).
+
+``close_unit`` scans the copied transcript and records the isolation
+verdict label.  An owner waiver path (``--waiver`` or the config key
+``waiver``) is handed to that scan only, never to a child session.
 Standard library only.
 """
 
@@ -225,6 +229,15 @@ def run_claude(
     }
 
 
+def scanner():
+    """The scanner module; it imports this one, so load it on first use."""
+    if __package__:
+        from . import canaries as module
+    else:
+        import canaries as module
+    return module
+
+
 def new_unit_dir(out_dir: Path) -> Path:
     out_dir = Path(out_dir)
     out_dir.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -393,9 +406,16 @@ def reconcile(unit_dir: Path) -> dict:
     return result
 
 
-def close_unit(unit_dir: Path, index_path: Path, unit_id: str) -> dict:
-    """Write final message and extracted JSON; append hashes (§4.2)."""
+def close_unit(
+    unit_dir: Path, index_path: Path, unit_id: str, waiver: Path | None = None
+) -> dict:
+    """Write final message and extracted JSON; append hashes (§4.2).
+
+    The entry also records the §3.6 isolation verdict label; a bad
+    ``waiver`` raises before the unit directory or the index is touched.
+    """
     unit_dir = Path(unit_dir)
+    isolation = scanner().unit_isolation(unit_dir, waiver)
     message = final_message(unit_dir / "stream.jsonl")
     answer = extract_final_answer(message) if message is not None else None
     write_private(unit_dir / "final_message.txt", message or "")
@@ -403,6 +423,7 @@ def close_unit(unit_dir: Path, index_path: Path, unit_id: str) -> dict:
     write_private(unit_dir / "answer.json", json.dumps(payload))
     entry = {"unit_id": unit_id, "t_close": utc_ms()}
     entry["status"] = "ANSWERED" if answer is not None else "FORMAT_FAIL"
+    entry["isolation"] = isolation
     for name in (
         "final_message.txt",
         "answer.json",
@@ -437,8 +458,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend-file", type=Path)
     parser.add_argument("--prompt-file", type=Path)
     parser.add_argument("--index", type=Path)
+    parser.add_argument("--waiver", type=Path)
     args = parser.parse_args(argv)
     cfg = load_config()
+    waiver = args.waiver or cfg.get("waiver") or None
+    if waiver is not None:  # refuse a bad waiver before a unit is spent
+        scanner().verify_waiver(waiver)
     if args.role == "reader":
         result = launch_reader(
             cfg,
@@ -463,7 +488,9 @@ def main(argv: list[str] | None = None) -> int:
             effort=args.effort,
         )
     if args.index:
-        result["close"] = close_unit(args.out, args.index, args.unit_id)
+        result["close"] = close_unit(
+            args.out, args.index, args.unit_id, waiver
+        )
     print(json.dumps(result, indent=1))
     return 0
 
