@@ -12,6 +12,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 CLASSIFIER_VERSION = 1
 MAX_DEPTH = 1_000
@@ -359,3 +360,108 @@ def cwd_of(record: dict, state: CodexState | None) -> str | None:
     ):
         return _str(payload.get("cwd"))
     return _str(record.get("cwd"))
+
+
+CLAUDE_HARNESS_PREFIXES = (  # design 3.4: a Claude user text starting so
+    "<command-name>",
+    "<command-message>",
+    "<local-command-stdout>",
+    "<local-command-caveat>",
+    "<system-reminder>",
+    "[Request interrupted",
+    "Caveat:",
+    "Base directory for this skill",
+    "<task-notification>",
+    "This session is being continued",
+)
+
+
+def claude_thread(rel_path: str, first: dict) -> ThreadInfo:
+    """Classify a Claude transcript from its path under the projects root
+    and its first record.  Main files: thread = sessionId (= file stem);
+    <session>/subagents/ files: thread = file stem, session = sessionId."""
+    path = PurePosixPath(rel_path)
+    session = _str(first.get("sessionId"))
+    if "subagents" in path.parts[:-1]:
+        cls, reason = "subagent", "path:subagents"
+        session = session or path.parent.parent.name
+    elif first.get("isSidechain") is True:
+        cls, reason = "subagent", "isSidechain"
+    else:
+        cls, reason = "primary", "path:main"
+    session = session or path.stem
+    thread_id = path.stem if cls == "subagent" else session
+    parent = session if session != thread_id else None
+    return ThreadInfo(
+        "claude", thread_id, session, parent, None, cls, reason, "none", None
+    )
+
+
+def _claude_text(content: object) -> str:
+    """String content, or text blocks joined with newlines (thinking and
+    tool blocks excluded) -- port of normalizers.py _claude_text."""
+    return content if isinstance(content, str) else _join(content)
+
+
+def claude_events(record: dict, line: int) -> list[EventRec]:
+    """Events of one Claude transcript record (design 3.4; spec O2)."""
+    rtype, message = record.get("type"), record.get("message")
+    if rtype not in ("user", "assistant") or not isinstance(message, dict):
+        return []  # attachments (hook output), system, summary, titles ...
+    if message.get("role") not in (rtype, None):
+        return []
+    ts = _str(record.get("timestamp"))
+    content = message.get("content")
+    blocks = content if isinstance(content, list) else []
+    if rtype == "assistant":
+        found = []
+        text = _claude_text(content)
+        if text.strip():
+            found.append(("reply", None, text, TEXT_LIMIT, None))
+        for block in blocks:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                name = _str(block.get("name")) or "unknown"
+                body = json.dumps(block.get("input"), ensure_ascii=False)
+                found.append(
+                    (
+                        "tool_call",
+                        name,
+                        f"{name}: {body}",
+                        TOOL_CALL_LIMIT,
+                        _str(block.get("id")),
+                    )
+                )
+        return [
+            _event(
+                line,
+                line,
+                ts,
+                "assistant",
+                kind,
+                tag,
+                text,
+                limit=limit,
+                part=part,
+                call_id=call_id,
+            )
+            for part, (kind, tag, text, limit, call_id) in enumerate(
+                found, start=1
+            )
+        ]
+    results = [
+        b
+        for b in blocks
+        if isinstance(b, dict) and b.get("type") == "tool_result"
+    ]
+    if results or "toolUseResult" in record:
+        return []  # tool output, never a prompt
+    text = _claude_text(content)
+    if not text.strip():
+        return []
+    tag = _tag(text, CLAUDE_HARNESS_PREFIXES)
+    for flag in ("isCompactSummary", "isMeta"):
+        if tag is None and record.get(flag) is True:
+            tag = flag
+    thread_class = "subagent" if record.get("isSidechain") is True else ""
+    kind = _user_kind(tag, thread_class)
+    return [_event(line, line, ts, "user", kind, tag, text)]
