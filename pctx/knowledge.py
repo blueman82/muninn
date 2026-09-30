@@ -26,6 +26,7 @@ REASON_MAX = 200
 QUOTE_MIN = 12
 QUOTE_MAX = 300
 CHAIN_MAX = 100  # hops followed along a supersede chain
+PROBLEMS_MAX = 100  # broken citations named by check()
 
 # `<` of a frame delimiter, however spaced or cased (design 4.8)
 _FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
@@ -201,9 +202,37 @@ def _ref(row: sqlite3.Row) -> str:
     return f"{row['provider']}:{row['thread_id']}:{row['line']}.{row['part']}"
 
 
+@_guarded
 def verify_citation(conn: sqlite3.Connection, row: sqlite3.Row) -> str:
-    """ok | changed | missing | erased for one citation row."""
-    return "ok"
+    """ok | changed | missing | erased for one citation row.
+
+    erased: the citation was scrubbed. changed: the cited line is now
+    another line (its hash differs or the quote is gone) or no longer
+    exists in a live source. missing: the provider deleted the source (the
+    event is kept) or nothing is left to look at. ok: the event is there
+    with the same hash and the quote is still in its text.
+    """
+    if row["state"] == "erased" or row["quote"] is None:
+        return "erased"
+    where = "s.provider = ? AND s.thread_id = ?"
+    event = conn.execute(
+        "SELECT e.id, e.line_sha256, s.status FROM event e"
+        " JOIN source s ON s.id = e.source_id"
+        f" WHERE {where} AND e.line = ? AND e.part = ?",
+        (row["provider"], row["thread_id"], row["line"], row["part"]),
+    ).fetchone()
+    if event is None:
+        source = conn.execute(
+            f"SELECT s.status FROM source s WHERE {where}",
+            (row["provider"], row["thread_id"]),
+        ).fetchone()
+        return (
+            "changed" if source and source["status"] == "active" else "missing"
+        )
+    quoted = query.quote_check(conn, str(event["id"]), row["quote"])["match"]
+    if event["line_sha256"] != row["line_sha256"] or not quoted:
+        return "changed"
+    return "missing" if event["status"] == "missing" else "ok"
 
 
 def _date(at: float) -> str:
@@ -394,3 +423,32 @@ def show(conn: sqlite3.Connection, kid: int) -> dict:
             for r in log
         ],
     }
+
+
+@_guarded
+def check(conn: sqlite3.Connection) -> dict:
+    """Re-verify every citation: counts of ok, changed, missing, erased and
+    the changed/missing ones named by entry and ref (never text)."""
+    counts = dict.fromkeys(("ok", "changed", "missing", "erased"), 0)
+    problems = []
+    rows = conn.execute(
+        "SELECT c.*, k.status AS entry_status FROM citation c"
+        " JOIN knowledge k ON k.id = c.knowledge_id ORDER BY c.id"
+    ).fetchall()
+    for row in rows:
+        state = verify_citation(conn, row)
+        counts[state] += 1
+        if state in ("changed", "missing"):
+            problems.append(
+                {
+                    "id": f"K{row['knowledge_id']}",
+                    "status": row["entry_status"],
+                    "ref": _ref(row),
+                    "state": state,
+                }
+            )
+    out = {"notice": NOTICE, "citations": len(rows), **counts}
+    out["problems"] = problems[:PROBLEMS_MAX]
+    if len(problems) > PROBLEMS_MAX:
+        out["problems_omitted"] = len(problems) - PROBLEMS_MAX
+    return out
