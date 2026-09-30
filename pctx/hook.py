@@ -20,6 +20,11 @@ from pctx import classify, knowledge, obs, query, scope, store
 
 BLOCK_LIMIT = 4000  # SessionStart block, characters
 RECALL_LIMIT = 1500  # prompt-time recall block, characters
+# Codex counts additionalContext in tokens (1500 SessionStart, 500 prompt:
+# integrations/codex/hooks/hooks.json) and dense refs and timestamps cost
+# about 1.8 characters a token, so its blocks are capped lower.
+CODEX_BLOCK_LIMIT = 2800
+CODEX_RECALL_LIMIT = 900
 MAX_INPUT = 64 * 1024  # bytes of hook payload read
 FIRST_LINE = 1024 * 1024  # bytes of a transcript's first line read
 ENTRY_TEXT = 300  # characters of one entry's text in a block
@@ -239,12 +244,21 @@ def _respond(event, payload, provider, env, trace, build) -> dict:
     }
 
 
-def _start_block(conn, home, payload, env, trace) -> str:
+def _limits(provider: str) -> tuple[int, int]:
+    """The (SessionStart, recall) character caps of a provider's blocks."""
+    if provider == "codex":
+        return CODEX_BLOCK_LIMIT, CODEX_RECALL_LIMIT
+    return BLOCK_LIMIT, RECALL_LIMIT
+
+
+def _start_block(conn, home, payload, env, trace, limit) -> str:
     cwd = _cwd(payload)
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = knowledge.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
-    return render_block(entries, _label(conn, ids, cwd), notes=_stale(home))
+    return render_block(
+        entries, _label(conn, ids, cwd), notes=_stale(home), limit=limit
+    )
 
 
 def session_start(
@@ -252,10 +266,14 @@ def session_start(
 ) -> dict:
     """SessionStart: the user-cited knowledge of this repo and global
     (spec O5b) plus the usage line (O3). trace, if given, receives counts
-    and the skip/error code for the stage log."""
-    return _respond(
-        "SessionStart", payload, provider, env, trace, _start_block
-    )
+    and the skip/error code for the stage log. The block is capped at
+    BLOCK_LIMIT, or CODEX_BLOCK_LIMIT for Codex."""
+    limit = _limits(provider)[0]
+
+    def build(conn, home, payload, env, trace):
+        return _start_block(conn, home, payload, env, trace, limit)
+
+    return _respond("SessionStart", payload, provider, env, trace, build)
 
 
 def _terms(fts: str | None) -> list[str]:
@@ -301,9 +319,9 @@ def _hit_line(hit: Mapping, cap: int) -> str:
     return f"- [{head}] {_clean(plain, cap)}"
 
 
-def _recall_text(entries, hits, notes) -> str:
-    """The recall block within RECALL_LIMIT: knowledge, then hits, the
-    last ones dropped (then the snippets shortened) until it fits."""
+def _recall_text(entries, hits, notes, limit=RECALL_LIMIT) -> str:
+    """The recall block within `limit`: knowledge, then hits, the last
+    ones dropped (then the snippets shortened) until it fits."""
     tail = [*(_clean(n, 200) for n in notes), RECALL_HINT]
     for cap in (SNIPPET, 200, 120):
         items = [_knowledge_line(e) for e in entries]
@@ -311,8 +329,10 @@ def _recall_text(entries, hits, notes) -> str:
         for count in range(len(items), 0, -1):
             lines = [classify.NOTICE, *items[:count], *tail]
             block = _frame(' kind="recall"', lines)
-            if len(block) <= RECALL_LIMIT:
+            if len(block) <= limit:
                 return block
+    # ponytail: a lone item over the cap gives no block; the longest
+    # realistic one is about 470 characters against Codex's 900
     return ""
 
 
@@ -339,7 +359,7 @@ def _pushable(conn, entries: list[dict]) -> list[dict]:
     return [e for e, kid in zip(entries, ids) if kid in allowed]
 
 
-def _recall_block(conn, home, payload, env, trace, terms) -> str:
+def _recall_block(conn, home, payload, env, trace, terms, limit) -> str:
     prompt = payload["prompt"]
     session = payload.get("session_id")
     entries, hits, dropped = [], [], 0
@@ -372,7 +392,7 @@ def _recall_block(conn, home, payload, env, trace, terms) -> str:
     trace["stages"] = {"floor_dropped": dropped, "returned": len(hits)}
     if not entries and not hits:
         return ""
-    return _recall_text(entries, hits, _stale(home))
+    return _recall_text(entries, hits, _stale(home), limit)
 
 
 def prompt_submit(
@@ -384,14 +404,17 @@ def prompt_submit(
     the others stay pull-only), then at most MAX_EVENTS prompt/reply events
     of this repo, never the caller's own session, each matching at least
     MIN_TERMS (3) distinct query terms. Prompts with fewer than MIN_TERMS
-    terms, slash commands and subagent transcripts recall nothing.
+    terms, slash commands and subagent transcripts recall nothing. The block
+    is capped at RECALL_LIMIT, or CODEX_RECALL_LIMIT for Codex.
     """
     trace = {} if trace is None else trace
     terms = _prompt_terms(payload, trace)
     if terms is None:  # nothing to recall: the store is not even opened
         return {}
 
+    limit = _limits(provider)[1]
+
     def build(conn, home, payload, env, trace):
-        return _recall_block(conn, home, payload, env, trace, terms)
+        return _recall_block(conn, home, payload, env, trace, terms, limit)
 
     return _respond("UserPromptSubmit", payload, provider, env, trace, build)
