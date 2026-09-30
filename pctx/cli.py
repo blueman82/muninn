@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import fcntl
 import hashlib
 import json
 import os
@@ -447,6 +448,149 @@ def _doctor(a, env, home, record):
     return (0 if out["ok"] else 1), out
 
 
+REBUILD = "pctx.sqlite.rebuild"
+
+
+def _full_sync(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+        except (AttributeError, OSError):
+            os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _attach_old(conn: sqlite3.Connection, db: Path) -> bool:
+    """ATTACH the old store if it is a readable schema-v1 file."""
+    if not db.exists():
+        return False
+    try:
+        conn.execute("ATTACH DATABASE ? AS old", (str(db),))
+        version = conn.execute("PRAGMA old.user_version").fetchone()[0]
+        conn.execute("SELECT count(*) FROM old.event").fetchone()
+        if version == store.SCHEMA_VERSION:
+            return True
+    except sqlite3.DatabaseError:
+        pass
+    try:
+        conn.execute("DETACH DATABASE old")
+    except sqlite3.Error:
+        pass
+    return False
+
+
+def _copy_old(conn: sqlite3.Connection, tables: tuple) -> dict:
+    """Rows of the non-derivable tables, ids kept, in one transaction."""
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("PRAGMA defer_foreign_keys = ON")  # supersede chains
+    done = {
+        t: conn.execute(f"INSERT INTO {t} SELECT * FROM old.{t}").rowcount
+        for t in tables
+    }
+    conn.execute("COMMIT")
+    return done
+
+
+def _copy_missing(conn: sqlite3.Connection) -> dict:
+    """Sources the providers deleted (events kept, design 2.4 #1)."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(source)")][1:]
+    ecols = [r[1] for r in conn.execute("PRAGMA table_info(event)")][2:]
+    gone = conn.execute(
+        f"SELECT id, {', '.join(cols)} FROM old.source o WHERE"
+        " status = 'missing' AND NOT EXISTS (SELECT 1 FROM main.source m"
+        " WHERE m.provider = o.provider AND m.thread_id = o.thread_id)"
+    ).fetchall()
+    copied = {"missing_sources": 0, "missing_events": 0}
+    for row in gone:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            new_id = conn.execute(
+                f"INSERT INTO source({', '.join(cols)}) VALUES"
+                f" ({', '.join('?' * len(cols))})",
+                tuple(row)[1:],
+            ).lastrowid
+        except sqlite3.IntegrityError:  # its path now holds another thread
+            conn.execute("ROLLBACK")
+            continue
+        ids: dict[int, int] = {}
+        for event in conn.execute(
+            f"SELECT id, {', '.join(ecols)} FROM old.event"
+            " WHERE source_id = ? ORDER BY id",
+            (row[0],),
+        ).fetchall():
+            values = dict(zip(ecols, tuple(event)[1:]))
+            values["parent_event_id"] = ids.get(values["parent_event_id"])
+            ids[event[0]] = conn.execute(
+                f"INSERT INTO event(source_id, {', '.join(ecols)}) VALUES"
+                f" (?, {', '.join('?' * len(ecols))})",
+                (new_id, *values.values()),
+            ).lastrowid
+        conn.execute(
+            "INSERT INTO usage SELECT ?, provider, session_root, calls,"
+            " errors, last_ts FROM old.usage WHERE source_id = ?",
+            (new_id, row[0]),
+        )
+        conn.execute("COMMIT")
+        copied["missing_sources"] += 1
+        copied["missing_events"] += len(ids)
+    return copied
+
+
+def _rebuild(a, env, home, record):
+    """A new store from the transcripts (design 4.1 failure table): scopes,
+    knowledge, tombstones and missing sources' events are copied from the
+    old file when it is readable; tombstones.jsonl is re-applied first."""
+    db, new = store.db_path(home), home / REBUILD
+    with store.writer_lock(home, wait_s=WRITER_WAIT_S):
+        if (home / "pctx.sqlite-journal").exists():  # roll it back first
+            settle = sqlite3.connect(db)
+            try:
+                settle.execute("SELECT count(*) FROM sqlite_master")
+            finally:
+                settle.close()
+        for stale in (new, home / f"{REBUILD}-journal"):
+            if stale.exists():
+                stale.unlink()
+        conn = store.connect_rw(new, fullfsync=False)  # re-derivable
+        try:
+            readable = _attach_old(conn, db)
+            copied = (
+                _copy_old(conn, ("scope", "scope_path", "tombstone"))
+                if readable
+                else {}
+            )
+            reapplied = erase.reapply_tombstones(conn, home)
+            stats = ingest.ingest(conn, ingest.default_roots(env), full=True)
+            if readable:
+                copied |= _copy_old(
+                    conn, ("knowledge", "citation", "knowledge_log")
+                )
+                copied |= _copy_missing(conn)
+                conn.execute("DETACH DATABASE old")
+            quick = conn.execute("PRAGMA quick_check").fetchone()[0]
+        finally:
+            conn.close()
+        if quick != "ok":
+            new.unlink()
+            return 2, {"error": "quick_check_failed"}
+        if (home / "pctx.sqlite-journal").exists():
+            new.unlink()
+            return 4, {"error": "hot_journal"}
+        _full_sync(new)  # the copied knowledge is not re-derivable
+        os.replace(new, db)
+        _full_sync(home)
+    record["counts"] = copied | {"reapplied": reapplied}
+    return 0, {
+        "rebuilt": True,
+        "old_readable": readable,
+        "copied": copied,
+        "reapplied_tombstones": reapplied,
+        "ingest": dataclasses.asdict(stats),
+    }
+
+
 def _not_built(a, env, home, record):
     return 2, {"error": "not_built"}
 
@@ -462,5 +606,5 @@ _HANDLERS = {
     "serve": _serve,
     "stats": _stats,
     "doctor": _doctor,
-    "rebuild": _not_built,
+    "rebuild": _rebuild,
 }
