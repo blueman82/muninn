@@ -461,7 +461,7 @@ class TombstoneAndReplayTests(IngestCase):
         self.assertEqual(stats.events_added, 2)
 
     def test_crash_mid_source_rolls_back(self):
-        self.write(rollout("thr-bad"), primary("thr-bad"))
+        self.write(rollout("0000-bad"), primary("0000-bad"))
         self.write(rollout(), primary())
         real = ingest._commit_source
 
@@ -469,7 +469,7 @@ class TombstoneAndReplayTests(IngestCase):
             thread = conn.execute(
                 "SELECT thread_id FROM source WHERE id = ?", (src_id,)
             ).fetchone()[0]
-            if thread == "thr-bad":  # events are already inserted
+            if thread == "0000-bad":  # events are already inserted
                 raise sqlite3.OperationalError("simulated crash")
             return real(conn, src_id, *args, **kw)
 
@@ -477,10 +477,10 @@ class TombstoneAndReplayTests(IngestCase):
             stats = self.run_ingest()
         self.assertEqual(stats.failed, 1)
         self.assertEqual(stats.errors, {"OperationalError": 1})
-        self.assertIsNone(self.source("thr-bad"))  # nothing committed
+        self.assertIsNone(self.source("0000-bad"))  # nothing committed
         self.assertEqual(len(self.events()), 2)  # the other source landed
         again = self.run_ingest()  # the next pass redoes the source
-        self.assertEqual(len(self.events("thr-bad")), 2)
+        self.assertEqual(len(self.events("0000-bad")), 2)
         self.assertEqual(again.failed, 0)
 
 
@@ -764,3 +764,20 @@ class RootsAndPassTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     ingest.default_roots({"HOME": "/h", "PCTX_ROOTS": bad})
+
+
+class RaceTests(IngestCase):
+    def test_file_vanishing_mid_pass_is_skipped(self):
+        gone = self.write(rollout("thr-gone"), primary("thr-gone"))
+        self.write(rollout(), primary())
+        real = ingest._first_line
+
+        def racing(path):
+            if path == gone:
+                gone.unlink()  # archived or deleted after discovery
+            return real(path)
+
+        with mock.patch.object(ingest, "_first_line", racing):
+            stats = self.run_ingest()
+        self.assertEqual(stats.skipped_files, 1)
+        self.assertEqual(len(self.events()), 2)

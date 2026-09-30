@@ -119,7 +119,9 @@ def ingest(
     stats, seen, work = PassStats(), set(), []
     for name, path, st in _discover(roots, only_threads):
         stats.files_seen += 1
-        item = _plan(conn, roots, name, path, st, full, only_threads, stats)
+        item = _safe_plan(
+            conn, roots, name, path, st, full, only_threads, stats
+        )
         if isinstance(item, _Work):
             work.append(item)
         elif item is not None:
@@ -151,7 +153,7 @@ def _late_forks(conn, roots, only_threads, stats) -> Iterator[_Work]:
             st = os.lstat(path)
         except OSError:
             continue
-        item = _plan(
+        item = _safe_plan(
             conn, roots, row["root"], path, st, False, only_threads, stats
         )
         if isinstance(item, _Work):
@@ -180,6 +182,16 @@ def _discover(
             ):
                 continue  # codex names end in the id; claude stem = id
             yield name, path, st
+
+
+def _safe_plan(conn, roots, name, path, st, full, only_threads, stats):
+    """_plan, skipping a file that vanished or became unreadable since it
+    was listed (an archive move racing the pass; the next pass sees it)."""
+    try:
+        return _plan(conn, roots, name, path, st, full, only_threads, stats)
+    except OSError:
+        stats.skipped_files += 1
+        return None
 
 
 def _plan(conn, roots, name, path, st, full, only_threads, stats):
@@ -365,6 +377,7 @@ def _process(conn, w: _Work, stats: PassStats, scopes, seen) -> None:
     except Exception as exc:  # counted; the next pass redoes the source
         if conn.in_transaction:
             conn.execute("ROLLBACK")
+        scopes.clear()  # it may name scopes created by the rolled-back txn
         stats.failed += 1
         kind = type(exc).__name__
         stats.errors[kind] = stats.errors.get(kind, 0) + 1
