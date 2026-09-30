@@ -28,6 +28,7 @@ from pctx import (
     erase,
     hook,
     ingest,
+    knowledge,
     obs,
     query,
     store,
@@ -60,6 +61,15 @@ class _Parser(argparse.ArgumentParser):
         if message:
             sys.stderr.write(message)
         raise SystemExit(2 if status == 0 else status)
+
+
+class _Cited(argparse.Action):
+    """--cite REF and --quote Q keep their command-line order in args.cited
+    as ("cite" | "quote", value) pairs, so --cite A --quote QA pairs up."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        items = list(getattr(namespace, self.dest, None) or [])
+        setattr(namespace, self.dest, [*items, (self.const, values)])
 
 
 def _parser() -> _Parser:
@@ -122,6 +132,40 @@ def _parser() -> _Parser:
     p = cmd("doctor", help="health checks (exit 1 when unhealthy)")
     p.add_argument("--cutover", action="store_true")
     cmd("rebuild", help="rebuild the store from the transcripts")
+    p = cmd("know", help="the cited knowledge ledger")
+    kinds = p.add_subparsers(dest="know_cmd", required=True)
+
+    def know(name, **kw):
+        return kinds.add_parser(name, allow_abbrev=False, **kw)
+
+    a = know("add", help="record an entry; every entry needs a verbatim quote")
+    a.add_argument("--kind", choices=knowledge.KINDS, required=True)
+    a.add_argument("--text", required=True)
+    a.add_argument(
+        "--cite", action=_Cited, const="cite", dest="cited", metavar="REF"
+    )
+    a.add_argument(
+        "--quote",
+        action=_Cited,
+        const="quote",
+        dest="cited",
+        metavar="Q",
+        help="after --cite: its quote; alone: search this session's prompts",
+    )
+    a.add_argument("--supersedes", metavar="K")
+    a.add_argument("--global", action="store_true", dest="is_global")
+    a = know("retract", help="retract a current entry")
+    a.add_argument("kid", metavar="K")
+    a.add_argument("--reason", default="")
+    a = know("list", help="entries of this repo and global, newest first")
+    a.add_argument(
+        "--status", choices=(*knowledge.STATUSES, "all"), default="current"
+    )
+    a.add_argument("--kind", choices=knowledge.KINDS)
+    a.add_argument("--all-projects", action="store_true")
+    a = know("show", help="one entry with its chain and log")
+    a.add_argument("kid", metavar="K")
+    know("check", help="re-verify every citation")
     p = cmd("hook", help="provider hook: payload on stdin, JSON on stdout")
     events = p.add_subparsers(dest="hook_event", required=True)
     for name in HOOKS:
@@ -210,7 +254,9 @@ def _hook_main(argv: list[str], env) -> int:
     return 0
 
 
-_TEXT_KEYS = frozenset({"text", "snippet", "preview", "quote", "first_prompt"})
+_TEXT_KEYS = frozenset(
+    {"text", "snippet", "preview", "quote", "first_prompt", "retract_reason"}
+)
 
 
 def _run(args, env) -> int:
@@ -670,6 +716,115 @@ def _rebuild(a, env, home, record):
     }
 
 
+def _citations(cited) -> tuple[list[tuple[str, str]], str | None]:
+    """The (ref, quote) pairs and the lone quote of add's ordered flags."""
+    pairs, pending, alone = [], None, []
+    for what, value in cited or ():
+        if what == "cite":
+            if pending is not None:
+                raise ValueError("each --cite needs its --quote")
+            pending = value
+        elif pending is not None:
+            pairs.append((pending, value))
+            pending = None
+        else:
+            alone.append(value)
+    if pending is not None:
+        raise ValueError("each --cite needs its --quote")
+    if len(alone) > 1:
+        raise ValueError("only one --quote may stand without --cite")
+    return pairs, (alone[0] if alone else None)
+
+
+def _refused(refused: knowledge.Refused):
+    out = {"error": refused.code}
+    if refused.detail:
+        out["detail"] = refused.detail
+    return 2, out
+
+
+def _know_add(a, env, home, record):
+    pairs, alone = _citations(a.cited)
+    try:
+        out = knowledge.run_add(
+            home,
+            wait_s=WRITER_WAIT_S,
+            kind=a.kind,
+            text=a.text,
+            cites=pairs,
+            quote_only=alone,
+            supersedes=a.supersedes,
+            global_scope=a.is_global,
+            cwd=_cwd(env),
+            actor=obs.actor(env),
+            roots=ingest.default_roots(env),
+            env=env,
+        )
+    except knowledge.Refused as refused:
+        return _refused(refused)
+    record["knowledge_ids"] = [int(out["entry"]["id"][1:])]
+    return 0, out
+
+
+def _know_retract(a, env, home, record):
+    try:
+        out = knowledge.run_retract(
+            home,
+            wait_s=WRITER_WAIT_S,
+            kid=a.kid,
+            reason=a.reason,
+            actor=obs.actor(env),
+        )
+    except knowledge.Refused as refused:
+        return _refused(refused)
+    record["knowledge_ids"] = [int(out["entry"]["id"][1:])]
+    return 0, out
+
+
+def _know_list(a, env, home, record):
+    out = _reader(
+        home,
+        lambda conn: knowledge.list_entries(
+            conn,
+            cwd=_cwd(env),
+            status=a.status,
+            kind=a.kind,
+            all_projects=a.all_projects,
+        ),
+    )
+    record["knowledge_ids"] = [
+        int(e["id"][1:]) for e in out.get("entries", [])
+    ]
+    return _code(out), out
+
+
+def _know_show(a, env, home, record):
+    out = _reader(home, lambda conn: knowledge.show(conn, a.kid))
+    if "entry" in out:
+        record["knowledge_ids"] = [int(out["entry"]["id"][1:])]
+    return _code(out), out
+
+
+def _know_check(a, env, home, record):
+    out = _reader(home, knowledge.check)
+    record["counts"] = _counts(out)
+    return 0, out
+
+
+_KNOW = {
+    "add": _know_add,
+    "retract": _know_retract,
+    "list": _know_list,
+    "show": _know_show,
+    "check": _know_check,
+}
+
+
+def _know(a, env, home, record):
+    record["cmd"] = f"know {a.know_cmd}"
+    return _KNOW[a.know_cmd](a, env, home, record)
+
+
 def _not_built(a, env, home, record):
     return 2, {"error": "not_built"}
 
@@ -686,4 +841,5 @@ _HANDLERS = {
     "stats": _stats,
     "doctor": _doctor,
     "rebuild": _rebuild,
+    "know": _know,
 }
