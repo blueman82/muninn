@@ -793,6 +793,7 @@ def run_probe(args: argparse.Namespace, cfg: dict) -> dict:
         ),
         "model": args.model,
         "effort": args.effort,
+        "resume_seed": getattr(args, "resume_seed", None),
         "t": launch.utc_ms(),
     }
     ledger_append(out, entry, args.max_probes)
@@ -845,7 +846,18 @@ def run_probe(args: argparse.Namespace, cfg: dict) -> dict:
         model=args.model,
         effort=args.effort,
         profile=getattr(args, "profile", "isolated"),
+        extra_flags=resume_flags(args),
     )
+
+
+def resume_flags(args: argparse.Namespace) -> tuple[str, ...]:
+    """K4 negative control only: inherit a seed conversation (a fork)."""
+    seed = getattr(args, "resume_seed", None)
+    if not seed:
+        return ()
+    if args.profile != "default":
+        raise SystemExit("--resume-seed is for default-profile controls")
+    return ("--resume", seed, "--fork-session")
 
 
 def seed_codex(cfg: dict, state: dict, run_dir: Path) -> dict:
@@ -976,6 +988,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["k2"].add_argument(
         "--arm", choices=["OLD", "NEW"], required=True
     )
+    sub.choices["k2"].add_argument("--resume-seed")
     sub.choices["k3"].add_argument(
         "--variant", choices=["frozen", "live"], required=True
     )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -287,6 +288,21 @@ class EvaluationTest(unittest.TestCase):
         self.assertTrue(canaries.evaluate_k5(path, None)["pass"])
         path = write_jsonl(self.tmp / "t2.jsonl", clean_records())
         self.assertFalse(canaries.evaluate_k5(path, None)["pass"])
+
+
+class ResumeFlagsTest(unittest.TestCase):
+    def test_resume_is_only_for_default_profile_controls(self) -> None:
+        args = argparse.Namespace(resume_seed="s-1", profile="default")
+        self.assertEqual(
+            canaries.resume_flags(args),
+            ("--resume", "s-1", "--fork-session"),
+        )
+        args.profile = "isolated"
+        with self.assertRaises(SystemExit):
+            canaries.resume_flags(args)
+        self.assertEqual(
+            canaries.resume_flags(argparse.Namespace(profile="isolated")), ()
+        )
 
 
 class SetupTest(unittest.TestCase):

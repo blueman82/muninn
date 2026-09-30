@@ -603,6 +603,21 @@ class ExtractTest(unittest.TestCase):
         )
         self.assertIsNone(launch.extract_final_answer(text))
 
+    def test_stream_session_id_reads_init_event(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        stream = tmp / "stream.jsonl"
+        stream.write_text(
+            json.dumps({"type": "system", "subtype": "hook_started"})
+            + "\n"
+            + json.dumps(
+                {"type": "system", "subtype": "init", "session_id": "s-2"}
+            )
+            + "\n"
+        )
+        self.assertEqual(launch.stream_session_id(stream), "s-2")
+        stream.write_text("")
+        self.assertIsNone(launch.stream_session_id(stream))
+
     def test_final_message_prefers_result_event(self) -> None:
         tmp = Path(tempfile.mkdtemp())
         stream = tmp / "stream.jsonl"

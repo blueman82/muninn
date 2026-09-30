@@ -156,6 +156,15 @@ def frozen_old_cli(cfg: dict) -> Path:
     raise RuntimeError("no byte-identical copy of the frozen OLD CLI")
 
 
+def stream_session_id(stream: Path) -> str | None:
+    """Session id reported by the run's system/init event, if any."""
+    for line in Path(stream).read_text().splitlines():
+        event = json.loads(line)
+        if event.get("type") == "system" and event.get("subtype") == "init":
+            return event.get("session_id")
+    return None
+
+
 def find_transcript(cfg: dict, session_id: str) -> Path | None:
     root = Path(cfg["projects_root"]).expanduser()
     return next(root.glob(f"*/{session_id}.jsonl"), None)
@@ -201,6 +210,7 @@ def run_claude(
             process.kill()
             process.wait()
             killed = True
+    session_id = stream_session_id(out_dir / "stream.jsonl") or session_id
     source = find_transcript(cfg, session_id)
     if source is not None:
         shutil.copyfile(source, out_dir / "transcript.jsonl")
@@ -235,8 +245,12 @@ def launch_reader(
     model: str,
     effort: str | None,
     profile: str = "isolated",
+    extra_flags: tuple[str, ...] = (),
 ) -> dict:
-    """Launch one single-shot reader bound to one token (§1.4, §2)."""
+    """Launch one single-shot reader bound to one token (§1.4, §2).
+
+    ``extra_flags`` exist only for negative controls (e.g. --resume).
+    """
     out_dir = new_unit_dir(out_dir)
     token, session_id = secrets.token_hex(16), str(uuid.uuid4())
     ceilings = cfg["ceilings"]
@@ -272,6 +286,7 @@ def launch_reader(
         session_id=session_id,
         mcp_config=str(mcp_path),
     )
+    argv += list(extra_flags)
     prompt = reader_prompt(cfg, tool_description, question, token)
     env = child_env(cfg, profile, dict(os.environ))
     return run_claude(cfg, argv, env, prompt, out_dir, session_id) | {
