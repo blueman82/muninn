@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from unittest import mock
 
-from pctx import cli, obs, store
+from pctx import cli, ingest, knowledge, obs, store
 from tests.test_classify import SK, codex_meta, reply, user_msg
 from tests.test_ingest import TID, IngestCase, rollout
 from tests.test_store import SPILLING_WRITER, Child
@@ -776,6 +776,27 @@ class KnowTests(CliCase):
         _, here, _ = self.pctx("know", "list")
         _, wide, _ = self.pctx("know", "list", "--all-projects")
         self.assertEqual((here["count"], wide["count"]), (2, 2))
+
+    def test_know_list_all_projects_reaches_other_scopes(self):
+        self.add("--cite", self.ref, "--quote", self.QUOTE)
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        knowledge.run_add(
+            self.home,
+            kind="fact",
+            text="Kept in another project",
+            cites=[(self.ref, self.QUOTE)],
+            cwd=str(elsewhere),
+            actor="user",
+            roots=ingest.default_roots(self.env),
+            env=self.env,
+        )
+        _, here, _ = self.pctx("know", "list")
+        _, wide, _ = self.pctx("know", "list", "--all-projects")
+        self.assertEqual([e["id"] for e in here["entries"]], ["K1"])
+        self.assertEqual(
+            sorted(e["id"] for e in wide["entries"]), ["K1", "K2"]
+        )
 
     def test_show_unknown_and_reader_failures(self):
         self.assertEqual(

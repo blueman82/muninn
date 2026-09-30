@@ -737,10 +737,7 @@ def _citations(cited) -> tuple[list[tuple[str, str]], str | None]:
 
 
 def _refused(refused: knowledge.Refused):
-    out = {"error": refused.code}
-    if refused.detail:
-        out["detail"] = refused.detail
-    return 2, out
+    return 2, {"error": refused.code}
 
 
 def _know_add(a, env, home, record):

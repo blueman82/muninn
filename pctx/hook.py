@@ -41,6 +41,7 @@ OPEN_HINT = (
     "Open a hit with `pctx open <ref> --context 3`;"
     " browse with `pctx sessions`."
 )
+RECALL_HINT = "Open a hit with `pctx open <ref> --context 3`."
 
 # the `<` of a frame delimiter, however spaced or cased (design 4.8)
 _FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
@@ -118,10 +119,14 @@ def _first_record(path: str) -> dict | None:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return None
-    with os.fdopen(fd, "rb") as handle:
+    try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        line = handle.readline(FIRST_LINE + 1)
+        line = os.fdopen(fd, "rb", closefd=False).readline(FIRST_LINE + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
     try:
         record = json.loads(line) if len(line) <= FIRST_LINE else None
     except (ValueError, RecursionError):
@@ -300,7 +305,7 @@ def _hit_line(hit: Mapping, cap: int) -> str:
 def _recall_text(entries, hits, notes) -> str:
     """The recall block within RECALL_LIMIT: knowledge, then hits, the
     last ones dropped (then the snippets shortened) until it fits."""
-    tail = [*(_clean(n, 200) for n in notes), OPEN_HINT]
+    tail = [*(_clean(n, 200) for n in notes), RECALL_HINT]
     for cap in (SNIPPET, 200, 120):
         items = [_knowledge_line(e) for e in entries]
         items += [_hit_line(h, cap) for h in hits]

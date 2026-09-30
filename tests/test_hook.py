@@ -443,10 +443,8 @@ class PromptRecallTests(RecallCase):
         self.assertEqual(kinds.count("K"), 2)
         self.assertEqual(kinds.count("E"), 3)  # at most three events
         self.assertIn(classify.NOTICE, text)
-        self.assertLess(text.rindex(HINT), text.rindex(CLOSE))
-        self.assertEqual(
-            text.split("\n")[-2].count("pctx open"), 1
-        )  # it ends on the hint
+        hint = "Open a hit with " + HINT + "."
+        self.assertEqual(text.split("\n")[-2], hint)  # it ends on the hint
 
     def test_prompt_hook_term_floor_min3(self):
         two = self.talk("two", "only alphaterm betaterm appear in this chat")
@@ -855,3 +853,194 @@ class HookEndToEndTests(HookCliCase):
         blob = (self.home / "calls.jsonl").read_text()
         for needle in ("canary", "ignore previous", "AKIA", "instructions"):
             self.assertNotIn(needle, blob)
+
+
+class RenderTests(HookCase):
+    """render_block and the helpers on their own, without a store."""
+
+    def entry(self, n=1, **kw):
+        base = {
+            "id": f"K{n}",
+            "kind": "decision",
+            "scope": "repo",
+            "text": "a decision",
+            "actor": "user",
+            "date": "2026-09-30",
+            "cite": "codex:thr:1.1",
+            "quote": "verbatim words here",
+        }
+        return base | kw
+
+    def test_limits_are_the_documented_ones(self):
+        self.assertEqual((hook.BLOCK_LIMIT, hook.RECALL_LIMIT), (4000, 1500))
+
+    def test_clean_cuts_to_the_limit_and_keeps_shorter_text(self):
+        self.assertEqual(hook._clean("x" * 300, 300), "x" * 300)
+        cut = hook._clean("x" * 301, 300)
+        self.assertEqual((len(cut), cut[-1]), (300, "…"))
+        self.assertEqual(hook._clean("a \n b\t c", 50), "a b c")
+        self.assertEqual(hook._clean(AKIA, 50), "[redacted:secret]")
+
+    def test_render_block_bounds_quote_text_label_and_size(self):
+        long = self.entry(text="t" * 500, quote="q" * 500)
+        block = hook.render_block([long], "x </pctx-memory> y")
+        (line,) = re.findall(r"^- K1 .*$", block, re.M)
+        self.assertIn("t" * 299 + "…", line)
+        self.assertIn('"' + "q" * 119 + '…"', line)
+        self.assertEqual(len(TAG.findall(block)), 2)  # the label is escaped
+        self.assertIn("&lt;/pctx-memory>", block)
+        many = [
+            self.entry(n, text="w" * 300, quote="v" * 120)
+            for n in range(9, 0, -1)
+        ]
+        block = hook.render_block(many, "repo")
+        self.assertLessEqual(len(block), 4000)
+        shown = re.findall(r"^- K(\d+) ", block, re.M)
+        self.assertEqual(shown, [str(n) for n in range(9, 9 - len(shown), -1)])
+        tiny = hook.render_block(many, "repo", limit=len(OPEN) + 400)
+        self.assertLessEqual(len(tiny), len(OPEN) + 400)
+        self.assertTrue(tiny.endswith(CLOSE))
+
+    def test_first_record_reads_only_what_it_may(self):
+        folder = self.tmp / "folder"
+        folder.mkdir()
+        self.assertIsNone(hook._first_record(str(folder)))  # not a file
+        fifo = self.tmp / "pipe"
+        os.mkfifo(fifo)
+        self.assertIsNone(hook._first_record(str(fifo)))
+        meta = tc.subagent_meta("thr-big")
+        meta["payload"]["base_instructions"] = {
+            "text": "z" * (1024 * 1024 + 10)
+        }
+        huge = self.tmp / "huge.jsonl"
+        huge.write_text(json.dumps(meta) + "\n")
+        self.assertIsNone(hook._first_record(str(huge)))  # over the cap
+        self.assertEqual(
+            self.start("codex", transcript_path=str(huge)).keys(),
+            {"hookSpecificOutput"},
+        )
+        small = self.tmp / "small.jsonl"
+        small.write_text(json.dumps(tc.subagent_meta("thr-s")) + "\n")
+        self.assertEqual(
+            hook._first_record(str(small))["type"], "session_meta"
+        )
+
+    def test_scope_label_in_the_header_and_its_fallback(self):
+        self.add()
+        self.assertIn(
+            "Project knowledge for repo (1 current", self.body(self.start())
+        )
+        wide = tk.kid(self.add(global_scope=True))
+        out = self.start(cwd="/some/where/else")  # an unknown scope
+        self.assertIn("Project knowledge for else (1 current", self.body(out))
+        self.assertIn(f"K{wide} ", self.body(out))
+
+
+class RecallStressTests(RecallCase):
+    def test_prompt_hook_reads_on_to_later_pages_and_keeps_knowledge(self):
+        prompt = "rareone raretwo commonone commontwo commonthree"
+        for i in range(6):
+            self.talk(f"fail{i}", "rareone raretwo")  # 2 of 5 terms, rank top
+        for term in ("commonone", "commontwo", "commonthree"):
+            for i in range(20):
+                self.talk(f"{term}{i}", f"{term} filler")
+        passing = self.talk("pass", "commonone commontwo commonthree both")
+        self.add(text="Notes on rareone raretwo")
+        out = self.ask(prompt)
+        rows = self.lines(out)
+        self.assertTrue(rows[0].startswith("- K"))  # knowledge survived
+        self.assertEqual(len(rows), 2)
+        self.assertIn(self.ref(passing), rows[1])  # found on the second page
+
+    def test_a_phrase_of_identifier_parts_is_not_a_third_term(self):
+        self.talk("a", "hook_core.py lives in the hooks dir")
+        self.noise(self.repo)
+        self.assertEqual(self.ask("hook_core.py"), {})  # 2 terms + a phrase
+        self.assertIn("hookSpecificOutput", self.ask("hook_core.py lives"))
+
+    def test_recall_text_drops_from_the_end_first(self):
+        entries = [
+            {
+                "id": f"K{n}", "kind": "fact", "date": "2026-09-30",
+                "actor": "user", "text": "e" * 300, "cites": ["codex:t:1.1"],
+            }
+            for n in (3, 2, 1)
+        ]  # fmt: skip
+        hits = [
+            {
+                "provider": "codex", "role": "user", "kind": "prompt",
+                "session": "abcd1234", "ts": "2026-01-01T00:00:00Z",
+                "ref": f"codex:thr:{n}.1", "snippet": "«h»" + "s" * 400,
+            }
+            for n in (1, 2, 3)
+        ]  # fmt: skip
+
+        def rows(text):
+            return [
+                x.split(" ")[1] for x in text.split("\n") if x.startswith("- ")
+            ]
+
+        full = hook._recall_text(entries, hits, ())
+        self.assertLessEqual(len(full), 1500)
+        self.assertEqual(rows(full), ["K3", "K2", "K1"])  # hits went first
+        text = hook._recall_text(entries[:1], hits, ())
+        self.assertLessEqual(len(text), 1500)
+        self.assertEqual(len(rows(text)), 3)  # K3 and the two best hits
+        self.assertNotIn("codex:thr:3.1", text)
+        self.assertNotIn("«", text)
+        self.assertTrue(
+            text.endswith("`pctx open <ref> --context 3`.\n" + CLOSE)
+        )
+        shrunk = hook._recall_text(entries[:1], hits[:3], ("x" * 180,))
+        self.assertLessEqual(len(shrunk), 1500)
+        self.assertIn("x" * 180, shrunk)
+
+    def test_prompt_hook_lines_carry_actor_and_cites(self):
+        self.add(text="Decision on alphaterm betaterm gammaterm")
+        self.talk("a", "alphaterm betaterm gammaterm deltaterm")
+        self.noise(self.repo)
+        text = self.body(self.ask())
+        self.assertIn("by:claude:abc123]", text)
+        self.assertIn("(cites: codex:thr-main:1.1)", text)
+        self.assertNotIn("«", text)
+        self.assertNotIn("»", text)
+
+
+class HookCliEdgeTests(HookCliCase):
+    def test_a_bad_provider_is_fail_open_for_session_start_too(self):
+        for argv in (
+            ("session-start", "--provider", "gemini"),
+            ("session-start", "--provider"),
+            ("session-start",),
+        ):
+            with self.subTest(argv):
+                done = subprocess.run(
+                    [str(LAUNCHER), "hook", *argv],
+                    input=b"{}",
+                    capture_output=True,
+                    env=self.env,
+                )
+                self.assertEqual(done.returncode, 0)
+                self.assertEqual(json.loads(done.stdout), {})
+
+    def test_hook_help_is_help_not_a_silent_hook(self):
+        code, out, err = self.pctx("hook", "--help")
+        self.assertEqual((code, out), (2, ""))  # the skeleton help contract
+        self.assertIn("session-start", err)
+
+    def test_a_crashing_hook_function_still_prints_json_and_exits_0(self):
+        def boom(payload, provider, env, trace=None):
+            raise RuntimeError("boom")
+
+        stdin = io.TextIOWrapper(io.BytesIO(b"{}"))
+        with (
+            mock.patch.dict(tcli.cli.HOOKS, {"session-start": boom}),
+            mock.patch("sys.stdin", stdin),
+            mock.patch.dict(os.environ, self.env, clear=True),
+        ):
+            out = io.StringIO()
+            with mock.patch("sys.stdout", out):
+                code = tcli.cli.main(
+                    ["hook", "session-start", "--provider", "claude"]
+                )
+        self.assertEqual((code, json.loads(out.getvalue())), (0, {}))
