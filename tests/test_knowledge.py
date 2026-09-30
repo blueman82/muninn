@@ -8,8 +8,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
-from pctx import erase, knowledge
+from pctx import erase, ingest, knowledge, store
 from tests import test_classify as tc
 from tests import test_ingest as ti
 from tests import test_query as tq
@@ -717,3 +718,281 @@ class ReparseTests(ti.IngestCase):
         self.run_ingest()
         got = knowledge.check(self.conn)
         self.assertEqual((got["ok"], got["missing"]), (0, 1))
+
+
+class ApprovalTests(KnowCase):
+    """O5a: a quote under 12 characters is an approval of a proposal."""
+
+    def setUp(self):
+        super().setUp()
+        src = self.add_source("thr-talk", session="sess-talk")
+        self.n = 0
+
+        def say(text, **kw):
+            self.n += 1
+            kw.setdefault("ts", f"2026-09-02T09:00:{self.n:02d}.000Z")
+            return self.add_event(src, self.repo, text, **kw)
+
+        def bot(text, **kw):
+            return say(text, kind="reply", role="assistant", **kw)
+
+        say("Please design the lookup path.")
+        self.r0 = bot("Sure, here is a first outline of the lookup path.")
+        self.r1 = bot(
+            "I propose to cache lookups in the zebra cache. Shall I?"
+        )
+        self.c1 = say("Bash: ls src", kind="tool_call", role="assistant")
+        self.yes = say("yes, do it")
+        self.r2 = bot("Done, the zebra cache is wired in.")
+        self.short_reply = bot("Done.")
+        self.r3 = bot("Shall I also cache the yak lookups too?")
+        self.yes2 = say("yes, do it")
+        solo = self.add_source("thr-solo", session="sess-solo")
+        self.first = self.add_event(solo, self.repo, "go ahead")
+        other = self.add_source("thr-other", session="sess-other")
+        self.add_event(
+            other,
+            self.repo,
+            "an unrelated question",
+            ts="2026-09-02T08:00:00.000Z",
+        )
+        self.r_other = self.add_event(
+            other,
+            self.repo,
+            "I propose to cache lookups elsewhere",
+            kind="reply",
+            role="assistant",
+        )
+        self.quote = {
+            self.r0: "first outline of the lookup",
+            self.r1: "propose to cache lookups",
+            self.r2: "zebra cache is wired in",
+            self.r3: "also cache the yak lookups",
+            self.r_other: "propose to cache lookups",
+        }
+
+    def cite(self, event, quote=None):
+        return (self.ref(event), quote or self.quote[event])
+
+    def test_short_approval_needs_preceding_reply_citation(self):
+        yes = self.cite(self.yes, "yes, do it")
+        self.refused("approval_needs_reply", cites=[yes])
+        # an earlier reply, a later reply, another thread's reply: not it
+        for wrong in (self.r0, self.r2, self.r_other):
+            with self.subTest(wrong):
+                self.refused(
+                    "approval_needs_reply", cites=[yes, self.cite(wrong)]
+                )
+        got = self.add(cites=[yes, self.cite(self.r1)])
+        self.assertEqual(
+            [(c["ref"], c["quote"]) for c in got["entry"]["cites"]],
+            [
+                (self.ref(self.yes), "yes, do it"),
+                (self.ref(self.r1), "propose to cache lookups"),
+            ],
+        )
+        self.add(kind="preference", cites=[yes, self.cite(self.r1)])
+        spaced = (self.ref(self.yes), "yes,do it")
+        self.refused("quote_not_found", cites=[spaced, self.cite(self.r1)])
+        spaced = (self.ref(self.yes), "  yes,   do  it ")
+        self.add(cites=[spaced, self.cite(self.r1)])
+        # the second "yes, do it" answers the later proposal
+        yes2 = self.cite(self.yes2, "yes, do it")
+        self.refused("approval_needs_reply", cites=[yes2, self.cite(self.r1)])
+        self.add(cites=[yes2, self.cite(self.r3)])
+        # two approvals in one entry each need their own proposal
+        self.refused(
+            "approval_needs_reply", cites=[yes, yes2, self.cite(self.r1)]
+        )
+        self.add(cites=[yes, yes2, self.cite(self.r1), self.cite(self.r3)])
+
+    def test_only_a_whole_user_prompt_can_be_short(self):
+        r1 = self.cite(self.r1)
+        self.refused("quote_length", cites=[(self.ref(self.yes), "yes"), r1])
+        self.refused("quote_length", cites=[(self.ref(self.yes), "do it"), r1])
+        self.refused(
+            "quote_length", cites=[(self.ref(self.short_reply), "Done."), r1]
+        )
+        self.refused(
+            "quote_length", cites=[(self.ref(self.c1), "Bash: ls"), r1]
+        )
+        self.refused(
+            "quote_not_found", cites=[(self.ref(self.yes), "yes do it"), r1]
+        )
+        self.refused(
+            "approval_needs_reply", cites=[(self.ref(self.first), "go ahead")]
+        )  # nothing came before it
+        self.refused(
+            "approval_needs_reply",
+            cites=[(self.ref(self.first), "go ahead"), r1],
+        )
+
+    def test_quote_only_approval_also_needs_the_reply(self):
+        env = {"CODEX_SESSION_ID": "sess-talk"}
+        self.refused(
+            "approval_needs_reply", quote_only="yes, do it", cites=[], env=env
+        )
+        # the latest "yes, do it" is the second; it answers r3, not r1
+        self.refused(
+            "approval_needs_reply",
+            quote_only="yes, do it",
+            cites=[self.cite(self.r1)],
+            env=env,
+        )
+        got = self.add(
+            quote_only="yes, do it", cites=[self.cite(self.r3)], env=env
+        )
+        refs = [c["ref"] for c in got["entry"]["cites"]]
+        self.assertEqual(refs, [self.ref(self.r3), self.ref(self.yes2)])
+
+
+class QuoteOnlyTests(ti.IngestCase):
+    """quote_only: the caller's own prompts, after a targeted ingest."""
+
+    QUOTE = "the zebra cache stays in place"
+
+    def setUp(self):
+        super().setUp()
+        self.tid = ti.TID
+        self.other_tid = "0199aaaa-bbbb-4ccc-8ddd-111111111111"
+        self.third_tid = "0199aaaa-bbbb-4ccc-8ddd-222222222222"
+        self.path = self.write(
+            ti.rollout(self.tid),
+            [
+                tc.codex_meta("user", self.tid),
+                tc.user_msg(1, f"we decided {self.QUOTE}, old wording"),
+                tc.reply(2, f"noted: {self.QUOTE}"),
+                tc.user_msg(
+                    3, f"<user_instructions>{self.QUOTE}</user_instructions>"
+                ),
+            ],
+        )
+        self.write(
+            ti.rollout(self.other_tid),
+            [
+                tc.codex_meta("user", self.other_tid),
+                tc.user_msg(1, f"elsewhere: {self.QUOTE}"),
+            ],
+        )
+        self.run_ingest()
+        # typed a moment ago: on disk, not yet ingested
+        self.append(
+            self.path, [tc.user_msg(4, f"final call: {self.QUOTE}, ship it")]
+        )
+        self.write(
+            ti.rollout(self.third_tid),
+            [
+                tc.codex_meta("user", self.third_tid),
+                tc.user_msg(1, "never ingested"),
+            ],
+        )
+
+    def add(self, **kw):
+        args = {
+            "kind": "decision", "text": "The zebra cache stays",
+            "cites": [], "quote_only": self.QUOTE, "supersedes": None,
+            "global_scope": False, "cwd": tc.CWD, "actor": "codex:0199aaaa",
+            "roots": self.roots, "env": {"CODEX_THREAD_ID": self.tid},
+        }  # fmt: skip
+        return knowledge.add(self.conn, **(args | kw))
+
+    def test_quote_only_searches_callers_session_prompts(self):
+        self.assertEqual(self.events()[-1][:3], (4, 1, "harness"))  # not yet
+        got = self.add()
+        (cite,) = got["entry"]["cites"]
+        self.assertEqual(cite["role"], "user")
+        self.assertEqual(cite["kind"], "prompt")
+        self.assertEqual(cite["quote"], self.QUOTE)
+        rows = {r[0]: r[3] for r in self.events()}
+        newest = max(
+            line for line, text in rows.items() if "final call" in text
+        )
+        self.assertEqual(cite["ref"], f"codex:{self.tid}:{newest}.1")
+        start, end = cite["span"]
+        self.assertEqual(rows[newest][start:end], self.QUOTE)
+        self.assertEqual(got["entry"]["cites"][0]["verify"], "ok")
+        # only the caller's threads were read: the third file stays unseen
+        self.assertIsNone(self.source(self.third_tid))
+
+    def test_quote_only_is_the_latest_prompt_never_reply_or_harness(self):
+        self.append(self.path, [tc.reply(5, f"sure, {self.QUOTE}")])
+        cite = self.add()["entry"]["cites"][0]
+        self.assertEqual(cite["kind"], "prompt")
+        self.assertTrue(cite["ref"].endswith(":5.1"))  # the appended prompt
+        only_old = self.add(
+            quote_only="we decided the zebra cache stays in place, old"
+        )
+        self.assertTrue(only_old["entry"]["cites"][0]["ref"].endswith(":2.1"))
+
+    def test_quote_only_errors(self):
+        self.refused_add("no_caller_session", env={})
+        self.refused_add("no_caller_session", env={"CODEX_THREAD_ID": ""})
+        self.refused_add("quote_not_found", quote_only="a quote nobody typed")
+        self.refused_add("quote_length", quote_only="")
+        self.refused_add("quote_length", quote_only="x" * 301)
+        # another session's prompt is never used
+        other = {"CODEX_THREAD_ID": self.other_tid}
+        got = self.add(env=other, quote_only="elsewhere: the zebra cache")
+        self.assertIn(self.other_tid, got["entry"]["cites"][0]["ref"])
+        self.refused_add(
+            "quote_not_found",
+            quote_only=f"final call: {self.QUOTE}",
+            env=other,
+        )
+
+    def refused_add(self, code, **kw):
+        with self.assertRaises(knowledge.Refused) as caught:
+            self.add(**kw)
+        self.assertEqual(caught.exception.code, code)
+
+    def test_targeted_ingest_same_connection_no_relock(self):
+        with store.writer_lock(self.home, wait_s=0):  # as the CLI holds it
+            with (
+                mock.patch.object(
+                    ingest, "ingest", wraps=ingest.ingest
+                ) as spy,
+                mock.patch.object(
+                    ingest, "run_pass", side_effect=AssertionError("relocked")
+                ),
+            ):
+                self.add()
+        spy.assert_called_once()
+        self.assertIs(spy.call_args.args[0], self.conn)
+        self.assertEqual(spy.call_args.args[1], self.roots)
+        self.assertEqual(spy.call_args.kwargs["only_threads"], {self.tid})
+        with store.writer_lock(self.home, wait_s=0):  # released afterwards
+            pass
+
+    def test_ingest_only_with_a_caller_and_roots(self):
+        with mock.patch.object(ingest, "ingest") as spy:
+            self.add(
+                cites=[
+                    (f"codex:{self.tid}:2.1", "we decided the zebra cache")
+                ],
+                quote_only=None,
+                env={},
+            )
+            self.add(
+                cites=[
+                    (f"codex:{self.tid}:2.1", "we decided the zebra cache")
+                ],
+                quote_only=None,
+                roots={},
+            )
+        spy.assert_not_called()
+
+    def test_claude_caller(self):
+        main = f"-work-repo/{tc.SESSION}.jsonl"
+        path = self.write(
+            main,
+            [tc.claude_rec("user", "earlier talk")],
+            root="claude-projects",
+        )
+        self.run_ingest()
+        self.append(
+            path, [tc.claude_rec("user", f"remember {self.QUOTE} please")]
+        )
+        env = {"CLAUDE_CODE_SESSION_ID": tc.SESSION}
+        cite = self.add(env=env)["entry"]["cites"][0]
+        self.assertEqual(cite["ref"], f"claude:{tc.SESSION}:2.1")
+        self.assertEqual(cite["quote"], self.QUOTE)

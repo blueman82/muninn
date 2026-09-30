@@ -15,7 +15,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from pctx import classify, query, scope
+from pctx import classify, ingest, query, scope
 from pctx.query import NOTICE, _guarded  # one guard for every reader
 
 KINDS = ("decision", "fact", "preference", "procedure")
@@ -25,6 +25,7 @@ TEXT_MAX = 500
 REASON_MAX = 200
 QUOTE_MIN = 12
 QUOTE_MAX = 300
+CALLER_ENV = ("CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID")
 CHAIN_MAX = 100  # hops followed along a supersede chain
 PROBLEMS_MAX = 100  # broken citations named by check()
 
@@ -37,7 +38,8 @@ class Refused(Exception):
 
     code: bad_kind, bad_actor, text_length, reason_length, uncited, bad_ref,
     not_found, ambiguous_ref, not_citable, quote_length, quote_not_found,
-    preference_needs_user, bad_supersedes, not_current.
+    approval_needs_reply, no_caller_session, preference_needs_user,
+    bad_supersedes, not_current.
     """
 
     def __init__(self, code: str, detail: str = ""):
@@ -66,7 +68,12 @@ def _kid(value) -> int | None:
 
 def _cite(conn: sqlite3.Connection, ref: str, quote: str) -> dict:
     """One (ref, quote) pair, checked: the event's identity plus the quote
-    (whitespace collapsed) and its span in the event text."""
+    (whitespace collapsed) and its span in the event text.
+
+    A quote under QUOTE_MIN characters is only accepted as the whole text of
+    a user prompt: an approval ("approval": True), valid once the entry
+    also cites the reply it answers (_proposals, spec O5a).
+    """
     opened = query.open_event(conn, ref, roots={}, context=0)
     if "error" in opened:
         raise Refused(opened["error"])
@@ -78,11 +85,17 @@ def _cite(conn: sqlite3.Connection, ref: str, quote: str) -> dict:
     ):
         raise Refused("not_citable")
     wanted = " ".join(quote.split())
-    if not QUOTE_MIN <= len(wanted) <= QUOTE_MAX:
+    if not wanted or len(wanted) > QUOTE_MAX:
         raise Refused("quote_length")
     found = query.quote_check(conn, str(opened["id"]), quote)
     if not found["match"]:
         raise Refused("quote_not_found")
+    short = len(wanted) < QUOTE_MIN
+    if short and not (
+        (prov["role"], prov["kind"]) == ("user", "prompt")
+        and " ".join(opened["text"].split()) == wanted
+    ):
+        raise Refused("quote_length")
     return {
         "event": opened["id"],
         "provider": prov["provider"],
@@ -95,7 +108,62 @@ def _cite(conn: sqlite3.Connection, ref: str, quote: str) -> dict:
         "ts": prov["ts"],
         "quote": wanted,
         "span": found["span"],
+        "approval": short,
     }
+
+
+def _proposals(conn: sqlite3.Connection, cites: list[dict]) -> None:
+    """Each approval needs the reply right before it, in its own thread,
+    among the entry's citations (O5a: proposal and approval)."""
+    cited = {c["event"] for c in cites}
+    for cite in cites:
+        if not cite["approval"]:
+            continue
+        before = conn.execute(
+            "SELECT p.id FROM event p"
+            " JOIN event a ON a.source_id = p.source_id"
+            " WHERE a.id = ? AND p.kind = 'reply'"
+            " AND (p.line, p.part) < (a.line, a.part)"
+            " ORDER BY p.line DESC, p.part DESC LIMIT 1",
+            (cite["event"],),
+        ).fetchone()
+        if before is None or before["id"] not in cited:
+            raise Refused("approval_needs_reply")
+
+
+def _caller(conn, roots, env) -> str | None:
+    """The caller's session root, after a targeted ingest of its own
+    threads so the prompt just typed is there. It runs on this connection:
+    the caller of add holds the writer lock, which is not reentrant."""
+    ids = {env.get(name) for name in CALLER_ENV} - {None, ""}
+    root = query.caller_root(conn, env)
+    if ids and roots:
+        ingest.ingest(conn, roots, only_threads=ids | {root})
+        root = query.caller_root(conn, env)
+    return root
+
+
+def _caller_prompt(conn: sqlite3.Connection, root: str, quote: str) -> dict:
+    """The caller's latest user prompt that holds the quote."""
+    wanted = " ".join(quote.split())
+    if not wanted or len(wanted) > QUOTE_MAX:
+        raise Refused("quote_length")
+    rows = conn.execute(
+        "SELECT e.id FROM event e JOIN source s ON s.id = e.source_id"
+        " WHERE s.session_root = ? AND s.thread_class = 'primary'"
+        " AND e.kind = 'prompt' AND e.role = 'user' AND e.flags & 1 = 0"
+        " AND instr(e.text, ?) > 0"
+        " ORDER BY COALESCE(e.ts, '') DESC, s.thread_id DESC,"
+        " e.line DESC, e.part DESC",
+        (root, wanted.split(" ", 1)[0]),
+    ).fetchall()
+    for row in rows:
+        try:
+            return _cite(conn, str(row["id"]), quote)
+        except Refused as refused:
+            if refused.code not in ("quote_not_found", "quote_length"):
+                raise
+    raise Refused("quote_not_found")
 
 
 def _insert(conn, sid, kind, body, actor, cites, old) -> int:
@@ -174,6 +242,9 @@ def add(
     body = _clean(text, "text_length", 1, TEXT_MAX)
     if not cites and quote_only is None:
         raise Refused("uncited")
+    root = _caller(conn, roots, env)
+    if quote_only is not None and root is None:
+        raise Refused("no_caller_session")
     conn.execute("BEGIN IMMEDIATE")
     try:
         sid = (
@@ -182,6 +253,10 @@ def add(
             else scope.scope_id(conn, cwd)
         )
         found = [_cite(conn, ref, quote) for ref, quote in cites]
+        if quote_only is not None:
+            found.append(_caller_prompt(conn, root, quote_only))
+        found = list({(c["event"], c["quote"]): c for c in found}.values())
+        _proposals(conn, found)
         if kind == "preference" and not any(
             (c["role"], c["kind"]) == ("user", "prompt") for c in found
         ):
