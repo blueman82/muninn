@@ -333,3 +333,175 @@ class ServeTests(CliCase):
         _, out, _ = self.pctx("search", "hello")
         self.assertEqual(out["poller"], "stale")
         self.assertGreaterEqual(out["index_age_s"], 500)
+
+
+def fake_run(pid=4242, cmd=None, ps=""):
+    """launchctl/ps stand-in: never the real launchd domain."""
+
+    def run(argv):
+        argv = [str(a) for a in argv]
+        if argv[:2] == ["launchctl", "print"]:
+            if pid is None:
+                return subprocess.CompletedProcess(argv, 113, b"", b"")
+            return subprocess.CompletedProcess(
+                argv, 0, f"\tstate = running\n\tpid = {pid}\n".encode(), b""
+            )
+        if argv[:2] == ["ps", "-ww"] and "-p" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, (cmd or "").encode(), b""
+            )
+        return subprocess.CompletedProcess(argv, 0, ps.encode(), b"")
+
+    return run
+
+
+class StatsDoctorTests(CliCase):
+    def pctx_call(self, n, cid, command, output):
+        from tests.test_classify import function_call
+        from tests.test_ingest import fc_output
+
+        return [
+            function_call(
+                n, "exec_command", json.dumps({"cmd": command}), cid
+            ),
+            fc_output(n + 1, cid, output),
+        ]
+
+    def test_stats_usage(self):
+        meta = codex_meta("user", TID, cwd=str(self.repo))
+        exited = "Process exited with code {}\n"
+        self.write(
+            rollout(),
+            [meta]
+            + self.pctx_call(1, "p1", "pctx search x", exited.format(3))
+            + self.pctx_call(3, "p2", "pctx stats", exited.format(0)),
+        )
+        self.run_ingest()
+        code, out, _ = self.pctx("stats", "--usage")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(
+            out["usage"],
+            [
+                {
+                    "provider": "codex",
+                    "session_root": TID,
+                    "calls": 2,
+                    "errors": 1,
+                    "last_ts": meta["timestamp"],
+                }
+            ],
+        )
+        self.assertEqual(
+            out["usage_totals"],
+            {"codex": {"calls": 2, "errors": 1, "sessions": 1}},
+        )
+        self.assertLessEqual(
+            {
+                "sources",
+                "events",
+                "flags",
+                "issues",
+                "knowledge",
+                "citations",
+                "tombstones",
+                "db_bytes",
+                "last_pass",
+                "classifier_version",
+                "hash_mismatches",
+            }
+            | ALWAYS,
+            set(out),
+        )
+        self.assertEqual(out["events"], {"tool_call": 2})
+        self.assertEqual(out["flags"]["marker"], 2)
+
+    def doctor(self, *extra, run=None):
+        with mock.patch.object(cli.obs, "run", run or fake_run()):
+            return self.pctx("doctor", *extra)
+
+    def checks(self, out):
+        return {c["check"]: c["ok"] for c in out["checks"]}
+
+    def test_doctor_checks(self):
+        path = self.session(TID, "hello there", "hi")
+        self.session("thr-two", "second", "one")
+        self.assertEqual(self.pctx("ingest")[0], 0)
+        code, out, _ = self.doctor()
+        self.assertEqual(code, 0, out)
+        got = self.checks(out)
+        for name in (
+            "data_dir_mode",
+            "file_modes",
+            "unexpected_files",
+            "journal_mode",
+            "writer_secure_delete",
+            "fts_secure_delete",
+            "quick_check",
+            "heartbeat",
+            "launchd_job",
+            "roots_readable",
+            "unowned_journal",
+        ):
+            with self.subTest(check=name):
+                self.assertIs(got[name], True)
+        path.unlink()
+        self.pctx("ingest")
+        code, out, _ = self.doctor()  # missing sources are not errors
+        info = {c["check"]: c for c in out["checks"]}["missing_sources"]
+        self.assertEqual(
+            (code, info["level"], info["detail"]), (0, "info", "1")
+        )
+        stray = self.home / "stray.bak"
+        stray.write_text("x")
+        code, out, _ = self.doctor()
+        self.assertEqual(
+            (code, self.checks(out)["unexpected_files"]), (1, False)
+        )
+        stray.unlink()
+        (self.home / "status.json").chmod(0o644)
+        self.assertIs(self.checks(self.doctor()[1])["file_modes"], False)
+        (self.home / "status.json").chmod(0o600)
+        self.assertEqual(self.doctor(run=fake_run(pid=None))[0], 1)
+        obs.write_status(self.home, {"last_pass_at": time.time() - 900})
+        code, out, _ = self.doctor()
+        self.assertEqual((code, self.checks(out)["heartbeat"]), (1, False))
+
+    def test_doctor_reports_unowned_journal(self):
+        self.session(TID, "hello", "hi")
+        self.pctx("ingest")
+        child = Child(self, SPILLING_WRITER, store.db_path(self.home))
+        child.wait_ready()
+        child.proc.kill()
+        child.proc.wait()
+        code, out, _ = self.doctor()
+        self.assertEqual(
+            (code, self.checks(out)["unowned_journal"]), (1, False)
+        )
+        self.assertTrue((self.home / "pctx.sqlite-journal").exists())
+
+    def test_doctor_cutover(self):
+        self.session(TID, "hello", "hi")
+        self.pctx("ingest")
+        home = Path(self.env["HOME"])
+        new = f"{home}/.local/lib/provenance-context/abc/bin/pctx serve"
+        code, out, _ = self.doctor("--cutover", run=fake_run(cmd=new))
+        self.assertEqual(code, 0, out)
+        old = "/Users/garyharr/Github/provenance-context-build"
+        settings = home / ".claude/settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text(json.dumps({"hooks": f"{old}/hooks/codex.py"}))
+        ps = f"  77 python3 {old}/scripts/cli.py serve\n"
+        code, out, _ = self.doctor("--cutover", run=fake_run(cmd="x", ps=ps))
+        got = self.checks(out)
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            [
+                got[k]
+                for k in (
+                    "no_old_tree_references",
+                    "old_process_gone",
+                    "new_pid_alive",
+                )
+            ],
+            [False, False, False],
+        )

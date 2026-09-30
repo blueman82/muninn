@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
+import subprocess
 import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from pctx import query, store
+from pctx import classify, ingest, query, store
 
 ROTATE_BYTES = 1024 * 1024
 LINE_BYTES = 1024
@@ -138,3 +140,317 @@ def install_sha(env: Mapping[str, str]) -> str | None:
     home = Path(env.get("HOME") or Path.home())
     current = home / ".local/lib/provenance-context/current"
     return Path(os.readlink(current)).name if current.is_symlink() else None
+
+
+def run(argv):
+    """launchctl and ps for doctor; tests replace it (never the real
+    launchd domain)."""
+    return subprocess.run(
+        [str(a) for a in argv], capture_output=True, timeout=10
+    )
+
+
+def _hash_mismatches(home: Path) -> int:
+    """open-time line hash failures, counted from the stage log."""
+    bad = 0
+    for name in ("calls.jsonl.1", "calls.jsonl"):
+        try:
+            lines = (home / name).read_text().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                bad += json.loads(line).get("hash_ok") is False
+            except (ValueError, AttributeError):
+                continue
+    return bad
+
+
+def stats(conn, home: Path, env: Mapping[str, str], *, usage=False) -> dict:
+    """Counts only (design 7): sources, events, flags, issues, knowledge,
+    tombstones, the last pass; usage adds O9's per-session pctx calls."""
+
+    def pairs(sql):
+        return {r[0]: r[1] for r in conn.execute(sql)}
+
+    flags = conn.execute(
+        "SELECT total(flags & 1 > 0), total(flags & 2 > 0),"
+        " total(flags & 4 > 0) FROM event"
+    ).fetchone()
+    status = read_status(home)
+    db = store.db_path(home)
+    out = {
+        "sources": {
+            "/".join(r[:4]): r[4]
+            for r in conn.execute(
+                "SELECT provider, root, thread_class, status, count(*)"
+                " FROM source GROUP BY 1, 2, 3, 4"
+            )
+        },
+        "events": pairs("SELECT kind, count(*) FROM event GROUP BY 1"),
+        "flags": dict(
+            zip(("marker", "redacted", "truncated"), (int(n) for n in flags))
+        ),
+        "skipped_lines": conn.execute(
+            "SELECT total(skipped_lines) FROM source"
+        ).fetchone()[0],
+        "issues": pairs("SELECT code, count(*) FROM source_issue GROUP BY 1"),
+        "other_threads": pairs(  # format drift: never guessed primary
+            "SELECT class_reason, count(*) FROM source"
+            " WHERE thread_class = 'other' GROUP BY 1"
+        ),
+        "knowledge": pairs(
+            "SELECT status, count(*) FROM knowledge GROUP BY 1"
+        ),
+        "citations": pairs("SELECT state, count(*) FROM citation GROUP BY 1"),
+        "tombstones": pairs(
+            "SELECT level, count(*) FROM tombstone GROUP BY 1"
+        ),
+        "db_bytes": db.stat().st_size if db.exists() else 0,
+        "last_pass": {
+            k: status.get(k)
+            for k in (
+                "last_pass_at",
+                "duration_s",
+                "files_changed",
+                "events_added",
+                "failed",
+                "errors",
+                "busy_skips",
+            )
+        }
+        | freshness(status),
+        "install_sha": install_sha(env) or status.get("install_sha"),
+        "classifier_version": classify.CLASSIFIER_VERSION,
+        "hash_mismatches": _hash_mismatches(home),
+    }
+    out["skipped_lines"] = int(out["skipped_lines"])
+    if usage:
+        rows = conn.execute(
+            "SELECT provider, session_root, sum(calls), sum(errors),"
+            " max(last_ts) FROM usage GROUP BY 1, 2 ORDER BY 1, 2"
+        ).fetchall()
+        out["usage"] = [
+            dict(
+                zip(
+                    ("provider", "session_root", "calls", "errors", "last_ts"),
+                    r,
+                )
+            )
+            for r in rows
+        ]
+        totals: dict[str, dict] = {}
+        for provider, _, calls, errors, _ in rows:
+            t = totals.setdefault(
+                provider, {"calls": 0, "errors": 0, "sessions": 0}
+            )
+            t["calls"] += calls
+            t["errors"] += errors
+            t["sessions"] += 1
+        out["usage_totals"] = totals
+    return out
+
+
+LABEL = "com.provenance-context"
+DATA_FILES = frozenset(
+    {
+        "pctx.sqlite",
+        "writer.lock",
+        "status.json",
+        "calls.jsonl",
+        "calls.jsonl.1",
+        "poller.log",
+        "tombstones.jsonl",
+    }
+)
+# The rollback tree whose code must no longer run or be referenced (the
+# same test as install/cutover.py's verify step).
+OLD_TREE = "/Users/garyharr/Github/provenance-context-build"
+OLD_CODE = tuple(
+    f"{OLD_TREE}/{d}" for d in ("scripts", "hooks", "claude-code")
+)
+_MARKETPLACE = "[marketplaces.provenance-context-local]"
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+def _job(env: Mapping[str, str]) -> dict | None:
+    """The launchd job as {'pid', 'cmd'}; None when not loaded."""
+    r = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
+    if r.returncode:
+        return None
+    found = re.search(rb"^\s*pid = (\d+)\s*$", r.stdout, re.M)
+    if not found:
+        return {"pid": None, "cmd": ""}
+    ps = run(["ps", "-ww", "-o", "command=", "-p", found[1].decode()])
+    return {
+        "pid": int(found[1]),
+        "cmd": ps.stdout.decode(errors="replace").strip(),
+    }
+
+
+def _writer_secure_delete() -> bool:
+    """Writers turn secure_delete on (a per-connection setting, not stored
+    in the file): apply the writer pragmas to an in-memory connection.
+    Opening the real store would roll back a hot journal doctor reports."""
+    conn = sqlite3.connect(":memory:")
+    try:
+        for pragma in store._WRITER_PRAGMAS:
+            conn.execute(pragma)
+        return conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def _lock_free(home: Path) -> bool:
+    try:
+        with store.writer_lock(home, wait_s=0):
+            return True
+    except (store.Busy, OSError):
+        return False
+
+
+def _old_refs(home_dir: Path) -> list[str]:
+    files = [
+        home_dir / ".claude/settings.json",
+        home_dir / ".claude/plugins/known_marketplaces.json",
+        home_dir / ".codex/config.toml",
+    ]
+    files += sorted((home_dir / "Library/LaunchAgents").glob("*.plist"))
+    bad = [
+        f.name
+        for f in files
+        if f.is_file()
+        and any(code.encode() in f.read_bytes() for code in OLD_CODE)
+    ]
+    config = home_dir / ".codex/config.toml"
+    if config.is_file():  # the old marketplace points at the tree root
+        section, inside = [], False
+        for line in config.read_text(errors="replace").splitlines():
+            if line.startswith("["):
+                inside = line.strip() == _MARKETPLACE
+            elif inside:
+                section.append(line)
+        if OLD_TREE in "\n".join(section):
+            bad.append("config.toml marketplace")
+    return bad
+
+
+def _old_procs() -> list[str]:
+    out = run(["ps", "-ww", "-axo", "pid=,command="]).stdout
+    bad = []
+    for line in out.decode(errors="replace").splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if pid != str(os.getpid()) and any(c in cmd for c in OLD_CODE):
+            bad.append(pid)
+    return bad
+
+
+def doctor(home: Path, env: Mapping[str, str], *, cutover=False) -> dict:
+    """Health checks (design 7): errors decide ok; warn and info do not.
+    Missing sources are information, never an error (D15)."""
+    checks: list[dict] = []
+
+    def check(name, ok, detail="", level="error"):
+        ok = None if ok is None else bool(ok)
+        checks.append(
+            {"check": name, "ok": ok, "level": level, "detail": str(detail)}
+        )
+
+    present = home.is_dir()
+    check(
+        "data_dir_mode",
+        present and _mode(home) == 0o700,
+        oct(_mode(home)) if present else "absent",
+    )
+    names = sorted(p.name for p in home.iterdir()) if present else []
+    loose = [
+        n for n in names if (home / n).is_file() and _mode(home / n) & 0o077
+    ]
+    check("file_modes", not loose, ",".join(loose))
+    stray = [
+        n
+        for n in names
+        if n not in DATA_FILES
+        and n != "pctx.sqlite-journal"
+        and not n.startswith(".status.json.")
+    ]
+    check("unexpected_files", not stray, ",".join(stray))
+    journal = (home / "pctx.sqlite-journal").exists()
+    check(
+        "unowned_journal",
+        not (journal and _lock_free(home)),
+        "a crashed writer's journal: the next writer rolls it back",
+    )
+    db = store.db_path(home)
+    try:
+        conn = store.connect_ro(db)
+    except store.StoreUnavailable as exc:
+        check("store_readable", False, type(exc).__name__)
+    else:
+        try:
+            check("store_readable", True)
+            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            check("journal_mode", mode == "delete", mode)
+            fts = [
+                conn.execute(
+                    f"SELECT v FROM {t}_config WHERE k = 'secure-delete'"
+                ).fetchone()
+                for t in ("event_fts", "knowledge_fts")
+            ]
+            check("fts_secure_delete", all(r and r[0] == 1 for r in fts))
+            quick = conn.execute("PRAGMA quick_check").fetchone()[0]
+            check("quick_check", quick == "ok", quick[:80])
+            missing = conn.execute(
+                "SELECT count(*) FROM source WHERE status = 'missing'"
+            ).fetchone()[0]
+            check("missing_sources", True, missing, level="info")
+            drift = conn.execute(
+                "SELECT count(*) FROM source WHERE thread_class = 'other'"
+            ).fetchone()[0]
+            check("other_threads", True, drift, level="info")
+            broken = conn.execute(
+                "SELECT count(*) FROM citation c WHERE c.state = 'live'"
+                " AND NOT EXISTS (SELECT 1 FROM event e JOIN source s"
+                " ON s.id = e.source_id WHERE s.provider = c.provider AND"
+                " s.thread_id = c.thread_id AND e.line = c.line AND"
+                " e.part = c.part AND e.line_sha256 = c.line_sha256)"
+            ).fetchone()[0]
+            check("citations_resolve", not broken, broken, level="warn")
+        except sqlite3.Error as exc:
+            check("store_readable", False, type(exc).__name__)
+        finally:
+            conn.close()
+    check("writer_secure_delete", _writer_secure_delete())
+    status = read_status(home)
+    fresh = freshness(status)
+    check("heartbeat", fresh["poller"] == "ok", fresh["index_age_s"])
+    failed = status.get("failed") or 0
+    check("failed_sources", not failed, failed, level="warn")
+    job = _job(env)
+    check("launchd_job", job is not None and job["pid"], job and job["pid"])
+    roots = ingest.default_roots(env)
+    blocked = [
+        n
+        for n, p in roots.items()
+        if p.exists() and not os.access(p, os.R_OK | os.X_OK)
+    ]
+    check("roots_readable", not blocked, ",".join(blocked))
+    absent = [n for n, p in roots.items() if not p.exists()]
+    check("roots_present", True, ",".join(absent), level="info")
+    if cutover:
+        home_dir = Path(env.get("HOME") or Path.home())
+        refs = _old_refs(home_dir)
+        check("no_old_tree_references", not refs, ",".join(refs))
+        procs = _old_procs()
+        check("old_process_gone", not procs, ",".join(procs))
+        lib = f"{home_dir}/.local/lib/provenance-context/"
+        check(
+            "new_pid_alive",
+            job and job["pid"] and lib in job["cmd"],
+            job and job["pid"],
+        )
+    ok = all(c["ok"] is not False for c in checks if c["level"] == "error")
+    return {"ok": ok, "checks": checks}

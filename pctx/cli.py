@@ -436,6 +436,17 @@ def _serve(a, env, home, record):
         return 0, None
 
 
+def _stats(a, env, home, record):
+    out = _reader(home, lambda conn: obs.stats(conn, home, env, usage=a.usage))
+    return 0, out
+
+
+def _doctor(a, env, home, record):
+    out = obs.doctor(home, env, cutover=a.cutover)
+    record["counts"] = {"failed": sum(c["ok"] is False for c in out["checks"])}
+    return (0 if out["ok"] else 1), out
+
+
 def _not_built(a, env, home, record):
     return 2, {"error": "not_built"}
 
@@ -449,7 +460,7 @@ _HANDLERS = {
     "erase": _erase,
     "ingest": _ingest,
     "serve": _serve,
-    "stats": _not_built,
-    "doctor": _not_built,
+    "stats": _stats,
+    "doctor": _doctor,
     "rebuild": _not_built,
 }
