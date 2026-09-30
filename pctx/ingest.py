@@ -8,9 +8,11 @@ events, cursor, anchor, parse state and usage counts commit together.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import stat
 import time
@@ -32,6 +34,12 @@ PATTERN = {
     "claude-projects": "*.jsonl",
 }
 INDEXED = ("primary", "subagent")  # O2; reviewer and other: row only
+# The rollout uuid ending a Codex file name.  It equals line-1 payload.id,
+# except in a long thread's continuation files, which keep payload.id and
+# get a new uuid (and history_base); each file is one transcript (3.3).
+_NAME_ID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 
 @dataclass
@@ -117,7 +125,7 @@ def ingest(
     """
     started = time.monotonic()
     stats, seen, work = PassStats(), set(), []
-    for name, path, st in _discover(roots, only_threads):
+    for name, path, st in _discover(roots):
         stats.files_seen += 1
         item = _safe_plan(
             conn, roots, name, path, st, full, only_threads, stats
@@ -161,7 +169,7 @@ def _late_forks(conn, roots, only_threads, stats) -> Iterator[_Work]:
 
 
 def _discover(
-    roots: dict[str, Path], only_threads: set[str] | None
+    roots: dict[str, Path],
 ) -> Iterator[tuple[str, Path, os.stat_result]]:
     """Regular files under each root in path order; symlinks, FIFOs and
     directories are never opened (rglob does not follow symlinked dirs)."""
@@ -177,10 +185,6 @@ def _discover(
                 continue
             if not stat.S_ISREG(st.st_mode):
                 continue
-            if only_threads and not any(
-                path.stem.endswith(tid) for tid in only_threads
-            ):
-                continue  # codex names end in the id; claude stem = id
             yield name, path, st
 
 
@@ -205,14 +209,18 @@ def _plan(conn, roots, name, path, st, full, only_threads, stats):
             _reactivate(conn, row["id"])
         return row["id"]  # the cheap path reads nothing (design 4.1 #3)
     first = _first_line(path)
-    info = _identify(name, roots[name], path, first) if first else None
+    info, base = _identify(name, roots[name], path, first)
     if info is None:  # line 1 incomplete, oversize or not a thread header
         stats.skipped_files += 1
         return row["id"] if row is not None else None
-    if only_threads and info.thread_id not in only_threads:
+    if only_threads and not only_threads & {
+        info.thread_id,
+        base,
+        info.session_root,
+    }:
         return None
     provider = PROVIDER[name]
-    if _tombstoned(conn, provider, info):  # before any line is parsed
+    if _tombstoned(conn, provider, info, base):  # before any line is read
         stats.skipped_files += 1
         return None
     if row is None:
@@ -279,20 +287,30 @@ def _hash_at(path: Path, offset: int) -> str | None:
     return classify.record_hash(raw) if raw.endswith(b"\n") else None
 
 
-def _identify(name, root, path, first) -> classify.ThreadInfo | None:
+def _identify(name, root, path, first):
+    """(ThreadInfo, base thread id of a continuation file) or (None, None)."""
     try:
-        record = json.loads(first)
+        record = json.loads(first) if first else None
     except (ValueError, RecursionError):
-        return None
+        return None, None
     if not isinstance(record, dict):
-        return None
+        return None, None
     if PROVIDER[name] == "claude":
         rel = path.relative_to(root).as_posix()
-        return classify.claude_thread(rel, record)
+        return classify.claude_thread(rel, record), None
     try:
-        return classify.codex_thread(record)
+        info = classify.codex_thread(record)
     except ValueError:  # not a session_meta with an id
-        return None
+        return None, None
+    own = _NAME_ID.search(path.stem)
+    if own is None or own.group() == info.thread_id:
+        return info, None
+    segment = dataclasses.replace(
+        info,
+        thread_id=own.group(),
+        parent_thread_id=info.parent_thread_id or info.thread_id,
+    )
+    return segment, info.thread_id
 
 
 def _source_id(conn, provider, thread_id) -> int | None:
@@ -305,9 +323,10 @@ def _source_id(conn, provider, thread_id) -> int | None:
     return row[0] if row else None
 
 
-def _tombstoned(conn, provider, info) -> bool:
-    """Thread tombstone, or a session tombstone on this thread's session or
-    on the session it was forked from (design 3.8)."""
+def _tombstoned(conn, provider, info, base=None) -> bool:
+    """Thread tombstone (on this file's thread or the thread it continues),
+    or a session tombstone on its session or the one it was forked from
+    (design 3.8)."""
     sessions = [info.session_root]
     if info.forked_from_id:
         sessions.append(info.forked_from_id)
@@ -322,9 +341,9 @@ def _tombstoned(conn, provider, info) -> bool:
     return (
         conn.execute(
             "SELECT 1 FROM tombstone WHERE provider = ? AND ("
-            "(level = 'thread' AND thread_id = ?) OR "
+            "(level = 'thread' AND thread_id IN (?, ?)) OR "
             f"(level = 'session' AND session_root IN ({marks}))) LIMIT 1",
-            (provider, info.thread_id, *sessions),
+            (provider, info.thread_id, base or info.thread_id, *sessions),
         ).fetchone()
         is not None
     )

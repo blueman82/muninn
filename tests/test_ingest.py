@@ -781,3 +781,56 @@ class RaceTests(IngestCase):
             stats = self.run_ingest()
         self.assertEqual(stats.skipped_files, 1)
         self.assertEqual(len(self.events()), 2)
+
+
+BASE = "0199bbbb-0000-4000-8000-000000000001"
+SEG = "0199bbbb-0000-4000-8000-000000000002"
+
+
+class SegmentTests(IngestCase):
+    """A long Codex thread continues in new rollout files: same payload.id,
+    a new rollout uuid in the name, history_base, ordinals continuing."""
+
+    def files(self):
+        self.write(
+            rollout(BASE),
+            [codex_meta("user", BASE), user_msg(1, "early"), reply(2, "e")],
+        )
+        hb = {
+            "end_byte_offset": 10,
+            "end_ordinal_exclusive": 3,
+            "thread_id": BASE,
+        }
+        seg = codex_meta("user", BASE, ordinal=3, history_base=hb)
+        self.write(rollout(SEG), [seg, user_msg(4, "later"), reply(5, "l")])
+
+    def test_continuation_segments_are_separate_sources(self):
+        self.files()
+        stats = self.run_ingest()
+        self.assertEqual((stats.failed, stats.skipped_files), (0, 0))
+        rows = self.conn.execute(
+            "SELECT thread_id, session_root, parent_thread_id, replay_mode"
+            " FROM source ORDER BY thread_id"
+        )
+        self.assertEqual(
+            [tuple(r) for r in rows],
+            [(BASE, BASE, None, "none"), (SEG, BASE, BASE, "history_base")],
+        )
+        self.assertEqual([e[3] for e in self.events(SEG)], ["later", "l"])
+        again = self.run_ingest()
+        self.assertEqual((again.files_changed, again.skipped_files), (0, 0))
+
+    def test_segments_follow_their_thread_for_tombstones_and_targets(self):
+        self.files()
+        targeted = self.run_ingest(only_threads={BASE})
+        self.assertEqual(targeted.files_changed, 2)  # all of the thread
+        self.conn.execute("DELETE FROM event")  # an erase, as WU7 does it
+        self.conn.execute("DELETE FROM source")
+        self.conn.execute(
+            "INSERT INTO tombstone(created_at, provider, level, thread_id)"
+            " VALUES (0, 'codex', 'thread', ?)",
+            (BASE,),
+        )
+        self.run_ingest()
+        count = self.conn.execute("SELECT count(*) FROM source").fetchone()[0]
+        self.assertEqual(count, 0)
