@@ -7,13 +7,17 @@ reads. Answers are plain JSON-serialisable dicts. Bad input comes back as
 exit 4.
 """
 
+import hashlib
 import json
+import os
 import re
 import sqlite3
+import stat
 import time
 from collections import Counter
 from collections.abc import Mapping
 from datetime import date, timedelta
+from pathlib import Path
 
 from pctx.scope import scope_ids_for_read
 
@@ -34,6 +38,11 @@ RECENT_POOL = 50
 KNOWLEDGE_HITS = 3
 OTHER_SCOPES = 5  # labels listed in other_scopes
 OUTPUT_LIMIT = 6144  # bytes of json.dumps
+OPEN_BYTES = 12_000  # text bytes per open page
+CONTEXT_MAX = 20
+PREVIEW = 200
+RAW_LIMIT = 64 * 1024  # longest raw line open will return
+LINE_CAP = 8 * 1024 * 1024  # ingest skips longer lines
 
 _REF = re.compile(r"(\w+):(\S+):(\d+)(?:\.(\d+))?")
 _QUOTED = re.compile(r'"([^"]*)"')
@@ -517,3 +526,187 @@ def search(
             " this scope; use --all-projects"
         )
     return _fit(out | _freshness(status))
+
+
+_EVENT_SQL = (
+    "SELECT e.*, s.provider, s.thread_id, s.session_root, s.thread_class,"
+    " s.root, s.path, s.status, sc.label FROM event e"
+    " JOIN source s ON s.id = e.source_id JOIN scope sc ON sc.id = e.scope_id"
+    " WHERE "
+)
+
+
+def _locate(conn: sqlite3.Connection, ref) -> tuple[sqlite3.Row | None, str]:
+    """(event row, "") for an id or a REF, else (None, error code)."""
+    text = str(ref).strip()
+    if re.fullmatch(r"[0-9]+", text):
+        rows = conn.execute(_EVENT_SQL + "e.id = ?", (int(text),)).fetchall()
+    else:
+        try:
+            provider, thread, line, part = parse_ref(text)
+        except ValueError:
+            return None, "bad_ref"
+        rows = []
+        for match, args in (
+            ("s.thread_id = ?", (thread,)),
+            ("substr(s.thread_id, 1, ?) = ?", (len(thread), thread)),
+        ):
+            rows = conn.execute(
+                _EVENT_SQL + f"s.provider = ? AND {match} AND e.line = ?"
+                " AND e.part = ? LIMIT 2",
+                (provider, *args, line, part),
+            ).fetchall()
+            if rows:
+                break
+    if len(rows) > 1:
+        return None, "ambiguous_ref"
+    return (rows[0], "") if rows else (None, "not_found")
+
+
+def _read_line(roots: Mapping, row: sqlite3.Row) -> bytes | None:
+    """The line at byte_offset, terminator included; None if unreadable.
+
+    Only an active source under a known root, never through a symlink or
+    out of the root, and never blocking on a non-regular file.
+    """
+    root = roots.get(row["root"])
+    if root is None or row["status"] != "active":
+        return None
+    base = os.path.normpath(root)
+    path = os.path.normpath(os.path.join(base, row["path"]))
+    try:
+        if os.path.commonpath([base, path]) != base:
+            return None
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        handle.seek(row["byte_offset"])
+        return handle.readline(LINE_CAP + 1)
+
+
+def _preview(text: str) -> str:
+    return " ".join(text.split())[:PREVIEW]
+
+
+def _neighbours(conn: sqlite3.Connection, row: sqlite3.Row, n: int) -> list:
+    """The n events before and after in (line, part) order, same source."""
+    found = []
+    for sign, cmp, order in ((-1, "<", "DESC"), (1, ">", "ASC")):
+        rows = conn.execute(
+            "SELECT id, ts, role, kind, tag, substr(text, 1, 1000) AS text"
+            f" FROM event WHERE source_id = ? AND (line, part) {cmp} (?, ?)"
+            f" ORDER BY line {order}, part {order} LIMIT ?",
+            (row["source_id"], row["line"], row["part"], n),
+        )
+        found += [
+            {
+                "id": r["id"],
+                "rel": sign * rank,
+                "ts": r["ts"],
+                "role": r["role"],
+                "kind": r["kind"],
+                "tag": r["tag"],
+                "preview": _preview(r["text"]),
+            }
+            for rank, r in enumerate(rows, 1)
+        ]
+    return sorted(found, key=lambda n: n["rel"])
+
+
+def open_event(
+    conn: sqlite3.Connection,
+    ref: str,
+    *,
+    roots: Mapping[str, Path],
+    context: int = 3,
+    offset: int = 0,
+    raw: bool = False,
+    status: Mapping | None = None,
+) -> dict:
+    """One event in full (design 4.5): text, provenance, neighbours.
+
+    ref is an event id or provider:thread_id:line.part (thread prefix ok).
+    The text is served in pages of at most OPEN_BYTES of UTF-8 from a
+    character offset; next_offset continues it. hash_ok re-reads the line
+    at byte_offset under roots (root name -> Path) while the source is
+    active (None when it cannot be checked). raw=True adds that verified
+    line as `raw`, unless the event is redacted (raw_redacted), the line is
+    over RAW_LIMIT (error line_too_large) or cannot be verified.
+    """
+    row, problem = _locate(conn, ref)
+    if row is None:
+        return _error(problem)
+    text = row["text"]
+    if offset < 0:
+        return _error("bad_offset")
+    if offset > len(text):
+        return _error("offset_past_end")
+    page = text[offset : offset + OPEN_BYTES].encode()[:OPEN_BYTES]
+    page = page.decode("utf-8", "ignore")  # never a split character
+    line = _read_line(roots, row)
+    body = None if line is None else line.rstrip(b"\r\n")
+    hash_ok = None
+    if body is not None:
+        hash_ok = hashlib.sha256(body).hexdigest() == row["line_sha256"]
+    provenance = {
+        "provider": row["provider"],
+        "thread": row["thread_id"],
+        "session": row["session_root"],
+        "ts": row["ts"],
+        "role": row["role"],
+        "kind": row["kind"],
+        "tag": row["tag"],
+        "scope": row["label"],
+        "cwd": row["cwd"],
+        "root": row["root"],
+        "path": row["path"],
+        "line": row["line"],
+        "part": row["part"],
+        "byte_offset": row["byte_offset"],
+        "line_sha256": row["line_sha256"],
+        "source_status": row["status"],
+    }
+    if row["thread_class"] != "primary":
+        provenance["class"] = row["thread_class"]
+    if row["parent_event_id"] is not None:
+        provenance["parent_event_id"] = row["parent_event_id"]
+    end = offset + len(page)
+    out = {
+        "notice": NOTICE,
+        "id": row["id"],
+        "ref": _ref(row),
+        "provenance": provenance,
+        "flagged": bool(row["flags"] & 1),
+        "redacted": bool(row["flags"] & 2),
+        "truncated": bool(row["flags"] & 4),
+        "text": page,
+        "offset": offset,
+        "next_offset": end if end < len(text) else None,
+        "chars": len(text),
+        "hash_ok": hash_ok,
+        "neighbours": _neighbours(
+            conn, row, min(max(context, 0), CONTEXT_MAX)
+        ),
+    }
+    if raw:
+        out |= _raw(row, body, hash_ok)
+    return out | _freshness(status)
+
+
+def _raw(row: sqlite3.Row, body: bytes | None, hash_ok: bool | None) -> dict:
+    """The raw-line part of an open answer: `raw`, or why there is none."""
+    if row["flags"] & 2:  # the line still holds the secret
+        return {"raw_redacted": True}
+    if body is None:
+        return {"error": "raw_unavailable"}
+    if len(body) > RAW_LIMIT:
+        return {"error": "line_too_large"}
+    if not hash_ok:
+        return {"error": "raw_hash_mismatch"}
+    try:
+        return {"raw": body.decode("utf-8")}
+    except UnicodeDecodeError:
+        return {"error": "raw_not_utf8"}
