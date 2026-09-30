@@ -331,6 +331,14 @@ def _prompt_terms(payload, trace) -> list[str] | None:
     return terms
 
 
+def _pushable(conn, entries: list[dict]) -> list[dict]:
+    """The matched entries a hook may push without being asked (spec O5b):
+    those with a live user-prompt citation, as at SessionStart."""
+    ids = [int(e["id"][1:]) for e in entries]
+    allowed = knowledge.user_cited(conn, ids)
+    return [e for e, kid in zip(entries, ids) if kid in allowed]
+
+
 def _recall_block(conn, home, payload, env, trace, terms) -> str:
     prompt = payload["prompt"]
     session = payload.get("session_id")
@@ -349,7 +357,7 @@ def _recall_block(conn, home, payload, env, trace, terms) -> str:
         if "error" in found:
             break
         if page == 1:
-            entries = found["knowledge"]
+            entries = _pushable(conn, found["knowledge"])
         counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
         for hit in found["hits"]:
             if counts[hit["id"]] >= MIN_TERMS:
@@ -372,7 +380,8 @@ def prompt_submit(
 ) -> dict:
     """UserPromptSubmit (spec 9.2): recall for the prompt, or {}.
 
-    Knowledge matches first, then at most MAX_EVENTS prompt/reply events
+    Matching knowledge first (user-cited entries only, as at SessionStart:
+    the others stay pull-only), then at most MAX_EVENTS prompt/reply events
     of this repo, never the caller's own session, each matching at least
     MIN_TERMS (3) distinct query terms. Prompts with fewer than MIN_TERMS
     terms, slash commands and subagent transcripts recall nothing.
