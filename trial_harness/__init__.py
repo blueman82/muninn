@@ -1,1 +1,1 @@
-"""Trial-1 harness: data prep, grading and metrics (H2); isolated launcher and canaries (H1)."""
+"""Trial-1 harness: H2 data, grading, metrics; H1 launcher, canaries."""
