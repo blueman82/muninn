@@ -3,17 +3,27 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
+from tests.trial_harness.test_canaries import (
+    SENTINEL,
+    clean_records,
+    email_context,
+    write_jsonl,
+    write_waiver,
+)
 from trial_harness import canaries, launch, mcp_reader
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -670,6 +680,160 @@ class CloseUnitTest(unittest.TestCase):
         answer = json.loads((unit / "answer.json").read_text())
         self.assertIs(answer["abstained"], True)
         self.assertEqual(os.stat(unit / "answer.json").st_mode & 0o777, 0o600)
+
+
+class CloseUnitVerdictTest(unittest.TestCase):
+    """close_unit records the isolation verdict label for every unit."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.waiver = write_waiver(self.tmp)
+        self.unit = self.tmp / "unit"
+        self.unit.mkdir()
+        self.index = self.tmp / "index.jsonl"
+        write_jsonl(
+            self.unit / "stream.jsonl", [{"type": "result", "result": "x"}]
+        )
+
+    def transcript(self, records: list[dict]) -> None:
+        write_jsonl(self.unit / "transcript.jsonl", records)
+
+    def entries(self) -> list[dict]:
+        text = self.index.read_text()
+        self.assertNotIn(SENTINEL, text)
+        return [json.loads(line) for line in text.splitlines()]
+
+    def test_close_unit_records_the_verdict_label(self) -> None:
+        self.transcript(clean_records()[:5])  # a tool-less grader
+        clean = launch.close_unit(self.unit, self.index, "G1:X")
+        self.assertEqual(clean["isolation"]["label"], "PASS")
+        self.transcript(clean_records()[:5] + [email_context()])
+        strict = launch.close_unit(self.unit, self.index, "G1:X")
+        self.assertEqual(strict["isolation"]["label"], "BLOCKED_ISOLATION")
+        self.assertEqual(strict["isolation"]["failures"], ["session_context"])
+        waived = launch.close_unit(
+            self.unit, self.index, "G1:X", waiver=self.waiver
+        )
+        isolation = waived["isolation"]
+        self.assertEqual(isolation["label"], "ISOLATION_WAIVED")
+        self.assertEqual(isolation["waived"], 1)
+        self.assertEqual(len(isolation["waived_attachment_sha256"]), 1)
+        self.assertEqual(
+            isolation["waiver_sha256"], launch.sha256_file(self.waiver)
+        )
+        self.assertEqual(self.entries(), [clean, strict, waived])
+
+    def test_close_unit_scans_a_reader_with_the_trial_tool_allowed(
+        self,
+    ) -> None:
+        self.transcript(clean_records())
+        grader = launch.close_unit(self.unit, self.index, "G1:X")
+        self.assertEqual(grader["isolation"]["label"], "BLOCKED_ISOLATION")
+        self.assertEqual(grader["isolation"]["failures"], ["other_tool_call"])
+        (self.unit / "binding.json").write_text(json.dumps({"arm": "NEW"}))
+        reader = launch.close_unit(self.unit, self.index, "NEW:X")
+        self.assertEqual(reader["isolation"]["label"], "PASS")
+
+    def test_close_unit_without_a_transcript_is_blocked(self) -> None:
+        entry = launch.close_unit(self.unit, self.index, "G1:X")
+        self.assertIsNone(entry["transcript_sha256"])
+        self.assertEqual(entry["isolation"]["label"], "BLOCKED_ISOLATION")
+        self.assertEqual(entry["isolation"]["failures"], ["no_transcript"])
+        self.assertEqual(self.entries(), [entry])
+
+    def test_close_unit_refuses_a_bad_waiver_and_appends_nothing(
+        self,
+    ) -> None:
+        self.transcript(clean_records()[:5] + [email_context()])
+        self.waiver.write_text("synthetic waiver, edited\n")
+        with self.assertRaises(ValueError):
+            launch.close_unit(
+                self.unit, self.index, "G1:X", waiver=self.waiver
+            )
+        self.assertFalse(self.index.exists())
+
+
+class MainWaiverTest(unittest.TestCase):
+    """The operator entry point hands the waiver path to close_unit only."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.waiver = write_waiver(self.tmp)
+        self.unit = self.tmp / "unit"
+        self.unit.mkdir()
+        self.index = self.tmp / "index.jsonl"
+        write_jsonl(
+            self.unit / "transcript.jsonl",
+            clean_records()[:5] + [email_context()],
+        )
+        write_jsonl(
+            self.unit / "stream.jsonl", [{"type": "result", "result": "x"}]
+        )
+        (self.tmp / "question.txt").write_text("A synthetic question?")
+        (self.tmp / "tool.txt").write_text("A synthetic tool description.")
+        (self.tmp / "backend.json").write_text("{}")
+
+    def argv(self, *extra: str) -> list[str]:
+        return [
+            "reader",
+            "--unit-id",
+            "NEW:X",
+            "--out",
+            str(self.unit),
+            "--arm",
+            "NEW",
+            "--qid",
+            "X",
+            "--scope",
+            "/s",
+            "--question-file",
+            str(self.tmp / "question.txt"),
+            "--tool-description-file",
+            str(self.tmp / "tool.txt"),
+            "--backend-file",
+            str(self.tmp / "backend.json"),
+            "--index",
+            str(self.index),
+            *extra,
+        ]
+
+    def run_main(self, *extra: str, cfg: dict | None = None):
+        stdout = io.StringIO()
+        config = patch.object(
+            launch, "load_config", return_value=cfg or launch.load_config()
+        )
+        run = patch.object(launch, "launch_reader", return_value={})
+        with config, run as reader, redirect_stdout(stdout):
+            launch.main(self.argv(*extra))
+        self.assertNotIn(SENTINEL, stdout.getvalue())
+        return reader, json.loads(self.index.read_text().splitlines()[-1])
+
+    def test_no_waiver_flag_or_config_keeps_the_scan_strict(self) -> None:
+        self.assertNotIn("waiver", launch.load_config())
+        _, entry = self.run_main()
+        self.assertEqual(entry["isolation"]["label"], "BLOCKED_ISOLATION")
+
+    def test_flag_reaches_close_unit_but_never_the_child(self) -> None:
+        reader, entry = self.run_main("--waiver", str(self.waiver))
+        self.assertEqual(entry["isolation"]["label"], "ISOLATION_WAIVED")
+        reader.assert_called_once()
+        self.assertNotIn("waiver", reader.call_args.kwargs)
+        self.assertNotIn(str(self.waiver), str(reader.call_args))
+
+    def test_frozen_config_can_carry_the_waiver_path(self) -> None:
+        cfg = launch.load_config() | {"waiver": str(self.waiver)}
+        _, entry = self.run_main(cfg=cfg)
+        self.assertEqual(entry["isolation"]["label"], "ISOLATION_WAIVED")
+
+    def test_bad_waiver_is_refused_before_a_unit_is_launched(self) -> None:
+        self.waiver.write_text("synthetic waiver, edited\n")
+        with patch.object(launch, "launch_reader") as reader:
+            with self.assertRaises(ValueError):
+                launch.main(self.argv("--waiver", str(self.waiver)))
+        reader.assert_not_called()
+        self.assertFalse(self.index.exists())
 
 
 if __name__ == "__main__":
