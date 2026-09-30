@@ -593,3 +593,33 @@ class RebuildTests(CliCase):
         texts = {r[0] for r in self.rows("SELECT text FROM event")}
         self.assertIn("keep this prompt", texts)
         self.assertFalse(any(CANARY in t for t in texts))
+
+
+class GoldenTests(CliCase):
+    def test_every_answer_has_notice_freshness_and_logged(self):
+        self.session(TID, "hello there", "hi")
+        self.run_ingest()
+        ref = f"codex:{TID}:2.1"
+        commands = (
+            ("search", "hello"),
+            ("open", ref),
+            ("sessions",),
+            ("session", TID),
+            ("quote-check", ref, "hello"),
+            ("ingest",),
+            ("stats",),
+            ("stats", "--usage"),
+            ("erase", "--session", TID),
+            ("open", "codex:nope:1.1"),
+            ("rebuild",),
+        )
+        for argv in commands:
+            with self.subTest(argv=argv):
+                with mock.patch.object(cli.obs, "run", fake_run()):
+                    code, out, _ = self.pctx(*argv)
+                self.assertIsInstance(out, dict)
+                self.assertLessEqual(ALWAYS, set(out))
+                self.assertEqual(out["notice"], cli.NOTICE)
+        with mock.patch.object(cli.obs, "run", fake_run()):
+            _, out, _ = self.pctx("doctor")
+        self.assertLessEqual(ALWAYS | {"ok", "checks"}, set(out))
