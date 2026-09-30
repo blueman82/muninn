@@ -230,3 +230,72 @@ class IdentityTests(unittest.TestCase):
         self.assertIn(c.NOTICE, c.FLAG_MARKERS)
         for marker in c.LEGACY_MARKERS + ("<pctx-memory", "<pctx-recall"):
             self.assertIn(marker, c.FLAG_MARKERS)
+
+
+R = "[redacted:secret]"
+# Fake secrets, assembled at runtime so no key-shaped literal is committed.
+SK = "sk-" + "A1b2C3d4" * 3
+GHP = "ghp_" + "Z9y8X7w6" * 3
+AKIA = "AKIA" + "QWERTYUIOPASDFGH"
+PEM_BODY = "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu"
+
+
+def pem(kind="RSA "):
+    begin = f"-----BEGIN {kind}PRIVATE KEY-----"
+    end = f"-----END {kind}PRIVATE KEY-----"
+    return f"{begin}\n{PEM_BODY}\n{PEM_BODY[:20]}==\n{end}"
+
+
+class RedactTests(unittest.TestCase):
+    def test_redact_patterns(self):
+        cases = (
+            (f"use {SK} now", f"use {R} now"),
+            (f"push with {GHP} ok", f"push with {R} ok"),
+            (f"id {AKIA} end", f"id {R} end"),
+            (
+                "clone https://user:pass@host.example/repo.git",
+                f"clone https://{R}@host.example/repo.git",
+            ),
+            (
+                "GET https://api.example/v1?token=abc123def done",
+                f"GET https://api.example/v1?token={R} done",
+            ),
+            ('{"password": "hunter2-synthetic"}', f'{{"password": "{R}"}}'),
+            ("{'api_key': 'k-123'}", f"{{'api_key': '{R}'}}"),
+            ("password=hunter2 next", f"password={R} next"),
+            ("client_secret: abc", f"client_secret: {R}"),
+            ("secret\n= split-value", f"secret\n= {R}"),
+            (f"key:\n{pem()}\ndone", f"key:\n{R}\ndone"),
+            (pem("OPENSSH "), R),
+            (pem(""), R),
+            (pem("ENCRYPTED "), R),
+            (
+                f"-----BEGIN PRIVATE KEY-----\n{PEM_BODY}\n\nnext paragraph",
+                f"{R}\n\nnext paragraph",
+            ),
+            (
+                '{"c": "-----BEGIN EC PRIVATE KEY-----\\n' + PEM_BODY + '"}',
+                '{"c": "' + R + '"}',
+            ),
+        )
+        for text, want in cases:
+            with self.subTest(text=text[:30]):
+                self.assertEqual(c.redact(text), (want, True))
+
+    def test_redact_overlapping_spans_merge(self):
+        # KEY_VALUE and the sk- pattern both match; one marker remains.
+        self.assertEqual(c.redact(f"token={SK}"), (f"token={R}", True))
+        both = f"a {SK} b {GHP} c"
+        self.assertEqual(c.redact(both), (f"a {R} b {R} c", True))
+
+    def test_redact_leaves_clean_text_and_is_idempotent(self):
+        for text in (
+            "the token count is 5 and a password policy",
+            "sk-short",
+            "AKIA" + "lower16charsxxxx"[:3],
+            R,
+            f"password={R}",
+            "",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(c.redact(text), (text, False))

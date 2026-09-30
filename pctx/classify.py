@@ -8,6 +8,7 @@ pass parsed records and receive thread facts and events.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -21,6 +22,65 @@ LEGACY_MARKERS = (
     "Historical evidence follows.",
 )
 FLAG_MARKERS = LEGACY_MARKERS + ("<pctx-memory", "<pctx-recall", NOTICE)
+
+# Span versions of the old line-drop regexes (context.py:29-49, 55-58) plus
+# PEM private-key blocks.  Group "v" is the secret value; patterns without
+# it redact the whole match.  HOSTILE_LINE is deliberately not ported.
+REDACTED = "[redacted:secret]"
+_URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
+_KEYS = (
+    r"api[_-]?key|access[_-]?token|client[_-]?secret|token|"
+    r"auth(?:orization)?|bearer|password|passwd|secret|private[_-]?key"
+)
+SECRET_PATTERNS = (
+    re.compile(rf"(?i)(?:{_KEYS})\s*(?:=|:)\s*(?P<v>\S+)"),
+    re.compile(r"(?i)bearer\s+(?P<v>\S+)"),
+    re.compile(
+        r"(?i)sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}"
+        r"|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
+    ),
+    re.compile(rf"(?i){_URL}(?P<v>[^/\s@]+)@\S+"),
+    re.compile(
+        rf"(?i){_URL}\S+[?&](?:api[_-]?key|access[_-]?token|token|password"
+        r"|secret)=(?P<v>[^&\s]+)"
+    ),
+    re.compile(
+        r"(?i)[\"'](?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
+        r"auth(?:orization)?|password|passwd|secret|private[_-]?key)[\"']"
+        r"\s*:\s*[\"'](?P<v>[^\"']+)[\"']"
+    ),
+    re.compile(
+        r"(?is)(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
+        r"password|passwd|secret)\s*\n\s*[:=]\s*(?P<v>\S+)"
+    ),
+    # A block without its END line still loses the key lines that follow.
+    re.compile(
+        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+        r"(?:.*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+        r"|(?:(?:\r?\n|\\n)[A-Za-z0-9+/=]+)*)",
+        re.S,
+    ),
+)
+
+
+def redact(text: str) -> tuple[str, bool]:
+    """Replace secret spans with REDACTED; report whether text changed."""
+    spans = []
+    for pattern in SECRET_PATTERNS:
+        group = "v" if "v" in pattern.groupindex else 0
+        spans.extend(m.span(group) for m in pattern.finditer(text))
+    if not spans:
+        return text, False
+    pieces, pos = [], 0
+    for start, end in sorted(spans):
+        if start >= pos:
+            pieces += [text[pos:start], REDACTED]
+            pos = end
+        elif end > pos:  # overlaps the previous span: extend it
+            pos = end
+    pieces.append(text[pos:])
+    new = "".join(pieces)
+    return new, new != text
 
 
 @dataclass(frozen=True)
