@@ -11,7 +11,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 CLASSIFIER_VERSION = 1
@@ -187,6 +187,60 @@ WAIT_TOOLS = frozenset(
 )
 _IMAGES = re.compile(r"\A\s*(?:<image\b[^>]*>\s*(?:</image>\s*)?)+")
 _TEXT_TYPES = ("input_text", "output_text", "text")
+TOOL_ERROR_HALF = 2 * 1024
+TRANSCRIPT_ROOTS = (
+    ".codex/sessions",
+    ".codex/archived_sessions",
+    ".claude/projects",
+)
+# O1: an output is stored only when error-bearing or a test summary.
+TOOL_ERROR_PATTERNS = (
+    # traceback: Python tracebacks, Rust and Go panics
+    re.compile(
+        r"^(?:Traceback \(most recent call last\):"
+        r"|thread '[^'\n]*' panicked at |panic: )",
+        re.M,
+    ),
+    # FAILED: pytest, unittest, jest and go test failure lines; TAP
+    re.compile(r"^(?:FAIL(?:ED)?\b|--- FAIL\b|not ok \d)", re.M),
+    # fatal: git, compilers, CPython
+    re.compile(r"^(?:fatal|FATAL|Fatal Python error)\b|: fatal error\b", re.M),
+    # error: CLI, compiler and linter diagnostics, exception lines, make,
+    # shells
+    re.compile(
+        r"^(?:error(?:\[\w+\])?:|Error: |ERROR\b|npm (?:ERR!|error) "
+        r"|(?:[\w.]+\.)?[A-Z]\w*(?:Error|Exception): "
+        r"|\S+:\d+(?::\d+)?: (?:error|fatal error)\b|\S+\(\d+,\d+\): error "
+        r"|make(?:\[\d+\])?: \*\*\* )|\bcommand not found\b",
+        re.M,
+    ),
+    # test summary: pytest, unittest, jest and vitest, cargo, go test
+    re.compile(
+        r"^=*\s*(?:\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed"
+        r"|deselected|warnings?),? )+in [\d.]+s\b"
+        r"|^Ran \d+ tests? in [\d.]+s"
+        r"|^\s*Tests?:?\s+(?:\d+ \w+, )*\d+ (?:passed|failed|total)\b"
+        r"|^test result: |^ok\s+\S+\s+[\d.]+s$",
+        re.M,
+    ),
+)
+# O11: the command word pctx (or a path to it, after env assignments) at a
+# command position, or python -m pctx.
+PCTX_CALL = re.compile(
+    r"(?:^|[;&|(`'\"]|\$\()\s*(?:\w+=\S*\s+)*"
+    r"(?:[^\s;&|()`'\"]*/)?pctx(?![\w./:-])|\s-m\s+pctx\b",
+    re.M,
+)
+_EXIT = re.compile(
+    r"^(?:Process exited with code|Exit code:?) (-?\d+)"
+    r"|\bexit_code\"?\s*[=:]\s*(-?\d+)",
+    re.M,
+)
+_NESTED = re.compile(  # a Codex or Claude transcript line inside an output
+    r"\"type\"\s*:\s*\"(?:session_meta|response_item|event_msg"
+    r"|turn_context)\"|\"parentUuid\"\s*:"
+)
+_RUNNING = re.compile(r"Script running with cell ID (\S+)")
 
 
 @dataclass(frozen=True)
@@ -205,12 +259,17 @@ class EventRec:
 
 @dataclass
 class CodexState:
-    """Per-source parse state.  Feed every line to codex_events, line 1
-    included: line 1 sets cwd, replay_before and thread_class."""
+    """Per-source parse state (Claude sources use it for tool linking).
+    Feed every line to codex_events, line 1 included: line 1 sets cwd,
+    replay_before and thread_class.  calls maps a pending call id to
+    (originating call id, tool name or None when its output is skipped);
+    cells maps a running exec cell id to the same pair."""
 
     cwd: str | None = None
     replay_before: int | None = None
     thread_class: str = "primary"
+    calls: dict[str, tuple[str, str | None]] = field(default_factory=dict)
+    cells: dict[str, tuple[str, str | None]] = field(default_factory=dict)
 
 
 def _finish(text: str, limit: int) -> tuple[str, int]:
@@ -271,6 +330,90 @@ def _user_kind(tag: str | None, thread_class: str) -> str:
     return "delegation" if thread_class == "subagent" else "prompt"
 
 
+def _cell(body: str) -> str | None:
+    try:
+        return _str(json.loads(body).get("cell_id"))
+    except (ValueError, AttributeError, RecursionError):
+        return None
+
+
+def _register(
+    state: CodexState | None, call_id: str | None, name: str, body: str
+) -> int:
+    """Remember a call so its output can be linked; return its flags."""
+    pctx = PCTX_CALL.search(body) is not None
+    if state is None or not call_id:
+        pass
+    elif name == "wait":  # an exec cell continuation: the exec call owns it
+        cell = _cell(body)
+        if cell in state.cells:
+            state.calls[call_id] = state.cells.pop(cell)
+    elif name not in WAIT_TOOLS:
+        tainted = pctx or any(root in body for root in TRANSCRIPT_ROOTS)
+        state.calls[call_id] = (call_id, None if tainted else name)
+    # ponytail: write_stdin continuations are not linked to their
+    # exec_command; content markers still apply to their outputs.
+    return FLAG_MARKER if pctx else 0
+
+
+def _is_error(text: str) -> bool:
+    if text.startswith("Script failed"):  # the exec tool's failure status
+        return True
+    if any(int(a or b) != 0 for a, b in _EXIT.findall(text)):
+        return True
+    return any(p.search(text) for p in TOOL_ERROR_PATTERNS)
+
+
+def _excerpt(text: str) -> tuple[str, bool]:
+    data = text.encode("utf-8", "surrogatepass")
+    if len(data) <= 2 * TOOL_ERROR_HALF:
+        return text, False
+    head = data[:TOOL_ERROR_HALF].decode("utf-8", "ignore")
+    tail = data[-TOOL_ERROR_HALF:].decode("utf-8", "ignore")
+    return f"{head}\n…\n{tail}", True
+
+
+def _tool_error(
+    state: CodexState | None,
+    call_id: str | None,
+    text: str,
+    line: int,
+    seq: int,
+    ts: str | None,
+    *,
+    part: int = 1,
+    is_error: bool = False,
+) -> list[EventRec]:
+    """A tool_error event for an error-bearing or test-summary output of a
+    known, clean call (O1); [] for everything else."""
+    unknown = (None, None)
+    origin, tool = state.calls.pop(call_id, unknown) if state else unknown
+    running = _RUNNING.match(text)
+    if origin and running:  # later wait(cell_id) outputs belong here
+        state.cells[running.group(1)] = (origin, tool)
+    if tool is None or not (is_error or _is_error(text)):
+        return []
+    if _NESTED.search(text) or any(m in text for m in FLAG_MARKERS):
+        return []  # a nested transcript or envelope, never stored
+    text, changed = redact(text)
+    text, cut = _excerpt(text)
+    flags = (FLAG_REDACTED if changed else 0) | (FLAG_TRUNCATED if cut else 0)
+    return [
+        EventRec(
+            line,
+            part,
+            seq,
+            ts,
+            "user",
+            "tool_error",
+            tool,
+            flags,
+            text,
+            origin,
+        )
+    ]
+
+
 def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
     """Events of one Codex rollout record (design 3.4; spec O1, O2)."""
     rtype, payload = record.get("type"), record.get("payload")
@@ -314,11 +457,13 @@ def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
         return [_event(*at, ts, role, kind, tag, text)]
     if kind in ("function_call", "custom_tool_call"):
         name = _str(payload.get("name")) or "unknown"
-        if name in WAIT_TOOLS:
-            return []
         body = payload.get("arguments" if kind == "function_call" else "input")
         if not isinstance(body, str):
             body = json.dumps(body, ensure_ascii=False)
+        call_id = _str(payload.get("call_id"))
+        flags = _register(state, call_id, name, body)
+        if name in WAIT_TOOLS:
+            return []
         return [
             _event(
                 *at,
@@ -328,9 +473,14 @@ def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
                 name,
                 f"{name}: {body}",
                 limit=TOOL_CALL_LIMIT,
-                call_id=_str(payload.get("call_id")),
+                flags=flags,
+                call_id=call_id,
             )
         ]
+    if kind in ("function_call_output", "custom_tool_call_output"):
+        output = payload.get("output")
+        text = output if isinstance(output, str) else _join(output)
+        return _tool_error(state, _str(payload.get("call_id")), text, *at, ts)
     if kind == "agent_message":
         # Delivered into the RECIPIENT's rollout.  A report from a
         # descendant agent is harness text there; a message from an
@@ -403,8 +553,12 @@ def _claude_text(content: object) -> str:
     return content if isinstance(content, str) else _join(content)
 
 
-def claude_events(record: dict, line: int) -> list[EventRec]:
-    """Events of one Claude transcript record (design 3.4; spec O2)."""
+def claude_events(
+    record: dict, line: int, state: CodexState | None = None
+) -> list[EventRec]:
+    """Events of one Claude transcript record (design 3.4; spec O1, O2).
+    Pass one CodexState per source to get tool_error events: an output is
+    stored only when its tool_use was seen in the same source."""
     rtype, message = record.get("type"), record.get("message")
     if rtype not in ("user", "assistant") or not isinstance(message, dict):
         return []  # attachments (hook output), system, summary, titles ...
@@ -417,19 +571,16 @@ def claude_events(record: dict, line: int) -> list[EventRec]:
         found = []
         text = _claude_text(content)
         if text.strip():
-            found.append(("reply", None, text, TEXT_LIMIT, None))
+            found.append(("reply", None, text, TEXT_LIMIT, None, 0))
         for block in blocks:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 name = _str(block.get("name")) or "unknown"
                 body = json.dumps(block.get("input"), ensure_ascii=False)
+                call_id = _str(block.get("id"))
+                flags = _register(state, call_id, name, body)
+                text = f"{name}: {body}"
                 found.append(
-                    (
-                        "tool_call",
-                        name,
-                        f"{name}: {body}",
-                        TOOL_CALL_LIMIT,
-                        _str(block.get("id")),
-                    )
+                    ("tool_call", name, text, TOOL_CALL_LIMIT, call_id, flags)
                 )
         return [
             _event(
@@ -442,9 +593,10 @@ def claude_events(record: dict, line: int) -> list[EventRec]:
                 text,
                 limit=limit,
                 part=part,
+                flags=flags,
                 call_id=call_id,
             )
-            for part, (kind, tag, text, limit, call_id) in enumerate(
+            for part, (kind, tag, text, limit, call_id, flags) in enumerate(
                 found, start=1
             )
         ]
@@ -453,8 +605,20 @@ def claude_events(record: dict, line: int) -> list[EventRec]:
         for b in blocks
         if isinstance(b, dict) and b.get("type") == "tool_result"
     ]
-    if results or "toolUseResult" in record:
-        return []  # tool output, never a prompt
+    if results or "toolUseResult" in record:  # tool output, never a prompt
+        events: list[EventRec] = []
+        for block in results:
+            events += _tool_error(
+                state,
+                _str(block.get("tool_use_id")),
+                _claude_text(block.get("content")),
+                line,
+                line,
+                ts,
+                part=len(events) + 1,
+                is_error=block.get("is_error") is True,
+            )
+        return events
     text = _claude_text(content)
     if not text.strip():
         return []
