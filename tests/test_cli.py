@@ -9,9 +9,13 @@ import contextlib
 import io
 import json
 import os
+import signal
+import subprocess
+import time
+from pathlib import Path
 from unittest import mock
 
-from pctx import cli, store
+from pctx import cli, obs, store
 from tests.test_classify import SK, codex_meta, reply, user_msg
 from tests.test_ingest import TID, IngestCase, rollout
 from tests.test_store import SPILLING_WRITER, Child
@@ -241,3 +245,91 @@ class WriterTests(CliCase):
         ):
             code, out, _ = self.pctx("ingest")
         self.assertEqual((code, out["error"]), (3, "busy"))
+
+
+LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
+
+
+class ServeTests(CliCase):
+    def start_serve(self, interval="0.2"):
+        log = open(self.home / "poller.log", "ab")
+        self.addCleanup(log.close)
+        proc = subprocess.Popen(
+            [str(LAUNCHER), "serve", "--interval", interval],
+            env=self.env,
+            stdout=log,
+            stderr=log,
+            cwd=self.repo,
+        )
+        self.addCleanup(proc.wait)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        return proc
+
+    def wait_status(self, key, timeout=60):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = obs.read_status(self.home)
+            if status.get(key):
+                return status
+            time.sleep(0.05)
+        self.fail(f"no {key} in status.json")
+
+    def test_serve_sigterm_between_sources(self):
+        self.session(TID, f"{CANARY} in a prompt", "a reply")
+        proc = self.start_serve()
+        status = self.wait_status("passes")
+        proc.send_signal(signal.SIGTERM)
+        self.assertEqual(proc.wait(timeout=30), 0)
+        self.assertFalse((self.home / "pctx.sqlite-journal").exists())
+        self.assertEqual(status["pid"], proc.pid)
+        self.assertEqual(status["interval_s"], 0.2)
+        self.assertLessEqual(
+            {
+                "last_pass_at",
+                "files_seen",
+                "events_added",
+                "failed",
+                "errors",
+                "classifier_version",
+                "schema_version",
+                "install_sha",
+                "duration_s",
+            },
+            set(status),
+        )
+        self.assertEqual(status["events_added"], 2)
+        self.pctx("search", CANARY)
+        for name in ("calls.jsonl", "status.json", "poller.log"):
+            with self.subTest(file=name):
+                self.assertNotIn(CANARY, (self.home / name).read_text())
+
+    def test_serve_sigterm_mid_pass_leaves_no_journal(self):
+        for n in range(300):
+            self.session(f"thr-{n:04d}", f"prompt {n}", f"reply {n}")
+        proc = self.start_serve(interval="60")
+        time.sleep(0.4)  # most likely inside the first pass
+        proc.send_signal(signal.SIGTERM)
+        self.assertEqual(proc.wait(timeout=60), 0)
+        self.assertFalse((self.home / "pctx.sqlite-journal").exists())
+        conn = store.connect_ro(store.db_path(self.home))
+        self.addCleanup(conn.close)
+        self.assertEqual(
+            conn.execute("PRAGMA quick_check").fetchone()[0], "ok"
+        )
+        torn = conn.execute(
+            "SELECT count(*) FROM source s WHERE s.cursor_line > 0 AND"
+            " (SELECT count(*) FROM event e WHERE e.source_id = s.id) != 2"
+        ).fetchone()[0]
+        self.assertEqual(torn, 0)  # every committed source is whole
+
+    def test_status_json_heartbeat_and_poller_stale(self):
+        self.session(TID, "hello there", "hi")
+        self.run_ingest()
+        obs.write_status(
+            self.home, {"last_pass_at": time.time() - 1, "interval_s": 60}
+        )
+        self.assertEqual(self.pctx("search", "hello")[1]["poller"], "ok")
+        obs.write_status(self.home, {"last_pass_at": time.time() - 500})
+        _, out, _ = self.pctx("search", "hello")
+        self.assertEqual(out["poller"], "stale")
+        self.assertGreaterEqual(out["index_age_s"], 500)

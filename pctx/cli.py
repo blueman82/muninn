@@ -14,6 +14,8 @@ import dataclasses
 import hashlib
 import json
 import os
+import signal
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -356,6 +358,84 @@ def _erase(a, env, home, record):
     return 0, out
 
 
+class _Stop(BaseException):
+    """SIGTERM or SIGHUP: leave serve once no transaction is open."""
+
+
+class _StopAfterCommit:
+    """The poller's connection: once a stop is requested mid-transaction,
+    raise _Stop right after that COMMIT or ROLLBACK (ingest commits each
+    source in its own transaction), so no journal is left behind."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn, self.stop = conn, False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def execute(self, sql, *args):
+        cursor = self._conn.execute(sql, *args)
+        if self.stop and sql in ("COMMIT", "ROLLBACK"):
+            raise _Stop
+        return cursor
+
+
+def _serve(a, env, home, record):
+    """KeepAlive poller (design 6.2): a pass, a heartbeat, a sleep.  A pass
+    is skipped while another writer holds the lock."""
+    roots, live = ingest.default_roots(env), {"conn": None}
+
+    def on_signal(signum, frame):
+        conn = live["conn"]
+        try:
+            busy = conn is not None and conn.in_transaction
+        except sqlite3.ProgrammingError:  # already closed
+            busy = False
+        if busy:
+            conn.stop = True  # finish this source's transaction first
+        else:
+            raise _Stop
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, on_signal)
+    passes = skipped = 0
+    try:
+        while True:
+            began = time.monotonic()
+            try:
+                with store.writer_lock(home, wait_s=0):
+                    raw = store.connect_rw(store.db_path(home))
+                    live["conn"] = _StopAfterCommit(raw)
+                    try:
+                        stats = ingest.ingest(live["conn"], roots)
+                    finally:
+                        raw.close()
+                        live["conn"] = None
+                passes += 1
+                _heartbeat(
+                    home,
+                    stats,
+                    env,
+                    pid=os.getpid(),
+                    interval_s=a.interval,
+                    passes=passes,
+                    busy_skips=skipped,
+                )
+            except store.Busy:
+                skipped += 1
+                obs.write_status(home, {"busy_skips": skipped})
+            except Exception as exc:  # poller.log: the class name only
+                print(
+                    f"pass failed: {type(exc).__name__}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                obs.write_status(home, {"last_error": type(exc).__name__})
+            time.sleep(max(0.0, a.interval - (time.monotonic() - began)))
+    except _Stop:
+        return 0, None
+
+
 def _not_built(a, env, home, record):
     return 2, {"error": "not_built"}
 
@@ -368,7 +448,7 @@ _HANDLERS = {
     "quote-check": _quote_check,
     "erase": _erase,
     "ingest": _ingest,
-    "serve": _not_built,
+    "serve": _serve,
     "stats": _not_built,
     "doctor": _not_built,
     "rebuild": _not_built,
