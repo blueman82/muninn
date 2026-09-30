@@ -11,6 +11,7 @@ import signal
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -1657,6 +1658,31 @@ class StoreTroubleTests(QueryCase):
                     self.assertNotIn("zebra", str(caught.exception))
         finally:
             self.rw.execute("ROLLBACK")
+
+    def test_reader_waits_through_a_writers_commit(self):
+        repo = self.add_scope("/repo")
+        self.add_event(self.add_source("a"), repo, "zebra")
+        held, done = threading.Event(), threading.Event()
+
+        def write():
+            conn = store.connect_rw(self.db, fullfsync=False)
+            try:
+                conn.execute("BEGIN EXCLUSIVE")
+                held.set()
+                done.wait(0.6)  # the commit is a moment away
+                conn.execute("COMMIT")
+            finally:
+                conn.close()
+
+        writer = threading.Thread(target=write)
+        writer.start()
+        self.assertTrue(held.wait(5))
+        start = time.monotonic()
+        got = query.search(self.ro(), "zebra", cwd="/repo", env={})
+        waited = time.monotonic() - start
+        writer.join()
+        self.assertEqual(len(got["hits"]), 1)  # answered once it committed
+        self.assertGreaterEqual(waited, 0.3)
 
     def test_hot_journal_raises_store_unavailable_subclass(self):
         repo = self.add_scope("/repo")

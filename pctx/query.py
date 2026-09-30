@@ -652,7 +652,7 @@ def _read_line(roots: Mapping, row: sqlite3.Row) -> bytes | None:
     Only an active source under a known root, never through a symlink or
     out of the root, and never blocking on a non-regular file.
     """
-    root = roots.get(row["root"])
+    root = (roots or {}).get(row["root"])
     if root is None or row["status"] != "active":
         return None
     base = os.path.normpath(root)
