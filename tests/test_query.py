@@ -194,6 +194,16 @@ class BuildQueryTests(unittest.TestCase):
         got = self.terms("The plan of the PLAN is a b to 7 ok")
         self.assertEqual(got, ['"plan"', '"ok"'])
 
+    def test_every_stopword_is_dropped(self):
+        self.assertTrue(30 <= len(query.STOPWORDS) <= 45)  # "about 35"
+        for word in query.STOPWORDS | {"AND", "Or", "NOT", "The"}:
+            with self.subTest(word):
+                self.assertIsNone(query.build_fts_query(word))
+        self.assertEqual(
+            self.terms("what is the plan and not the cache"),
+            ['"plan"', '"cache"'],
+        )
+
     def test_none_when_no_terms(self):
         for text in ("", "   ", "the a of to", "!!! ??? ...", "__ _ ___"):
             with self.subTest(text):
@@ -217,6 +227,31 @@ class BuildQueryTests(unittest.TestCase):
         )
         path = self.terms("see pctx/query.py:12")
         self.assertIn('"pctx query py 12"', path)
+
+    def test_hostile_input_stays_linear(self):
+        blobs = [
+            "a" * 40000,
+            "a_" * 20000,
+            "a.b." * 10000,
+            "x " * 20000,
+            '"' * 40000,
+            "a:b" * 10000,
+            "-".join(["w"] * 10000),
+            "é" * 40000,
+        ]
+        start = time.monotonic()
+        for blob in blobs:
+            query.build_fts_query(blob)
+        self.assertLess(time.monotonic() - start, 2)
+
+    def test_blobs_and_long_identifiers_are_bounded(self):
+        self.assertIsNone(query.build_fts_query("a" * 101))  # a blob
+        self.assertEqual(self.terms("a" * 100), ['"' + "a" * 100 + '"'])
+        path = "/".join(f"seg{i}" for i in range(30))
+        phrase = self.terms(path)[-1]
+        self.assertEqual(phrase.count(" "), 11)  # 12 parts, then cut
+        many = " ".join(f"a{i}.b{i}" for i in range(20))
+        self.assertEqual(len(self.terms(many)), 16 + 8)  # terms + phrases
 
     def test_every_term_is_a_safe_quoted_string(self):
         hostile = [
@@ -460,7 +495,7 @@ class SearchFilterTests(QueryCase):
         snippet = self.search("needle")["hits"][0]["snippet"]
         self.assertIn("«needle»", snippet)
         self.assertTrue(snippet.startswith("…") and snippet.endswith("…"))
-        self.assertLess(len(snippet.split()), 40)
+        self.assertTrue(30 <= len(snippet.split()) <= 36)  # 32 tokens
 
     def test_filters_provider_since_until(self):
         c1 = self.one("c1", "zebra a", ts="2026-09-01T10:00:00.000Z")
@@ -538,6 +573,43 @@ class SearchFilterTests(QueryCase):
         self.assertEqual(self.ids(harness), {env, bare})  # reports: opt in
         both = self.search("marker", kinds={"harness"}, include_subagents=True)
         self.assertEqual(self.ids(both), {env, bare, report})
+
+    def test_since_and_until_are_inclusive_at_a_timestamp(self):
+        at = "2026-09-15T10:00:00.000Z"
+        hit = self.one("a", "zebra", ts=at)
+        self.noise(self.repo)
+        for kw in ({"since": at}, {"until": at}):
+            with self.subTest(kw):
+                self.assertEqual(self.ids(self.search("zebra", **kw)), {hit})
+        early = "2026-09-15T09:59:59.999Z"
+        self.assertEqual(self.search("zebra", until=early)["hits"], [])
+        late = "2026-09-15T10:00:00.001Z"
+        self.assertEqual(self.search("zebra", since=late)["hits"], [])
+
+    def test_explicit_session_beats_the_current_session_exclusion(self):
+        mine = self.one("cur", "canary echo")
+        self.one("old", "canary echo")
+        self.noise(self.repo)
+        env = {"CLAUDE_CODE_SESSION_ID": "cur"}
+        got = self.search("canary", env=env, session="cur")
+        self.assertEqual(self.ids(got), {mine})
+
+    def test_delegation_needs_the_opt_in_even_in_a_primary_thread(self):
+        deleg = self.ev("p", "marker odd", kind="delegation")
+        self.noise(self.repo)
+        self.assertEqual(self.search("marker")["hits"], [])
+        got = self.search("marker", include_subagents=True)
+        self.assertEqual(self.ids(got), {deleg})
+
+    def test_limit_and_page_are_clamped(self):
+        for i in range(3):
+            self.one(f"s{i}", f"zebra {'pad ' * i}")
+        self.noise(self.repo)
+        self.assertEqual(self.search("zebra", limit=1000)["limit"], 30)
+        for limit in (0, -5):
+            got = self.search("zebra", limit=limit)
+            self.assertEqual((got["limit"], len(got["hits"])), (1, 1))
+        self.assertEqual(self.search("zebra", page=-3)["page"], 1)
 
     def test_tool_error_only_with_explicit_kind(self):
         p = self.add_source("p")
@@ -648,6 +720,48 @@ class SearchComposeTests(QueryCase):
         hits = self.search("zebra")["hits"]
         self.assertEqual([h["repeats"] for h in hits], [1, 0])
         self.assertEqual([h["more_in_session"] for h in hits], [2, 2])
+
+    def test_tool_cap_is_per_page(self):
+        # ranks: 4 tools + 1 prompt (page 1), then 5 tools + 1 prompt (page 2)
+        plan = "TTTTP" + "TTTTTP"
+        for rank, kind in enumerate(plan):
+            self.one(
+                f"r{rank}", f"zebra {'pad ' * rank}",
+                kind="tool_call" if kind == "T" else "prompt",
+            )  # fmt: skip
+        self.noise(self.repo)
+        first = self.search("zebra", limit=5)["hits"]
+        second = self.search("zebra", limit=5, page=2)["hits"]
+        kinds = lambda hits: [h["kind"] for h in hits]  # noqa: E731
+        self.assertEqual(kinds(first).count("tool_call"), 4)
+        self.assertEqual(kinds(second).count("tool_call"), 4)  # a fresh page
+        self.assertEqual(kinds(second)[-1], "prompt")
+
+    def test_more_in_session_only_when_hits_are_hidden(self):
+        two = self.add_source("two")
+        for i in range(2):
+            self.add_event(two, self.repo, f"zebra pair {i}")
+        one = self.add_source("one")  # 1 shown hit, tool calls held back
+        self.add_event(one, self.repo, "zebra lead")
+        for i in range(4):
+            self.one(f"t{i}", f"zebra tool {i}", kind="tool_call")
+        for i in range(3):
+            self.add_event(one, self.repo, f"zebra call {i}", kind="tool_call")
+        self.noise(self.repo)
+        got = self.search("zebra", limit=30)
+        by_session = {}
+        for hit in got["hits"]:
+            by_session.setdefault(hit["session"], []).append(hit)
+        self.assertEqual(len(by_session["two"]), 2)
+        for hit in by_session["two"] + by_session["one"]:
+            self.assertNotIn("more_in_session", hit)
+
+    def test_has_more_is_false_on_an_exact_last_page(self):
+        for i in range(20):
+            self.one(f"s{i}", f"zebra {'pad ' * i}")
+        self.noise(self.repo)
+        pages = [self.search("zebra", limit=10, page=n) for n in (1, 2)]
+        self.assertEqual([p["has_more"] for p in pages], [True, False])
 
     def test_search_pages_are_disjoint(self):
         for i in range(25):
@@ -770,8 +884,46 @@ class SearchAroundTests(QueryCase):
         dump = json.dumps(got)
         for secret in ("BETASECRET", "GAMMASECRET", "SUBAGENTSECRET"):
             self.assertNotIn(secret, dump)
+        self.assertNotIn("note", got)  # it has an in-scope hit
         wide = self.search("zebra", all_projects=True)
         self.assertEqual(wide["other_scopes"], {})
+
+    def test_knowledge_text_is_cut_and_only_live_cites_show(self):
+        k = self.know("zebra " + "long " * 100)
+        for state, line in (
+            ("erased", 1),
+            ("live", 2),
+            ("live", 3),
+            ("live", 4),
+        ):
+            self.rw.execute(
+                "INSERT INTO citation(knowledge_id, provider, thread_id,"
+                " line, part, line_sha256, role, kind, state) VALUES"
+                " (?, 'codex', 'thr', ?, 1, 'h', 'user', 'prompt', ?)",
+                (k, line, state),
+            )
+        self.noise(self.repo)
+        entry = self.search("zebra")["knowledge"][0]
+        self.assertEqual(len(entry["text"]), 300)
+        self.assertEqual(entry["cites"], ["codex:thr:2.1", "codex:thr:3.1"])
+
+    def test_exact_cwd_mode_counts_other_cwds_as_outside(self):
+        self.add_event(
+            self.add_source("a"), self.repo, "zebra one", cwd="/repo"
+        )
+        self.add_event(
+            self.add_source("b"), self.repo, "zebra two", cwd="/repo/sub"
+        )
+        self.add_event(
+            self.add_source("c"), self.repo, "zebra three"
+        )  # no cwd
+        self.noise(self.repo)
+        got = self.search("zebra", scope="/repo")
+        self.assertEqual(got["other_scopes"], {"repo": 2})
+        self.assertNotIn("note", got)  # something matched exactly
+        got = self.search("zebra", scope="/elsewhere")
+        self.assertEqual(got["hits"], [])
+        self.assertIn("3 matches outside this scope", got["note"])
 
     def test_zero_in_scope_reports_outside_matches(self):
         self.add_event(self.add_source("b1"), self.beta, "zebra one")
@@ -948,6 +1100,44 @@ class OpenTests(OpenCase):
         _, ids, _, _ = self.write_source("thr-many", many)
         rels = [n["rel"] for n in self.open(ids[25], context=99)["neighbours"]]
         self.assertEqual(rels, [*range(-20, 0), *range(1, 21)])
+
+    def test_neighbours_within_a_line_follow_part_order(self):
+        _, ids, _, _ = self.write_source("thr-w", self.specs(), backwards=True)
+        got = self.open(ids[1], context=2)  # line 2; line 3 holds parts 1, 2
+        self.assertEqual(
+            [(n["rel"], n["id"]) for n in got["neighbours"]],
+            [(-1, ids[0]), (1, ids[2]), (2, ids[3])],
+        )
+        back = self.open(ids[4], context=2)  # line 4: parts 3.2, 3.1 before
+        self.assertEqual(
+            [(n["rel"], n["id"]) for n in back["neighbours"][:2]],
+            [(-2, ids[2]), (-1, ids[3])],
+        )
+
+    def test_negative_context_is_zero_and_a_subagent_is_marked(self):
+        sub = self.add_source("thr-sub", cls="subagent")
+        eid = self.add_event(sub, self.repo, "delegated", kind="delegation")
+        self.add_event(sub, self.repo, "and more", kind="reply")
+        got = self.open(eid, context=-5)
+        self.assertEqual(got["neighbours"], [])
+        self.assertEqual(got["provenance"]["class"], "subagent")
+        self.assertEqual(len(self.open(eid, context=1)["neighbours"]), 1)
+
+    def test_exact_thread_beats_a_longer_thread_with_that_prefix(self):
+        _, short, _, _ = self.write_source("thr-x", self.specs()[:1])
+        self.write_source("thr-xy", self.specs()[:1])
+        self.assertEqual(self.open("codex:thr-x:1.1")["id"], short[0])
+        self.assertEqual(
+            self.open("codex:thr-x:1"), self.open("codex:thr-x:1.1")
+        )
+
+    def test_a_line_over_the_ingest_cap_never_verifies(self):
+        big = "z" * (8 * 1024 * 1024 + 5)
+        _, ids, lines, _ = self.write_source("thr-huge", [(big, {})])
+        self.assertGreater(len(lines[0]), 8 * 1024 * 1024)
+        got = self.open(ids[0], raw=True)  # its stored hash matches the file
+        self.assertIs(got["hash_ok"], False)
+        self.assertNotIn("raw", got)
 
     def test_previews_are_one_line_and_at_most_200_chars(self):
         specs = [("x", {}), ("word  \n\n  " * 100, {}), ("tail", {})]
@@ -1202,7 +1392,7 @@ class SessionsTests(QueryCase):
     def sessions(self, **kw):
         return query.sessions(self.ro(), cwd="/repo", **kw)
 
-    def test_sessions_newest_first_with_counts_and_preview(self):
+    def test_sessions_and_session_timeline_order(self):
         got = self.sessions()
         self.assertEqual(got["notice"], NOTICE)
         self.assertEqual(
@@ -1233,6 +1423,11 @@ class SessionsTests(QueryCase):
         self.assertEqual(len(b["preview"]), 120)
         self.assertTrue(b["preview"].startswith("B long long"))
         self.assertEqual(by_root["dddd-root"]["status"], "missing")
+        timeline = query.session(self.ro(), "aaaa-root")["events"]
+        self.assertEqual(
+            [e["id"] for e in timeline],
+            [self.a1, self.a2, self.asub, self.af, self.a3],
+        )
 
     def test_sessions_filters_and_limit(self):
         self.assertEqual(
@@ -1247,6 +1442,8 @@ class SessionsTests(QueryCase):
         self.assertFalse(self.sessions()["has_more"])
         nowhere = query.sessions(self.ro(), cwd="/nowhere")
         self.assertEqual(nowhere["sessions"], [])
+        bad = self.sessions(since="yesterday")
+        self.assertEqual(bad, {"error": "bad_date", "notice": NOTICE})
         stale = self.sessions(status={"last_pass_at": time.time() - 900})
         self.assertEqual(stale["poller"], "stale")
 
@@ -1284,6 +1481,44 @@ class SessionsTests(QueryCase):
             if cursor is None:
                 break
         self.assertEqual(seen, order)
+
+    def test_session_rows_are_short_flagged_and_can_start_at_an_undated_event(
+        self,
+    ):
+        z = self.add_source("z-main", session="zzzz-root")
+        undated = self.add_event(z, self.repo, "no timestamp " * 30)
+        flagged = self.add_event(
+            z, self.repo, "pasted block", ts="2026-09-02T00:00:00Z", flags=1
+        )
+        got = query.session(self.ro(), "zzzz-root")
+        first = got["events"][0]
+        self.assertEqual(len(first["preview"]), 80)
+        self.assertNotIn("flagged", first)
+        self.assertTrue(got["events"][1]["flagged"])
+        resumed = query.session(self.ro(), "zzzz-root", from_id=undated)
+        self.assertEqual(
+            [e["id"] for e in resumed["events"]], [undated, flagged]
+        )
+        later = query.session(self.ro(), "zzzz-root", from_id=flagged)
+        self.assertEqual([e["id"] for e in later["events"]], [flagged])
+
+    def test_an_exact_session_root_beats_longer_roots_it_prefixes(self):
+        self.add_source("s-short", session="abcd")
+        other = self.add_source("s-long", session="abcdef")
+        self.add_event(other, self.repo, "belongs to the long one")
+        got = query.session(self.ro(), "abcd")
+        self.assertEqual((got["session"], got["total"]), ("abcd", 0))
+        self.assertEqual(
+            query.session(self.ro(), "abcde")["session"], "abcdef"
+        )
+        found = self.search_in("abcd")
+        self.assertEqual(found, {"hits": []})
+
+    def search_in(self, session):
+        got = query.search(
+            self.ro(), "belongs", cwd="/repo", env={}, session=session
+        )
+        return {"hits": got["hits"]}
 
     def test_session_ties_nulls_and_errors(self):
         s = self.add_source("z-main", session="zzzz-root")
@@ -1358,7 +1593,7 @@ class QuoteCheckTests(QueryCase):
 
     def test_quote_check_is_linear_on_a_large_event(self):
         repo = self.add_scope("/repo")
-        text = "word " * 13000 + "needle  here"  # ~64 KiB, 13,000 words
+        text = "a " * 32000 + "needle  here"  # 64 KiB, 32,000 words
         self.add_event(self.add_source("thr-l"), repo, text)
         start = time.monotonic()
         got = query.quote_check(self.ro(), "codex:thr-l:1.1", "needle here")

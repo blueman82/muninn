@@ -32,6 +32,8 @@ PROVIDERS = ("codex", "claude")
 
 MAX_TERMS = 16
 MAX_PHRASES = 8
+MAX_PHRASE_PARTS = 12  # words in one phrase; a longer one keeps its start
+MAX_TERM_LEN = 100  # a longer "word" is a blob, not something to search for
 CANDIDATES = 300  # bm25 candidates per search, composed into pages
 PAGE_MAX = 30
 SNIPPET_TOKENS = 32
@@ -55,7 +57,7 @@ _REF = re.compile(r"(\w+):(\S+):(\d+)(?:\.(\d+))?")
 _QUOTED = re.compile(r'"([^"]*)"')
 _WORD = re.compile(r"\w+")
 _PART = re.compile(r"[^\W_]+")  # what FTS5's unicode61 counts as a token
-_IDENT = re.compile(r"\w+(?:[./\\:-]\w+)+|\w+_\w+")
+_IDENT = re.compile(r"\w+(?:[./\\:-]+\w+)*")  # linear: no overlapping loops
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}(?:T[\w:.+-]*)?")
 _AGENT_REPORT = (  # subagent reports are stored in the parent's thread
     "(e.kind = 'harness' AND COALESCE(e.tag, '') = 'agent_message')"
@@ -86,29 +88,29 @@ def parse_ref(ref: str) -> tuple[str, str, int, int]:
 def build_fts_query(text: str) -> str | None:
     """FTS5 MATCH string: quoted terms joined by OR, or None if no terms.
 
-    Terms are lower-case \\w+ words minus stopwords and 1-char words, deduped,
-    at most MAX_TERMS. A "quoted phrase" stays a phrase (in place of its
-    words); an identifier such as hook_core.py also adds a phrase of its
-    parts. Every element is double-quoted, so no FTS operator survives.
+    Terms are lower-case \\w+ words minus stopwords, 1-char words and blobs
+    over MAX_TERM_LEN, deduped, at most MAX_TERMS. A "quoted phrase" stays a
+    phrase (in place of its words); an identifier such as hook_core.py also
+    adds a phrase of its parts. Every element is double-quoted, so no FTS
+    operator survives. Linear in the length of the text.
     """
     phrases = []
 
-    def quoted(found: re.Match) -> str:
-        parts = _PART.findall(found[1])
-        if len(parts) < 2:
-            return f" {found[1]} "  # one quoted word is just a term
-        phrases.append(" ".join(parts))
-        return " "
-
-    rest = _QUOTED.sub(quoted, text.lower())
-    for ident in _IDENT.findall(rest):
-        parts = _PART.findall(ident)
+    def phrase(text: str) -> str:
+        parts = _PART.findall(text)
         if len(parts) > 1:
-            phrases.append(" ".join(parts))
+            phrases.append(" ".join(parts[:MAX_PHRASE_PARTS]))
+        return " " if len(parts) > 1 else f" {text} "
+
+    rest = _QUOTED.sub(lambda found: phrase(found[1]), text.lower())
+    for ident in _IDENT.findall(rest):
+        phrase(ident)
     words = dict.fromkeys(
         w
         for w in _WORD.findall(rest)
-        if len(w) > 1 and w not in STOPWORDS and _PART.search(w)
+        if 1 < len(w) <= MAX_TERM_LEN
+        and w not in STOPWORDS
+        and _PART.search(w)
     )
     elements = list(words)[:MAX_TERMS]
     elements += list(dict.fromkeys(phrases))[:MAX_PHRASES]
@@ -489,7 +491,7 @@ def _paginate(entries: list, recent: bool, limit: int, page: int):
     return pool[start : start + limit], len(pool) > start + limit
 
 
-def _render(conn, fts, shown, entries, total, capped: bool) -> list[dict]:
+def _render(conn, fts, shown, entries, total) -> list[dict]:
     """Hits for the shown entries; a session that hit its cap reports how
     many of its matches no hit stands for (more_in_session)."""
     hits_in, covered = Counter(), Counter()
@@ -504,7 +506,7 @@ def _render(conn, fts, shown, entries, total, capped: bool) -> list[dict]:
         hit = _hit(row, snippets.get(row["id"], ""), entry["repeats"])
         root = row["session_root"]
         more = total[root] - covered[root]
-        if capped and hits_in[root] >= PER_SESSION and more > 0:
+        if hits_in[root] >= PER_SESSION and more > 0:
             hit["more_in_session"] = more
         hits.append(hit)
     return hits
@@ -578,14 +580,18 @@ def search(
         rows, limit, per_session=root is None, tools=not kinds and root is None
     )
     shown, has_more = _paginate(entries, recent, limit, page)
-    hits = _render(conn, fts, shown, entries, total, capped=root is None)
+    hits = _render(conn, fts, shown, entries, total)
     out |= {
         "scope": _scope_label(conn, ids, scope, all_projects),
         "hits": hits,
         "page": page,
         "limit": limit,
         "has_more": has_more,
-        "other_scopes": dict(other.most_common(OTHER_SCOPES)),
+        "other_scopes": dict(
+            sorted(other.items(), key=lambda kv: (-kv[1], kv[0]))[
+                :OTHER_SCOPES
+            ]
+        ),
         "stages": {
             "matches": sum(total.values()) + sum(other.values()),
             "in_scope": sum(total.values()),
