@@ -7,6 +7,7 @@ reads. Answers are plain JSON-serialisable dicts. Bad input comes back as
 exit 4.
 """
 
+import bisect
 import hashlib
 import json
 import os
@@ -43,6 +44,10 @@ CONTEXT_MAX = 20
 PREVIEW = 200
 RAW_LIMIT = 64 * 1024  # longest raw line open will return
 LINE_CAP = 8 * 1024 * 1024  # ingest skips longer lines
+SESSIONS_MAX = 100
+SESSION_PAGE_MAX = 200
+FIRST_PROMPT = 120  # chars of a session's first prompt
+ROW_PREVIEW = 80  # chars per line of a session timeline
 
 _REF = re.compile(r"(\w+):(\S+):(\d+)(?:\.(\d+))?")
 _QUOTED = re.compile(r'"([^"]*)"')
@@ -273,6 +278,8 @@ def _hit(row: sqlite3.Row, snippet: str, repeats: int) -> dict:
 
 def _resolve_session(conn: sqlite3.Connection, given: str) -> str:
     """A session root from a root or an unambiguous prefix of one."""
+    if not given:
+        raise _BadArgument("unknown_session")
     found = conn.execute(
         "SELECT DISTINCT session_root FROM source WHERE session_root = ?"
         " OR substr(session_root, 1, ?) = ? LIMIT 3",
@@ -710,3 +717,199 @@ def _raw(row: sqlite3.Row, body: bytes | None, hash_ok: bool | None) -> dict:
         return {"raw": body.decode("utf-8")}
     except UnicodeDecodeError:
         return {"error": "raw_not_utf8"}
+
+
+_PRIMARY_EVENTS = (
+    " FROM event e JOIN source s ON s.id = e.source_id"
+    " JOIN scope sc ON sc.id = e.scope_id"
+    " WHERE s.thread_class = 'primary' AND "
+)
+
+
+def _session_row(conn, row: sqlite3.Row, inside: str, more: list) -> dict:
+    """One sessions() entry: counts, threads and forks, first prompt."""
+    where = f"s.provider = ? AND s.session_root = ? AND {inside}"
+    args = [row["provider"], row["session_root"], *more]
+    kinds = conn.execute(
+        "SELECT e.kind, count(*) AS n"
+        + _PRIMARY_EVENTS
+        + where
+        + " GROUP BY e.kind ORDER BY e.kind",
+        args,
+    )
+    first = conn.execute(
+        "SELECT substr(e.text, 1, 1000) AS text"
+        + _PRIMARY_EVENTS
+        + where
+        + " AND e.kind = 'prompt' ORDER BY COALESCE(e.ts, ''), s.thread_id,"
+        " e.line, e.part LIMIT 1",
+        args,
+    ).fetchone()
+    threads = conn.execute(
+        "SELECT count(*) AS n, count(forked_from_id) AS forks,"
+        " sum(status = 'active') AS live FROM source"
+        " WHERE provider = ? AND session_root = ?",
+        args[:2],
+    ).fetchone()
+    return {
+        "session": row["session_root"],
+        "provider": row["provider"],
+        "first_ts": row["first_ts"],
+        "last_ts": row["last_ts"],
+        "events": row["events"],
+        "kinds": {k["kind"]: k["n"] for k in kinds},
+        "threads": threads["n"],
+        "forks": threads["forks"],
+        "preview": (
+            " ".join(first["text"].split())[:FIRST_PROMPT] if first else None
+        ),
+        "status": "active" if threads["live"] else "missing",
+        "scope": row["label"],
+    }
+
+
+def sessions(
+    conn: sqlite3.Connection,
+    *,
+    cwd: str,
+    all_projects: bool = False,
+    since: str | None = None,
+    limit: int = 20,
+    status: Mapping | None = None,
+) -> dict:
+    """Sessions in scope, newest first (design 4.6).
+
+    Counts, first/last ts and the first prompt cover the session's primary
+    threads; `threads` and `forks` count every thread pctx has classified.
+    since keeps sessions whose last event is at or after it.
+    """
+    limit = min(max(limit, 1), SESSIONS_MAX)
+    try:
+        after, after_params = _times(since, None)
+    except _BadArgument as bad:
+        return _error(str(bad))
+    ids = scope_ids_for_read(conn, cwd)
+    inside, more = _scope_clause(ids, None, all_projects)
+    having = "HAVING max(e.ts) >= ?" if after else ""
+    rows = conn.execute(
+        "SELECT s.provider, s.session_root, min(e.ts) AS first_ts,"
+        " max(e.ts) AS last_ts, count(*) AS events, min(sc.label) AS label"
+        + _PRIMARY_EVENTS
+        + inside
+        + f" GROUP BY s.provider, s.session_root {having}"
+        " ORDER BY max(e.ts) DESC, s.session_root LIMIT ?",
+        [*more, *after_params, limit + 1],
+    ).fetchall()
+    return {
+        "notice": NOTICE,
+        "scope": _scope_label(conn, ids, None, all_projects),
+        "sessions": [
+            _session_row(conn, r, inside, more) for r in rows[:limit]
+        ],
+        "has_more": len(rows) > limit,
+        **_freshness(status),
+    }
+
+
+def session(
+    conn: sqlite3.Connection,
+    root: str,
+    *,
+    from_id: int | None = None,
+    limit: int = 50,
+    status: Mapping | None = None,
+) -> dict:
+    """Every event of every thread of one session, one line each.
+
+    Ordered by ts, then thread, line and part (design 4.6). root may be an
+    unambiguous prefix. Page on with from_id=next_from.
+    """
+    limit = min(max(limit, 1), SESSION_PAGE_MAX)
+    try:
+        root = _resolve_session(conn, root)
+    except _BadArgument as bad:
+        return _error(str(bad))
+    order = "COALESCE(e.ts, ''), s.thread_id, e.line, e.part"
+    where, args = "s.session_root = ?", [root]
+    if from_id is not None:
+        start = conn.execute(
+            f"SELECT {order} FROM event e JOIN source s ON s.id = e.source_id"
+            " WHERE e.id = ? AND s.session_root = ?",
+            (from_id, root),
+        ).fetchone()
+        if start is None:
+            return _error("bad_from")
+        where += f" AND ({order}) >= (?, ?, ?, ?)"
+        args += list(start)
+    rows = conn.execute(
+        "SELECT e.id, e.line, e.part, e.ts, e.role, e.kind, e.tag, e.flags,"
+        " substr(e.text, 1, 500) AS text, s.provider, s.thread_id,"
+        " s.thread_class FROM event e JOIN source s ON s.id = e.source_id"
+        f" WHERE {where} ORDER BY {order} LIMIT ?",
+        [*args, limit + 1],
+    ).fetchall()
+    events = []
+    for row in rows[:limit]:
+        event = {
+            "id": row["id"],
+            "ref": _ref(row),
+            "ts": row["ts"],
+            "role": row["role"],
+            "kind": row["kind"],
+            "tag": row["tag"],
+            "preview": _preview(row["text"])[:ROW_PREVIEW],
+        }
+        if row["thread_class"] != "primary":
+            event["class"] = row["thread_class"]
+        if row["flags"] & 1:
+            event["flagged"] = True
+        events.append(event)
+    total = conn.execute(
+        "SELECT count(*) FROM event e JOIN source s ON s.id = e.source_id"
+        " WHERE s.session_root = ?",
+        (root,),
+    ).fetchone()[0]
+    return {
+        "notice": NOTICE,
+        "session": root,
+        "provider": conn.execute(
+            "SELECT provider FROM source WHERE session_root = ? LIMIT 1",
+            (root,),
+        ).fetchone()[0],
+        "total": total,
+        "events": events,
+        "next_from": rows[limit]["id"] if len(rows) > limit else None,
+        **_freshness(status),
+    }
+
+
+def quote_check(conn: sqlite3.Connection, ref: str, quote: str) -> dict:
+    """{"match": bool, "span": [start, end] | None} for a quote in an event.
+
+    A whitespace-collapsed, case-sensitive substring test; the span is in
+    characters of the stored text, whitespace inside it included. An
+    unknown ref adds error.
+    """
+    row, problem = _locate(conn, ref)
+    if row is None:
+        return {"match": False, "span": None, "error": problem}
+    text, wanted = row["text"], " ".join(quote.split())
+    words = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+    starts, at = [], 0  # where each word begins in the collapsed text
+    for start, end in words:
+        starts.append(at)
+        at += end - start + 1
+    found = (
+        " ".join(text[a:b] for a, b in words).find(wanted) if wanted else -1
+    )
+    if found < 0:
+        return {"match": False, "span": None}
+
+    def original(index: int) -> int:
+        word = bisect.bisect_right(starts, index) - 1
+        return words[word][0] + index - starts[word]
+
+    return {
+        "match": True,
+        "span": [original(found), original(found + len(wanted) - 1) + 1],
+    }
