@@ -80,9 +80,7 @@
         "--permission-mode",
         "dontAsk",
         "--permission-prompts",
-        "none",
-        "--system-prompt",
-        "You are Claude Code, Anthropic's official CLI for Claude."
+        "none"
       ],
       "settings": {
         "disableAllHooks": true,
@@ -132,7 +130,7 @@
     "--permission-mode dontAsk / --permission-prompts none": "anything not pre-allowed is denied; only trial_tool is allowed",
     "env": "allowlist only: no parent CLAUDE_*/CODEX_*/ANTHROPIC_* variables, so no reader can address a session",
     "alwaysLoad": "trial_tool is loaded upfront, not deferred behind ToolSearch",
-    "--system-prompt": "probe P04 experiment: does a replaced system prompt drop the userEmail session_context?",
+    "--system-prompt": "not used: probe P04 showed a replaced system prompt still carries the session_context userEmail attachment, so the default prompt is kept",
     "enabledPlugins": "the built-in cc-plugin-agents-md plugin loads even under --restricted"
   }
 }
