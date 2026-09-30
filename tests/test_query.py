@@ -5,9 +5,11 @@ through connect_ro; every path is a temp dir. No transcript text anywhere.
 """
 
 import hashlib
+import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -326,25 +328,26 @@ class SearchCoreTests(QueryCase):
         )
 
     def test_only_primary_unflagged_default_kinds_returned(self):
-        p, sub = self.add_source("p"), self.add_source("s", cls="subagent")
-        rev = self.add_source("r", cls="reviewer")
-        oth = self.add_source("o", cls="other")
+        def ev(name, text, cls="primary", **kw):
+            src = self.add_source(name, cls=cls)
+            return self.add_event(src, self.repo, text, **kw)
+
         want = {
-            self.add_event(p, self.repo, "sentinel prompt"),
-            self.add_event(p, self.repo, "sentinel reply", kind="reply"),
-            self.add_event(p, self.repo, "sentinel call", kind="tool_call"),
+            ev("p1", "sentinel prompt"),
+            ev("p2", "sentinel reply", kind="reply"),
+            ev("p3", "sentinel call", kind="tool_call"),
         }
-        harness = self.add_event(p, self.repo, "sentinel h", kind="harness")
-        self.add_event(p, self.repo, "sentinel x", kind="tool_error")
-        self.add_event(p, self.repo, "sentinel flagged", flags=1)
-        self.add_event(sub, self.repo, "sentinel sub", kind="delegation")
-        self.add_event(sub, self.repo, "sentinel sub2", kind="reply")
-        self.add_event(rev, self.repo, "sentinel reviewer")
-        self.add_event(oth, self.repo, "sentinel other")
+        harness = ev("p4", "sentinel h", kind="harness")
+        ev("p5", "sentinel x", kind="tool_error")
+        ev("p6", "sentinel flagged", flags=1)
+        ev("s1", "sentinel sub", cls="subagent", kind="delegation")
+        ev("s2", "sentinel sub2", cls="subagent", kind="reply")
+        ev("r1", "sentinel reviewer", cls="reviewer")
+        ev("o1", "sentinel other", cls="other")
         self.noise(self.repo)
         self.assertEqual(set(self.ids(self.search("sentinel"))), want)
         only = self.search("sentinel", kinds={"harness"})
-        self.assertEqual(self.ids(only), [harness])  # explicit, still p only
+        self.assertEqual(self.ids(only), [harness])  # explicit, still primary
 
     def test_scope_spans_worktrees(self):
         repo = self.tmp / "wtrepo"
@@ -483,58 +486,45 @@ class SearchFilterTests(QueryCase):
                 got = self.search("zebra", **kw)
                 self.assertEqual(got, {"error": code, "notice": NOTICE})
 
+    def ev(self, name, text, cls="primary", **kw):
+        src = self.add_source(name, cls=cls)
+        return self.add_event(src, self.repo, text, **kw)
+
     def test_include_subagents_and_delegation_kind(self):
-        p = self.add_source("p", session="root")
-        sub = self.add_source("sub", session="root", cls="subagent")
-        add = lambda src, text, **kw: self.add_event(  # noqa: E731
-            src, self.repo, text, **kw
-        )
-        prompt = add(p, "marker prompt")
-        deleg = add(sub, "marker do it", kind="delegation")
-        sreply = add(sub, "marker done", kind="reply", role="assistant")
-        scall = add(sub, "marker call", kind="tool_call", role="assistant")
+        prompt = self.ev("p", "marker prompt")
+        deleg = self.ev("s1", "marker do it", "subagent", kind="delegation")
+        sreply = self.ev("s2", "marker done", "subagent", kind="reply")
+        scall = self.ev("s3", "marker call", "subagent", kind="tool_call")
         self.noise(self.repo)
         self.assertEqual(self.ids(self.search("marker")), {prompt})
         wide = self.search("marker", include_subagents=True)
         self.assertEqual(self.ids(wide), {prompt, deleg, sreply, scall})
-        classes = {h["id"]: h.get("class") for h in wide["hits"]}
-        self.assertEqual(classes[deleg], "subagent")
-        self.assertNotIn(
-            "class", [h for h in wide["hits"] if h["id"] == prompt][0]
-        )
-        kinds = {h["id"]: h["kind"] for h in wide["hits"]}
-        self.assertEqual(kinds[deleg], "delegation")
+        by_id = {h["id"]: h for h in wide["hits"]}
+        self.assertEqual(by_id[deleg]["class"], "subagent")
+        self.assertEqual(by_id[deleg]["kind"], "delegation")
+        self.assertNotIn("class", by_id[prompt])
         # delegation is a subagent kind: naming it does not opt in
-        self.assertEqual(
-            self.search("marker", kinds={"delegation"})["hits"], []
-        )
+        got = self.search("marker", kinds={"delegation"})
+        self.assertEqual(got["hits"], [])
 
     def test_include_subagents_adds_agent_message_reports(self):
-        p = self.add_source("p", session="root")
-        add = lambda text, **kw: self.add_event(  # noqa: E731
-            p, self.repo, text, **kw
+        prompt = self.ev("p", "marker prompt")
+        report = self.ev(
+            "h1", "marker child report", kind="harness", tag="agent_message"
         )
-        prompt = add("marker prompt")
-        report = add(
-            "marker child report", kind="harness", tag="agent_message"
+        env = self.ev(
+            "h2", "marker env", kind="harness", tag="environment_context"
         )
-        env = add(
-            "marker environment", kind="harness", tag="environment_context"
-        )
-        bare = add("marker untagged", kind="harness")
+        bare = self.ev("h3", "marker untagged", kind="harness")
         self.noise(self.repo)
         self.assertEqual(self.ids(self.search("marker")), {prompt})
         wide = self.search("marker", include_subagents=True)
         self.assertEqual(self.ids(wide), {prompt, report})  # not env/bare
         by_id = {h["id"]: h for h in wide["hits"]}
         self.assertEqual(by_id[report]["tag"], "agent_message")
-        self.assertNotIn(
-            "class", by_id[report]
-        )  # it lives in a primary thread
+        self.assertNotIn("class", by_id[report])  # a primary thread's event
         harness = self.search("marker", kinds={"harness"})
-        self.assertEqual(
-            self.ids(harness), {env, bare}
-        )  # reports need the opt-in
+        self.assertEqual(self.ids(harness), {env, bare})  # reports: opt in
         both = self.search("marker", kinds={"harness"}, include_subagents=True)
         self.assertEqual(self.ids(both), {env, bare, report})
 
@@ -565,3 +555,258 @@ class SearchFilterTests(QueryCase):
         self.assertEqual(self.ids(got), {at})
         got = self.search("zebra", cwd="/elsewhere", scope="/repo/sub")
         self.assertEqual(self.ids(got), {sub})
+
+
+class SearchComposeTests(QueryCase):
+    def setUp(self):
+        super().setUp()
+        self.repo = self.add_scope("/repo")
+
+    def one(self, name, text, scope_id=None, **kw):
+        src = self.add_source(name)
+        return self.add_event(src, scope_id or self.repo, text, **kw)
+
+    def ids(self, result):
+        return [h["id"] for h in result["hits"]]
+
+    def test_per_session_cap_2_and_tool_cap_4(self):
+        crowd = self.add_source("crowd")
+        for i in range(5):
+            self.add_event(crowd, self.repo, f"zebra note {i}")
+        for i in range(8):
+            self.one(f"tc{i}", f"zebra command {i}", kind="tool_call")
+        for i in range(3):
+            self.one(f"p{i}", f"zebra prompt {i}")
+        self.noise(self.repo)
+        hits = self.search("zebra", limit=12)["hits"]
+        crowded = [h for h in hits if h["session"] == "crowd"]
+        self.assertEqual(len(crowded), 2)
+        self.assertEqual(sum(h["kind"] == "tool_call" for h in hits), 4)
+        self.assertEqual(len(hits), 2 + 4 + 3)
+        every = self.search("zebra", kinds={"tool_call"}, limit=12)["hits"]
+        self.assertEqual(len(every), 8)  # explicit kinds lift the tool cap
+        self.assertEqual(
+            self.search("zebra", kinds={"prompt"})["hits"][0]["kind"], "prompt"
+        )
+
+    def test_identical_text_collapsed_with_repeats(self):
+        rep = self.add_source("rep")
+        for _ in range(3):
+            self.add_event(rep, self.repo, "continue with zebra please")
+        self.add_event(rep, self.repo, "zebra another text")
+        self.one("o", "continue with zebra please")  # other session: apart
+        self.noise(self.repo)
+        hits = self.search("zebra")["hits"]
+        same = [h for h in hits if "continue" in h["snippet"]]
+        self.assertEqual(
+            sorted((h["session"], h["repeats"]) for h in same),
+            [("o", 0), ("rep", 2)],
+        )
+
+    def test_more_in_session_and_session_drilldown(self):
+        big = self.add_source("big", session="bigroot")
+        for i in range(5):
+            self.add_event(big, self.repo, f"zebra entry {i}")
+        self.one("small", "zebra lone entry")
+        self.noise(self.repo)
+        got = self.search("zebra")
+        capped = [h for h in got["hits"] if h["session"] == "bigroot"]
+        self.assertEqual([h["more_in_session"] for h in capped], [3, 3])
+        lone = [h for h in got["hits"] if h["session"] == "small"]
+        self.assertNotIn("more_in_session", lone[0])
+        drill = self.search("zebra", session="bigroot")
+        self.assertEqual(len(drill["hits"]), 5)  # all matches, no cap
+        self.assertEqual({h["session"] for h in drill["hits"]}, {"bigroot"})
+        self.assertNotIn("more_in_session", drill["hits"][0])
+        self.assertEqual(
+            self.search("zebra", session="bigr")["hits"], drill["hits"]
+        )
+        self.assertEqual(
+            self.search("zebra", session="nope"),
+            {"error": "unknown_session", "notice": NOTICE},
+        )
+
+    def test_more_in_session_excludes_collapsed_repeats(self):
+        s = self.add_source("dup", session="duproot")
+        for text in ("zebra a", "zebra a", "zebra b", "zebra c", "zebra d"):
+            self.add_event(s, self.repo, text)
+        self.noise(self.repo)
+        hits = self.search("zebra")["hits"]
+        self.assertEqual([h["repeats"] for h in hits], [1, 0])
+        self.assertEqual([h["more_in_session"] for h in hits], [2, 2])
+
+    def test_search_pages_are_disjoint(self):
+        for i in range(25):
+            self.one(f"s{i}", f"zebra {'pad ' * i}end")
+        self.noise(self.repo)
+        pages = [self.search("zebra", limit=10, page=n) for n in (1, 2, 3, 4)]
+        self.assertEqual([len(p["hits"]) for p in pages], [10, 10, 5, 0])
+        self.assertEqual(
+            [p["has_more"] for p in pages], [True, True, False, False]
+        )
+        seen = [i for p in pages for i in self.ids(p)]
+        self.assertEqual(len(seen), 25)
+        self.assertEqual(len(set(seen)), 25)
+        self.assertNotIn("note", pages[3])  # past the end is not "no matches"
+
+    def test_recent_resorts_top_50_by_ts(self):
+        for i in range(60):  # a longer text ranks lower, and is newer
+            self.one(
+                f"r{i}", f"zebra {'pad ' * i}", ts=f"2026-09-01T00:{i:02d}:00Z"
+            )
+        self.noise(self.repo)
+        ranked = self.search("zebra", limit=30)["hits"]
+        self.assertEqual(ranked[0]["ts"], "2026-09-01T00:00:00Z")
+        got = self.search("zebra", recent=True, limit=30)["hits"]
+        stamps = [h["ts"] for h in got]
+        self.assertEqual(stamps, sorted(stamps, reverse=True))
+        self.assertEqual(stamps[0], "2026-09-01T00:49:00Z")  # not :59
+
+    def test_output_bounded_6kb(self):
+        for i in range(40):
+            text = f"zebra {'wordy filler text ' * 30}{i}"
+            self.one(f"b{i}", text, cwd="/repo/some/deeply/nested/dir")
+        self.noise(self.repo)
+        default = self.search("zebra")
+        self.assertLessEqual(len(json.dumps(default)), 6144)
+        big = self.search("zebra", limit=30)
+        self.assertLessEqual(len(json.dumps(big)), 6144)
+        self.assertLess(len(big["hits"]), 30)
+        self.assertEqual(big["omitted"], 30 - len(big["hits"]))
+        self.assertTrue(big["has_more"])
+
+
+class SearchAroundTests(QueryCase):
+    """Knowledge, other-scope counts, the zero-hit note, freshness."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.add_scope("/repo")
+        self.beta = self.add_scope("/proj/beta")
+
+    def know(self, text, scope_id=None, status="current", **kw):
+        row = {"kind": "decision", "actor": "claude:abc", "at": 1790000000.0}
+        row |= kw
+        return self.rw.execute(
+            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
+            " created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                scope_id or self.repo,
+                row["kind"],
+                text,
+                status,
+                row["actor"],
+                row["at"],
+            ),
+        ).lastrowid
+
+    def test_knowledge_hits_first(self):
+        wide = scope.global_scope_id(self.rw)
+        k1 = self.know("use zebra caching for lookups")
+        self.rw.execute(
+            "INSERT INTO citation(knowledge_id, provider, thread_id, line,"
+            " part, line_sha256, role, kind) VALUES (?, 'codex', 'thr', 12,"
+            " 1, 'h', 'user', 'prompt')",
+            (k1,),
+        )
+        k2 = self.know("global zebra preference", scope_id=wide, kind="fact")
+        self.know("old zebra decision", status="superseded")
+        self.know("retracted zebra", status="retracted")
+        self.know("beta zebra decision", scope_id=self.beta)
+        self.know("unrelated apples")
+        self.add_event(self.add_source("a"), self.repo, "an event about zebra")
+        self.noise(self.repo)
+        got = self.search("zebra")
+        self.assertLess(list(got).index("knowledge"), list(got).index("hits"))
+        entries = {e["id"]: e for e in got["knowledge"]}
+        self.assertEqual(set(entries), {f"K{k1}", f"K{k2}"})
+        first = entries[f"K{k1}"]
+        self.assertEqual(first["kind"], "decision")
+        self.assertEqual(first["scope"], "repo")
+        self.assertEqual(first["actor"], "claude:abc")
+        self.assertEqual(first["date"], "2026-09-21")
+        self.assertEqual(first["text"], "use zebra caching for lookups")
+        self.assertEqual(first["cites"], ["codex:thr:12.1"])
+        self.assertEqual(entries[f"K{k2}"]["cites"], [])
+        self.assertEqual(len(got["hits"]), 1)  # episodic memory stays apart
+        self.assertEqual(self.search("zebra", page=2)["knowledge"], [])
+        every = self.search("zebra", all_projects=True)["knowledge"]
+        self.assertEqual(len(every), 3)  # top 3 of the 3 current ones
+
+    def test_knowledge_top_3_and_no_drilldown_section(self):
+        for i in range(5):
+            self.know(f"zebra decision {i}")
+        self.add_event(self.add_source("a"), self.repo, "zebra event")
+        self.noise(self.repo)
+        self.assertEqual(len(self.search("zebra")["knowledge"]), 3)
+        drill = self.search("zebra", session="a")
+        self.assertEqual(drill["knowledge"], [])
+
+    def test_other_scopes_counts_no_text(self):
+        self.add_event(self.add_source("a"), self.repo, "zebra home")
+        gamma = self.add_scope("/proj/gamma")
+        self.add_event(self.add_source("b1"), self.beta, "zebra BETASECRET1")
+        self.add_event(self.add_source("b2"), self.beta, "zebra BETASECRET2")
+        self.add_event(self.add_source("g"), gamma, "zebra GAMMASECRET")
+        sub = self.add_source("sub", cls="subagent")
+        self.add_event(sub, self.beta, "zebra SUBAGENTSECRET", kind="reply")
+        self.noise(self.repo)
+        got = self.search("zebra")
+        self.assertEqual(got["other_scopes"], {"beta": 2, "gamma": 1})
+        dump = json.dumps(got)
+        for secret in ("BETASECRET", "GAMMASECRET", "SUBAGENTSECRET"):
+            self.assertNotIn(secret, dump)
+        wide = self.search("zebra", all_projects=True)
+        self.assertEqual(wide["other_scopes"], {})
+
+    def test_zero_in_scope_reports_outside_matches(self):
+        self.add_event(self.add_source("b1"), self.beta, "zebra one")
+        self.add_event(self.add_source("b2"), self.beta, "zebra two")
+        self.noise(self.repo)
+        got = self.search("zebra", cwd="/repo")
+        self.assertEqual(got["hits"], [])
+        self.assertEqual(got["other_scopes"], {"beta": 2})
+        self.assertIn("0 matches in this scope", got["note"])
+        self.assertIn("2 matches outside this scope", got["note"])
+        self.assertIn("--all-projects", got["note"])
+        nothing = self.search("qqqq")
+        self.assertEqual(nothing["hits"], [])
+        self.assertNotIn("--all-projects", nothing.get("note", ""))
+
+    def test_freshness_fields_only_with_status(self):
+        self.add_event(self.add_source("a"), self.repo, "zebra")
+        self.noise(self.repo)
+        bare = self.search("zebra")
+        self.assertNotIn("poller", bare)
+        self.assertNotIn("index_age_s", bare)
+        now = time.time()
+        fresh = self.search("zebra", status={"last_pass_at": now - 30})
+        self.assertEqual(fresh["poller"], "ok")
+        self.assertTrue(25 <= fresh["index_age_s"] <= 40)
+        lagging = {"last_pass_at": now - 130, "interval_s": 60}
+        self.assertEqual(self.search("zebra", status=lagging)["poller"], "ok")
+        stale = {"last_pass_at": now - 500, "interval_s": 60}
+        got = self.search("zebra", status=stale)
+        self.assertEqual(got["poller"], "stale")
+        self.assertGreaterEqual(got["index_age_s"], 499)
+        got = self.search("zebra", status={})  # no heartbeat at all
+        self.assertEqual((got["index_age_s"], got["poller"]), (None, "stale"))
+
+    def test_stage_counts(self):
+        crowd = self.add_source("crowd")
+        for i in range(4):
+            self.add_event(crowd, self.repo, f"zebra {i}")
+        self.add_event(self.add_source("b"), self.beta, "zebra beta")
+        self.noise(self.repo)
+        stages = self.search("zebra")["stages"]
+        self.assertEqual(
+            stages,
+            {
+                "matches": 5,  # eligible, every scope
+                "in_scope": 4,
+                "candidates": 4,
+                "session_capped": 2,
+                "tool_capped": 0,
+                "returned": 2,
+            },
+        )
