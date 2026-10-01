@@ -31,7 +31,7 @@ from install import configedit as ce
 LABEL = "com.provenance-context"
 # The legacy daemon tree to retire; PCTX_OLD_TREE names it. Unset, it is a
 # path that never exists, so fresh installs and upgrades never match it.
-OLD_TREE = Path(os.environ.get("PCTX_OLD_TREE") or "/nonexistent/pctx-old-tree")
+OLD_TREE = Path(os.environ.get("PCTX_OLD_TREE") or "/nonexistent/old-tree")
 MKT_NAME = "provenance-context-local"
 PLUGIN_ID = f"provenance-context@{MKT_NAME}"
 MARKETPLACE = f"[marketplaces.{MKT_NAME}]"
@@ -954,7 +954,8 @@ def cutover(ctx, repo, sha, expect_tree=None):
         rec["record_removed"] = True
     install_record(ctx, rec, "ok")
     done = "planned" if ctx.dry_run else "done"
-    ctx.say(f"cutover {done}; record in {ctx.legacy}")
+    where = "install-record.json" if rec.get("record_removed") else ctx.legacy
+    ctx.say(f"cutover {done}; record in {where}")
     return rec
 
 
@@ -1044,7 +1045,7 @@ def main(argv=None):
         upgrade=args.upgrade,
     )
     try:
-        cutover(ctx, args.repo, args.sha, args.expect_old_tree_hash)
+        cutover(ctx, args.repo.resolve(), args.sha, args.expect_old_tree_hash)
     except (StepFailed, ce.Refused, ce.Raced) as exc:
         say(f"FAILED: {exc}")
         return 1
