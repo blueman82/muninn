@@ -170,6 +170,101 @@ class QueryCase(unittest.TestCase):
         return done.stdout.strip()
 
 
+class AnswerEvidenceTests(QueryCase):
+    def setUp(self):
+        super().setUp()
+        self.repo = self.add_scope()
+        self.expected = {}
+        self.flagged = {}
+        for cls in ("primary", "subagent", "reviewer", "other"):
+            source = self.add_source(cls, session="evidence", cls=cls)
+            for kind, flags, eligible in (
+                ("prompt", 1, False),
+                ("harness", 1, False),
+                ("harness", 0, False),
+                ("tool_error", 0, False),
+                ("tool_call", 0, False),
+                ("delegation", 0, False),
+                ("prompt", 0, True),
+                ("reply", 0, True),
+            ):
+                eid = self.add_event(
+                    source,
+                    self.repo,
+                    f"evidence {cls} {kind} {flags}",
+                    kind=kind,
+                    flags=flags,
+                )
+                self.expected[eid] = eligible if cls == "primary" else False
+                self.flagged[eid] = bool(flags)
+
+    def test_open_and_neighbours_mark_answer_evidence(self):
+        for eid, eligible in self.expected.items():
+            with self.subTest(eid=eid):
+                opened = query.open_event(self.ro(), eid, roots={}, context=20)
+                self.assertIs(opened.get("answer_citable"), eligible)
+                self.assertIn("navigation", opened["preview_notice"])
+                for neighbour in opened["neighbours"]:
+                    self.assertIs(
+                        neighbour.get("answer_citable"),
+                        self.expected[neighbour["id"]],
+                    )
+                    self.assertIs(
+                        neighbour.get("flagged"), self.flagged[neighbour["id"]]
+                    )
+
+    def test_timeline_marks_all_rows_and_preserves_navigation(self):
+        out = query.session(self.ro(), "evidence")
+        self.assertEqual({r["id"] for r in out["events"]}, set(self.expected))
+        for row in out["events"]:
+            with self.subTest(eid=row["id"]):
+                self.assertIs(
+                    row.get("answer_citable"), self.expected[row["id"]]
+                )
+                opened = query.open_event(self.ro(), row["ref"], roots={})
+                self.assertEqual(opened["id"], row["id"])
+        self.assertIn("navigation", out["preview_notice"])
+
+    def test_search_marks_explicit_nondefault_hits(self):
+        out = self.search(
+            "evidence",
+            kinds=set(query.ALL_KINDS),
+            include_subagents=True,
+            session="evidence",
+            limit=30,
+        )
+        self.assertEqual(len(out["hits"]), 12)
+        for hit in out["hits"]:
+            with self.subTest(eid=hit["id"]):
+                self.assertIs(
+                    hit.get("answer_citable"), self.expected[hit["id"]]
+                )
+        self.assertIn("navigation", out["preview_notice"])
+
+    def test_session_preview_retains_first_prompt_flags(self):
+        normal = self.add_source("normal")
+        self.add_event(normal, self.repo, "Normal first prompt")
+        empty = self.add_source("no-prompt")
+        self.add_event(empty, self.repo, "Only a call", kind="tool_call")
+        out = query.sessions(self.ro(), cwd="/repo")
+        rows = {r["session"]: r for r in out["sessions"]}
+        for root, flagged, eligible in (
+            ("evidence", True, False),
+            ("normal", False, True),
+            ("no-prompt", False, False),
+        ):
+            with self.subTest(root=root):
+                self.assertIs(rows[root].get("preview_flagged"), flagged)
+                self.assertIs(
+                    rows[root].get("preview_answer_citable"), eligible
+                )
+        self.assertEqual(
+            rows["evidence"]["preview"], "evidence primary prompt 1"
+        )
+        self.assertIsNone(rows["no-prompt"]["preview"])
+        self.assertIn("navigation", out["preview_notice"])
+
+
 class RefTests(unittest.TestCase):
     def test_parse_ref_forms(self):
         self.assertEqual(
@@ -383,6 +478,7 @@ class SearchCoreTests(QueryCase):
                 "cwd": "/repo/sub",
                 "source_status": "active",
                 "snippet": "the «zebra» crossed",
+                "answer_citable": False,
                 "repeats": 0,
             },
         )
@@ -1112,7 +1208,18 @@ class OpenTests(OpenCase):
         self.assertEqual(labelled[ids[4]], ("harness", "environment_context"))
         first = got["neighbours"][0]
         self.assertEqual(
-            set(first), {"id", "rel", "ts", "role", "kind", "tag", "preview"}
+            set(first),
+            {
+                "id",
+                "rel",
+                "ts",
+                "role",
+                "kind",
+                "tag",
+                "preview",
+                "flagged",
+                "answer_citable",
+            },
         )
         self.assertEqual(self.open(ids[6], context=0)["neighbours"], [])
         one = self.open(str(ids[6]), context=1)["neighbours"]
@@ -1435,6 +1542,8 @@ class SessionsTests(QueryCase):
                 "threads": 4,  # main, fork, subagent, reviewer
                 "forks": 1,
                 "preview": "First prompt of A",
+                "preview_flagged": False,
+                "preview_answer_citable": True,
                 "status": "active",
                 "scope": "repo",
             },
@@ -1493,6 +1602,7 @@ class SessionsTests(QueryCase):
                 "kind": "prompt",
                 "tag": None,
                 "preview": "First prompt of A",
+                "answer_citable": True,
             },
         )
         self.assertIsNone(every["next_from"])
