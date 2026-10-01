@@ -114,6 +114,7 @@ class Fake:
         self.loaded, self.pid = "old", 64653
         self.heartbeat, self.doctor, self.cutover_doctor = True, 0, 0
         self.toml_writes, self.probe_mode, self.linger = [], "ok", False
+        self.version = b"codex-cli 0.159.2\n"
 
     def now(self):
         return self.clock[0]
@@ -182,7 +183,7 @@ class Fake:
 
     def _codex(self, args, env, input):
         if args == ["--version"]:
-            return done(b"codex-cli 0.159.2\n")
+            return done(self.version)
         assert args[:2] == ["plugin", "add"], args
         assert env["CODEX_HOME"] == str(self.home / ".codex")
         config = self.home / ".codex/config.toml"
@@ -410,6 +411,16 @@ class RehearsalTest(unittest.TestCase):
         self.assertEqual(rec["trust"], "auto")
         rb.rollback(w.ctx(), co.load_record(record))
         self.assert_restored()
+
+    def test_trust_auto_only_for_verified_codex_versions(self):
+        # 0.159.3: live hooks/list currentHash == codex_hooks() (2026-10-01)
+        for version, trust in (("0.159.3", "auto"), ("0.160.0", "owner")):
+            with self.subTest(version=version):
+                w = self.w = World(self)
+                w.fake.version = f"codex-cli {version}\n".encode()
+                self.assertEqual(
+                    co.cutover(w.ctx(), w.repo, w.sha)["trust"], trust
+                )
 
     def test_second_rollback_is_a_no_op(self):
         w = self.w

@@ -44,7 +44,8 @@ CODEX_KEYS = {
 }
 MARKERS = (MKT_NAME, "provenance-context@")
 CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit")
-CODEX_VERIFIED = "codex-cli 0.159.2"  # trust-hash algorithm checked here
+# trust-hash port checked: 0.159.2 source+binary, 0.159.3 live currentHash
+CODEX_VERIFIED = ("codex-cli 0.159.2", "codex-cli 0.159.3")
 PLIST = "Library/LaunchAgents/com.provenance-context.plist"
 HEARTBEAT_S = 120
 PINNED = (
@@ -464,7 +465,7 @@ def record(ctx, rec):
         return
     rec["launchd"] = job(ctx)
     version = ctx.run(["codex", "--version"]).stdout.decode().strip()
-    rec["trust"] = "auto" if version == CODEX_VERIFIED else "owner"
+    rec["trust"] = "auto" if version in CODEX_VERIFIED else "owner"
     ctx.legacy.mkdir(mode=0o700)
     if plist is not None:
         ce.atomic_write(
