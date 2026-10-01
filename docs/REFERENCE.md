@@ -117,6 +117,25 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `other_threads` | info | always | count of unrecognised thread types |
 | `roots_present` | info | always | names of provider roots that do not exist |
 
+## Per-prompt recall switch (`recall.off`)
+
+**Function.** Before each prompt, the UserPromptSubmit hook (`pctx hook prompt`) can add a short block of up to 1,500
+characters: matching knowledge entries first, then up to 3 earlier prompts or replies from this repo. If a file named
+`recall.off` exists in the data directory, that hook prints `{}` and never opens the database, so no recall is added.
+SessionStart (`pctx hook session-start`) is not affected; `PCTX_HOOK_DISABLE=1` silences both hooks.
+
+**Default for new installs: ON.** The file does not exist after `--fresh` or `--upgrade`; neither creates it. Recall stays on
+until someone creates the file.
+
+| To | Run |
+|---|---|
+| turn recall off | `install -m 600 /dev/null ~/.local/share/provenance-context/recall.off` |
+| turn recall on | `unlink ~/.local/share/provenance-context/recall.off` |
+| check | `ls ~/.local/share/provenance-context/recall.off` (present = off) |
+
+The file must be mode 0600, otherwise `pctx doctor` fails `file_modes`. Its contents are ignored. An `--upgrade` leaves it
+as it is, so the setting survives upgrades. (On the owner's machine it is set to off.)
+
 ## Files in the data directory
 
 `pctx.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only);

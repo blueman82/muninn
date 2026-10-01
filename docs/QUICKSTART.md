@@ -36,6 +36,12 @@ release. Provider config is not touched. A failed upgrade returns to the old
 release; after a successful one the old release is gone (re-run `--upgrade`
 at an earlier commit to go back).
 
+## Per-prompt recall is on by default
+
+A new install adds recall to each prompt. To turn it off, run
+`install -m 600 /dev/null ~/.local/share/provenance-context/recall.off`; to turn it back on, `unlink` that file. Details in
+`docs/REFERENCE.md`.
+
 ## Check it works
 
     pctx doctor            # exit 0 = healthy

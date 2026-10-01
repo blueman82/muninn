@@ -84,6 +84,11 @@ response.
   It is skipped for prompts with fewer than 3 query terms and prompts
   starting with `/`.
 
+Per-prompt recall switch: if the file `recall.off` exists in the data directory,
+the UserPromptSubmit hook prints `{}` without opening the database; SessionStart
+is unaffected. The default is ON: a new install has no `recall.off` (the
+installer never creates it). See `docs/REFERENCE.md` for the commands.
+
 `<pctx-memory` and `<pctx-recall` are the only automatic-injection markers.
 Ingest flags any stored text that contains either (or the CLI notice
 sentence), so a pasted block never returns as a normal prompt; hook contexts
