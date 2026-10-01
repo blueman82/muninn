@@ -196,6 +196,15 @@ FREE_WARN_RATIO = 0.25
 FREE_WARN_BYTES = 64 * 1024**2
 
 
+def human_bytes(n: float) -> str:
+    """188.5 MB, 2.0 GB: 1024-based, units B KB MB GB TB."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if abs(n) < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
 def db_space(conn) -> dict:
     """page_count, freelist_count, page_size and the free-space ratio."""
     pages, free, size = (
@@ -433,7 +442,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> dict:
             check(
                 "db_size",
                 size < DB_WARN_BYTES,
-                f"{size} bytes; threshold {DB_WARN_BYTES}",
+                f"{human_bytes(size)}; threshold {human_bytes(DB_WARN_BYTES)}",
                 level="warn",
             )
             free = space["freelist_count"] * space["page_size"]
@@ -443,7 +452,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> dict:
                     space["free_ratio"] > FREE_WARN_RATIO
                     and free > FREE_WARN_BYTES
                 ),
-                f"{free} bytes free ({space['free_ratio']:.0%});"
+                f"{human_bytes(free)} free ({space['free_ratio']:.0%});"
                 " run: pctx compact",
                 level="warn",
             )
