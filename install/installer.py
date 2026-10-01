@@ -528,7 +528,7 @@ def pin(ctx, rec):
 
 
 def pctx_env(home, **extra):
-    """Environment for pctx: no inherited PCTX_* (e.g. trial PCTX_ROOTS)."""
+    """Environment for pctx: no inherited PCTX_* (e.g. a PCTX_ROOTS override)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("PCTX_")}
     return dict(env, PCTX_HOME=str(home), **extra)
 

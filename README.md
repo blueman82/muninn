@@ -142,5 +142,3 @@ config, ends with `pctx doctor`, and deletes every other release.
 
 - Tests use a temporary `PCTX_HOME` and synthetic provider fixtures; no
   transcript text is committed.
-- `trial_harness/` drives the frozen evaluation protocol; it is not part of
-  the runtime.

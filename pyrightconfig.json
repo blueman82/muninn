@@ -1,5 +1,5 @@
 {
-  "include": ["pctx", "trial_harness", "install", "tests"],
+  "include": ["pctx", "install", "tests"],
   "pythonVersion": "3.13",
   "typeCheckingMode": "basic"
 }

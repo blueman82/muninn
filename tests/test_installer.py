@@ -124,7 +124,7 @@ class Fake:
         return done(cmd.encode())
 
     def _pctx(self, args, env, input):
-        assert "PCTX_ROOTS" not in env, "inherited trial env reached pctx"
+        assert "PCTX_ROOTS" not in env, "inherited PCTX_ROOTS reached pctx"
         if args[0] == "hook":
             assert env.get("PCTX_HOOK_DISABLE") == "1" and input == b"{}"
             return done(b"{}")

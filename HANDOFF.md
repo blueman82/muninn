@@ -21,12 +21,12 @@
 
 ## Not done
 
-- The matched trial was inconclusive (see the memory file
+- The matched trial is over and its harness is deleted (it is in git
+  history). It was inconclusive (see the memory file
   `project_memsys_pctx_rebuild.md`); retrieval and answer-quality fixes are
   the next product work.
 - `--fresh` has only been rehearsed in a temp HOME, never on a second machine.
 - Item deferred by the owner: a hash-chained call log.
-- `trial_harness/` still holds machine-specific paths; it is not runtime.
 
 ## Tests
 

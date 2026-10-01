@@ -25,7 +25,6 @@ SESSION_MATCHER = "startup|resume|clear|compact"
 PYTHON = "/opt/homebrew/bin/python3.13"
 ENV_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 RETIRED = (
-    "provenance-context-build",
     "hooks/codex.py",
     "claude-code/",
     "scripts/",
@@ -309,7 +308,7 @@ class ConfigCleanupTest(unittest.TestCase):
     def test_pyright_targets_the_new_layout(self):
         config = load(PYRIGHT)
         self.assertEqual(
-            config["include"], ["pctx", "trial_harness", "install", "tests"]
+            config["include"], ["pctx", "install", "tests"]
         )
         self.assertNotIn("extraPaths", config)
 

@@ -13,7 +13,6 @@ Instructions for coding agents working in this repo. Any parent-directory
 - `install/`: `installer.py` (`--fresh`, `--upgrade`),
   `rollback.py`, `configedit.py`.
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
-- `trial_harness/`: the evaluation driver for this machine only; not runtime.
 - `docs/`: quick start, troubleshooting, architecture.
 
 ## Rules

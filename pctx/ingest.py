@@ -58,7 +58,7 @@ class PassStats:
 
 def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
     """Provider roots; PCTX_ROOTS (a JSON object, root name -> path)
-    replaces them, e.g. for tests and the trial mirror."""
+    replaces them, e.g. for tests."""
     home = Path(env.get("HOME") or Path.home())
     raw = env.get("PCTX_ROOTS")
     if not raw:
