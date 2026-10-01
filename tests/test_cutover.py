@@ -5,11 +5,15 @@ git and cp run for real, but only on temp dirs. Config files are
 synthetic and carry a fake credential that must never be recorded.
 """
 
+import contextlib
+import dataclasses
+import io
 import json
 import os
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -144,7 +148,13 @@ class Fake:
                 if self.loaded
                 else done(rc=113)
             )
-        if args[0] == "bootout":
+        if args[0] == "kickstart":
+            self.pid += 1
+            status = self.home / ".local/share/provenance-context/status.json"
+            if self.heartbeat:
+                status.write_text("{}")
+                os.utime(status, (self.now(), self.now()))
+        elif args[0] == "bootout":
             self.loaded = None
         elif args[0] == "bootstrap":
             prog = plistlib.loads(Path(args[2]).read_bytes())[
@@ -642,3 +652,173 @@ class CodexContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FreshInstallTest(unittest.TestCase):
+    """--fresh: a machine with no legacy daemon, data or Claude/Codex setup
+    beyond whatever plain config the colleague already has."""
+
+    def setUp(self):
+        self.w = w = World(self)
+        h = w.home
+        shutil.rmtree(h / ".local/share/provenance-context")
+        for gone in (co.PLIST, ".claude/plugins/known_marketplaces.json"):
+            (h / gone).unlink()
+        shutil.rmtree(h / ".codex/plugins")
+        (h / ".claude/settings.json").write_bytes(dump({"theme": "dark"}))
+        (h / ".codex/config.toml").write_text('model = "gpt"\n')
+        (h / ".codex/config.toml").chmod(0o600)
+        w.fake.loaded = None
+        self.ctx = lambda **kw: dataclasses.replace(
+            w.ctx(**kw), fresh=True, old_tree=w.old
+        )
+
+    def test_install_record_and_rollback_leave_nothing_behind(self):
+        w, h = self.w, self.w.home
+        before = {
+            r: (h / r).read_bytes()
+            for r in (".claude/settings.json", ".codex/config.toml")
+        }
+        rec = co.cutover(self.ctx(), w.repo, w.sha)
+        self.assertEqual(w.fake.loaded, "new")
+        self.assertIsNone(rec["old_tree_hash"])
+        lib = h / ".local/lib/provenance-context"
+        self.assertEqual(os.readlink(lib / "python"), sys.executable)
+        out = json.loads((lib / "install-record.json").read_text())
+        self.assertEqual(
+            (out["outcome"], out["fresh"], out["sha"], out["python"]["path"]),
+            ("ok", True, w.sha, sys.executable),
+        )
+        self.assertIn("hooks.SessionStart", out["config_keys"])
+        self.assertNotIn(CRED, json.dumps(out))
+        self.assertEqual((lib / "install-record.json").stat().st_mode & 0o777, 0o600)
+        self.assertNotEqual(
+            (h / ".claude/settings.json").read_bytes(),
+            before[".claude/settings.json"],
+        )
+        rb.rollback(w.ctx(), co.load_record(Path(rec["legacy"]) / "cutover-record.json"))
+        for rel, data in before.items():
+            self.assertEqual((h / rel).read_bytes(), data, rel)
+        self.assertFalse((h / ".local/share/provenance-context").exists())
+        self.assertFalse((h / co.PLIST).exists())
+        self.assertFalse(os.path.lexists(lib / "python"))
+        self.assertFalse(os.path.lexists(h / ".local/bin/pctx"))
+
+    def test_no_claude_or_codex_is_left_unconfigured(self):
+        w, h = self.w, self.w.home
+        (h / ".claude/settings.json").unlink()
+        (h / ".codex/config.toml").unlink()
+        rec = co.cutover(self.ctx(), w.repo, w.sha)
+        self.assertEqual((rec["has_claude"], rec["has_codex"]), (False, False))
+        self.assertFalse((h / ".claude/settings.json").exists())
+        self.assertTrue(any("left unconfigured" in x for x in w.out))
+        out = json.loads(
+            (h / ".local/lib/provenance-context/install-record.json").read_text()
+        )
+        self.assertEqual(out["config_keys"], [])
+
+    def test_refuses_when_already_installed(self):
+        w, h = self.w, self.w.home
+        (h / ".local/share/provenance-context").mkdir(parents=True)
+        with self.assertRaises(co.StepFailed):
+            co.cutover(self.ctx(), w.repo, w.sha)
+        self.assertFalse((h / ".local/lib/provenance-context").exists())
+
+    def test_failed_verify_rolls_back_and_records_it(self):
+        w, h = self.w, self.w.home
+        w.fake.heartbeat = False
+        with self.assertRaises(co.StepFailed):
+            co.cutover(self.ctx(), w.repo, w.sha)
+        out = json.loads(
+            (h / ".local/lib/provenance-context/install-record.json").read_text()
+        )
+        self.assertEqual(out["outcome"], "rolled_back")
+        self.assertEqual(out["failed"]["step"], "start_new")
+        self.assertFalse((h / ".local/share/provenance-context").exists())
+
+
+class InstallLogTest(unittest.TestCase):
+    def test_log_has_status_and_stderr_but_never_stdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "lib/install.log"
+
+            def run(argv, env=None, input=None):
+                return subprocess.CompletedProcess(
+                    argv, 3, b"TRANSCRIPT-TEXT", b"boom"
+                )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                say, logged = co.install_log(path, run)
+                say("hello")
+                logged(["launchctl", "bootstrap", "x"])
+            text = path.read_text()
+            self.assertIn("hello", text)
+            self.assertIn("run launchctl bootstrap -> 3", text)
+            self.assertIn("stderr: boom", text)
+            self.assertNotIn("TRANSCRIPT-TEXT", text)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+
+class UpgradeTest(unittest.TestCase):
+    """--upgrade: re-pin a newer commit and keep exactly one release."""
+
+    def setUp(self):
+        self.w = w = World(self)
+        self.first = co.cutover(w.ctx(), w.repo, w.sha)["sha"]
+        (w.repo / "bin/note").write_text("v2\n")
+        git(w.repo, "add", "-A")
+        git(w.repo, "commit", "-qm", "v2")
+        self.sha2 = git(w.repo, "rev-parse", "HEAD").decode().strip()
+        self.lib = w.home / ".local/lib/provenance-context"
+        self.ctx = dataclasses.replace(
+            w.ctx(), upgrade=True, ts="20261002T000000Z"
+        )
+
+    def releases(self):
+        return sorted(
+            p.name
+            for p in self.lib.iterdir()
+            if p.is_dir() and not p.is_symlink()
+        )
+
+    def test_one_release_remains_and_config_is_untouched(self):
+        w, h = self.w, self.w.home
+        self.assertEqual(self.releases(), [self.first])
+        configs = {
+            r: (h / r).read_bytes()
+            for r in (".claude/settings.json", ".codex/config.toml")
+        }
+        shares = sorted(p.name for p in (h / ".local/share").iterdir())
+        co.cutover(self.ctx, w.repo, self.sha2)
+        self.assertEqual(self.releases(), [self.sha2])
+        self.assertEqual(os.readlink(self.lib / "current"), self.sha2)
+        kick = ["launchctl", "kickstart", "-k", self.ctx.target]
+        self.assertIn(kick, w.fake.calls)
+        for rel, data in configs.items():
+            self.assertEqual((h / rel).read_bytes(), data, rel)
+        out = json.loads((self.lib / "install-record.json").read_text())
+        self.assertEqual(
+            (out["outcome"], out["upgrade"], out["sha"]),
+            ("ok", True, self.sha2),
+        )
+        self.assertEqual(
+            sorted(p.name for p in (h / ".local/share").iterdir()),
+            shares,  # no leftover record dir
+        )
+
+    def test_failed_upgrade_returns_to_the_old_release(self):
+        w = self.w
+        w.fake.heartbeat = False
+        w.fake.clock[0] += 1000  # the first install's heartbeat is stale
+        with self.assertRaises(co.StepFailed):
+            co.cutover(self.ctx, w.repo, self.sha2)
+        self.assertEqual(os.readlink(self.lib / "current"), self.first)
+        self.assertTrue((self.lib / self.first).is_dir())
+        out = json.loads((self.lib / "install-record.json").read_text())
+        self.assertEqual(out["outcome"], "rolled_back")
+
+    def test_refuses_when_nothing_is_installed(self):
+        w = self.w
+        (self.lib / "current").unlink()
+        with self.assertRaises(co.StepFailed):
+            co.cutover(self.ctx, w.repo, self.sha2)

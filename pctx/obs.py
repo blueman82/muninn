@@ -29,6 +29,14 @@ _NUMBERS = (
     "exit",
     "target_id",
     "n_context",
+    "pid",
+    "passes",
+    "busy_skips",
+    "interval_s",
+    "files_changed",
+    "events_added",
+    "failed",
+    "duration_s",
 )
 _FLAGS = ("hash_ok", "logged")
 _ID_LISTS = ("returned_ids", "knowledge_ids", "ids")
@@ -38,6 +46,8 @@ _CODES = {  # string fields: fixed shapes that cannot carry text
     "actor": re.compile(r"user|(?:claude|codex):[\w-]{1,12}"),
     "query_sha12": re.compile(r"[0-9a-f]{12}"),
     "error": re.compile(r"[a-z_]{1,40}"),
+    "event": re.compile(r"[a-z_]{1,20}"),
+    "exc": re.compile(r"[A-Za-z_]{1,60}"),  # an exception class name
 }
 _KEY = re.compile(r"[a-z_]{1,30}")
 
@@ -86,10 +96,16 @@ def log_call(
         while len(data) > LINE_BYTES and line.get(key):
             line[key] = line[key][: len(line[key]) // 2]
             data = encoded()
-    path = home / "calls.jsonl"
+    return _append(home, "calls.jsonl", data)
+
+
+def _append(home: Path, name: str, data: bytes) -> bool:
+    """Append to home/name, rotating to name.1 at ROTATE_BYTES (two files
+    at most); False when the append is denied."""
+    path = home / name
     try:
         if path.exists() and path.stat().st_size + len(data) > ROTATE_BYTES:
-            os.replace(path, home / "calls.jsonl.1")  # two files at most
+            os.replace(path, home / f"{name}.1")
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.write(fd, data)
@@ -98,6 +114,14 @@ def log_call(
     except OSError:  # e.g. the Codex sandbox denies the append
         return False
     return True
+
+
+def log_poller(home: Path, record: Mapping) -> bool:
+    """One allowlisted JSON line in poller.log: an event code, counts and an
+    exception class name; never transcript text.  Rotated like calls.jsonl."""
+    line = _clean({**record, "at": round(time.time(), 3)})
+    data = json.dumps(line, sort_keys=True, separators=(",", ":")).encode()
+    return _append(home, "poller.log", data + b"\n")
 
 
 def actor(env: Mapping[str, str]) -> str:
@@ -166,6 +190,26 @@ def _hash_mismatches(home: Path) -> int:
     return bad
 
 
+# ponytail: untuned guesses; retune from real colleague databases.
+DB_WARN_BYTES = 2 * 1024**3
+FREE_WARN_RATIO = 0.25
+FREE_WARN_BYTES = 64 * 1024**2
+
+
+def db_space(conn) -> dict:
+    """page_count, freelist_count, page_size and the free-space ratio."""
+    pages, free, size = (
+        conn.execute(f"PRAGMA {p}").fetchone()[0]
+        for p in ("page_count", "freelist_count", "page_size")
+    )
+    return {
+        "page_count": pages,
+        "freelist_count": free,
+        "page_size": size,
+        "free_ratio": round(free / pages, 4) if pages else 0.0,
+    }
+
+
 def stats(conn, home: Path, env: Mapping[str, str], *, usage=False) -> dict:
     """Counts only (design 7): sources, events, flags, issues, knowledge,
     tombstones, the last pass; usage adds O9's per-session pctx calls."""
@@ -188,6 +232,10 @@ def stats(conn, home: Path, env: Mapping[str, str], *, usage=False) -> dict:
             )
         },
         "events": pairs("SELECT kind, count(*) FROM event GROUP BY 1"),
+        "events_by_provider": pairs(
+            "SELECT s.provider, count(*) FROM event e"
+            " JOIN source s ON s.id = e.source_id GROUP BY 1"
+        ),
         "flags": dict(
             zip(("marker", "redacted", "truncated"), (int(n) for n in flags))
         ),
@@ -207,6 +255,7 @@ def stats(conn, home: Path, env: Mapping[str, str], *, usage=False) -> dict:
             "SELECT level, count(*) FROM tombstone GROUP BY 1"
         ),
         "db_bytes": db.stat().st_size if db.exists() else 0,
+        "db_space": db_space(conn),
         "last_pass": {
             k: status.get(k)
             for k in (
@@ -214,6 +263,7 @@ def stats(conn, home: Path, env: Mapping[str, str], *, usage=False) -> dict:
                 "duration_s",
                 "files_changed",
                 "events_added",
+                "skipped_files",
                 "failed",
                 "errors",
                 "busy_skips",
@@ -260,15 +310,20 @@ DATA_FILES = frozenset(
         "calls.jsonl",
         "calls.jsonl.1",
         "poller.log",
+        "poller.log.1",
         "tombstones.jsonl",
         "recall.off",
     }
 )
 # The rollback tree whose code must no longer run or be referenced (the
 # same test as install/cutover.py's verify step).
-OLD_TREE = "/Users/garyharr/Github/provenance-context-build"
+# Set PCTX_OLD_TREE to a legacy daemon tree to have doctor --cutover check
+# that nothing still references it; unset (the default) skips those checks.
+OLD_TREE = os.environ.get("PCTX_OLD_TREE", "")
 OLD_CODE = tuple(
-    f"{OLD_TREE}/{d}" for d in ("scripts", "hooks", "claude-code")
+    f"{OLD_TREE}/{d}"
+    for d in ("scripts", "hooks", "claude-code")
+    if OLD_TREE
 )
 _MARKETPLACE = "[marketplaces.provenance-context-local]"
 
@@ -334,7 +389,7 @@ def _old_refs(home_dir: Path) -> list[str]:
                 inside = line.strip() == _MARKETPLACE
             elif inside:
                 section.append(line)
-        if OLD_TREE in "\n".join(section):
+        if OLD_TREE and OLD_TREE in "\n".join(section):
             bad.append("config.toml marketplace")
     return bad
 
@@ -420,6 +475,25 @@ def doctor(home: Path, env: Mapping[str, str], *, cutover=False) -> dict:
                 " e.part = c.part AND e.line_sha256 = c.line_sha256)"
             ).fetchone()[0]
             check("citations_resolve", not broken, broken, level="warn")
+            space = db_space(conn)
+            size = space["page_count"] * space["page_size"]
+            check(
+                "db_size",
+                size < DB_WARN_BYTES,
+                f"{size} bytes; threshold {DB_WARN_BYTES}",
+                level="warn",
+            )
+            free = space["freelist_count"] * space["page_size"]
+            check(
+                "db_free_space",
+                not (
+                    space["free_ratio"] > FREE_WARN_RATIO
+                    and free > FREE_WARN_BYTES
+                ),
+                f"{free} bytes free ({space['free_ratio']:.0%});"
+                " run: pctx compact",
+                level="warn",
+            )
         except sqlite3.Error as exc:
             check("store_readable", False, type(exc).__name__)
         finally:

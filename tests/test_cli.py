@@ -11,7 +11,9 @@ import json
 import os
 import signal
 import subprocess
+import tempfile
 import time
+import unittest
 from pathlib import Path
 from unittest import mock
 
@@ -250,6 +252,45 @@ class WriterTests(CliCase):
 LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
 
 
+class LauncherTests(unittest.TestCase):
+    """bin/pctx finds its interpreter without a hardcoded path."""
+
+    def launch(self, home, **env):
+        base = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+        return subprocess.run(
+            [str(LAUNCHER), "--version"],
+            env=base | env,
+            capture_output=True,
+            text=True,
+        )
+
+    def fake_python(self, path):
+        path.write_text('#!/bin/sh\necho "ran $0"\n')
+        path.chmod(0o755)
+        return path
+
+    def test_resolution_order_and_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            lib = home / ".local/lib/provenance-context"
+            lib.mkdir(parents=True)
+            linked = self.fake_python(home / "linked-python")
+            (lib / "python").symlink_to(linked)
+            self.assertIn("provenance-context/python", self.launch(home).stdout)
+            env_py = self.fake_python(home / "env-python")
+            r = self.launch(home, PCTX_PYTHON=str(env_py))
+            self.assertIn("env-python", r.stdout)
+            (lib / "python").unlink()
+            stubs = home / "stubs"  # pythons older than 3.13
+            stubs.mkdir()
+            for name in ("python3.13", "python3.14", "python3"):
+                (stubs / name).write_text("#!/bin/sh\nexit 1\n")
+                (stubs / name).chmod(0o755)
+            r = self.launch(home, PATH=f"{stubs}:/usr/bin:/bin")
+            self.assertEqual(r.returncode, 127)
+            self.assertIn("PCTX_PYTHON", r.stderr)
+
+
 class ServeTests(CliCase):
     def start_serve(self, interval="0.2"):
         log = open(self.home / "poller.log", "ab")
@@ -302,6 +343,15 @@ class ServeTests(CliCase):
         # launchd opens StandardOutPath before Umask applies: 0644 -> 0600
         log_mode = os.stat(self.home / "poller.log").st_mode & 0o777
         self.assertEqual(log_mode, 0o600)
+        events = [
+            json.loads(x)
+            for x in (self.home / "poller.log").read_text().splitlines()
+        ]
+        self.assertEqual(
+            [e["event"] for e in events][0::len(events) - 1], ["start", "stop"]
+        )
+        (first,) = [e for e in events if e["event"] == "pass"][:1]
+        self.assertEqual(first["events_added"], 2)
         self.pctx("search", CANARY)
         for name in ("calls.jsonl", "status.json", "poller.log"):
             with self.subTest(file=name):
@@ -403,12 +453,14 @@ class StatsDoctorTests(CliCase):
             {
                 "sources",
                 "events",
+                "events_by_provider",
                 "flags",
                 "issues",
                 "knowledge",
                 "citations",
                 "tombstones",
                 "db_bytes",
+                "db_space",
                 "last_pass",
                 "classifier_version",
                 "hash_mismatches",
@@ -417,6 +469,8 @@ class StatsDoctorTests(CliCase):
             set(out),
         )
         self.assertEqual(out["events"], {"tool_call": 2})
+        self.assertEqual(sum(out["events_by_provider"].values()), 2)
+        self.assertIn("skipped_files", out["last_pass"])
         self.assertEqual(out["flags"]["marker"], 2)
 
     def doctor(self, *extra, run=None):
@@ -472,6 +526,44 @@ class StatsDoctorTests(CliCase):
         code, out, _ = self.doctor()
         self.assertEqual((code, self.checks(out)["heartbeat"]), (1, False))
 
+    def test_doctor_warns_on_bloat_and_compact_reclaims(self):
+        self.session(TID, "hello there", "hi")
+        self.pctx("ingest")
+        conn = cli.store.connect_rw(cli.store.db_path(self.home))
+        conn.execute("CREATE TABLE junk(x)")
+        conn.execute("INSERT INTO junk VALUES (zeroblob(500000))")
+        conn.execute("DELETE FROM junk")  # frees the pages, keeps the file
+        conn.close()
+        with mock.patch.object(cli.obs, "FREE_WARN_BYTES", 0):
+            with mock.patch.object(cli.obs, "FREE_WARN_RATIO", 0.0):
+                code, out, _ = self.doctor()
+        warn = {c["check"]: c for c in out["checks"]}["db_free_space"]
+        self.assertEqual((code, warn["ok"], warn["level"]), (0, False, "warn"))
+        self.assertGreater(self.pctx("stats")[1]["db_space"]["freelist_count"], 0)
+        code, out, _ = self.pctx("compact")
+        self.assertEqual(code, 0, out)
+        self.assertLess(
+            out["compact"]["bytes_after"], out["compact"]["bytes_before"]
+        )
+        self.assertEqual(out["db_space"]["freelist_count"], 0)
+
+    def test_pretty_is_indented_same_json(self):
+        self.session(TID, "hello there", "hi")
+        self.pctx("ingest")
+
+        def raw(*argv):
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, self.env, clear=True):
+                with contextlib.redirect_stdout(out):
+                    cli.main(list(argv))
+            return out.getvalue()
+
+        compact, pretty = raw("stats"), raw("--pretty", "stats")
+        self.assertNotIn("\n", compact.strip())
+        self.assertIn('\n  "', pretty)
+        keys = lambda t: set(json.loads(t))  # noqa: E731
+        self.assertEqual(keys(compact), keys(pretty))
+
     def test_doctor_reports_unowned_journal(self):
         self.session(TID, "hello", "hi")
         self.pctx("ingest")
@@ -492,7 +584,14 @@ class StatsDoctorTests(CliCase):
         new = f"{home}/.local/lib/provenance-context/abc/bin/pctx serve"
         code, out, _ = self.doctor("--cutover", run=fake_run(cmd=new))
         self.assertEqual(code, 0, out)
-        old = "/Users/garyharr/Github/provenance-context-build"
+        old = "/legacy/tree"
+        legacy = mock.patch.multiple(
+            cli.obs,
+            OLD_TREE=old,
+            OLD_CODE=tuple(f"{old}/{d}" for d in ("scripts", "hooks")),
+        )
+        legacy.start()
+        self.addCleanup(legacy.stop)
         settings = home / ".claude/settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(json.dumps({"hooks": f"{old}/hooks/codex.py"}))

@@ -2,7 +2,7 @@
 
   cd ~/.local/lib/provenance-context/current   # or the new repo root
   L=~/.local/share/provenance-context-legacy-<ts>
-  /opt/homebrew/bin/python3.13 -E -s -B -m install.rollback \\
+  python3.13 -E -s -B -m install.rollback \\
       --record "$L/cutover-record.json" [--dry-run]
   ... -m install.rollback --residue   # list leftovers; deletes nothing
 Every action first looks at launchd and the filesystem, so rollback is
@@ -66,6 +66,8 @@ def rollback(ctx, rec):
             "restore legacy data dir",
             lambda: os.rename(legacy / "data", ctx.data),
         )
+    elif rec.get("fresh") and ctx.data.exists():  # this install made it
+        act(f"move {ctx.data} aside", lambda: aside(ctx, ctx.data, "data"))
     elif ctx.new_data.exists():
         act(
             f"move {ctx.new_data} aside",
@@ -131,7 +133,11 @@ def rollback(ctx, rec):
                 f"relink {link}",
                 lambda lk=link, t=target: co.relink(lk, t, ctx.ts),
             )
-    if co.tree_hash(ctx) != rec["old_tree_hash"]:
+    if rec.get("upgrade") and co.job(ctx):  # back onto the old release
+        kick = ["launchctl", "kickstart", "-k", ctx.target]
+        act("restart the job", lambda: co.must(ctx, kick))
+    legacy_free = rec.get("fresh") or rec.get("upgrade")
+    if not legacy_free and co.tree_hash(ctx) != rec["old_tree_hash"]:
         problems.append("OLD TREE CHANGED: hard stop, E1 fails")
     for item in residue(ctx.home):
         ctx.say(f"residue (owner decides): {item['path']} {item['bytes']} B")

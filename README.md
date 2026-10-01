@@ -51,8 +51,9 @@ session environment variables.
 - `pctx quote-check REF QUOTE`: check a quote against an event.
 - `pctx erase --session S | --event REF | --match TEXT`: forget content;
   `--dry-run` previews the targets without deleting.
-- `pctx stats` and `pctx doctor`: counts and health checks; `doctor --cutover`
-  adds the cutover checks.
+- `pctx stats` and `pctx doctor`: counts, database size and free space, and
+  health checks; `doctor --cutover` adds the cutover checks. `pctx compact`
+  vacuums the database. `--pretty` (or `PCTX_PRETTY=1`) indents any JSON.
 - `pctx ingest`, `pctx serve`, `pctx hook ...`: catch-up ingest, the poller
   loop, and the provider hooks below.
 
@@ -95,7 +96,7 @@ themselves are never stored.
   with `umask 077`, and the launchd job sets `Umask` "077".
 - Logs never hold transcript text: `calls.jsonl` is an allowlist (a query is
   kept only as a term count and a hash prefix), `status.json` holds counts,
-  and `poller.log` holds exception class names and codes.
+  and `poller.log` holds event codes, counts and exception class names.
 - Secrets are redacted at ingest and again on every output.
 - `pctx erase` writes tombstones (identifiers and hashes only) that are
   checked before any line is parsed, so a rescan, restart or archive move
@@ -106,6 +107,10 @@ themselves are never stored.
   data directory.
 
 ## Install, cutover and rollback
+
+See `docs/` (quick start, troubleshooting, architecture). `install.cutover`
+runs as a legacy cutover, `--fresh` or `--upgrade`; each ends with one
+pinned release.
 
 The files here are templates. `@HOME@` is a literal placeholder that the
 cutover script replaces with the real home directory.

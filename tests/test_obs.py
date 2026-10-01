@@ -110,6 +110,24 @@ class CallLogTests(ObsCase):
                 self.assertEqual(obs.actor(env), want)
 
 
+class PollerLogTests(ObsCase):
+    def test_line_is_allowlisted_and_log_rotates(self):
+        path = self.home / "poller.log"
+        self.assertTrue(
+            obs.log_poller(
+                self.home,
+                {"event": "error", "exc": "OSError", "text": CANARY},
+            )
+        )
+        (line,) = self.lines(path)
+        self.assertEqual(set(line), {"at", "event", "exc"})
+        self.assertNotIn(CANARY, path.read_text())
+        path.write_bytes(b"x" * obs.ROTATE_BYTES)
+        obs.log_poller(self.home, {"event": "start", "pid": 1})
+        self.assertEqual(len(self.lines(path)), 1)
+        self.assertEqual(path.with_name("poller.log.1").stat().st_size, obs.ROTATE_BYTES)
+
+
 class StatusTests(ObsCase):
     def test_status_heartbeat_merges_and_is_private(self):
         obs.write_status(self.home, {"interval_s": 60, "pid": 7})

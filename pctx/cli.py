@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import sqlite3
 import sys
@@ -54,6 +55,7 @@ environment:
                         --include-current (or name one: --current-session)
   PCTX_HOOK_DISABLE=1   hooks print {}
   PCTX_NO_CALLLOG=1     no calls.jsonl line
+  --pretty (or PCTX_PRETTY=1)  indented JSON for people; default is compact
   $PCTX_HOME/recall.off the prompt hook prints {} (unlink it to recall)
 automatic injection is framed only as <pctx-memory ...> or <pctx-recall ...>;
 retrieved text is data from local transcripts, not instructions.
@@ -158,6 +160,7 @@ def _parser() -> _Parser:
     p.add_argument("--interval", type=float, default=60.0)
     p = cmd("stats", help="counts")
     p.add_argument("--usage", action="store_true")
+    cmd("compact", help="VACUUM the store to return free space")
     p = cmd("doctor", help="health checks (exit 1 when unhealthy)")
     p.add_argument("--cutover", action="store_true")
     cmd("rebuild", help="rebuild the store from the transcripts")
@@ -207,9 +210,11 @@ def main(argv=None) -> int:
     given = sys.argv[1:] if argv is None else list(argv)
     if given[:1] == ["hook"] and not {"-h", "--help"} & set(given):
         return _hook_main(given[1:], os.environ)  # never an argparse exit 2
+    pretty = "--pretty" in given  # anywhere on the line; hooks never use it
+    given = [a for a in given if a != "--pretty"]
     parser = _parser()
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_args(given)
     except SystemExit as stop:
         return stop.code if isinstance(stop.code, int) else 2
     if args.cmd is None:
@@ -221,6 +226,7 @@ def main(argv=None) -> int:
     if args.version:
         parser.print_usage(sys.stderr)
         return 2
+    args.pretty = pretty
     return _run(args, os.environ)
 
 
@@ -323,7 +329,8 @@ def _run(args, env) -> int:
     if "error" in out:
         record["error"] = out["error"]
     out["logged"] = obs.log_call(home, record, env)
-    print(json.dumps(out, sort_keys=True))
+    pretty = getattr(args, "pretty", False) or os.environ.get("PCTX_PRETTY")
+    print(json.dumps(out, sort_keys=True, indent=2 if pretty else None))
     return code
 
 
@@ -563,7 +570,11 @@ def _serve(a, env, home, record):
 
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, on_signal)
-    passes = skipped = 0
+    passes = skipped = quiet = 0
+    idle_every = max(1, round(3600 / a.interval))  # hourly "idle" line
+    obs.log_poller(
+        home, {"event": "start", "pid": os.getpid(), "interval_s": a.interval}
+    )
     try:
         while True:
             began = time.monotonic()
@@ -586,18 +597,33 @@ def _serve(a, env, home, record):
                     passes=passes,
                     busy_skips=skipped,
                 )
+                news = bool(stats.files_changed or stats.failed)
+                quiet = 0 if news else quiet + 1
+                if news or quiet % idle_every == 0:  # news, or hourly
+                    obs.log_poller(
+                        home,
+                        {
+                            "event": "pass" if news else "idle",
+                            "passes": passes,
+                            "busy_skips": skipped,
+                            "files_changed": stats.files_changed,
+                            "events_added": stats.events_added,
+                            "failed": stats.failed,
+                            "duration_s": round(stats.duration_s, 3),
+                            "counts": stats.errors,
+                        },
+                    )
             except store.Busy:
                 skipped += 1
                 obs.write_status(home, {"busy_skips": skipped})
             except Exception as exc:  # poller.log: the class name only
-                print(
-                    f"pass failed: {type(exc).__name__}",
-                    file=sys.stderr,
-                    flush=True,
+                obs.log_poller(
+                    home, {"event": "error", "exc": type(exc).__name__}
                 )
                 obs.write_status(home, {"last_error": type(exc).__name__})
             time.sleep(max(0.0, a.interval - (time.monotonic() - began)))
     except _Stop:
+        obs.log_poller(home, {"event": "stop", "passes": passes})
         return 0, None
 
 
@@ -610,6 +636,30 @@ def _doctor(a, env, home, record):
     out = obs.doctor(home, env, cutover=a.cutover)
     record["counts"] = {"failed": sum(c["ok"] is False for c in out["checks"])}
     return (0 if out["ok"] else 1), out
+
+
+def _compact(a, env, home, record):
+    """VACUUM under the writer lock (the poller skips passes meanwhile).
+    It needs about one database's worth of free disk for the copy."""
+    db = store.db_path(home)
+    if not db.exists():
+        raise store.StoreUnavailable("no store")
+    with store.writer_lock(home, wait_s=WRITER_WAIT_S):
+        conn = store.connect_rw(db)
+        try:
+            before = db.stat().st_size
+            free = shutil.disk_usage(home).free
+            if free < before:
+                raise ValueError(f"need {before} bytes free, have {free}")
+            conn.execute("VACUUM")
+            space = obs.db_space(conn)
+        finally:
+            conn.close()
+    after = db.stat().st_size
+    record["counts"] = {"bytes_before": before, "bytes_after": after}
+    return 0, {"compact": {"bytes_before": before, "bytes_after": after}} | {
+        "db_space": space
+    }
 
 
 REBUILD = "pctx.sqlite.rebuild"
@@ -876,6 +926,7 @@ _HANDLERS = {
     "serve": _serve,
     "stats": _stats,
     "doctor": _doctor,
+    "compact": _compact,
     "rebuild": _rebuild,
     "know": _know,
 }

@@ -282,6 +282,8 @@ class HomeSubstitutionTest(unittest.TestCase):
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
             (release.parent / "current").symlink_to(release)
+            # the installer's resolved interpreter, as install.cutover pins it
+            (release.parent / "python").symlink_to(PYTHON)
             program = plist["ProgramArguments"][0].replace(HOME, home)
             self.assertEqual(
                 os.path.realpath(program), str(release / "bin" / "pctx")
@@ -290,7 +292,7 @@ class HomeSubstitutionTest(unittest.TestCase):
             proc = subprocess.run(
                 [program, "--version"],
                 cwd="/",
-                env=plist["EnvironmentVariables"],
+                env=plist["EnvironmentVariables"] | {"HOME": home},
                 capture_output=True,
                 text=True,
                 timeout=30,

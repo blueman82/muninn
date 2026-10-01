@@ -1,7 +1,7 @@
 """Live cutover from the legacy provenance-context daemon to pctx (§6.3).
 
 Run from the new repo root, never from the old tree:
-  /opt/homebrew/bin/python3.13 -E -s -B -m install.cutover \\
+  python3.13 -E -s -B -m install.cutover \\
       --repo DIR --sha SHA [--expect-old-tree-hash H] [--dry-run]
 Any failure after the record is written runs install.rollback. Every
 external effect goes through ctx.run (launchctl, ps, git, cp, pctx,
@@ -18,6 +18,7 @@ import plistlib
 import queue
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -28,7 +29,9 @@ from pathlib import Path
 from install import configedit as ce
 
 LABEL = "com.provenance-context"
-OLD_TREE = Path("/Users/garyharr/Github/provenance-context-build")
+# The legacy daemon tree to retire; PCTX_OLD_TREE names it. Unset, it is a
+# path that never exists, so fresh installs and upgrades never match it.
+OLD_TREE = Path(os.environ.get("PCTX_OLD_TREE") or "/nonexistent/pctx-old-tree")
 MKT_NAME = "provenance-context-local"
 PLUGIN_ID = f"provenance-context@{MKT_NAME}"
 MARKETPLACE = f"[marketplaces.{MKT_NAME}]"
@@ -78,6 +81,8 @@ class Ctx:
     sleep: object = time.sleep
     say: object = print
     probe: object = None  # probe(ctx) -> Codex hooks/list entries
+    fresh: bool = False  # a machine with no legacy daemon, data or tree
+    upgrade: bool = False  # already on pctx: re-pin, restart, prune
 
     def __post_init__(self):
         h, share = self.home, self.home / ".local/share"
@@ -103,6 +108,30 @@ def run_real(argv, env=None, input=None):
     return subprocess.run(
         argv, env=env, input=input, capture_output=True, timeout=600
     )
+
+
+def install_log(path, run=run_real):
+    """(say, run) that also append to `path` (0600, timestamped): messages,
+    each command's name and exit status, a failed command's stderr tail.
+    Never stdout (it can carry transcript paths or text)."""
+
+    def say(text):
+        print(text)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
+            f.write(f"{stamp} {text}\n")
+
+    def logged(argv, env=None, input=None):
+        r = run(argv, env=env, input=input)
+        name = " ".join(str(a) for a in argv[:2])
+        say(f"run {name} -> {r.returncode}")
+        if r.returncode:
+            say("  stderr: " + r.stderr.decode(errors="replace")[-300:])
+        return r
+
+    return say, logged
 
 
 def must(ctx, argv, env=None, input=None, quiet=False):
@@ -375,6 +404,47 @@ def save(ctx, rec):
     ce.atomic_write(ctx.legacy / "cutover-record.json", data, 0o600)
 
 
+def install_record(ctx, rec, outcome):
+    """lib/install-record.json: what was installed and which config keys it
+    touched (names only, no values), for rollback and support."""
+    if ctx.dry_run:
+        return
+    ctx.lib.mkdir(parents=True, exist_ok=True)
+    keys = [
+        ".".join(e["path"])
+        for e in rec["claude"]["settings"]
+        if rec["has_claude"]
+    ]
+    keys += [e["header"] for e in rec["codex"] if rec["has_codex"]]
+    out = {
+        k: rec.get(k)
+        for k in (
+            "fresh",
+            "upgrade",
+            "ts",
+            "sha",
+            "repo",
+            "python",
+            "steps",
+            "failed",
+        )
+    }
+    out |= {
+        "outcome": outcome,
+        "config_keys": keys,
+        "record": (
+            None
+            if rec.get("record_removed")
+            else str(ctx.legacy / "cutover-record.json")
+        ),
+    }
+    ce.atomic_write(
+        ctx.lib / "install-record.json",
+        json.dumps(out, indent=1).encode(),
+        0o600,
+    )
+
+
 def load_record(path):
     return json.loads(Path(path).read_text())
 
@@ -404,7 +474,18 @@ def preflight(ctx, repo, sha, expect_tree):
         raise StepFailed(
             "Claude hook fragment must be SessionStart+UserPromptSubmit"
         )
-    tree = tree_hash(ctx)
+    tree = None if ctx.fresh or ctx.upgrade else tree_hash(ctx)
+    if ctx.upgrade:
+        if not (ctx.data.is_dir() and ctx.plist.exists()):
+            raise StepFailed("nothing to upgrade: no data dir or plist")
+        if not (ctx.lib / "current").is_symlink():
+            raise StepFailed("nothing to upgrade: no current release")
+    if ctx.fresh:
+        if sys.version_info < (3, 13):
+            raise StepFailed("the installer needs Python 3.13+")
+        for path in (ctx.data, ctx.plist):
+            if os.path.lexists(path):
+                raise StepFailed(f"{path} exists: already installed")
     if expect_tree and tree != expect_tree:
         raise StepFailed("old tree hash differs from the expected baseline")
     for path in (ctx.legacy, ctx.new_data, ctx.failed):
@@ -412,15 +493,22 @@ def preflight(ctx, repo, sha, expect_tree):
             raise StepFailed(f"{path} already exists")
     if ctx.pctx.exists() and not ctx.pctx.is_symlink():
         raise StepFailed(f"{ctx.pctx} is not a symlink")
-    edit_settings(ctx.settings.read_bytes(), fragment, ctx.old_tree)
-    if ctx.known.exists():
+    touch = not ctx.upgrade  # an upgrade leaves provider config alone
+    if touch and ctx.settings.exists():
+        edit_settings(ctx.settings.read_bytes(), fragment, ctx.old_tree)
+    if touch and ctx.known.exists():
         edit_known(ctx.known.read_bytes(), ctx.old_tree)
-    text = ctx.config.read_text()
-    hooks = codex_hooks(files["integrations/codex/hooks/hooks.json"])
-    text = drop_trust(text)
-    text = enable(repoint(text, f"{ctx.lib}/current/integrations/codex"))
-    write_trust(text, hooks)
+    if touch and ctx.config.exists():
+        text = ctx.config.read_text()
+        hooks = codex_hooks(files["integrations/codex/hooks/hooks.json"])
+        text = drop_trust(text)
+        text = enable(repoint(text, f"{ctx.lib}/current/integrations/codex"))
+        write_trust(text, hooks)
     return {
+        "fresh": ctx.fresh,
+        "upgrade": ctx.upgrade,
+        "has_claude": touch and ctx.settings.exists(),
+        "has_codex": touch and ctx.config.exists(),
         "schema": 1,
         "ts": ctx.ts,
         "home": str(ctx.home),
@@ -428,6 +516,7 @@ def preflight(ctx, repo, sha, expect_tree):
         "sha": sha,
         "old_tree": str(ctx.old_tree),
         "old_tree_hash": tree,
+        "python": {"path": sys.executable, "version": sys.version.split()[0]},
         "legacy": str(ctx.legacy),
         "steps": [],
     }
@@ -444,7 +533,9 @@ def dry(ctx, text):
 
 def record(ctx, rec):
     """Step 1: launchd state, old plist hash, before-values of our keys."""
-    settings = ce.load_json(ctx.settings.read_bytes())
+    settings = (
+        ce.load_json(ctx.settings.read_bytes()) if rec["has_claude"] else {}
+    )
     known = ce.load_json(ctx.known.read_bytes()) if ctx.known.exists() else {}
     rec["claude"] = {
         "settings": [json_entry(settings, p) for p in claude_paths(settings)],
@@ -452,8 +543,10 @@ def record(ctx, rec):
             [json_entry(known, (MKT_NAME,))] if ctx.known.exists() else []
         ),
     }
-    rec["codex"] = codex_record(ctx.config.read_text())
-    links = (ctx.lib / "current", ctx.pctx)
+    rec["codex"] = (
+        codex_record(ctx.config.read_text()) if rec["has_codex"] else []
+    )
+    links = (ctx.lib / "current", ctx.lib / "python", ctx.pctx)
     rec["links"] = {
         str(p): os.readlink(p) if p.is_symlink() else None for p in links
     }
@@ -464,7 +557,10 @@ def record(ctx, rec):
     if dry(ctx, f"record launchd {ctx.target}, plist sha256, keys {keys}"):
         return
     rec["launchd"] = job(ctx)
-    version = ctx.run(["codex", "--version"]).stdout.decode().strip()
+    try:
+        version = ctx.run(["codex", "--version"]).stdout.decode().strip()
+    except OSError:  # no codex on this machine
+        version = ""
     rec["trust"] = "auto" if version in CODEX_VERIFIED else "owner"
     ctx.legacy.mkdir(mode=0o700)
     if plist is not None:
@@ -485,7 +581,7 @@ def relink(link, target, ts):
 def pin(ctx, rec):
     """Step 2: git archive into lib/<sha>, substitute @HOME@, relink."""
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
-    if dry(ctx, f"pin {sha} -> {dest}; current and {ctx.pctx} relinked"):
+    if dry(ctx, f"pin {sha} -> {dest}; current, python, pctx relinked"):
         return
     argv = ["git", "-C", rec["repo"], "archive", "--format=tar", sha]
     tar = must(ctx, argv, env=GIT_ENV).stdout
@@ -509,6 +605,7 @@ def pin(ctx, rec):
     os.rename(tmp, dest)
     relink(ctx.lib / "current", sha, ctx.ts)
     relink(ctx.pctx, ctx.lib / "current/bin/pctx", ctx.ts)
+    relink(ctx.lib / "python", sys.executable, ctx.ts)  # bin/pctx reads it
 
 
 def pctx_env(home, **extra):
@@ -524,6 +621,42 @@ def prebuild(ctx, rec):
     ctx.new_data.mkdir(mode=0o700)
     must(ctx, [ctx.pctx, "ingest", "--full"], env=pctx_env(ctx.new_data))
     must(ctx, [ctx.pctx, "doctor"], env=pctx_env(ctx.new_data))
+
+
+def ingest_fresh(ctx, rec):
+    """Fresh install: create the data dir and index what already exists.
+    (doctor runs in verify, once the launchd job is up.)"""
+    if dry(ctx, f"PCTX_HOME={ctx.data} pctx ingest --full"):
+        return
+    ctx.data.mkdir(parents=True, mode=0o700)
+    must(ctx, [ctx.pctx, "ingest", "--full"], env=pctx_env(ctx.data))
+
+
+def restart(ctx, rec):
+    """Upgrade: kickstart the running job onto the re-pinned release."""
+    if dry(ctx, f"launchctl kickstart -k {ctx.target}"):
+        return
+    started = ctx.now()
+    must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
+    wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "job has no live PID")
+    wait(ctx, lambda: fresh(ctx, started), HEARTBEAT_S, "heartbeat not fresh")
+
+
+def prune(ctx, rec):
+    """One pinned release: delete every release dir but current's target.
+    Runs last, so a failed install can still roll back to the old one."""
+    link = ctx.lib / "current"
+    keep = os.readlink(link) if link.is_symlink() else None
+    old = [
+        p
+        for p in sorted(ctx.lib.iterdir() if ctx.lib.is_dir() else [])
+        if p.is_dir() and not p.is_symlink() and p.name != keep
+    ]
+    if dry(ctx, f"prune {[p.name for p in old]}"):
+        return
+    for path in old:
+        ctx.say(f"prune {path.name}")
+        shutil.rmtree(path)
 
 
 def snapshot(ctx, rec):
@@ -601,6 +734,9 @@ def claude(ctx, rec):
     """Step 7: merge our two hooks; drop old-tree marketplace entries."""
     if dry(ctx, f"merge SessionStart+UserPromptSubmit into {ctx.settings}"):
         return
+    if not rec["has_claude"]:
+        ctx.say(f"{ctx.settings} not found: Claude Code left unconfigured")
+        return
     frag = ctx.lib / "current/integrations/claude/settings-hooks.json"
     fragment = json.loads(frag.read_bytes())["hooks"]
 
@@ -621,6 +757,9 @@ def codex(ctx, rec):
     """Step 8 in A6 order: untrust, retire stale cache, install, trust."""
     source = f"{ctx.lib}/current/integrations/codex"
     if dry(ctx, f"codex: drop old trust keys, move {ctx.cache}, add plugin"):
+        return
+    if not rec["has_codex"]:
+        ctx.say(f"{ctx.config} not found: Codex left unconfigured")
         return
 
     def edit(transform):
@@ -670,16 +809,18 @@ def old_refs(ctx):
         for f in files
         if f.exists() and any(c in f.read_bytes() for c in code)
     ]
-    mkt = ce.parse_section(
-        ctx.config.read_text(), MARKETPLACE, CODEX_KEYS[MARKETPLACE]
-    )
-    if str(ctx.old_tree) in json.dumps(mkt):
-        bad.append("config.toml marketplace")
+    if ctx.config.exists():
+        mkt = ce.parse_section(
+            ctx.config.read_text(), MARKETPLACE, CODEX_KEYS[MARKETPLACE]
+        )
+        if str(ctx.old_tree) in json.dumps(mkt):
+            bad.append("config.toml marketplace")
     return bad
 
 
 def hook_commands(ctx):
-    settings = ce.load_json(ctx.settings.read_bytes())
+    exists = ctx.settings.exists()
+    settings = ce.load_json(ctx.settings.read_bytes()) if exists else {}
     cmds = [
         h["command"]
         for event in CLAUDE_EVENTS
@@ -702,7 +843,8 @@ def verify(ctx, rec):
         ok = None if ok is None else bool(ok)  # None: could not verify
         checks.append({"check": name, "ok": ok, "detail": detail})
 
-    check("old_tree_unchanged", tree_hash(ctx) == rec["old_tree_hash"])
+    if not (ctx.fresh or ctx.upgrade):
+        check("old_tree_unchanged", tree_hash(ctx) == rec["old_tree_hash"])
     refs = old_refs(ctx)
     check("no_old_tree_references", not refs, ", ".join(refs))
     check("old_process_gone", not old_procs(ctx))
@@ -715,7 +857,7 @@ def verify(ctx, rec):
         check(
             "hook_runs", r.returncode == 0 and r.stdout.strip() == b"{}", cmd
         )
-    if ctx.probe:
+    if ctx.probe and rec["has_codex"]:
         codex_checks(ctx, rec, check)
     r = ctx.run([ctx.pctx, "doctor", "--cutover"], env=pctx_env(ctx.data))
     check("doctor_cutover", r.returncode == 0)
@@ -769,7 +911,16 @@ STEPS = (
     claude,
     codex,
     verify,
+    prune,
 )
+FRESH_STEPS = (pin, ingest_fresh, start_new, claude, codex, verify, prune)
+UPGRADE_STEPS = (pin, restart, verify, prune)
+
+
+def steps(ctx):
+    if ctx.upgrade:
+        return UPGRADE_STEPS
+    return FRESH_STEPS if ctx.fresh else STEPS
 
 
 def cutover(ctx, repo, sha, expect_tree=None):
@@ -777,7 +928,8 @@ def cutover(ctx, repo, sha, expect_tree=None):
     record(ctx, rec)
     step = record
     try:
-        for step in STEPS:
+        for step in steps(ctx):
+            ctx.say(f"step {step.__name__}")
             step(ctx, rec)
             if not ctx.dry_run:
                 rec["steps"].append(step.__name__)
@@ -795,7 +947,12 @@ def cutover(ctx, repo, sha, expect_tree=None):
 
         for problem in rollback(ctx, rec):
             ctx.say(f"PROBLEM: {problem}")
+        install_record(ctx, rec, "rolled_back")
         raise
+    if ctx.upgrade and not ctx.dry_run:  # no rollback once the old is gone
+        shutil.rmtree(ctx.legacy)
+        rec["record_removed"] = True
+    install_record(ctx, rec, "ok")
     done = "planned" if ctx.dry_run else "done"
     ctx.say(f"cutover {done}; record in {ctx.legacy}")
     return rec
@@ -853,19 +1010,43 @@ def main(argv=None):
     ap.add_argument("--sha", required=True)
     ap.add_argument("--expect-old-tree-hash")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="already on pctx: re-pin this commit, restart, keep one release",
+    )
+    ap.add_argument(
+        "--fresh",
+        action="store_true",
+        help="no legacy daemon or data (a colleague's machine)",
+    )
     ap.add_argument("--home", type=Path, default=Path.home())
     args = ap.parse_args(argv)
+    if args.fresh and args.upgrade:
+        ap.error("--fresh and --upgrade are exclusive")
     if args.home.resolve() != Path.home().resolve() and not args.dry_run:
         ap.error(
             "--home is dry-run only: launchctl acts on the real gui domain"
         )
     os.umask(0o077)
     ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    ctx = Ctx(args.home, run_real, ts, dry_run=args.dry_run, probe=codex_probe)
+    say, run = install_log(
+        args.home / ".local/lib/provenance-context/install.log"
+    )
+    ctx = Ctx(
+        args.home,
+        run,
+        ts,
+        dry_run=args.dry_run,
+        probe=codex_probe,
+        say=say,
+        fresh=args.fresh,
+        upgrade=args.upgrade,
+    )
     try:
         cutover(ctx, args.repo, args.sha, args.expect_old_tree_hash)
     except (StepFailed, ce.Refused, ce.Raced) as exc:
-        print(f"FAILED: {exc}", file=sys.stderr)
+        say(f"FAILED: {exc}")
         return 1
     return 0
 
