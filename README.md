@@ -106,7 +106,7 @@ themselves are never stored.
 
 ## Install and rollback
 
-See `docs/` (quick start, troubleshooting, architecture). `install.installer`
+See `docs/` (reference, quick start, troubleshooting, architecture). `install.installer`
 runs as `--fresh` (new machine) or `--upgrade` (re-pin); each ends with one
 pinned release.
 

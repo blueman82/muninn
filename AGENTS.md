@@ -13,7 +13,7 @@ Instructions for coding agents working in this repo. Any parent-directory
 - `install/`: `installer.py` (`--fresh`, `--upgrade`),
   `rollback.py`, `configedit.py`.
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
-- `docs/`: quick start, troubleshooting, architecture.
+- `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 
 ## Rules
 
