@@ -516,6 +516,10 @@ def _serve(a, env, home, record):
     """KeepAlive poller (design 6.2): a pass, a heartbeat, a sleep.  A pass
     is skipped while another writer holds the lock."""
     roots, live = ingest.default_roots(env), {"conn": None}
+    try:  # launchd opens StandardOutPath before Umask applies (0644)
+        os.chmod(home / "poller.log", 0o600)
+    except FileNotFoundError:  # not run by launchd
+        pass
 
     def on_signal(signum, frame):
         conn = live["conn"]

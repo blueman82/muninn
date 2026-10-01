@@ -253,6 +253,7 @@ LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
 class ServeTests(CliCase):
     def start_serve(self, interval="0.2"):
         log = open(self.home / "poller.log", "ab")
+        os.chmod(self.home / "poller.log", 0o644)  # as launchd creates it
         self.addCleanup(log.close)
         proc = subprocess.Popen(
             [str(LAUNCHER), "serve", "--interval", interval],
@@ -298,6 +299,9 @@ class ServeTests(CliCase):
             set(status),
         )
         self.assertEqual(status["events_added"], 2)
+        # launchd opens StandardOutPath before Umask applies: 0644 -> 0600
+        log_mode = os.stat(self.home / "poller.log").st_mode & 0o777
+        self.assertEqual(log_mode, 0o600)
         self.pctx("search", CANARY)
         for name in ("calls.jsonl", "status.json", "poller.log"):
             with self.subTest(file=name):
