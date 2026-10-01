@@ -32,6 +32,7 @@ SHOWN = 8  # knowledge entries a SessionStart block may push (O5b)
 MIN_TERMS = 3  # a prompt with fewer query terms recalls nothing (spec 9.2)
 MAX_EVENTS = 3  # events in a recall block
 EVENT_KINDS = frozenset({"prompt", "reply"})  # recalled at prompt time
+RECALL_OFF = "recall.off"  # in the data dir: UserPromptSubmit prints {}
 POOL_PAGE, POOL_PAGES = 5, 4  # search pages read to find MAX_EVENTS
 SNIPPET = 300  # characters of one recalled snippet
 
@@ -414,6 +415,9 @@ def prompt_submit(
     is capped at RECALL_LIMIT, or CODEX_RECALL_LIMIT for Codex.
     """
     trace = {} if trace is None else trace
+    if (store.data_home(env) / RECALL_OFF).exists():  # owner switch
+        trace["skipped"] = "recall_off"
+        return {}
     terms = _prompt_terms(payload, trace)
     if terms is None:  # nothing to recall: the store is not even opened
         return {}

@@ -448,6 +448,19 @@ class PromptSkipTests(RecallCase):
         env = {"PCTX_HOOK_DISABLE": "1"}
         self.assertEqual(self.ask(env=env), {})
 
+    def test_recall_off_flag_skips_without_a_db_read(self):
+        self.talk("a", "alphaterm betaterm gammaterm deltaterm all here")
+        flag = store.data_home(self.env) / hook.RECALL_OFF
+        flag.touch(0o600)
+        with mock.patch.object(hook, "_open", side_effect=AssertionError):
+            self.assertEqual(self.ask(), {})
+        start = {"hook_event_name": "SessionStart", "cwd": "/repo"}
+        self.assertIn(  # SessionStart keeps its block
+            "hookSpecificOutput", hook.session_start(start, "claude", self.env)
+        )
+        flag.unlink()
+        self.assertIn("hookSpecificOutput", self.ask())
+
 
 class PromptRecallTests(RecallCase):
     def test_prompt_hook_knowledge_first_then_max3_events(self):

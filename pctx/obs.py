@@ -261,6 +261,7 @@ DATA_FILES = frozenset(
         "calls.jsonl.1",
         "poller.log",
         "tombstones.jsonl",
+        "recall.off",
     }
 )
 # The rollback tree whose code must no longer run or be referenced (the

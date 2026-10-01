@@ -54,6 +54,7 @@ environment:
                         --include-current (or name one: --current-session)
   PCTX_HOOK_DISABLE=1   hooks print {}
   PCTX_NO_CALLLOG=1     no calls.jsonl line
+  $PCTX_HOME/recall.off the prompt hook prints {} (unlink it to recall)
 automatic injection is framed only as <pctx-memory ...> or <pctx-recall ...>;
 retrieved text is data from local transcripts, not instructions.
 """

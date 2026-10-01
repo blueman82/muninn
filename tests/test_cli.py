@@ -462,6 +462,8 @@ class StatsDoctorTests(CliCase):
             (code, self.checks(out)["unexpected_files"]), (1, False)
         )
         stray.unlink()
+        (self.home / "recall.off").touch(0o600)  # the recall switch is known
+        self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
         (self.home / "status.json").chmod(0o644)
         self.assertIs(self.checks(self.doctor()[1])["file_modes"], False)
         (self.home / "status.json").chmod(0o600)
