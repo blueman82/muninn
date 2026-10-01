@@ -21,6 +21,7 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 from pathlib import Path
 
+from pctx import classify
 from pctx.scope import scope_ids_for_read
 from pctx.store import HotJournal, StoreUnavailable
 
@@ -55,6 +56,7 @@ RECENT_POOL = 50
 KNOWLEDGE_HITS = 3
 OTHER_SCOPES = 5  # labels listed in other_scopes
 OUTPUT_LIMIT = 6144  # bytes of json.dumps
+MAX_INDEX_AGE = 2**63 - 1  # larger ages are unknown, keeping metadata bounded
 OPEN_BYTES = 12_000  # text bytes per open page
 CONTEXT_MAX = 20
 PREVIEW = 200
@@ -468,25 +470,39 @@ def _freshness(status: Mapping | None) -> dict:
         return {"index_age_s": None, "poller": "stale"}
     every = status.get("interval_s")
     every = every if isinstance(every, (int, float)) and every > 0 else 60
-    age = max(0, int(time.time() - last))
+    try:
+        age = max(0, int(time.time() - last))
+    except (OverflowError, ValueError):
+        return {"index_age_s": None, "poller": "stale"}
+    if age > MAX_INDEX_AGE:
+        return {"index_age_s": None, "poller": "stale"}
     return {
         "index_age_s": age,
         "poller": "ok" if age <= 3 * every else "stale",
     }
 
 
-def _fit(out: dict) -> dict:
-    """Trim hits, then knowledge, until the json is at most OUTPUT_LIMIT."""
-    hits = len(out["hits"])
-    for key in ("hits", "knowledge"):
-        while out[key] and len(json.dumps(out)) > OUTPUT_LIMIT:
-            out[key].pop()
-    if len(out["hits"]) < hits:
-        out["omitted"] = hits - len(out["hits"])
-        out["has_more"] = True
-        out["note"] = "output trimmed to fit; use a smaller limit to see more"
-        out["stages"]["returned"] = len(out["hits"])
-    return out
+def _output_size(out: dict) -> int:
+    # Reserve stable freshness so heartbeat changes cannot shift pages.
+    # CLI adds logged and a newline, then redacts text again.
+    wire = out | {
+        "index_age_s": MAX_INDEX_AGE,
+        "poller": "stale",
+        "logged": False,
+    }
+    size = len(json.dumps(wire).encode("utf-8")) + 1
+    for key, field in (("hits", "snippet"), ("knowledge", "text")):
+        for item in out[key]:
+            text = item[field]
+            plain = (
+                text.replace("«", "").replace("»", "")
+                if key == "hits"
+                else text
+            )
+            clean, changed = classify.redact(plain)
+            if changed:
+                size += max(0, len(json.dumps(clean)) - len(json.dumps(text)))
+    return size
 
 
 def _tally(conn, fts, where, params, inside, inside_params):
@@ -505,14 +521,68 @@ def _tally(conn, fts, where, params, inside, inside_params):
     return total, other
 
 
-def _paginate(entries: list, recent: bool, limit: int, page: int):
-    """(the page's entries, whether more follow); recent re-sorts the top
-    RECENT_POOL by ts, newest first, before paging."""
-    pool = entries[:RECENT_POOL] if recent else entries
-    if recent:
-        pool = sorted(pool, key=lambda e: e["row"]["ts"] or "", reverse=True)
-    start = (page - 1) * limit
-    return pool[start : start + limit], len(pool) > start + limit
+def _paginate(hits: list[dict], out: dict, limit: int, page: int) -> dict:
+    """Partition rendered hits before selecting a numeric page."""
+    offset, number = 0, 1
+    while True:
+        current = out | {
+            "page": number,
+            "hits": [],
+            "knowledge": (
+                [dict(k) for k in out["knowledge"]] if number == 1 else []
+            ),
+            "has_more": offset < len(hits),
+            "stages": out["stages"] | {"returned": 0},
+        }
+        # Keep knowledge navigation on page one, shortening previews only.
+        while _output_size(current) > OUTPUT_LIMIT and any(
+            k["text"] for k in current["knowledge"]
+        ):
+            entry = max(current["knowledge"], key=lambda k: len(k["text"]))
+            entry["text"] = entry["text"][: len(entry["text"]) // 2]
+            entry["text_truncated"] = True
+        if _output_size(current) > OUTPUT_LIMIT:
+            if current["knowledge"] and page > 1:
+                number += 1
+                continue
+            return _error("output_too_large") | {
+                "note": "Search metadata exceeds 6 KiB; narrow query/scope. "
+                "For oversized knowledge, use pctx know list/show; "
+                "search --page 2 continues to event hits.",
+                "has_more": bool(current["knowledge"] and hits),
+            }
+        while offset < len(hits) and len(current["hits"]) < limit:
+            hit = dict(hits[offset])
+            current["hits"].append(hit)
+            current["stages"]["returned"] = len(current["hits"])
+            current["has_more"] = offset + 1 < len(hits)
+            if _output_size(current) > OUTPUT_LIMIT:
+                if len(current["hits"]) > 1 or current["knowledge"]:
+                    current["hits"].pop()
+                    current["stages"]["returned"] = len(current["hits"])
+                    current["has_more"] = True
+                    break
+                snippet = hit["snippet"]
+                hit["snippet_truncated"] = True
+                hit["snippet"] = ""
+                if _output_size(current) > OUTPUT_LIMIT:
+                    return _error("output_too_large") | {
+                        "note": f"Hit {hit['id']} metadata exceeds 6 KiB; "
+                        f"use pctx open {hit['id']} to inspect the original.",
+                    }
+                low, high = 0, len(snippet)
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    hit["snippet"] = snippet[:middle]
+                    if _output_size(current) <= OUTPUT_LIMIT:
+                        low = middle
+                    else:
+                        high = middle - 1
+                hit["snippet"] = snippet[:low]
+            offset += 1
+        if number == page:
+            return current
+        number = page if offset == len(hits) else number + 1
 
 
 def _render(conn, fts, shown, entries, total) -> list[dict]:
@@ -608,14 +678,15 @@ def search(
     entries, session_capped, tool_capped = _compose(
         rows, limit, per_session=root is None, tools=not kinds and root is None
     )
-    shown, has_more = _paginate(entries, recent, limit, page)
-    hits = _render(conn, fts, shown, entries, total)
+    pool = entries[:RECENT_POOL] if recent else entries
+    if recent:
+        pool = sorted(pool, key=lambda e: e["row"]["ts"] or "", reverse=True)
+    hits = _render(conn, fts, pool, entries, total)
     out |= {
         "scope": _scope_label(conn, ids, scope, all_projects),
         "hits": hits,
         "page": page,
         "limit": limit,
-        "has_more": has_more,
         "other_scopes": dict(
             sorted(other.items(), key=lambda kv: (-kv[1], kv[0]))[
                 :OTHER_SCOPES
@@ -630,14 +701,14 @@ def search(
             "returned": len(hits),
         },
     }
-    if page == 1 and root is None:
+    if root is None:
         out["knowledge"] = _knowledge(conn, fts, ids, all_projects)
     if not total and other:
         out["note"] = (
             f"0 matches in this scope; {sum(other.values())} matches outside"
             " this scope; use --all-projects"
         )
-    return _fit(out | _freshness(status))
+    return _paginate(hits, out | _freshness(status), limit, page)
 
 
 _EVENT_SQL = (
