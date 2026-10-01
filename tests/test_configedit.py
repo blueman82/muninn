@@ -29,7 +29,7 @@ notes = \"\"\"
 
 {MKT}
 source_type = "local"
-source = "/fake/old-tree"
+source = "/fake/source-dir"
 
 [marketplaces.other]
 source = "/fake/other"
@@ -59,7 +59,7 @@ class TomlSectionTest(unittest.TestCase):
     def test_header_inside_multiline_string_is_not_a_section(self):
         fake = '[plugins."looks-like-a-header"]'
         self.assertIsNone(ce.get_section(TOML, fake))
-        self.assertIn('source = "/fake/old-tree"', ce.get_section(TOML, MKT))
+        self.assertIn('source = "/fake/source-dir"', ce.get_section(TOML, MKT))
 
     def test_remove_then_restore_is_byte_identical(self):
         for header in NAMED:
@@ -75,7 +75,7 @@ class TomlSectionTest(unittest.TestCase):
     def test_parse_section_reads_only_that_block(self):
         self.assertEqual(
             ce.parse_section(TOML, MKT, {"source_type", "source"}),
-            {"source_type": "local", "source": "/fake/old-tree"},
+            {"source_type": "local", "source": "/fake/source-dir"},
         )
         self.assertEqual(
             ce.parse_section(TOML, PLUGIN, {"enabled"}), {"enabled": False}
@@ -91,10 +91,10 @@ class TomlSectionTest(unittest.TestCase):
         cases = {
             "duplicate": TOML + f"\n{MKT}\nsource = 'x'\n",
             "inline table": TOML.replace(
-                'source = "/fake/old-tree"', "source = { a = 1 }"
+                'source = "/fake/source-dir"', "source = { a = 1 }"
             ),
             "array value": TOML.replace(
-                'source = "/fake/old-tree"', 'source = ["x"]'
+                'source = "/fake/source-dir"', 'source = ["x"]'
             ),
             "comment in section": TOML.replace(
                 "enabled = false", "enabled = false\n# note"

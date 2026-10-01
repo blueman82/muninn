@@ -83,7 +83,7 @@ CREATE TABLE event (id INTEGER PRIMARY KEY,
   scope_id INTEGER NOT NULL REFERENCES scope(id),
   cwd TEXT,                          -- exact cwd string in effect (A3)
   parent_event_id INTEGER,           -- tool_error -> its tool_call; no FK
-  flags INTEGER NOT NULL DEFAULT 0,  -- 1 legacy-envelope marker, 2 redacted,
+  flags INTEGER NOT NULL DEFAULT 0,  -- 1 injected-block marker, 2 redacted,
                                      -- 4 truncated (>64 KiB)
   text TEXT NOT NULL, UNIQUE (source_id, line, part));
 CREATE INDEX event_scope_ts ON event(scope_id, ts);

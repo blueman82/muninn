@@ -2,8 +2,8 @@
 
 Status: Accepted, 2026-10-01. Decided by: owner ("only have one pinned release, nothing else").
 
-**Context.** The launchd job and both hooks run `~/.local/lib/provenance-context/current/bin/pctx`. Earlier installs kept
-superseded release directories and a moved-aside data directory.
+**Context.** The launchd job and both hooks run `~/.local/lib/provenance-context/current/bin/pctx`. Superseded
+release directories would otherwise accumulate.
 
 **Decision.** `~/.local/lib/provenance-context/` holds one release directory, the `current` and `python` links,
 `install-record.json` and `install.log`. `install.installer --upgrade` re-pins a clean commit, restarts the job with

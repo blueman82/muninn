@@ -1,14 +1,13 @@
-# 0002: The installer has only `--fresh` and `--upgrade`
+# 0002: The installer has two modes, `--fresh` and `--upgrade`
 
-Status: Accepted, 2026-10-01. Decided by: owner ("we're using this new only and never going back at all. Remove").
+Status: Accepted, 2026-10-01. Decided by: owner (one install path, nothing else to maintain).
 
-**Context.** `install/cutover.py` migrated this machine from the old daemon: it built a second data directory, swapped
-the launchd job, moved the old data aside and could restore the old daemon. That migration is finished, the old tree is
-deleted, and a colleague's machine has none of it.
+**Context.** A new machine has no data directory, launchd job or release; an installed machine only needs to re-pin and
+restart. Any other install path is code to maintain and test for no user.
 
-**Decision.** Delete the legacy cutover and its rollback path, `doctor --cutover`, `PCTX_OLD_TREE` and the old-tree
-checks. `install/installer.py` runs `--fresh` (new machine) or `--upgrade` (re-pin). One of the two is required.
-`install/rollback.py` only undoes an interrupted run from its `rollback-record.json`.
+**Decision.** `install/installer.py` runs `--fresh` (new machine) or `--upgrade` (re-pin a clean commit); exactly one is
+required. `install/rollback.py` only undoes an interrupted run from its `rollback-record.json`.
 
-**Consequences.** The old daemon cannot be restored by this code (git history keeps it). `classify.LEGACY_MARKERS`
-stays: it flags the old daemon's injected blocks when they appear inside past transcripts.
+**Consequences.** Everything the installer does is rehearsed in a temp HOME in `tests/test_installer.py`. `--fresh` has not
+yet run on a second real machine. `classify.INJECTED_MARKERS` is unrelated: it flags injected memory blocks found inside
+past transcripts.

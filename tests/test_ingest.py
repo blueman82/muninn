@@ -121,7 +121,7 @@ class SourceModeTests(IngestCase):
             "SELECT line, byte_offset, line_sha256, seq, ts, cwd, scope_id"
             " FROM event ORDER BY line"
         ).fetchall()
-        for row in rows:  # I3: identity is the old record hash of the line
+        for row in rows:  # I3: identity is the record hash of the line
             begin = sum(len(r) + 1 for r in raw[: row["line"] - 1])
             self.assertEqual(row["byte_offset"], begin)
             self.assertEqual(

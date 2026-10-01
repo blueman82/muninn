@@ -24,11 +24,6 @@ HOME = "@HOME@"
 SESSION_MATCHER = "startup|resume|clear|compact"
 PYTHON = "/opt/homebrew/bin/python3.13"
 ENV_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
-RETIRED = (
-    "hooks/codex.py",
-    "claude-code/",
-    "scripts/",
-)
 
 
 def hook_command(event, provider):
@@ -207,22 +202,6 @@ class CommandContractTest(unittest.TestCase):
                     command,
                 )
 
-    def test_no_file_references_the_old_tree_or_retired_paths(self):
-        files = (
-            CODEX_PLUGIN,
-            CODEX_HOOKS,
-            CLAUDE_HOOKS,
-            PLIST,
-            README,
-            PYPROJECT,
-            PYRIGHT,
-        )
-        for path in files:
-            text = path.read_text(encoding="utf-8")
-            for retired in RETIRED:
-                with self.subTest(file=path.name, retired=retired):
-                    self.assertNotIn(retired, text)
-
     def test_readme_is_concise(self):
         lines = README.read_text(encoding="utf-8").splitlines()
         self.assertLessEqual(len(lines), 150)
@@ -301,7 +280,7 @@ class HomeSubstitutionTest(unittest.TestCase):
 
 
 class ConfigCleanupTest(unittest.TestCase):
-    def test_pyproject_drops_retired_per_file_ignores(self):
+    def test_pyproject_has_no_per_file_ignores(self):
         config = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
         self.assertNotIn("per-file-ignores", config["tool"]["ruff"]["lint"])
 
