@@ -52,8 +52,7 @@ session environment variables.
 - `pctx erase --session S | --event REF | --match TEXT`: forget content;
   `--dry-run` previews the targets without deleting.
 - `pctx stats` and `pctx doctor`: counts, database size and free space, and
-  health checks; `doctor --cutover` adds the cutover checks. `pctx compact`
-  vacuums the database. `--pretty` (or `PCTX_PRETTY=1`) indents any JSON.
+  health checks. `pctx compact` vacuums the database. `--pretty` (or `PCTX_PRETTY=1`) indents any JSON.
 - `pctx ingest`, `pctx serve`, `pctx hook ...`: catch-up ingest, the poller
   loop, and the provider hooks below.
 
@@ -103,35 +102,32 @@ themselves are never stored.
   cannot bring erased content back. It uses secure delete on the tables and
   the full-text index, then scans the data directory for residue and reports
   it. Provider transcripts, Time Machine and free disk blocks are out of its
-  reach; `erase` prints the provider file paths and warns about any legacy
-  data directory.
+  reach; `erase` prints the provider file paths and other derived copies.
 
-## Install, cutover and rollback
+## Install and rollback
 
-See `docs/` (quick start, troubleshooting, architecture). `install.cutover`
-runs as a legacy cutover, `--fresh` or `--upgrade`; each ends with one
+See `docs/` (quick start, troubleshooting, architecture). `install.installer`
+runs as `--fresh` (new machine) or `--upgrade` (re-pin); each ends with one
 pinned release.
 
 The files here are templates. `@HOME@` is a literal placeholder that the
-cutover script replaces with the real home directory.
+installer replaces with the real home directory.
 
 - `integrations/claude/settings-hooks.json`: the `hooks` fragment merged into
   `~/.claude/settings.json` (SessionStart and UserPromptSubmit).
 - `integrations/codex/`: the Codex plugin `provenance-context`, version 0.2.0,
   hooks only (no MCP server, no skills): `.codex-plugin/plugin.json` and
   `hooks/hooks.json`. Codex skips plugin hooks until they are trusted with
-  `/hooks`, unless the cutover verified the trust hash.
+  `/hooks`, unless the installer verified the trust hash.
 - `launchd/com.provenance-context.plist`: the poller job. It runs
   `~/.local/lib/provenance-context/current/bin/pctx serve --interval 60` with
   `KeepAlive`, `Umask` "077" and no environment except `PATH`.
 
-`install/cutover.py` performs the live cutover: it records only the config
-keys it touches, pins the release under `~/.local/lib/provenance-context/`,
-pre-builds the index, swaps the launchd job and provider config, moves the
-previous data directory aside, and ends with `pctx doctor --cutover`.
-`install/rollback.py` restores the recorded values and the previous data
-directory. The moved-aside directory is kept for an acceptance window (default
-7 days) before the owner decides to delete it.
+`install/installer.py` records only the config keys it touches, pins the
+release under `~/.local/lib/provenance-context/`, indexes existing
+transcripts (`--fresh`), starts or restarts the launchd job, merges provider
+config, ends with `pctx doctor`, and deletes every other release.
+`install/rollback.py` restores the recorded values from an interrupted run.
 
 ## Development
 

@@ -10,7 +10,7 @@ Instructions for coding agents working in this repo. Any parent-directory
   `query.py`, `knowledge.py`, `erase.py`, `hook.py`, `obs.py` (stats, doctor,
   logs).
 - `bin/pctx`: launcher that finds the interpreter; do not hardcode a path.
-- `install/`: `cutover.py` (legacy cutover, `--fresh`, `--upgrade`),
+- `install/`: `installer.py` (`--fresh`, `--upgrade`),
   `rollback.py`, `configedit.py`.
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
 - `trial_harness/`: the evaluation driver for this machine only; not runtime.
@@ -24,7 +24,7 @@ Instructions for coding agents working in this repo. Any parent-directory
 - Output is JSON on stdout; `--pretty` only changes indentation. Hooks must
   keep returning compact JSON and exit 0.
 - Do not write to a user's real `HOME`, launchd domain or provider config in
-  tests: use a temp `PCTX_HOME` and the fakes in `tests/test_cutover.py`.
+  tests: use a temp `PCTX_HOME` and the fakes in `tests/test_installer.py`.
 - Never touch provider transcripts.
 
 ## Check

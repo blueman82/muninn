@@ -161,8 +161,7 @@ def _parser() -> _Parser:
     p = cmd("stats", help="counts")
     p.add_argument("--usage", action="store_true")
     cmd("compact", help="VACUUM the store to return free space")
-    p = cmd("doctor", help="health checks (exit 1 when unhealthy)")
-    p.add_argument("--cutover", action="store_true")
+    cmd("doctor", help="health checks (exit 1 when unhealthy)")
     cmd("rebuild", help="rebuild the store from the transcripts")
     p = cmd("know", help="the cited knowledge ledger")
     kinds = p.add_subparsers(dest="know_cmd", required=True)
@@ -633,7 +632,7 @@ def _stats(a, env, home, record):
 
 
 def _doctor(a, env, home, record):
-    out = obs.doctor(home, env, cutover=a.cutover)
+    out = obs.doctor(home, env)
     record["counts"] = {"failed": sum(c["ok"] is False for c in out["checks"])}
     return (0 if out["ok"] else 1), out
 

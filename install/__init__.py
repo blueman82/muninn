@@ -1,1 +1,1 @@
-"""Live cutover and rollback between the legacy daemon and pctx."""
+"""Installer and rollback for pctx."""

@@ -698,7 +698,7 @@ class HookCliCase(tcli.CliCase):
 
 
 class HookCommandTests(HookCliCase):
-    def test_cutover_hook_disabled_prints_empty_object(self):
+    def test_installed_hook_commands_disabled_print_empty_object(self):
         commands = [
             h["command"].replace("@HOME@", str(self.tmp / "userhome"))
             for groups in json.loads(HOOKS_JSON.read_text())["hooks"].values()

@@ -31,9 +31,9 @@ flowchart LR
   `~/.local/lib/provenance-context/current/bin/pctx`; `bin/pctx` picks the
   interpreter from `$PCTX_PYTHON`, then the installer's `python` link, then
   Python 3.13+ on PATH.
-- **Installer.** `install/cutover.py` has three modes (legacy cutover,
-  `--fresh`, `--upgrade`) over one step pipeline: record, pin, build or
-  restart, merge provider config, verify, prune. `install/rollback.py`
+- **Installer.** `install/installer.py` has two modes (`--fresh`,
+  `--upgrade`) over one step pipeline: record, pin, build or restart, merge
+  provider config, verify, prune. `install/rollback.py`
   reverses it from the recorded values.
 - **Trust.** Everything stored is untrusted historical data. Secrets are
   redacted at ingest and on output; automatic injection is framed so pasted

@@ -349,8 +349,6 @@ class ScopeOfEraseTests(EraseCase):
     def test_out_of_scope_listing(self):
         home = Path(self.env["HOME"])
         present = [
-            home / ".local/share/provenance-context-legacy-20260930T120000",
-            home / ".claude/plugins/cache/provenance-context-local",
             home / ".codex/plugins/cache/provenance-context-local",
             home / ".codex/memories",
         ]

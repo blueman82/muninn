@@ -1,11 +1,12 @@
-"""Live cutover from the legacy provenance-context daemon to pctx (§6.3).
+"""Install pctx on this machine: --fresh (new machine) or --upgrade (re-pin).
 
-Run from the new repo root, never from the old tree:
-  python3.13 -E -s -B -m install.cutover \\
-      --repo DIR --sha SHA [--expect-old-tree-hash H] [--dry-run]
+Run from the repo root, at a clean commit:
+  python3.13 -E -s -B -m install.installer \
+      --repo DIR --sha SHA (--fresh | --upgrade) [--dry-run]
 Any failure after the record is written runs install.rollback. Every
-external effect goes through ctx.run (launchctl, ps, git, cp, pctx,
-codex), so tests rehearse the whole sequence in a temp HOME.
+external effect goes through ctx.run (launchctl, ps, git, pctx, codex), so
+tests rehearse the whole sequence in a temp HOME. Each run ends with exactly
+one pinned release.
 """
 
 import argparse
@@ -29,9 +30,6 @@ from pathlib import Path
 from install import configedit as ce
 
 LABEL = "com.provenance-context"
-# The legacy daemon tree to retire; PCTX_OLD_TREE names it. Unset, it is a
-# path that never exists, so fresh installs and upgrades never match it.
-OLD_TREE = Path(os.environ.get("PCTX_OLD_TREE") or "/nonexistent/old-tree")
 MKT_NAME = "provenance-context-local"
 PLUGIN_ID = f"provenance-context@{MKT_NAME}"
 MARKETPLACE = f"[marketplaces.{MKT_NAME}]"
@@ -66,7 +64,7 @@ GIT_ENV = dict(os.environ, GIT_OPTIONAL_LOCKS="0")
 
 
 class StepFailed(Exception):
-    """A cutover step could not complete; rollback follows."""
+    """An install step could not complete; rollback follows."""
 
 
 @dataclasses.dataclass
@@ -74,27 +72,24 @@ class Ctx:
     home: Path
     run: object  # run(argv, env=None, input=None) -> CompletedProcess
     ts: str
-    old_tree: Path = OLD_TREE
     uid: int = os.getuid()
     dry_run: bool = False
     now: object = time.time
     sleep: object = time.sleep
     say: object = print
     probe: object = None  # probe(ctx) -> Codex hooks/list entries
-    fresh: bool = False  # a machine with no legacy daemon, data or tree
+    fresh: bool = False  # a new machine: no data, plist or release yet
     upgrade: bool = False  # already on pctx: re-pin, restart, prune
 
     def __post_init__(self):
         h, share = self.home, self.home / ".local/share"
         self.data = share / "provenance-context"
-        self.new_data = share / "provenance-context.new"
-        self.legacy = share / f"provenance-context-legacy-{self.ts}"
+        self.rdir = share / f"provenance-context-install-{self.ts}"
         self.failed = share / f"provenance-context-failed-{self.ts}"
         self.lib = h / ".local/lib/provenance-context"
         self.pctx = h / ".local/bin/pctx"
         self.plist = h / PLIST
         self.settings = h / ".claude/settings.json"
-        self.known = h / ".claude/plugins/known_marketplaces.json"
         self.codex_home = h / ".codex"
         self.config = h / ".codex/config.toml"
         self.cache = (
@@ -171,38 +166,8 @@ def is_new(ctx, j):
     return bool(j and j["pid"] and f"{ctx.lib}/" in j["cmd"])
 
 
-def old_procs(ctx):
-    """Pids of processes whose argv runs old-tree code."""
-    out = must(ctx, ["ps", "-ww", "-axo", "pid=,command="]).stdout
-    code = [
-        f"{ctx.old_tree}/{d}/" for d in ("scripts", "hooks", "claude-code")
-    ]
-    bad = []
-    for line in out.decode(errors="replace").splitlines():
-        pid, _, cmd = line.strip().partition(" ")
-        if pid != str(os.getpid()) and any(c in cmd for c in code):
-            bad.append(pid)
-    return bad
 
 
-def tree_hash(ctx):
-    """evals.json E1's hash of the old tree, computed read-only."""
-
-    def git(*args):
-        argv = ["git", "-C", ctx.old_tree, *args]
-        return must(ctx, argv, env=GIT_ENV).stdout
-
-    h = hashlib.sha256(
-        git("symbolic-ref", "--short", "HEAD")
-        + git("rev-parse", "HEAD")
-        + git("diff", "HEAD", "--binary")
-    )
-    for name in git("ls-files", "-o", "--exclude-standard", "-z").split(b"\0"):
-        if name and b"__pycache__" not in name and not name.endswith(b"/"):
-            with open(ctx.old_tree / os.fsdecode(name), "rb") as f:
-                digest = hashlib.file_digest(f, "sha256").hexdigest()
-            h.update(digest.encode() + b" *" + name + b"\n")
-    return h.hexdigest()
 
 
 LABELS = {
@@ -266,51 +231,25 @@ def codex_hooks(data: bytes) -> list:
 # ---- config transforms: pure, bytes/text in and out ---------------------
 
 
-def ours(group, old):
-    """A settings hook group that runs pctx or old-tree code."""
+def ours(group):
+    """A settings hook group that runs pctx."""
     cmds = " ".join(h.get("command", "") for h in group.get("hooks", []))
-    return "/.local/bin/pctx hook" in cmds or str(old) in cmds
+    return "/.local/bin/pctx hook" in cmds
 
 
 def claude_paths(obj):
-    """The only settings.json keys the cutover may change."""
-    plugins = obj.get("enabledPlugins")
-    plugins = plugins if isinstance(plugins, dict) else {}
-    mine = [k for k in plugins if k.split("@")[0] == "provenance-context"]
-    return (
-        [("hooks", e) for e in CLAUDE_EVENTS]
-        + [("extraKnownMarketplaces", MKT_NAME)]
-        + [("enabledPlugins", k) for k in mine]
-    )
+    """The only settings.json keys the installer may change."""
+    return [("hooks", e) for e in CLAUDE_EVENTS]
 
 
-def edit_settings(data, fragment, old):
+def edit_settings(data, fragment):
     obj = ce.load_json(data)
     for event in CLAUDE_EVENTS:
         current = ce.jget(obj, ("hooks", event))[1] or []
         if not isinstance(current, list):
             raise ce.Refused(f"settings.json hooks.{event} is not a list")
-        keep = [g for g in current if not ours(g, old)]
+        keep = [g for g in current if not ours(g)]
         ce.jset(obj, ("hooks", event), keep + fragment[event])
-    for path in claude_paths(obj)[2:]:
-        value = ce.jget(obj, path)[1]
-        if path[0] == "enabledPlugins" or str(old) in json.dumps(value):
-            ce.jdel(obj, path)
-    if str(old) in json.dumps(obj.get("extraKnownMarketplaces")):
-        raise ce.Refused(
-            "settings.json: another marketplace names the old tree"
-        )
-    return ce.dump_like(data, obj)
-
-
-def edit_known(data, old):
-    obj = ce.load_json(data)
-    if str(old) in json.dumps(ce.jget(obj, (MKT_NAME,))[1]):
-        ce.jdel(obj, (MKT_NAME,))
-    if str(old) in json.dumps(obj):
-        raise ce.Refused(
-            "known_marketplaces.json: an entry still names the old tree"
-        )
     return ce.dump_like(data, obj)
 
 
@@ -401,7 +340,7 @@ def codex_record(text):
 
 def save(ctx, rec):
     data = json.dumps(rec, indent=1).encode()
-    ce.atomic_write(ctx.legacy / "cutover-record.json", data, 0o600)
+    ce.atomic_write(ctx.rdir / "rollback-record.json", data, 0o600)
 
 
 def install_record(ctx, rec, outcome):
@@ -435,7 +374,7 @@ def install_record(ctx, rec, outcome):
         "record": (
             None
             if rec.get("record_removed")
-            else str(ctx.legacy / "cutover-record.json")
+            else str(ctx.rdir / "rollback-record.json")
         ),
     }
     ce.atomic_write(
@@ -449,12 +388,10 @@ def load_record(path):
     return json.loads(Path(path).read_text())
 
 
-def preflight(ctx, repo, sha, expect_tree):
+def preflight(ctx, repo, sha):
     """Check everything and dry-apply every config edit; change nothing."""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise StepFailed("--sha must be a full 40-hex commit id")
-    if repo.resolve() == ctx.old_tree.resolve():
-        raise StepFailed("--repo is the old tree")
 
     def rgit(*args):
         return must(ctx, ["git", "-C", repo, *args], env=GIT_ENV).stdout
@@ -474,7 +411,6 @@ def preflight(ctx, repo, sha, expect_tree):
         raise StepFailed(
             "Claude hook fragment must be SessionStart+UserPromptSubmit"
         )
-    tree = None if ctx.fresh or ctx.upgrade else tree_hash(ctx)
     if ctx.upgrade:
         if not (ctx.data.is_dir() and ctx.plist.exists()):
             raise StepFailed("nothing to upgrade: no data dir or plist")
@@ -486,18 +422,14 @@ def preflight(ctx, repo, sha, expect_tree):
         for path in (ctx.data, ctx.plist):
             if os.path.lexists(path):
                 raise StepFailed(f"{path} exists: already installed")
-    if expect_tree and tree != expect_tree:
-        raise StepFailed("old tree hash differs from the expected baseline")
-    for path in (ctx.legacy, ctx.new_data, ctx.failed):
+    for path in (ctx.rdir, ctx.failed):
         if os.path.lexists(path):
             raise StepFailed(f"{path} already exists")
     if ctx.pctx.exists() and not ctx.pctx.is_symlink():
         raise StepFailed(f"{ctx.pctx} is not a symlink")
     touch = not ctx.upgrade  # an upgrade leaves provider config alone
     if touch and ctx.settings.exists():
-        edit_settings(ctx.settings.read_bytes(), fragment, ctx.old_tree)
-    if touch and ctx.known.exists():
-        edit_known(ctx.known.read_bytes(), ctx.old_tree)
+        edit_settings(ctx.settings.read_bytes(), fragment)
     if touch and ctx.config.exists():
         text = ctx.config.read_text()
         hooks = codex_hooks(files["integrations/codex/hooks/hooks.json"])
@@ -514,10 +446,8 @@ def preflight(ctx, repo, sha, expect_tree):
         "home": str(ctx.home),
         "repo": str(repo),
         "sha": sha,
-        "old_tree": str(ctx.old_tree),
-        "old_tree_hash": tree,
         "python": {"path": sys.executable, "version": sys.version.split()[0]},
-        "legacy": str(ctx.legacy),
+        "rdir": str(ctx.rdir),
         "steps": [],
     }
 
@@ -532,16 +462,12 @@ def dry(ctx, text):
 
 
 def record(ctx, rec):
-    """Step 1: launchd state, old plist hash, before-values of our keys."""
+    """Step 1: before-values of our config keys and the links."""
     settings = (
         ce.load_json(ctx.settings.read_bytes()) if rec["has_claude"] else {}
     )
-    known = ce.load_json(ctx.known.read_bytes()) if ctx.known.exists() else {}
     rec["claude"] = {
-        "settings": [json_entry(settings, p) for p in claude_paths(settings)],
-        "known": (
-            [json_entry(known, (MKT_NAME,))] if ctx.known.exists() else []
-        ),
+        "settings": [json_entry(settings, p) for p in claude_paths(settings)]
     }
     rec["codex"] = (
         codex_record(ctx.config.read_text()) if rec["has_codex"] else []
@@ -550,23 +476,16 @@ def record(ctx, rec):
     rec["links"] = {
         str(p): os.readlink(p) if p.is_symlink() else None for p in links
     }
-    plist = ctx.plist.read_bytes() if ctx.plist.exists() else None
-    rec["old_plist"] = plist and hashlib.sha256(plist).hexdigest()
     keys = [".".join(e["path"]) for e in rec["claude"]["settings"]]
     keys += [e["header"] for e in rec["codex"]]
-    if dry(ctx, f"record launchd {ctx.target}, plist sha256, keys {keys}"):
+    if dry(ctx, f"record links and config keys {keys}"):
         return
-    rec["launchd"] = job(ctx)
     try:
         version = ctx.run(["codex", "--version"]).stdout.decode().strip()
     except OSError:  # no codex on this machine
         version = ""
     rec["trust"] = "auto" if version in CODEX_VERIFIED else "owner"
-    ctx.legacy.mkdir(mode=0o700)
-    if plist is not None:
-        ce.atomic_write(
-            ctx.legacy / "com.provenance-context.plist", plist, 0o600
-        )
+    ctx.rdir.mkdir(mode=0o700, parents=True)
     save(ctx, rec)
 
 
@@ -614,13 +533,6 @@ def pctx_env(home, **extra):
     return dict(env, PCTX_HOME=str(home), **extra)
 
 
-def prebuild(ctx, rec):
-    """Step 3: full ingest into <data>.new, then doctor."""
-    if dry(ctx, f"PCTX_HOME={ctx.new_data} pctx ingest --full; pctx doctor"):
-        return
-    ctx.new_data.mkdir(mode=0o700)
-    must(ctx, [ctx.pctx, "ingest", "--full"], env=pctx_env(ctx.new_data))
-    must(ctx, [ctx.pctx, "doctor"], env=pctx_env(ctx.new_data))
 
 
 def ingest_fresh(ctx, rec):
@@ -659,40 +571,10 @@ def prune(ctx, rec):
         shutil.rmtree(path)
 
 
-def snapshot(ctx, rec):
-    """A8: APFS clone of the legacy data dir while the old job still runs."""
-    dest = ctx.legacy / "snapshot"
-    if dry(ctx, f"cp -c -R {ctx.data} {dest}") or not ctx.data.exists():
-        return
-    must(ctx, ["cp", "-c", "-R", ctx.data, dest])
 
 
-def stop_old(ctx, rec):
-    """Step 4: bootout; wait for the label and old-tree code to be gone."""
-    if dry(ctx, f"launchctl bootout {ctx.target}"):
-        return
-    if job(ctx):
-        ctx.run(["launchctl", "bootout", ctx.target])
-    wait(ctx, lambda: job(ctx) is None, 30, "old job still loaded")
-    wait(ctx, lambda: not old_procs(ctx), 30, "old-tree code still running")
 
 
-def swap(ctx, rec):
-    """Step 5: legacy data aside (kept), pre-built store in, catch up."""
-    if dry(
-        ctx, f"mv {ctx.data} {ctx.legacy}/data; mv {ctx.new_data} {ctx.data}"
-    ):
-        return
-    if ctx.data.exists():
-        os.rename(ctx.data, ctx.legacy / "data")
-    os.rename(ctx.new_data, ctx.data)
-    (ctx.legacy / "RETENTION.txt").write_text(
-        f"Legacy provenance-context data from the {ctx.ts} cutover. Keep "
-        "until the owner accepts the cutover (default 7 days); only the "
-        "owner deletes it. Rollback: python3.13 -E -s -B -m "
-        f"install.rollback --record {ctx.legacy}/cutover-record.json\n"
-    )
-    must(ctx, [ctx.pctx, "ingest"], env=pctx_env(ctx.data))
 
 
 def fresh(ctx, since):
@@ -731,7 +613,7 @@ def start_new(ctx, rec):
 
 
 def claude(ctx, rec):
-    """Step 7: merge our two hooks; drop old-tree marketplace entries."""
+    """Merge our two hooks into Claude settings."""
     if dry(ctx, f"merge SessionStart+UserPromptSubmit into {ctx.settings}"):
         return
     if not rec["has_claude"]:
@@ -743,20 +625,13 @@ def claude(ctx, rec):
     def check(before, after):
         ce.json_check(before, after, claude_paths(ce.load_json(before)))
 
-    edit = lambda b: edit_settings(b, fragment, ctx.old_tree)  # noqa: E731
-    ce.edit_file(ctx.settings, edit, check)
-    if ctx.known.exists():
-        ce.edit_file(
-            ctx.known,
-            lambda b: edit_known(b, ctx.old_tree),
-            lambda a, b: ce.json_check(a, b, [(MKT_NAME,)]),
-        )
+    ce.edit_file(ctx.settings, lambda b: edit_settings(b, fragment), check)
 
 
 def codex(ctx, rec):
-    """Step 8 in A6 order: untrust, retire stale cache, install, trust."""
+    """Codex in A6 order: untrust, install, enable, trust."""
     source = f"{ctx.lib}/current/integrations/codex"
-    if dry(ctx, f"codex: drop old trust keys, move {ctx.cache}, add plugin"):
+    if dry(ctx, "codex: drop trust keys, add plugin, enable, trust"):
         return
     if not rec["has_codex"]:
         ctx.say(f"{ctx.config} not found: Codex left unconfigured")
@@ -768,12 +643,6 @@ def codex(ctx, rec):
         )
 
     edit(drop_trust)
-    # A Codex install deletes other cached versions (store.rs:689-718):
-    # keep the old copy as residue for the owner instead.
-    if ctx.cache.exists():
-        (ctx.legacy / "codex-plugin-cache").mkdir()
-        stale = ctx.legacy / "codex-plugin-cache" / ctx.cache.name
-        os.rename(ctx.cache, stale)
     edit(lambda text: repoint(text, source))
     before = ctx.config.read_bytes()
     env = dict(os.environ, CODEX_HOME=str(ctx.codex_home))
@@ -796,26 +665,6 @@ def codex(ctx, rec):
         ctx.say(OWNER_STEP)
 
 
-def old_refs(ctx):
-    """Config files or plists that still reference old-tree code."""
-    code = [
-        f"{ctx.old_tree}/{d}".encode()
-        for d in ("scripts", "hooks", "claude-code")
-    ]
-    files = [ctx.settings, ctx.known, ctx.config]
-    files += sorted(ctx.plist.parent.glob("*.plist"))
-    bad = [
-        f.name
-        for f in files
-        if f.exists() and any(c in f.read_bytes() for c in code)
-    ]
-    if ctx.config.exists():
-        mkt = ce.parse_section(
-            ctx.config.read_text(), MARKETPLACE, CODEX_KEYS[MARKETPLACE]
-        )
-        if str(ctx.old_tree) in json.dumps(mkt):
-            bad.append("config.toml marketplace")
-    return bad
 
 
 def hook_commands(ctx):
@@ -825,7 +674,7 @@ def hook_commands(ctx):
         h["command"]
         for event in CLAUDE_EVENTS
         for group in (ce.jget(settings, ("hooks", event))[1] or [])
-        if ours(group, ctx.old_tree)
+        if ours(group)
         for h in group["hooks"]
     ]
     for path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
@@ -834,8 +683,8 @@ def hook_commands(ctx):
 
 
 def verify(ctx, rec):
-    """Step 9: machine-readable checks; any failure triggers rollback."""
-    if dry(ctx, "verify: refs, processes, PID, heartbeat, hooks, doctor"):
+    """Machine-readable checks; any failure triggers rollback."""
+    if dry(ctx, "verify: PID, heartbeat, hooks, doctor"):
         return
     checks = []
 
@@ -843,11 +692,6 @@ def verify(ctx, rec):
         ok = None if ok is None else bool(ok)  # None: could not verify
         checks.append({"check": name, "ok": ok, "detail": detail})
 
-    if not (ctx.fresh or ctx.upgrade):
-        check("old_tree_unchanged", tree_hash(ctx) == rec["old_tree_hash"])
-    refs = old_refs(ctx)
-    check("no_old_tree_references", not refs, ", ".join(refs))
-    check("old_process_gone", not old_procs(ctx))
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
     check("heartbeat_fresh", fresh(ctx, 0))
@@ -859,10 +703,10 @@ def verify(ctx, rec):
         )
     if ctx.probe and rec["has_codex"]:
         codex_checks(ctx, rec, check)
-    r = ctx.run([ctx.pctx, "doctor", "--cutover"], env=pctx_env(ctx.data))
-    check("doctor_cutover", r.returncode == 0)
+    r = ctx.run([ctx.pctx, "doctor"], env=pctx_env(ctx.data))
+    check("doctor", r.returncode == 0)
     report = json.dumps({"checks": checks}, indent=1).encode()
-    ce.atomic_write(ctx.legacy / "verify.json", report, 0o600)
+    ce.atomic_write(ctx.rdir / "verify.json", report, 0o600)
     failed = [c["check"] for c in checks if c["ok"] is False]
     if failed:
         raise StepFailed("verify failed: " + ", ".join(failed))
@@ -901,18 +745,6 @@ def codex_checks(ctx, rec, check):
         ctx.say(OWNER_STEP)
 
 
-STEPS = (
-    pin,
-    prebuild,
-    snapshot,
-    stop_old,
-    swap,
-    start_new,
-    claude,
-    codex,
-    verify,
-    prune,
-)
 FRESH_STEPS = (pin, ingest_fresh, start_new, claude, codex, verify, prune)
 UPGRADE_STEPS = (pin, restart, verify, prune)
 
@@ -920,11 +752,11 @@ UPGRADE_STEPS = (pin, restart, verify, prune)
 def steps(ctx):
     if ctx.upgrade:
         return UPGRADE_STEPS
-    return FRESH_STEPS if ctx.fresh else STEPS
+    return FRESH_STEPS
 
 
-def cutover(ctx, repo, sha, expect_tree=None):
-    rec = preflight(ctx, Path(repo), sha, expect_tree)
+def install(ctx, repo, sha):
+    rec = preflight(ctx, Path(repo), sha)
     record(ctx, rec)
     step = record
     try:
@@ -942,7 +774,7 @@ def cutover(ctx, repo, sha, expect_tree=None):
             "error": f"{type(exc).__name__}: {exc}",
         }
         save(ctx, rec)
-        ctx.say(f"cutover failed at {step.__name__}: {exc}; rolling back")
+        ctx.say(f"install failed at {step.__name__}: {exc}; rolling back")
         from install.rollback import rollback
 
         for problem in rollback(ctx, rec):
@@ -950,12 +782,12 @@ def cutover(ctx, repo, sha, expect_tree=None):
         install_record(ctx, rec, "rolled_back")
         raise
     if ctx.upgrade and not ctx.dry_run:  # no rollback once the old is gone
-        shutil.rmtree(ctx.legacy)
+        shutil.rmtree(ctx.rdir)
         rec["record_removed"] = True
     install_record(ctx, rec, "ok")
     done = "planned" if ctx.dry_run else "done"
-    where = "install-record.json" if rec.get("record_removed") else ctx.legacy
-    ctx.say(f"cutover {done}; record in {where}")
+    where = "install-record.json" if rec.get("record_removed") else ctx.rdir
+    ctx.say(f"install {done}; record in {where}")
     return rec
 
 
@@ -995,7 +827,7 @@ def codex_probe(ctx, timeout=60):
         call(
             1,
             "initialize",
-            {"clientInfo": {"name": "pctx-cutover", "version": "1"}},
+            {"clientInfo": {"name": "pctx-install", "version": "1"}},
         )
         p.stdin.write(b'{"method": "initialized"}\n')
         result = call(2, "hooks/list", {"cwds": [str(ctx.home)]})["result"]
@@ -1006,25 +838,23 @@ def codex_probe(ctx, timeout=60):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="install.cutover")
+    ap = argparse.ArgumentParser(prog="install.installer")
     ap.add_argument("--repo", type=Path, required=True)
     ap.add_argument("--sha", required=True)
-    ap.add_argument("--expect-old-tree-hash")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument(
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
         "--upgrade",
         action="store_true",
         help="already on pctx: re-pin this commit, restart, keep one release",
     )
-    ap.add_argument(
+    mode.add_argument(
         "--fresh",
         action="store_true",
-        help="no legacy daemon or data (a colleague's machine)",
+        help="a new machine: no data, launchd job or release yet",
     )
     ap.add_argument("--home", type=Path, default=Path.home())
     args = ap.parse_args(argv)
-    if args.fresh and args.upgrade:
-        ap.error("--fresh and --upgrade are exclusive")
     if args.home.resolve() != Path.home().resolve() and not args.dry_run:
         ap.error(
             "--home is dry-run only: launchctl acts on the real gui domain"
@@ -1045,7 +875,7 @@ def main(argv=None):
         upgrade=args.upgrade,
     )
     try:
-        cutover(ctx, args.repo.resolve(), args.sha, args.expect_old_tree_hash)
+        install(ctx, args.repo.resolve(), args.sha)
     except (StepFailed, ce.Refused, ce.Raced) as exc:
         say(f"FAILED: {exc}")
         return 1

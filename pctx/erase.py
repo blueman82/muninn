@@ -29,9 +29,7 @@ NOT_COVERED = (
     "Time Machine and other backups",
     "free filesystem blocks (FileVault encrypts them at rest)",
 )
-_LEGACY = ".local/share/provenance-context-legacy-*"
 _DERIVED = (
-    ".claude/plugins/cache/provenance-context-local",
     ".codex/plugins/cache/provenance-context-local",
     ".codex/memories",
 )
@@ -550,6 +548,5 @@ def _out_of_scope(env: Mapping[str, str]) -> list[str]:
     """Other derived copies that exist: listed for the owner, never
     deleted (O13, A13)."""
     home = Path(env.get("HOME") or Path.home())
-    found = [str(p) for p in home.glob(_LEGACY)]
-    found += [str(home / rel) for rel in _DERIVED if (home / rel).exists()]
+    found = [str(home / rel) for rel in _DERIVED if (home / rel).exists()]
     return sorted(found)

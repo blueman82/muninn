@@ -13,9 +13,9 @@
 
 From the repo root (a clean worktree at the commit you want):
 
-    python3.13 -E -s -B -m install.cutover \
+    python3.13 -E -s -B -m install.installer \
         --repo . --sha "$(git rev-parse HEAD)" --fresh --dry-run   # preview
-    python3.13 -E -s -B -m install.cutover \
+    python3.13 -E -s -B -m install.installer \
         --repo . --sha "$(git rev-parse HEAD)" --fresh
 
 `--fresh` refuses if the data directory or the launchd plist already exists.
@@ -28,7 +28,7 @@ run `/hooks` if the installer prints `OWNER STEP`.
 
 ## Upgrade an installed machine
 
-    python3.13 -E -s -B -m install.cutover \
+    python3.13 -E -s -B -m install.installer \
         --repo . --sha "$(git rev-parse HEAD)" --upgrade
 
 It re-pins the commit, restarts the poller, verifies, then deletes every other

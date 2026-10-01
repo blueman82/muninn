@@ -315,19 +315,6 @@ DATA_FILES = frozenset(
         "recall.off",
     }
 )
-# The rollback tree whose code must no longer run or be referenced (the
-# same test as install/cutover.py's verify step).
-# Set PCTX_OLD_TREE to a legacy daemon tree to have doctor --cutover check
-# that nothing still references it; unset (the default) skips those checks.
-OLD_TREE = os.environ.get("PCTX_OLD_TREE", "")
-OLD_CODE = tuple(
-    f"{OLD_TREE}/{d}"
-    for d in ("scripts", "hooks", "claude-code")
-    if OLD_TREE
-)
-_MARKETPLACE = "[marketplaces.provenance-context-local]"
-
-
 def _mode(path: Path) -> int:
     return path.stat().st_mode & 0o777
 
@@ -368,43 +355,9 @@ def _lock_free(home: Path) -> bool:
         return False
 
 
-def _old_refs(home_dir: Path) -> list[str]:
-    files = [
-        home_dir / ".claude/settings.json",
-        home_dir / ".claude/plugins/known_marketplaces.json",
-        home_dir / ".codex/config.toml",
-    ]
-    files += sorted((home_dir / "Library/LaunchAgents").glob("*.plist"))
-    bad = [
-        f.name
-        for f in files
-        if f.is_file()
-        and any(code.encode() in f.read_bytes() for code in OLD_CODE)
-    ]
-    config = home_dir / ".codex/config.toml"
-    if config.is_file():  # the old marketplace points at the tree root
-        section, inside = [], False
-        for line in config.read_text(errors="replace").splitlines():
-            if line.startswith("["):
-                inside = line.strip() == _MARKETPLACE
-            elif inside:
-                section.append(line)
-        if OLD_TREE and OLD_TREE in "\n".join(section):
-            bad.append("config.toml marketplace")
-    return bad
 
 
-def _old_procs() -> list[str]:
-    out = run(["ps", "-ww", "-axo", "pid=,command="]).stdout
-    bad = []
-    for line in out.decode(errors="replace").splitlines():
-        pid, _, cmd = line.strip().partition(" ")
-        if pid != str(os.getpid()) and any(c in cmd for c in OLD_CODE):
-            bad.append(pid)
-    return bad
-
-
-def doctor(home: Path, env: Mapping[str, str], *, cutover=False) -> dict:
+def doctor(home: Path, env: Mapping[str, str]) -> dict:
     """Health checks (design 7): errors decide ok; warn and info do not.
     Missing sources are information, never an error (D15)."""
     checks: list[dict] = []
@@ -515,17 +468,5 @@ def doctor(home: Path, env: Mapping[str, str], *, cutover=False) -> dict:
     check("roots_readable", not blocked, ",".join(blocked))
     absent = [n for n, p in roots.items() if not p.exists()]
     check("roots_present", True, ",".join(absent), level="info")
-    if cutover:
-        home_dir = Path(env.get("HOME") or Path.home())
-        refs = _old_refs(home_dir)
-        check("no_old_tree_references", not refs, ",".join(refs))
-        procs = _old_procs()
-        check("old_process_gone", not procs, ",".join(procs))
-        lib = f"{home_dir}/.local/lib/provenance-context/"
-        check(
-            "new_pid_alive",
-            job and job["pid"] and lib in job["cmd"],
-            job and job["pid"],
-        )
     ok = all(c["ok"] is not False for c in checks if c["level"] == "error")
     return {"ok": ok, "checks": checks}

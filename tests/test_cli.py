@@ -577,40 +577,6 @@ class StatsDoctorTests(CliCase):
         )
         self.assertTrue((self.home / "pctx.sqlite-journal").exists())
 
-    def test_doctor_cutover(self):
-        self.session(TID, "hello", "hi")
-        self.pctx("ingest")
-        home = Path(self.env["HOME"])
-        new = f"{home}/.local/lib/provenance-context/abc/bin/pctx serve"
-        code, out, _ = self.doctor("--cutover", run=fake_run(cmd=new))
-        self.assertEqual(code, 0, out)
-        old = "/legacy/tree"
-        legacy = mock.patch.multiple(
-            cli.obs,
-            OLD_TREE=old,
-            OLD_CODE=tuple(f"{old}/{d}" for d in ("scripts", "hooks")),
-        )
-        legacy.start()
-        self.addCleanup(legacy.stop)
-        settings = home / ".claude/settings.json"
-        settings.parent.mkdir(parents=True)
-        settings.write_text(json.dumps({"hooks": f"{old}/hooks/codex.py"}))
-        ps = f"  77 python3 {old}/scripts/cli.py serve\n"
-        code, out, _ = self.doctor("--cutover", run=fake_run(cmd="x", ps=ps))
-        got = self.checks(out)
-        self.assertEqual(code, 1)
-        self.assertEqual(
-            [
-                got[k]
-                for k in (
-                    "no_old_tree_references",
-                    "old_process_gone",
-                    "new_pid_alive",
-                )
-            ],
-            [False, False, False],
-        )
-
 
 class RebuildTests(CliCase):
     def setUp(self):
