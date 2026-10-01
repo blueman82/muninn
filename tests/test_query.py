@@ -366,7 +366,7 @@ class SearchCoreTests(QueryCase):
             src, self.repo, "the zebra crossed", ts=ts, cwd="/repo/sub",
             tag="Bash", kind="tool_call", role="assistant", line=7, part=2,
         )  # fmt: skip
-        hit = self.search("zebra")["hits"][0]
+        hit = self.search("zebra", kinds={"tool_call"})["hits"][0]
         self.assertEqual(
             hit,
             {
@@ -395,8 +395,8 @@ class SearchCoreTests(QueryCase):
         want = {
             ev("p1", "sentinel prompt"),
             ev("p2", "sentinel reply", kind="reply"),
-            ev("p3", "sentinel call", kind="tool_call"),
         }
+        call = ev("p3", "sentinel call", kind="tool_call")
         harness = ev("p4", "sentinel h", kind="harness")
         ev("p5", "sentinel x", kind="tool_error")
         ev("p6", "sentinel flagged", flags=1)
@@ -406,6 +406,9 @@ class SearchCoreTests(QueryCase):
         ev("o1", "sentinel other", cls="other")
         self.noise(self.repo)
         self.assertEqual(set(self.ids(self.search("sentinel"))), want)
+        self.assertEqual(
+            self.ids(self.search("sentinel", kinds={"tool_call"})), [call]
+        )
         only = self.search("sentinel", kinds={"harness"})
         self.assertEqual(self.ids(only), [harness])  # explicit, still primary
 
@@ -558,7 +561,11 @@ class SearchFilterTests(QueryCase):
         self.noise(self.repo)
         self.assertEqual(self.ids(self.search("marker")), {prompt})
         wide = self.search("marker", include_subagents=True)
-        self.assertEqual(self.ids(wide), {prompt, deleg, sreply, scall})
+        self.assertEqual(self.ids(wide), {prompt, deleg, sreply})
+        calls = self.search(
+            "marker", include_subagents=True, kinds={"tool_call"}
+        )
+        self.assertEqual(self.ids(calls), {scall})
         by_id = {h["id"]: h for h in wide["hits"]}
         self.assertEqual(by_id[deleg]["class"], "subagent")
         self.assertEqual(by_id[deleg]["kind"], "delegation")
@@ -635,9 +642,9 @@ class SearchFilterTests(QueryCase):
             role="assistant", parent=call,
         )  # fmt: skip
         self.noise(self.repo)
-        self.assertEqual(self.ids(self.search("marker")), {call})
+        self.assertEqual(self.ids(self.search("marker")), set())
         wide = self.search("marker", include_subagents=True)
-        self.assertEqual(self.ids(wide), {call})
+        self.assertEqual(self.ids(wide), set())
         got = self.search("marker", kinds={"tool_error"})
         self.assertEqual(self.ids(got), {err})
         self.assertEqual(
@@ -669,7 +676,7 @@ class SearchComposeTests(QueryCase):
     def ids(self, result):
         return [h["id"] for h in result["hits"]]
 
-    def test_per_session_cap_2_and_tool_cap_4(self):
+    def test_per_session_cap_2_and_explicit_tool_calls(self):
         crowd = self.add_source("crowd")
         for i in range(5):
             self.add_event(crowd, self.repo, f"zebra note {i}")
@@ -681,10 +688,10 @@ class SearchComposeTests(QueryCase):
         hits = self.search("zebra", limit=12)["hits"]
         crowded = [h for h in hits if h["session"] == "crowd"]
         self.assertEqual(len(crowded), 2)
-        self.assertEqual(sum(h["kind"] == "tool_call" for h in hits), 4)
-        self.assertEqual(len(hits), 2 + 4 + 3)
+        self.assertEqual(sum(h["kind"] == "tool_call" for h in hits), 0)
+        self.assertEqual(len(hits), 2 + 3)
         every = self.search("zebra", kinds={"tool_call"}, limit=12)["hits"]
-        self.assertEqual(len(every), 8)  # explicit kinds lift the tool cap
+        self.assertEqual(len(every), 8)  # explicit tool calls remain available
         self.assertEqual(
             self.search("zebra", kinds={"prompt"})["hits"][0]["kind"], "prompt"
         )
@@ -735,8 +742,8 @@ class SearchComposeTests(QueryCase):
         self.assertEqual([h["repeats"] for h in hits], [1, 0])
         self.assertEqual([h["more_in_session"] for h in hits], [2, 2])
 
-    def test_tool_cap_is_per_page(self):
-        # ranks: 4 tools + 1 prompt (page 1), then 5 tools + 1 prompt (page 2)
+    def test_explicit_tool_calls_are_not_capped_per_page(self):
+        # ranks: 4 tools + 1 prompt, then 5 tools, then 1 prompt
         plan = "TTTTP" + "TTTTTP"
         for rank, kind in enumerate(plan):
             self.one(
@@ -744,12 +751,14 @@ class SearchComposeTests(QueryCase):
                 kind="tool_call" if kind == "T" else "prompt",
             )  # fmt: skip
         self.noise(self.repo)
-        first = self.search("zebra", limit=5)["hits"]
-        second = self.search("zebra", limit=5, page=2)["hits"]
+        requested = {"prompt", "tool_call"}
+        first = self.search("zebra", limit=5, kinds=requested)["hits"]
+        second = self.search("zebra", limit=5, page=2, kinds=requested)["hits"]
+        third = self.search("zebra", limit=5, page=3, kinds=requested)["hits"]
         kinds = lambda hits: [h["kind"] for h in hits]  # noqa: E731
         self.assertEqual(kinds(first).count("tool_call"), 4)
-        self.assertEqual(kinds(second).count("tool_call"), 4)  # a fresh page
-        self.assertEqual(kinds(second)[-1], "prompt")
+        self.assertEqual(kinds(second).count("tool_call"), 5)
+        self.assertEqual(kinds(third), ["prompt"])
 
     def test_more_in_session_only_when_hits_are_hidden(self):
         two = self.add_source("two")
