@@ -26,7 +26,7 @@ provider root name to path (tests); `PCTX_PYTHON` interpreter for `bin/pctx`; `P
 | `pctx search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]`, `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
 | `pctx open REF` | one event in full with neighbours; REF is an event id or `provider:thread_id:line.part` | `text`, `neighbours[]`, `provenance`, `hash_ok`, `redacted`, `truncated`, `next_offset` |
 | `pctx sessions` | sessions in scope, newest first | `sessions[]` (`session`, `provider`, `events`, `threads`, `forks`, `first_ts`, `last_ts`, `kinds`, `preview`) |
-| `pctx session ROOT` | one session's events across its threads | events, `next_from` |
+| `pctx session ROOT` | one session's events across its threads, in order; ROOT is the `session` value from `sessions` | `events[]` (`id`, `ref`, `kind`, `role`, `ts`, `preview`, `answer_citable`, `tag`), `total`, `provider`, `next_from` (pass as `--from` for the next page) |
 | `pctx quote-check REF QUOTE` | is QUOTE verbatim in that event? | match result |
 
 **search flags:** `--all-projects` widen beyond this repo; `--include-subagents`; `--include-current` also search the
