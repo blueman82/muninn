@@ -38,7 +38,15 @@ NOTICE = classify.NOTICE
 PROVIDERS = ("claude", "codex")
 HOOKS = {"session-start": hook.session_start, "prompt": hook.prompt_submit}
 WRITER_WAIT_S = 15.0  # CLI writers wait this long for the lock (design 4.1)
-HELP = """environment:
+HELP = query.PREVIEW_NOTICE + """
+Open originals: pctx open REF --context 3; for knowledge: pctx know show K.
+Search pages vary in size; --limit is an upper bound. If has_more is true,
+repeat the same search with --page N+1, even if this page has no hits.
+Continue a session with pctx session ROOT --from NEXT (next_from).
+Continue original text with pctx open REF --offset NEXT (next_offset).
+Stop when the continuation is null or has_more is false.
+
+environment:
   PCTX_HOME             data dir (default ~/.local/share/provenance-context)
   PCTX_ROOTS            JSON object: provider root name -> path
   CLAUDE_CODE_SESSION_ID, CODEX_SESSION_ID, CODEX_THREAD_ID
@@ -98,12 +106,27 @@ def _parser() -> _Parser:
     p.add_argument("--until")
     p.add_argument("--session")
     p.add_argument("--recent", action="store_true")
-    p.add_argument("--limit", type=int, default=10)
-    p.add_argument("--page", type=int, default=1)
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="upper bound on hits; page sizes vary with the byte budget",
+    )
+    p.add_argument(
+        "--page",
+        type=int,
+        default=1,
+        help="if has_more is true, repeat this search with page N+1",
+    )
     p = cmd("open", help="one event in full, with neighbours")
     p.add_argument("ref", help="event id or provider:thread_id:line.part")
     p.add_argument("--context", type=int, default=3)
-    p.add_argument("--offset", type=int, default=0)
+    p.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="continue this original with its next_offset value",
+    )
     p.add_argument("--raw", action="store_true")
     p = cmd("sessions", help="sessions in scope, newest first")
     p.add_argument("--all-projects", action="store_true")
@@ -111,7 +134,12 @@ def _parser() -> _Parser:
     p.add_argument("--limit", type=int, default=20)
     p = cmd("session", help="one session's events across its threads")
     p.add_argument("root")
-    p.add_argument("--from", dest="from_id", type=int)
+    p.add_argument(
+        "--from",
+        dest="from_id",
+        type=int,
+        help="continue this session with its next_from value",
+    )
     p.add_argument("--limit", type=int, default=50)
     p = cmd("quote-check", help="is QUOTE verbatim in the event?")
     p.add_argument("ref")

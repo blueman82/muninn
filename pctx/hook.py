@@ -44,9 +44,15 @@ USAGE = (
 )
 OPEN_HINT = (
     "Open a hit with `pctx open <ref> --context 3`;"
-    " browse with `pctx sessions`."
+    " browse with `pctx sessions`. Search page sizes vary: if has_more,"
+    " repeat the search with --page N+1. See `pctx --help` for cursors. "
+    + query.PREVIEW_NOTICE
 )
-RECALL_HINT = "Open a hit with `pctx open <ref> --context 3`."
+RECALL_HINT = (
+    "Previews are navigation only. Support claims with opened, cited eligible"
+    " originals; omit unsupported claims or label them unknown.\n"
+    "Open a hit with `pctx open <ref> --context 3`."
+)
 
 # the `<` of a frame delimiter, however spaced or cased (design 4.8)
 _FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
