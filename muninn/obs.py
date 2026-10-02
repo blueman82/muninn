@@ -19,7 +19,7 @@ from typing import TypedDict
 
 from muninn import ingest, store
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
-from muninn.obs_stats import db_space, human_bytes, stats
+from muninn.obs_stats import db_space, human_bytes, reread, stats
 from muninn.obs_status import freshness, install_sha, read_status, write_status
 
 __all__ = [
@@ -257,6 +257,14 @@ def _other_threads(conn: sqlite3.Connection) -> CheckResult:
     return _result("other_threads", True, drift, level="info")
 
 
+def _reread(conn: sqlite3.Connection) -> CheckResult:
+    """Say how far a classifier change's one-time re-read has got."""
+    got = reread(conn)
+    return _result(
+        "reread", True, f"{got['pending']} of {got['of']}", level="info"
+    )
+
+
 def _citations_resolve(conn: sqlite3.Connection) -> CheckResult:
     """Every live citation still points at an event with the same hash."""
     broken = _count(
@@ -305,6 +313,7 @@ _STORE_CHECKS: tuple[Callable[[sqlite3.Connection], CheckResult], ...] = (
     _quick_check,
     _missing_sources,
     _other_threads,
+    _reread,
     _citations_resolve,
     _db_size,
     _db_free_space,
