@@ -1,64 +1,76 @@
-"""pctx ingest (design 4.1, 3.5, 3.8; spec O1, O2, O7, O9, A3).
+"""Ingest provider transcripts into the store.
 
 Discover provider transcripts, identify each thread from line 1, and commit
-its newline-terminated lines as events.  ingest() needs the caller to hold
-store.writer_lock; run_pass() takes it.  One BEGIN IMMEDIATE per source:
-events, cursor, anchor, parse state and usage counts commit together.
+its newline-terminated lines as events.  `ingest` needs the caller to hold
+`store.writer_lock`; `run_pass` takes it.  There is one BEGIN IMMEDIATE per
+source: events, cursor, anchor, parse state and usage counts commit
+together.
+
+Planning lives in `pctx.ingest_plan`, line parsing in `pctx.ingest_parse`
+and the shared types in `pctx.ingest_model`.
 """
 
 from __future__ import annotations
 
-import dataclasses
-import hashlib
 import json
 import os
-import re
 import sqlite3
-import stat
 import time
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NamedTuple, cast
 
-from pctx import classify, scope, store
-
-MAX_LINE_BYTES = 8 * 1024 * 1024
-PROVIDER = {
-    "codex-sessions": "codex",
-    "codex-archived": "codex",
-    "claude-projects": "claude",
-}
-PATTERN = {
-    "codex-sessions": "rollout-*.jsonl",
-    "codex-archived": "rollout-*.jsonl",
-    "claude-projects": "*.jsonl",
-}
-INDEXED = ("primary", "subagent")  # O2; reviewer and other: row only
-# The rollout uuid ending a Codex file name.  It equals line-1 payload.id,
-# except in a long thread's continuation files, which keep payload.id and
-# get a new uuid (and history_base); each file is one transcript (3.3).
-_NAME_ID = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+from pctx import classify, store
+from pctx.ingest_model import (
+    INDEXED,
+    PROVIDER,
+    PassStats,
+    PlanOptions,
+    Work,
+)
+from pctx.ingest_parse import (
+    ParseStart,
+    Progress,
+    Usage,
+    parse_source,
+)
+from pctx.ingest_plan import (
+    discover,
+    late_forks,
+    plan_source,
+    source_id_for,
 )
 
+__all__ = ["PassStats", "default_roots", "ingest", "run_pass"]
 
-@dataclass
-class PassStats:
-    files_seen: int = 0
-    files_changed: int = 0
-    events_added: int = 0
-    events_removed: int = 0
-    skipped_lines: int = 0
-    missing: int = 0
-    duration_s: float = 0.0
-    skipped_files: int = 0  # tombstoned, unidentifiable or duplicate files
-    failed: int = 0  # sources rolled back by an error; redone next pass
-    errors: dict[str, int] = field(default_factory=dict)  # class name: n
+# Progress of a source that is indexed as a row only (no events read).
+_NO_PROGRESS = Progress((0, 0), (None, None), None, 0)
+
+
+class _Written(NamedTuple):
+    """The counts one source's transaction produced."""
+
+    source_id: int
+    added: int
+    removed: int
+    skipped: int
 
 
 def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
-    """Provider roots; PCTX_ROOTS (a JSON object, root name -> path)
-    replaces them, e.g. for tests."""
+    """Return the provider roots, or those named by PCTX_ROOTS.
+
+    PCTX_ROOTS (a JSON object, root name to path) replaces the defaults,
+    e.g. for tests.
+
+    Args:
+        env: Environment to read HOME and PCTX_ROOTS from.
+
+    Returns:
+        Root name to directory; the directories may not exist.
+
+    Raises:
+        ValueError: If PCTX_ROOTS is not an object naming known roots.
+    """
     home = Path(env.get("HOME") or Path.home())
     raw = env.get("PCTX_ROOTS")
     if not raw:
@@ -68,12 +80,16 @@ def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
             "claude-projects": home / ".claude" / "projects",
         }
     given = json.loads(raw)
-    if not isinstance(given, dict) or not set(given) <= set(PROVIDER):
+    # isinstance leaves the JSON object's types unknown; its keys are always
+    # strings and every value is passed through str() below.
+    roots = cast(dict[str, object], given)
+    if not isinstance(given, dict) or not set(roots) <= set(PROVIDER):
         raise ValueError(f"PCTX_ROOTS must map {sorted(PROVIDER)} to paths")
-    return {name: _expand(str(path), home) for name, path in given.items()}
+    return {name: _expand(str(path), home) for name, path in roots.items()}
 
 
 def _expand(path: str, home: Path) -> Path:
+    """Expand a leading ``~`` against ``home``, not the process's HOME."""
     if path == "~" or path.startswith("~/"):
         return home / path[2:]
     return Path(path)
@@ -81,15 +97,30 @@ def _expand(path: str, home: Path) -> Path:
 
 def run_pass(
     home: Path,
-    roots: dict[str, Path],
+    roots: Mapping[str, Path],
     *,
     only_threads: set[str] | None = None,
     full: bool = False,
     fullfsync: bool = True,
     wait_s: float = 0.0,
 ) -> PassStats:
-    """Take the writer lock (store.BusyError if held; the poller passes 0 and
-    skips the pass), open the store, run one ingest pass, close."""
+    """Take the writer lock, open the store, run one ingest pass, close.
+
+    store.BusyError propagates if the lock is still held after ``wait_s``,
+    and ValueError if a root name is not a known provider.
+
+    Args:
+        home: Data home that holds the store and the lock.
+        roots: Provider root name to directory.
+        only_threads: Limit the pass to these thread or session ids.
+        full: Re-read every source from the start.
+        fullfsync: False only for a re-derivable pre-build.
+        wait_s: Seconds to wait for the lock; the poller passes 0 and skips
+            the pass when another writer is busy.
+
+    Returns:
+        Counters for the pass.
+    """
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home), fullfsync=fullfsync)
         try:
@@ -98,49 +129,48 @@ def run_pass(
             conn.close()
 
 
-@dataclass
-class _Work:
-    name: str
-    path: Path
-    rel: str
-    st: os.stat_result
-    info: classify.ThreadInfo
-    row: sqlite3.Row | None
-    first: bytes
-    mode: str  # new | append | replace
-
-
 def ingest(
     conn: sqlite3.Connection,
-    roots: dict[str, Path],
+    roots: Mapping[str, Path],
     *,
     only_threads: set[str] | None = None,
     full: bool = False,
 ) -> PassStats:
-    """One pass over the roots with a store.connect_rw connection.
+    """Run one pass over the roots with a store.connect_rw connection.
 
-    The caller must hold store.writer_lock for the whole call (writers are
-    serialised by it; the lock is not reentrant).  only_threads limits the
-    pass to those thread ids and skips missing-source marking.
+    The caller must hold store.writer_lock for the whole call: writers are
+    serialised by it, and the lock is not reentrant.  ValueError propagates
+    if a root name is not a known provider.
+
+    Args:
+        conn: Read-write connection from store.connect_rw.
+        roots: Provider root name to directory.
+        only_threads: Limit the pass to these thread or session ids (a
+            continuation file also matches its base thread id); this also
+            skips missing-source marking, which needs a view of every root.
+        full: Re-read every source from the start.
+
+    Returns:
+        Counters for the pass.
     """
     started = time.monotonic()
-    stats, seen, work = PassStats(), set(), []
-    for name, path, st in _discover(roots):
+    opts = PlanOptions(roots, full, only_threads)
+    stats, seen, work = PassStats(), set[int](), list[Work]()
+    for name, path, st in discover(roots):
         stats.files_seen += 1
-        item = _safe_plan(
-            conn, roots, name, path, st, full, only_threads, stats
-        )
-        if isinstance(item, _Work):
+        item = plan_source(conn, opts, stats, name, path, st)
+        if isinstance(item, Work):
             work.append(item)
         elif item is not None:
             seen.add(item)  # an unchanged or skipped known source
     # Parents before their old-format forks: the content-prefix rule reads
-    # the parent's events (design 3.5 #3).  The sort is stable.
+    # the parent's events, so they must be written first.  Python's sort is
+    # stable, so every other order (path order) is kept.
     work.sort(key=lambda w: w.info.replay_mode == "content_prefix")
     scopes: dict[str | None, int] = {}
     for item in work:
         _process(conn, item, stats, scopes, seen)
-    for item in _late_forks(conn, roots, only_threads, stats):
+    for item in late_forks(conn, opts, stats):
         _process(conn, item, stats, scopes, seen)
     if only_threads is None:
         stats.missing = _mark_missing(conn, roots, seen)
@@ -148,228 +178,17 @@ def ingest(
     return stats
 
 
-def _late_forks(conn, roots, only_threads, stats) -> Iterator[_Work]:
-    """Unchanged 'unverified' old forks whose parent arrived this pass."""
-    rows = conn.execute(
-        "SELECT root, path FROM source WHERE replay_mode = 'unverified'"
-    ).fetchall()
-    for row in rows:
-        if row["root"] not in roots:
-            continue
-        path = roots[row["root"]] / row["path"]
-        try:
-            st = os.lstat(path)
-        except OSError:
-            continue
-        item = _safe_plan(
-            conn, roots, row["root"], path, st, False, only_threads, stats
-        )
-        if isinstance(item, _Work):
-            yield item
+def _mark_missing(
+    conn: sqlite3.Connection, roots: Mapping[str, Path], seen: set[int]
+) -> int:
+    """Mark active sources under a scanned root that were not seen.
 
+    Only the status changes: the events stay searchable, since a transcript
+    that was archived or deleted elsewhere is still history.
 
-def _discover(
-    roots: dict[str, Path],
-) -> Iterator[tuple[str, Path, os.stat_result]]:
-    """Regular files under each root in path order; symlinks, FIFOs and
-    directories are never opened (rglob does not follow symlinked dirs)."""
-    for name, root in roots.items():
-        if name not in PROVIDER:
-            raise ValueError(f"unknown root {name!r}")
-        if not root.is_dir():
-            continue
-        for path in sorted(root.rglob(PATTERN[name])):
-            try:
-                st = os.lstat(path)
-            except OSError:
-                continue
-            if not stat.S_ISREG(st.st_mode):
-                continue
-            yield name, path, st
-
-
-def _safe_plan(conn, roots, name, path, st, full, only_threads, stats):
-    """_plan, skipping a file that vanished or became unreadable since it
-    was listed (an archive move racing the pass; the next pass sees it)."""
-    try:
-        return _plan(conn, roots, name, path, st, full, only_threads, stats)
-    except OSError:
-        stats.skipped_files += 1
-        return None
-
-
-def _plan(conn, roots, name, path, st, full, only_threads, stats):
-    """A _Work item, a known source id to count as seen, or None."""
-    rel = path.relative_to(roots[name]).as_posix()
-    row = conn.execute(
-        "SELECT * FROM source WHERE root = ? AND path = ?", (name, rel)
-    ).fetchone()
-    if row is not None and not full and _unchanged(conn, row, st):
-        if row["status"] == "missing":  # back, byte-identical
-            _reactivate(conn, row["id"])
-        return row["id"]  # the cheap path reads nothing (design 4.1 #3)
-    first = _first_line(path)
-    info, base = _identify(name, roots[name], path, first)
-    if info is None:  # line 1 incomplete, oversize or not a thread header
-        stats.skipped_files += 1
-        return row["id"] if row is not None else None
-    if only_threads and not only_threads & {
-        info.thread_id,
-        base,
-        info.session_root,
-    }:
-        return None
-    provider = PROVIDER[name]
-    if _tombstoned(conn, provider, info, base):  # before any line is read
-        stats.skipped_files += 1
-        return None
-    if row is None:
-        row = conn.execute(
-            "SELECT * FROM source WHERE provider = ? AND thread_id = ?",
-            (provider, info.thread_id),
-        ).fetchone()
-        if row is not None and _still_there(roots, row):
-            stats.skipped_files += 1  # a copy is not indexed twice (3.5 #5)
-            return None
-        # else: a rename or archive move; _process updates root and path
-    elif row["thread_id"] != info.thread_id:
-        stats.skipped_files += 1  # another thread under a known name
-        return row["id"]
-    mode = _mode(conn, row, info, first, st, path, full)
-    return _Work(name, path, rel, st, info, row, first, mode)
-
-
-def _unchanged(conn, row, st) -> bool:
-    return (
-        (row["ino"], row["size"], row["mtime_ns"])
-        == (st.st_ino, st.st_size, st.st_mtime_ns)
-        and row["classifier_version"] == classify.CLASSIFIER_VERSION
-        and not _parent_arrived(conn, row)
-    )
-
-
-def _parent_arrived(conn, row) -> bool:
-    """An 'unverified' old fork whose parent is now indexed (3.5 #3)."""
-    return row["replay_mode"] == "unverified" and bool(
-        _source_id(conn, row["provider"], row["forked_from_id"])
-    )
-
-
-def _mode(conn, row, info, first, st, path, full) -> str:
-    if row is None:
-        return "new"
-    changed = (
-        full
-        or row["classifier_version"] != classify.CLASSIFIER_VERSION
-        or info.thread_class not in INDEXED
-        or _parent_arrived(conn, row)
-        or classify.record_hash(first) != row["first_line_sha256"]
-        or st.st_size < row["cursor_bytes"]  # truncated
-        or (
-            row["anchor_offset"] is not None
-            and _hash_at(path, row["anchor_offset"]) != row["anchor_sha256"]
-        )
-    )
-    return "replace" if changed else "append"
-
-
-def _first_line(path: Path) -> bytes | None:
-    """Line 1 with its newline, or None while incomplete or oversize."""
-    with open(path, "rb") as handle:
-        raw = handle.readline(MAX_LINE_BYTES + 1)
-    return raw if raw.endswith(b"\n") else None
-
-
-def _hash_at(path: Path, offset: int) -> str | None:
-    with open(path, "rb") as handle:
-        handle.seek(offset)
-        raw = handle.readline(MAX_LINE_BYTES + 1)
-    return classify.record_hash(raw) if raw.endswith(b"\n") else None
-
-
-def _identify(name, root, path, first):
-    """(ThreadInfo, base thread id of a continuation file) or (None, None)."""
-    try:
-        record = json.loads(first) if first else None
-    except (ValueError, RecursionError):
-        return None, None
-    if not isinstance(record, dict):
-        return None, None
-    if PROVIDER[name] == "claude":
-        rel = path.relative_to(root).as_posix()
-        return classify.claude_thread(rel, record), None
-    try:
-        info = classify.codex_thread(record)
-    except ValueError:  # not a session_meta with an id
-        return None, None
-    own = _NAME_ID.search(path.stem)
-    if own is None or own.group() == info.thread_id:
-        return info, None
-    segment = dataclasses.replace(
-        info,
-        thread_id=own.group(),
-        parent_thread_id=info.parent_thread_id or info.thread_id,
-    )
-    return segment, info.thread_id
-
-
-def _source_id(conn, provider, thread_id) -> int | None:
-    if not thread_id:
-        return None
-    row = conn.execute(
-        "SELECT id FROM source WHERE provider = ? AND thread_id = ?",
-        (provider, thread_id),
-    ).fetchone()
-    return row[0] if row else None
-
-
-def _tombstoned(conn, provider, info, base=None) -> bool:
-    """Thread tombstone (on this file's thread or the thread it continues),
-    or a session tombstone on its session or the one it was forked from
-    (design 3.8)."""
-    sessions = [info.session_root]
-    if info.forked_from_id:
-        sessions.append(info.forked_from_id)
-        parent = conn.execute(
-            "SELECT session_root FROM source WHERE provider = ?"
-            " AND thread_id = ?",
-            (provider, info.forked_from_id),
-        ).fetchone()
-        if parent:
-            sessions.append(parent[0])
-    marks = ",".join("?" * len(sessions))
-    return (
-        conn.execute(
-            "SELECT 1 FROM tombstone WHERE provider = ? AND ("
-            "(level = 'thread' AND thread_id IN (?, ?)) OR "
-            f"(level = 'session' AND session_root IN ({marks}))) LIMIT 1",
-            (provider, info.thread_id, base or info.thread_id, *sessions),
-        ).fetchone()
-        is not None
-    )
-
-
-def _still_there(roots, row) -> bool:
-    """Whether a known source's recorded file still exists (else it moved)."""
-    root = roots.get(row["root"])
-    if root is None:
-        return False
-    try:
-        return stat.S_ISREG(os.lstat(root / row["path"]).st_mode)
-    except OSError:
-        return False
-
-
-def _reactivate(conn, source_id) -> None:
-    conn.execute("BEGIN IMMEDIATE")
-    conn.execute(
-        "UPDATE source SET status = 'active' WHERE id = ?", (source_id,)
-    )
-    conn.execute("COMMIT")
-
-
-def _mark_missing(conn, roots, seen) -> int:
-    """Rows under a scanned root that were not seen: missing, events kept."""
+    Returns:
+        How many sources were newly marked missing.
+    """
     marks = ",".join("?" * len(roots))
     rows = conn.execute(
         f"SELECT id FROM source WHERE status = 'active' AND root IN ({marks})",
@@ -385,38 +204,63 @@ def _mark_missing(conn, roots, seen) -> int:
     return len(gone)
 
 
-def _process(conn, w: _Work, stats: PassStats, scopes, seen) -> None:
-    """One source in one transaction; an error rolls back only it."""
+def _process(
+    conn: sqlite3.Connection,
+    w: Work,
+    stats: PassStats,
+    scopes: dict[str | None, int],
+    seen: set[int],
+) -> None:
+    """Write one source in one transaction; an error rolls back only it."""
     if w.row is not None:
         seen.add(w.row["id"])  # never marked missing because it failed
-    elif _source_id(conn, PROVIDER[w.name], w.info.thread_id):
+    elif source_id_for(conn, PROVIDER[w.name], w.info.thread_id):
         stats.skipped_files += 1  # a copy that arrived earlier this pass
         return
     try:
+        # IMMEDIATE takes the write lock now rather than at the first write,
+        # so a source never fails half-way on a lock upgrade.
         conn.execute("BEGIN IMMEDIATE")
-        source_id, added, removed, skipped = _write(conn, w, scopes)
+        written = _write(conn, w, scopes)
         conn.execute("COMMIT")
     except Exception as exc:  # counted; the next pass redoes the source
         if conn.in_transaction:
             conn.execute("ROLLBACK")
-        scopes.clear()  # it may name scopes created by the rolled-back txn
+        # The cache may hold scope ids created inside the rolled-back
+        # transaction; reusing one would violate the scope foreign key.
+        scopes.clear()
         stats.failed += 1
         kind = type(exc).__name__
         stats.errors[kind] = stats.errors.get(kind, 0) + 1
         return
-    seen.add(source_id)
+    seen.add(written.source_id)
     stats.files_changed += 1
-    stats.events_added += added
-    stats.events_removed += removed
-    stats.skipped_lines += skipped
+    stats.events_added += written.added
+    stats.events_removed += written.removed
+    stats.skipped_lines += written.skipped
 
 
-def _write(conn, w: _Work, scopes) -> tuple[int, int, int, int]:
-    info, row, provider = w.info, w.row, PROVIDER[w.name]
+def _replay(
+    conn: sqlite3.Connection, info: classify.ThreadInfo, provider: str
+) -> tuple[int | None, str]:
+    """Return (parent source id, replay mode) for a source about to be written.
+
+    A content-prefix fork can only drop its copied history once its parent
+    is indexed; until then it is recorded as 'unverified' and planned again
+    when the parent arrives.
+    """
     parent_id, replay_mode = None, info.replay_mode
     if replay_mode == "content_prefix":
-        parent_id = _source_id(conn, provider, info.forked_from_id)
+        parent_id = source_id_for(conn, provider, info.forked_from_id)
         replay_mode = "content_prefix" if parent_id else "unverified"
+    return parent_id, replay_mode
+
+
+def _upsert_source(
+    conn: sqlite3.Connection, w: Work, replay_mode: str, now: float
+) -> int:
+    """Insert the source row, or refresh its identity; return its id."""
+    info, row = w.info, w.row
     ident = (
         info.session_root,
         info.parent_thread_id,
@@ -430,96 +274,138 @@ def _write(conn, w: _Work, scopes) -> tuple[int, int, int, int]:
         classify.record_hash(w.first),
         classify.CLASSIFIER_VERSION,
     )
-    now, removed = time.time(), 0
-    if row is None:
-        source_id = conn.execute(
-            "INSERT INTO source(session_root, parent_thread_id,"
-            " forked_from_id, thread_class, class_reason, replay_mode,"
-            " replay_before, root, path, first_line_sha256,"
-            " classifier_version, provider, thread_id, ino, size, mtime_ns,"
-            " first_seen, last_seen) VALUES"
-            " (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,?)",
-            (*ident, provider, info.thread_id, now, now),
-        ).lastrowid
-    else:
-        source_id = row["id"]
+    if row is not None:
+        # root and path are refreshed too: a known thread may have moved
+        # (an archive move) and keeps its row and events.
         conn.execute(
             "UPDATE source SET session_root=?, parent_thread_id=?,"
             " forked_from_id=?, thread_class=?, class_reason=?,"
             " replay_mode=?, replay_before=?, root=?, path=?,"
             " first_line_sha256=?, classifier_version=? WHERE id=?",
-            (*ident, source_id),
+            (*ident, row["id"]),
         )
+        return row["id"]
+    new_id = conn.execute(
+        "INSERT INTO source(session_root, parent_thread_id,"
+        " forked_from_id, thread_class, class_reason, replay_mode,"
+        " replay_before, root, path, first_line_sha256,"
+        " classifier_version, provider, thread_id, ino, size, mtime_ns,"
+        " first_seen, last_seen) VALUES"
+        " (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,?)",
+        (*ident, PROVIDER[w.name], info.thread_id, now, now),
+    ).lastrowid
+    # An INSERT that did not raise always sets lastrowid; typeshed types it
+    # as Optional because it is None after other statement kinds.
+    return cast(int, new_id)
+
+
+def _clear_source(conn: sqlite3.Connection, source_id: int) -> int:
+    """Delete a source's events, issues and usage; return events removed."""
+    removed = conn.execute(
+        "DELETE FROM event WHERE source_id = ?", (source_id,)
+    ).rowcount
+    for table in ("source_issue", "usage"):
+        conn.execute(f"DELETE FROM {table} WHERE source_id = ?", (source_id,))
+    return removed
+
+
+def _write(
+    conn: sqlite3.Connection, w: Work, scopes: dict[str | None, int]
+) -> _Written:
+    """Write one source inside the caller's transaction.
+
+    The source row, the events, the cursor and the usage counts are all
+    written here so that the caller's COMMIT makes them visible together.
+
+    Returns:
+        The source id and the counts the transaction produced.
+    """
+    info, row = w.info, w.row
+    parent_id, replay_mode = _replay(conn, info, PROVIDER[w.name])
+    now = time.time()
+    source_id = _upsert_source(conn, w, replay_mode, now)
     resume = row is not None and w.mode == "append"
+    removed = 0
     if row is not None and not resume:
-        removed = conn.execute(
-            "DELETE FROM event WHERE source_id = ?", (source_id,)
-        ).rowcount
-        for table in ("source_issue", "usage"):
-            conn.execute(
-                f"DELETE FROM {table} WHERE source_id = ?", (source_id,)
-            )
+        removed = _clear_source(conn, source_id)
     if info.thread_class not in INDEXED:  # a row with stat fields only
-        _commit_source(
-            conn,
-            source_id,
-            w.st,
-            now,
-            (0, 0),
-            (None, None),
-            None,
-            0,
-            reset=True,
-        )
-        return source_id, 0, removed, 0
-    start = (row["cursor_bytes"], row["cursor_line"]) if resume else (0, 0)
-    anchor = (
-        (row["anchor_offset"], row["anchor_sha256"])
-        if resume
-        else (None, None)
-    )
-    parsed = _parse(
-        conn,
-        w,
-        source_id,
-        provider,
-        start,
-        anchor,
-        parent_id,
-        row["parse_state"] if resume else None,
-        scopes,
-    )
-    cursor, anchor, state, added, skipped, usage = parsed
+        _commit_source(conn, source_id, w.st, now, _NO_PROGRESS, reset=True)
+        return _Written(source_id, 0, removed, 0)
+    start = _start_of(row if resume else None, parent_id)
+    result = parse_source(conn, w, source_id, start, scopes)
     _commit_source(
-        conn,
-        source_id,
-        w.st,
-        now,
-        cursor,
-        anchor,
-        state,
-        skipped,
-        reset=not resume,
+        conn, source_id, w.st, now, result.progress, reset=not resume
     )
-    calls, errors, last_ts = usage
-    if calls or errors:
-        conn.execute(
-            "INSERT INTO usage(source_id, provider, session_root, calls,"
-            " errors, last_ts) VALUES (?,?,?,?,?,?)"
-            " ON CONFLICT(source_id) DO UPDATE SET"
-            " calls = calls + excluded.calls,"
-            " errors = errors + excluded.errors,"
-            " last_ts = CASE WHEN excluded.last_ts > coalesce(last_ts, '')"
-            " THEN excluded.last_ts ELSE last_ts END",
-            (source_id, provider, info.session_root, calls, errors, last_ts),
-        )
-    return source_id, added, removed, skipped
+    _add_usage(
+        conn, source_id, PROVIDER[w.name], info.session_root, result.usage
+    )
+    return _Written(source_id, result.added, removed, result.progress.skipped)
+
+
+def _start_of(prior: sqlite3.Row | None, parent_id: int | None) -> ParseStart:
+    """Return where to begin parsing: the row's cursor, or the file start."""
+    if prior is None:
+        return ParseStart((0, 0), (None, None), None, parent_id)
+    return ParseStart(
+        (prior["cursor_bytes"], prior["cursor_line"]),
+        (prior["anchor_offset"], prior["anchor_sha256"]),
+        prior["parse_state"],
+        parent_id,
+    )
+
+
+def _add_usage(
+    conn: sqlite3.Connection,
+    source_id: int,
+    provider: str,
+    session_root: str,
+    usage: Usage,
+) -> None:
+    """Add this pass's pctx usage counts to the source's running totals."""
+    if not (usage.calls or usage.errors):
+        return
+    conn.execute(
+        "INSERT INTO usage(source_id, provider, session_root, calls,"
+        " errors, last_ts) VALUES (?,?,?,?,?,?)"
+        " ON CONFLICT(source_id) DO UPDATE SET"
+        " calls = calls + excluded.calls,"
+        " errors = errors + excluded.errors,"
+        " last_ts = CASE WHEN excluded.last_ts > coalesce(last_ts, '')"
+        " THEN excluded.last_ts ELSE last_ts END",
+        (
+            source_id,
+            provider,
+            session_root,
+            usage.calls,
+            usage.errors,
+            usage.last_ts,
+        ),
+    )
 
 
 def _commit_source(
-    conn, source_id, st, now, cursor, anchor, state, skipped, *, reset
+    conn: sqlite3.Connection,
+    source_id: int,
+    st: os.stat_result,
+    now: float,
+    progress: Progress,
+    *,
+    reset: bool,
 ) -> None:
-    """Cursor, anchor, stat fields and parse state move with the events."""
+    """Record the cursor, anchor, stat fields and parse state of a source.
+
+    They move in the same transaction as the events, so after a crash the
+    cursor never points past an event that was not stored.
+
+    Args:
+        conn: Connection inside the source's write transaction.
+        source_id: The source row to update.
+        st: The stat taken when the file was listed.
+        now: Timestamp for last_seen.
+        progress: Cursor, anchor, parse state and skipped-line count.
+        reset: True when the source was rebuilt, so skipped_lines is set
+            rather than added to.
+    """
     conn.execute(
         "UPDATE source SET ino=?, size=?, mtime_ns=?, cursor_bytes=?,"
         " cursor_line=?, anchor_offset=?, anchor_sha256=?, parse_state=?,"
@@ -530,245 +416,13 @@ def _commit_source(
             st.st_ino,
             st.st_size,
             st.st_mtime_ns,
-            *cursor,
-            *anchor,
-            state,
+            *progress.cursor,
+            *progress.anchor,
+            progress.state,
             now,
             reset,
-            skipped,
-            skipped,
+            progress.skipped,
+            progress.skipped,
             source_id,
         ),
-    )
-
-
-def _parse(
-    conn, w, source_id, provider, start, anchor, parent_id, saved, scopes
-):
-    """Classify and insert the new lines of one source (inside its txn)."""
-    info = w.info
-    state, pending, extra = _load_state(saved, info)
-    events_of = (
-        classify.codex_events
-        if provider == "codex"
-        else classify.claude_events
-    )
-    tombs = {
-        (r[0], r[1])
-        for r in conn.execute(
-            "SELECT line, line_sha256 FROM tombstone WHERE provider = ?"
-            " AND level = 'line' AND thread_id = ?",
-            (provider, info.thread_id),
-        )
-    }
-    prefix = _event_hashes(conn, parent_id) if extra["prefix_open"] else None
-    extra["prefix_open"] = bool(prefix) and extra["prefix_open"]
-    added = skipped = 0
-    usage = [0, 0, None]  # pctx calls, failed pctx outputs, last call ts
-    cursor = start
-    with open(w.path, "rb") as handle:
-        handle.seek(start[0])
-        for number, begin, end, raw in _lines(handle, *start):
-            cursor = (end, number)
-            if raw is None:
-                code = "line_too_large"
-            else:
-                digest = classify.record_hash(raw)
-                anchor = (begin, digest)
-                if (number, digest) in tombs:
-                    continue  # an erased line never re-enters (I5)
-                record, code = _decode(raw)
-            if code:
-                conn.execute(
-                    "INSERT OR REPLACE INTO source_issue(source_id, line, at,"
-                    " code) VALUES (?, ?, ?, ?)",
-                    (source_id, number, time.time(), code),
-                )
-                skipped += 1
-                continue
-            found = events_of(record, number, state)
-            if provider == "codex":
-                _count_output(record, extra, usage)
-            cwd = classify.cwd_of(record, state)
-            for ev in found:
-                if extra["prefix_open"]:
-                    if _role_text(ev.role, ev.text) in prefix:
-                        continue  # the fork's copy of its parent's history
-                    extra["prefix_open"] = False
-                event_id = _insert(
-                    conn,
-                    source_id,
-                    begin,
-                    digest,
-                    ev,
-                    cwd,
-                    info,
-                    pending,
-                    scopes,
-                )
-                added += 1
-                if ev.kind == "tool_call":
-                    _note_call(ev, event_id, provider, pending, extra, usage)
-    return (
-        cursor,
-        anchor,
-        _dump_state(state, pending, extra),
-        added,
-        skipped,
-        usage,
-    )
-
-
-def _lines(handle, offset, number):
-    """(line number, start, end, raw) of each newline-terminated line; raw
-    is None for a line over MAX_LINE_BYTES.  Stops before a partial tail:
-    it is read once its newline exists (I4)."""
-    while True:
-        raw = handle.readline(MAX_LINE_BYTES + 1)
-        if not raw.endswith(b"\n"):
-            if len(raw) <= MAX_LINE_BYTES:
-                return  # EOF, or a line still being written
-            size = len(raw)
-            while not raw.endswith(b"\n"):
-                raw = handle.readline(1 << 20)
-                if not raw:
-                    return  # an oversize line still being written
-                size += len(raw)
-            number += 1
-            yield number, offset, offset + size, None
-            offset += size
-            continue
-        number += 1
-        yield number, offset, offset + len(raw), raw
-        offset += len(raw)
-
-
-def _decode(raw: bytes) -> tuple[dict | None, str | None]:
-    try:
-        record = json.loads(raw)
-    except RecursionError:
-        return None, "too_deep"
-    except ValueError:  # includes invalid UTF-8
-        return None, "invalid_json"
-    if not classify.within_depth(record):  # design order: depth first
-        return None, "too_deep"
-    if not isinstance(record, dict):
-        return None, "not_object"
-    return record, None
-
-
-def _insert(conn, source_id, begin, digest, ev, cwd, info, pending, scopes):
-    if cwd not in scopes:  # O7: a gone cwd may resolve by commit hint
-        scopes[cwd] = scope.scope_id(conn, cwd or "", info.commit_hash)
-    parent = pending.get(ev.call_id) if ev.kind == "tool_error" else None
-    return conn.execute(
-        "INSERT INTO event(source_id, line, part, byte_offset, line_sha256,"
-        " seq, ts, role, kind, tag, scope_id, cwd, parent_event_id, flags,"
-        " text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (
-            source_id,
-            ev.line,
-            ev.part,
-            begin,
-            digest,
-            ev.seq,
-            ev.ts,
-            ev.role,
-            ev.kind,
-            ev.tag,
-            scopes[cwd],
-            cwd,
-            parent,
-            ev.flags,
-            ev.text,
-        ),
-    ).lastrowid
-
-
-def _note_call(ev, event_id, provider, pending, extra, usage) -> None:
-    """Remember a tool_call for linking (O1) and count pctx calls (O9)."""
-    if ev.call_id:
-        pending[ev.call_id] = event_id
-    # ponytail: the pctx test runs on the 4 KiB-capped text; a call whose
-    # pctx word sits later is not counted.
-    if ev.flags & classify.FLAG_MARKER and classify.PCTX_CALL.search(ev.text):
-        usage[0] += 1
-        usage[2] = max(usage[2] or "", ev.ts or "") or None
-        if provider == "codex" and ev.call_id:
-            extra["pctx"].add(ev.call_id)
-
-
-def _count_output(record, extra, usage) -> None:
-    """O9: the exit status of a pctx call's output, read here, never kept.
-    The output itself is skipped by classify (the call invokes pctx)."""
-    payload = record.get("payload")
-    if record.get("type") != "response_item" or not isinstance(payload, dict):
-        return
-    call_id = payload.get("call_id")
-    if call_id not in extra["pctx"] or payload.get("type") not in (
-        "function_call_output",
-        "custom_tool_call_output",
-    ):
-        return
-    extra["pctx"].discard(call_id)
-    output = payload.get("output")
-    # ponytail: an exec cell still running reports later through wait();
-    # only its first output is read here.
-    text = output if isinstance(output, str) else classify._join(output)
-    exits = classify._EXIT.findall(text)
-    if text.startswith("Script failed") or any(
-        int(a or b) != 0 for a, b in exits
-    ):
-        usage[1] += 1
-
-
-def _role_text(role: str, text: str) -> bytes:
-    """sha256(role || text), the content-prefix identity (design 3.5 #3)."""
-    data = f"{role}\n{text}".encode("utf-8", "surrogatepass")
-    return hashlib.sha256(data).digest()
-
-
-def _event_hashes(conn, source_id) -> set[bytes]:
-    if source_id is None:
-        return set()
-    rows = conn.execute(
-        "SELECT role, text FROM event WHERE source_id = ?", (source_id,)
-    )
-    return {_role_text(role, text) for role, text in rows}
-
-
-def _load_state(saved, info):
-    """The classify state plus ingest's own resume fields (C2)."""
-    data = json.loads(saved) if saved else {}
-    state = classify.CodexState(
-        cwd=data.get("cwd"),
-        replay_before=info.replay_before,
-        thread_class=info.thread_class,
-        calls={k: tuple(v) for k, v in data.get("calls", {}).items()},
-        cells={k: tuple(v) for k, v in data.get("cells", {}).items()},
-    )
-    extra = {
-        "prefix_open": data.get("prefix_open", True),
-        "pctx": set(data.get("pctx", ())),
-    }
-    return state, data.get("pending", {}), extra
-
-
-def _dump_state(state, pending, extra) -> str:
-    """JSON of what a later append pass needs; linked entries are pruned:
-    a call id stays only while classify can still route an output to it."""
-    live = {origin for origin, _ in state.calls.values()}
-    live |= {origin for origin, _ in state.cells.values()}
-    return json.dumps(
-        {
-            "cwd": state.cwd,
-            "thread_class": state.thread_class,
-            "replay_before": state.replay_before,
-            "calls": state.calls,
-            "cells": state.cells,
-            "pending": {c: e for c, e in pending.items() if c in live},
-            "prefix_open": extra["prefix_open"],
-            "pctx": sorted(extra["pctx"] & set(state.calls)),
-        },
-        sort_keys=True,
     )

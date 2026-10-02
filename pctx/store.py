@@ -1,4 +1,13 @@
-"""pctx store: schema v1, connections, writer lock, private files."""
+"""SQLite store: schema v1, connections, the writer lock, private files.
+
+The store is one rollback-journal SQLite file under the data home.  Every
+writer takes the flock in `writer_lock` first, so there is exactly one
+writer process at a time.  Readers open the file read-only and do not need
+the writer lock, but in rollback-journal mode a reader's SHARED lock can
+briefly delay a writer's commit; that is why the writer sets busy_timeout.
+"""
+
+from __future__ import annotations
 
 import fcntl
 import json
@@ -6,20 +15,18 @@ import os
 import sqlite3
 import tempfile
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-# Design 3.2 DDL plus the accepted amendments (event.cwd + event_cwd index,
-# event.kind delegation/tool_error, event.parent_event_id, source.parse_state
-# and the per-source usage counts of O9). Line-wrapped to
-# 79 columns; source_issue lists `code` before its table-level PRIMARY KEY
-# because SQLite rejects a column definition after a table constraint.
-# knowledge_ai/ad/au are spelled out with NULL-text guards: an erased entry
-# (text NULL) is not in knowledge_fts, and an FTS5 'delete' for a row that is
-# not indexed corrupts the index.
+# Schema v1.  The DDL is line-wrapped to 79 columns.  source_issue lists
+# `code` before its table-level PRIMARY KEY because SQLite rejects a column
+# definition that follows a table constraint.  The knowledge_ai/ad/au
+# triggers are spelled out with NULL-text guards: an erased entry (text NULL)
+# is not in knowledge_fts, and an FTS5 'delete' for a row that is not indexed
+# corrupts the index.
 SCHEMA_SQL = r"""
 CREATE TABLE scope (id INTEGER PRIMARY KEY,
   key TEXT NOT NULL UNIQUE,  -- main-worktree realpath | bare cwd | 'global'
@@ -55,7 +62,7 @@ CREATE TABLE source (id INTEGER PRIMARY KEY,
   parse_state TEXT,  -- ingest resume state (JSON ids and paths, no text)
   UNIQUE (provider, thread_id), UNIQUE (root, path));
 CREATE INDEX source_session ON source(provider, session_root);
-CREATE TABLE usage (  -- O9: pctx invocations seen at ingest; counts only
+CREATE TABLE usage (  -- pctx invocations seen at ingest; counts only
   source_id INTEGER PRIMARY KEY REFERENCES source(id) ON DELETE CASCADE,
   provider TEXT NOT NULL CHECK (provider IN ('codex','claude')),
   session_root TEXT NOT NULL,
@@ -81,7 +88,7 @@ CREATE TABLE event (id INTEGER PRIMARY KEY,
     ('prompt','reply','tool_call','harness','delegation','tool_error')),
   tag TEXT,                          -- harness tag or tool name
   scope_id INTEGER NOT NULL REFERENCES scope(id),
-  cwd TEXT,                          -- exact cwd string in effect (A3)
+  cwd TEXT,                          -- exact cwd string in effect
   parent_event_id INTEGER,           -- tool_error -> its tool_call; no FK
   flags INTEGER NOT NULL DEFAULT 0,  -- 1 injected-block marker, 2 redacted,
                                      -- 4 truncated (>64 KiB)
@@ -172,7 +179,14 @@ class BusyError(Exception):
 
 
 def data_home(env: Mapping[str, str] = os.environ) -> Path:
-    """$PCTX_HOME, else ~/.local/share/provenance-context."""
+    """Return $PCTX_HOME, else ~/.local/share/provenance-context.
+
+    Args:
+        env: Environment to read; a parameter so tests need not patch it.
+
+    Returns:
+        The data home directory; it may not exist yet.
+    """
     configured = env.get("PCTX_HOME")
     if configured:
         return Path(configured).expanduser()
@@ -180,32 +194,49 @@ def data_home(env: Mapping[str, str] = os.environ) -> Path:
 
 
 def db_path(home: Path) -> Path:
+    """Return the database file inside a data home."""
     return home / "pctx.sqlite"
 
 
 def ensure_private_dir(path: Path) -> None:
-    """mkdir -p, then force mode 0700 on the leaf."""
+    """Create ``path`` and any parents, then force mode 0700 on the leaf."""
     path.mkdir(parents=True, exist_ok=True)
-    os.chmod(path, 0o700)
+    path.chmod(0o700)
 
 
 def write_json_atomic(path: Path, obj: object) -> None:
-    """Write JSON to a 0600 temp file in the same dir, then os.replace."""
+    """Write JSON to a 0600 temp file in the same dir, then rename it over.
+
+    A value JSON cannot encode raises TypeError or ValueError before anything
+    is written; OSError propagates from the temp-file operations.
+
+    Args:
+        path: Destination file.
+        obj: JSON-serialisable value; keys are sorted for stable bytes.
+    """
     payload = json.dumps(obj, sort_keys=True).encode("utf-8")  # may raise
+    # The temp file lives beside the target: rename is only atomic within one
+    # filesystem, so readers see the old file or the new one, never a mix.
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as handle:  # mkstemp files are 0600
             handle.write(payload)
-        os.replace(tmp, path)
+        Path(tmp).replace(path)
     except BaseException:
-        os.unlink(tmp)
+        # BaseException so an interrupt does not leave a stray temp file
+        # holding the payload.
+        Path(tmp).unlink()
         raise
 
 
+# Applied to every writer connection before any statement of ours.
 _WRITER_PRAGMAS = (
     "PRAGMA busy_timeout=5000",
+    # Zero freed pages: an erased event or knowledge entry must not survive
+    # as readable text in the free list.
     "PRAGMA secure_delete=ON",
-    "PRAGMA foreign_keys=ON",
+    "PRAGMA foreign_keys=ON",  # off by default and per connection
+    # FULL keeps a committed transaction durable across power loss.
     "PRAGMA synchronous=FULL",
     "PRAGMA cache_size=-262144",  # 256 MiB: big replaces must not spill
 )
@@ -220,11 +251,18 @@ def _ensure_dir(path: Path) -> None:
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
+    """Create the schema on a brand-new database.
+
+    Raises:
+        StoreUnavailableError: If the file holds another schema version.
+    """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == SCHEMA_VERSION:
         return
     if version != 0:
-        raise StoreUnavailableError(f"schema v{version}, need v{SCHEMA_VERSION}")
+        raise StoreUnavailableError(
+            f"schema v{version}, need v{SCHEMA_VERSION}"
+        )
     # All-or-nothing: DDL and user_version commit together. On failure the
     # transaction stays open and connect_rw's close() rolls it back.
     conn.executescript(
@@ -237,21 +275,43 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
     """Open the store for writing, creating and migrating it.
 
     Autocommit connection (callers issue BEGIN IMMEDIATE); rows are
-    sqlite3.Row. fullfsync=False is only for a re-derivable pre-build.
+    sqlite3.Row.
+
+    Args:
+        path: Database file; created with mode 0600 if absent.
+        fullfsync: False is only for a re-derivable pre-build, where
+            durability is traded for speed.
+
+    Returns:
+        An open read-write connection with the writer pragmas applied.
+
+    Raises:
+        StoreUnavailableError: If the journal mode is not 'delete' or the
+            file holds another schema version.
     """
     _ensure_dir(path.parent)
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)  # born private
     os.fchmod(fd, 0o600)  # tightened if it already existed
     os.close(fd)
+    # isolation_level=None: sqlite3's implicit transactions would fight the
+    # explicit BEGIN IMMEDIATE that every caller issues to take the write
+    # lock up front.
     conn = sqlite3.connect(path, isolation_level=None)
     try:
         conn.row_factory = sqlite3.Row
         for pragma in _WRITER_PRAGMAS:
             conn.execute(pragma)
         conn.execute(f"PRAGMA fullfsync={'ON' if fullfsync else 'OFF'}")
+        # Rollback-journal mode (SQLite's default) is required, not just
+        # assumed: it needs no -wal/-shm sidecar files, so a read-only
+        # connection can still open the store, and a crashed writer is
+        # recoverable through heal_hot_journal.  Fail loudly if the file was
+        # switched to another mode behind our back.
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         if mode != "delete":
-            raise StoreUnavailableError(f"journal_mode is {mode!r}, need 'delete'")
+            raise StoreUnavailableError(
+                f"journal_mode is {mode!r}, need 'delete'"
+            )
         _init_schema(conn)
     except BaseException:
         conn.close()
@@ -260,11 +320,23 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
 
 
 @contextmanager
-def writer_lock(home: Path, wait_s: float = 15.0) -> Iterator[None]:
-    """Hold the flock on home/writer.lock; BusyError after wait_s (0 = no wait).
+def writer_lock(home: Path, wait_s: float = 15.0) -> Generator[None]:
+    """Hold the flock on home/writer.lock for the ``with`` block.
 
     Not reentrant (a second open() in one process conflicts): take it once
-    at command entry and never nest. Never fork while holding it.
+    at command entry and never nest. Never fork while holding it, because
+    the child would inherit the descriptor and keep the lock after the
+    parent releases it.
+
+    Args:
+        home: Data home; the lock file lives beside the database.
+        wait_s: Seconds to wait for the lock; 0 means do not wait.
+
+    Yields:
+        Nothing; the lock is held until the block exits.
+
+    Raises:
+        BusyError: If the lock is still held elsewhere after ``wait_s``.
     """
     _ensure_dir(home)
     fd = os.open(home / "writer.lock", os.O_CREAT | os.O_RDWR, 0o600)
@@ -284,14 +356,24 @@ def writer_lock(home: Path, wait_s: float = 15.0) -> Iterator[None]:
 
 
 def _uri(path: Path, mode: str) -> str:
-    return Path(path).absolute().as_uri() + f"?mode={mode}"
+    """Return a SQLite file: URI for ``path`` with ``?mode=`` appended."""
+    return path.absolute().as_uri() + f"?mode={mode}"
 
 
 def connect_ro(path: Path) -> sqlite3.Connection:
-    """Open the store read-only; StoreUnavailableError if it cannot be read.
+    """Open the store read-only.
 
-    Raises HotJournalError when a crashed writer left a journal that this
-    read-only connection cannot roll back (see heal_hot_journal).
+    Args:
+        path: Database file.
+
+    Returns:
+        A read-only connection (``query_only``) whose rows are sqlite3.Row.
+
+    Raises:
+        HotJournalError: If a crashed writer left a journal that this
+            read-only connection cannot roll back (see heal_hot_journal).
+        StoreUnavailableError: If the store cannot be read or holds another
+            schema version.
     """
     conn = None
     try:
@@ -314,16 +396,26 @@ def connect_ro(path: Path) -> sqlite3.Connection:
         raise StoreUnavailableError(f"cannot read the store ({name})") from exc
     if version != SCHEMA_VERSION:
         conn.close()
-        raise StoreUnavailableError(f"schema v{version}, need v{SCHEMA_VERSION}")
+        raise StoreUnavailableError(
+            f"schema v{version}, need v{SCHEMA_VERSION}"
+        )
     return conn
 
 
 def heal_hot_journal(path: Path, home: Path) -> bool:
-    """Roll back a crashed writer's journal; True once a writer opened it.
+    """Roll back a crashed writer's journal.
 
     Takes the writer lock without waiting and opens read-write once (the
-    first read rolls the journal back). False when the lock is busy or this
-    process may not write (sandboxed), so the caller reports hot_journal.
+    first read rolls the journal back).
+
+    Args:
+        path: Database file.
+        home: Data home that holds the writer lock.
+
+    Returns:
+        True once a writer opened the file; False when the lock is busy or
+        this process may not write (sandboxed), so the caller reports
+        hot_journal.
     """
     try:
         with writer_lock(home, wait_s=0):
