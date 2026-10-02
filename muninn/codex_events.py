@@ -22,9 +22,15 @@ from muninn.event_model import (
 )
 from muninn.tool_errors import WAIT_TOOLS, register_call, tool_error
 
+# A Codex desktop session that continues a ChatGPT conversation is still the
+# owner's own session; only the conversation pasted into it is not theirs.
+CHATGPT_HANDOFF = "chatgpt_handoff"
+CHATGPT_REFERENCE_TAG = "## Referenced ChatGPT conversation"
+
 # A Codex user text starting with one of these was written by the harness,
 # not typed by the person.
 HARNESS_TAGS = (
+    CHATGPT_REFERENCE_TAG,
     "<environment_context>",
     "# AGENTS.md instructions",
     "<user_instructions>",
@@ -54,6 +60,8 @@ def _codex_class(payload: Record) -> tuple[str, str]:
         return "reviewer", "subagent.other=guardian"
     if kind == "user":
         return "primary", "thread_source=user"
+    if kind == CHATGPT_HANDOFF:
+        return "primary", f"thread_source={CHATGPT_HANDOFF}"
     if kind == "subagent":
         return "subagent", "thread_source=subagent"
     # The value is copied into a stored reason, so cap what a transcript can

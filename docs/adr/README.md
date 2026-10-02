@@ -14,3 +14,4 @@ implementer chose it inside work the owner ordered.
 | [0007](0007-recall-off-by-default.md) | Per-prompt recall starts off on a fresh install |
 | [0008](0008-install-wrapper.md) | `bin/muninn-install` picks the install mode and previews without writing |
 | [0009](0009-uninstall.md) | `bin/muninn-uninstall` removes muninn and keeps the data unless told otherwise |
+| [0010](0010-chatgpt-handoff-sessions.md) | Codex ChatGPT-handoff sessions are the owner's primary sessions |

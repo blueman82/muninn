@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from muninn import classify as c
+from muninn.codex_events import CHATGPT_HANDOFF, CHATGPT_REFERENCE_TAG
 from tests.classify_support import (
     CWD,
     GUARDIAN_SOURCE,
@@ -378,10 +379,22 @@ class CodexDelegationTests(unittest.TestCase):
         primary, _ = run_codex([codex_meta(), user_msg(1, "do the task")])
         self.assertEqual(primary[0].kind, "prompt")
 
+    def test_a_chatgpt_handoff_session_stores_what_the_owner_typed(
+        self,
+    ) -> None:
+        meta = codex_meta(CHATGPT_HANDOFF, "thr-h")
+        pasted = f"{CHATGPT_REFERENCE_TAG}:\n" + '{"title":"CV Fit"}'
+        records = [meta, user_msg(1, pasted), user_msg(2, "apply to these")]
+        events, state = run_codex(records)
+        self.assertEqual(state.thread_class, "primary")
+        # The pasted conversation is not the owner speaking; their typing is.
+        self.assertEqual([e.kind for e in events], ["harness", "prompt"])
+        self.assertEqual(events[1].text, "apply to these")
+
     def test_reviewer_and_other_threads_return_events_normally(self) -> None:
         for meta in (
             codex_meta("guardian_review", "thr-g", source=GUARDIAN_SOURCE),
-            codex_meta("chatgpt_handoff", "thr-h"),
+            codex_meta("memory_consolidation", "thr-m"),
         ):
             with self.subTest(thread=meta["payload"]["id"]):
                 records = [meta, user_msg(1, "review this"), reply(2, "ok")]

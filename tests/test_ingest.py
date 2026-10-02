@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from muninn import classify, ingest, ingest_model, ingest_plan
+from muninn.codex_events import CHATGPT_HANDOFF, CHATGPT_REFERENCE_TAG
 from tests.ingest_support import (
     BASE,
     HOLD_LOCK,
@@ -82,6 +83,26 @@ class SourceModeTests(IngestCase):
         ).fetchone()[0]
         self.assertEqual(leaks, 0)
 
+    def test_a_chatgpt_handoff_session_is_indexed_as_primary(self) -> None:
+        pasted = f"{CHATGPT_REFERENCE_TAG}:\n" + '{"title":"CV Fit"}'
+        records = [
+            codex_meta(CHATGPT_HANDOFF, "thr-h"),
+            user_msg(1, pasted),
+            user_msg(2, "apply to these"),
+        ]
+        self.write(rollout("thr-h"), records)
+        self.run_ingest()
+        (row,) = self.conn.execute(
+            "SELECT thread_class, class_reason FROM source"
+        )
+        self.assertEqual(
+            tuple(row), ("primary", f"thread_source={CHATGPT_HANDOFF}")
+        )
+        kinds = self.conn.execute(
+            "SELECT kind FROM event ORDER BY line"
+        ).fetchall()
+        self.assertEqual([k[0] for k in kinds], ["harness", "prompt"])
+
     def test_progress_is_reported_for_every_source_planned_and_written(
         self,
     ) -> None:
@@ -94,7 +115,10 @@ class SourceModeTests(IngestCase):
         self.assertEqual(len(beats), 4)  # two planned, two written
 
     def test_non_primary_source_row_only_no_events(self) -> None:
-        handoff = [codex_meta("chatgpt_handoff", "thr-h"), user_msg(1, "x")]
+        handoff = [
+            codex_meta("memory_consolidation", "thr-h"),
+            user_msg(1, "x"),
+        ]
         unknown = codex_meta("user", "thr-u")
         del unknown["payload"]["thread_source"]
         self.write(rollout("thr-h"), handoff)
@@ -107,7 +131,7 @@ class SourceModeTests(IngestCase):
         self.assertEqual(
             [tuple(r) for r in rows],
             [
-                ("thr-h", "other", "thread_source=chatgpt_handoff", 0),
+                ("thr-h", "other", "thread_source=memory_consolidation", 0),
                 ("thr-u", "other", "thread_source=missing", 0),
             ],
         )
