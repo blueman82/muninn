@@ -2,8 +2,9 @@
 
 The store is one rollback-journal SQLite file under the data home.  Every
 writer takes the flock in `writer_lock` first, so there is exactly one
-writer process at a time; readers open the file read-only and never block
-it.
+writer process at a time.  Readers open the file read-only and do not need
+the writer lock, but in rollback-journal mode a reader's SHARED lock can
+briefly delay a writer's commit; that is why the writer sets busy_timeout.
 """
 
 from __future__ import annotations
@@ -209,7 +210,11 @@ def write_json_atomic(path: Path, obj: object) -> None:
     Args:
         path: Destination file.
         obj: JSON-serialisable value; keys are sorted for stable bytes.
-            A value json cannot encode raises before anything is written.
+
+    A value json cannot encode raises TypeError or ValueError before anything
+    is written; OSError propagates from the temp-file operations.  Ruff's
+    docstring rules reject a Raises section for exceptions raised only by
+    callees, so they are described here instead.
     """
     payload = json.dumps(obj, sort_keys=True).encode("utf-8")  # may raise
     # The temp file lives beside the target: rename is only atomic within one

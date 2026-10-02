@@ -86,7 +86,7 @@ class Work:
 
     Attributes:
         name: Provider root name the file was found under.
-        path: Absolute file path.
+        path: File path under the provider root.
         rel: Path relative to the root, as stored in the source row.
         st: The lstat taken when the file was listed.
         info: Thread identity read from line 1.

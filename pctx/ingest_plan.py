@@ -90,8 +90,9 @@ def late_forks(
 
     The first planning round skips such a fork as unchanged, because its
     parent was not indexed yet; once the parent's source is written the
-    content-prefix rule can finally be applied, so the fork is planned again
-    as if forced.
+    content-prefix rule can finally be applied.  The fork is planned again
+    with ``full`` off: it is picked up only because _parent_arrived makes
+    _unchanged false for it.
     """
     rows = conn.execute(
         "SELECT root, path FROM source WHERE replay_mode = 'unverified'"
@@ -220,7 +221,11 @@ def _vet(
 def _unchanged(
     conn: sqlite3.Connection, row: sqlite3.Row, st: os.stat_result
 ) -> bool:
-    """Whether stat and classifier version match the row and nothing waits."""
+    """Whether stat and classifier version match and no fork awaits a parent.
+
+    The last condition means no 'unverified' fork is still waiting on a
+    parent that has since arrived.
+    """
     return (
         (row["ino"], row["size"], row["mtime_ns"])
         == (st.st_ino, st.st_size, st.st_mtime_ns)

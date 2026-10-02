@@ -116,8 +116,9 @@ def run_pass(
             the pass when another writer is busy.
 
     Returns:
-        Counters for the pass; store.BusyError propagates when the lock is
-        still held after ``wait_s``.
+        Counters for the pass.  store.BusyError propagates if the writer
+        lock is still held after ``wait_s``, and ValueError if a root name
+        is not a known provider.
     """
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home), fullfsync=fullfsync)
@@ -142,12 +143,14 @@ def ingest(
     Args:
         conn: Read-write connection from store.connect_rw.
         roots: Provider root name to directory.
-        only_threads: Limit the pass to these thread ids; this also skips
-            missing-source marking, which needs a view of every root.
+        only_threads: Limit the pass to these thread or session ids (a
+            continuation file also matches its base thread id); this also
+            skips missing-source marking, which needs a view of every root.
         full: Re-read every source from the start.
 
     Returns:
-        Counters for the pass.
+        Counters for the pass.  ValueError propagates if a root name is not
+        a known provider.
     """
     started = time.monotonic()
     opts = PlanOptions(roots, full, only_threads)
