@@ -73,6 +73,7 @@ class FreshInstallTest(unittest.TestCase):
         )
         record = Path(rec["rdir"]) / "rollback-record.json"
         self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertIn(f"record in {rec['rdir']}", "\n".join(w.out))
         rb.rollback(w.ctx(), co.load_record(record))
         for rel, data in before.items():
             self.assertEqual((h / rel).read_bytes(), data, rel)
