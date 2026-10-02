@@ -102,6 +102,10 @@ def register_call(
 ) -> int:
     """Remember a call so its output can be linked later.
 
+    Mutates ``state``: stores the call in ``state.calls`` and, for a ``wait``
+    continuation, moves its exec cell entry from ``state.cells`` into
+    ``state.calls``.
+
     Args:
         state: Per-source state; None skips linking.
         call_id: Provider call id, if the record has one.
@@ -155,6 +159,11 @@ def tool_error(
     is_error: bool = False,
 ) -> list[EventRec]:
     """Build a ``tool_error`` event for the output of a known, clean call.
+
+    Mutates ``state``: always consumes the pending ``state.calls`` entry for
+    ``call_id``, even when it returns an empty list, and records a
+    ``state.cells`` entry when the output says the exec cell is still
+    running.
 
     Args:
         state: Per-source state holding the pending calls.

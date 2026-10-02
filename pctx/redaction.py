@@ -11,12 +11,13 @@ import re
 
 REDACTED = "[redacted:secret]"
 
-# Every pattern below must stay linear-time on hostile text, because
-# transcripts are untrusted and a catastrophic backtrack would stall ingest
-# while it holds the writer lock. That is why each repeat is bounded
-# ({20,}, {0,16384}), tempered (the (?!-----BEGIN ) guard) or limited to
-# horizontal whitespace; an unbounded repeat only ever consumes a newline
-# followed by a base64 run, so the two alternatives cannot overlap.
+# Every pattern below must stay near-linear on hostile text: transcripts are
+# untrusted, and a catastrophic backtrack here would stall whichever caller
+# redacts, including ingest. Repeats are therefore bounded ({0,16384}),
+# tempered (the (?!-----BEGIN ) guard) or limited to horizontal whitespace.
+# The remaining unbounded repeats (\S+, \s*, the base64 run) each stop at a
+# distinct delimiter, so a failed match rescans a span only a small number
+# of times rather than exponentially. Re-check this when adding a pattern.
 _URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
 _KEYS = (
     r"api[_-]?key|access[_-]?token|client[_-]?secret|token|"

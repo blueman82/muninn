@@ -23,7 +23,7 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, Unpack
+from typing import Any, NotRequired, TypedDict, Unpack, cast
 
 from pctx import scope, store
 from pctx.knowledge_cite import (
@@ -177,8 +177,9 @@ def _insert(
         " VALUES (?, ?, ?, ?)",
         [(k, action, request.actor, now) for k, action in logged],
     )
-    assert kid is not None  # an INSERT always yields a rowid
-    return kid
+    # sqlite3 types lastrowid as int | None; it is always set after a
+    # successful INSERT, so the cast only narrows the type.
+    return cast(int, kid)
 
 
 def _write_entry(
@@ -289,8 +290,9 @@ def retract(
             " VALUES (?, 'retract', ?, ?)",
             (number, actor, time.time()),
         )
-    assert number is not None  # a missing entry raised above
-    return {"notice": NOTICE, "entry": entry(conn, number)}
+    # A falsy number made ``row`` None and raised above, so it is an int
+    # here; the cast only narrows the type.
+    return {"notice": NOTICE, "entry": entry(conn, cast(int, number))}
 
 
 def run_add(

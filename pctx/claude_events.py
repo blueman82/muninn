@@ -45,7 +45,10 @@ def claude_thread(rel_path: str, first: Record) -> ThreadInfo:
 
     A main file's thread id is its ``sessionId``, which equals the file
     stem. A ``<session>/subagents/`` file's thread id is its own file stem and
-    its session is the ``sessionId``, falling back to the parent directory.
+    its session is the ``sessionId``, falling back to the ``<session>``
+    directory name (the parent of ``subagents/``). A file outside such a
+    directory whose first record has ``isSidechain`` true is also a subagent.
+    When no ``sessionId`` is present the session falls back to the file stem.
 
     Args:
         rel_path: Path of the transcript under the projects root.

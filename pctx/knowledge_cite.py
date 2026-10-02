@@ -132,11 +132,14 @@ def caller_session(
     """
     ids = {env.get(name) for name in CALLER_ENV} - {None, ""}
     if ids and roots:
-        # The caller's root may be None and is kept in the set on purpose:
-        # ingest compares the set with each file's base id, which is None
-        # for a continuation file, so such files are refreshed too. The cast
-        # records that ingest's ``set[str]`` annotation is narrower than what
-        # it accepts.
+        # caller_root may return None, and the None stays in the set. Ingest
+        # tests the set against each file's thread id, base id and session
+        # root, and the base id is None for every file except a continuation
+        # segment, so a None here matches nearly all sources and widens the
+        # targeted ingest to a full pass. That widening is kept as is: it
+        # only ever reads more, and the None case is an unknown caller. The
+        # cast records that ingest's ``set[str]`` annotation is narrower
+        # than what it accepts.
         only = cast(set[str], ids | {query.caller_root(conn, env)})
         ingest.ingest(conn, dict(roots), only_threads=only)
     return query.caller_root(conn, env)
