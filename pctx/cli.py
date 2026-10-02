@@ -21,6 +21,7 @@ import signal
 import sqlite3
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from pctx import (
@@ -205,7 +206,7 @@ def _parser() -> _Parser:
     return top
 
 
-def main(argv=None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     given = sys.argv[1:] if argv is None else list(argv)
     if given[:1] == ["hook"] and not {"-h", "--help"} & set(given):
         return _hook_main(given[1:], os.environ)  # never an argparse exit 2

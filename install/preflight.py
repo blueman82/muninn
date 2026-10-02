@@ -103,8 +103,9 @@ def _check_installable(ctx: Ctx) -> None:
     Raises:
         StepFailedError: If Python is too old or pctx data or a plist exist.
     """
-    # Compare major and minor explicitly: this guard is for a stray older
-    # interpreter even though the repo tooling targets 3.13.
+    # Kept despite the 3.13 lint target: the installer can be started by
+    # whatever python3 is first on PATH. The attributes
+    # form avoids the linter's "outdated version block" rule.
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         raise StepFailedError("the installer needs Python 3.13+")
     for path in (ctx.data, ctx.plist):

@@ -31,7 +31,7 @@ CODEX_HOOKS_PIN = "current/integrations/codex/hooks/hooks.json"
 
 
 def record(ctx: Ctx, rec: Record) -> None:
-    """Step 1: before-values of our config keys and the links."""
+    """Snapshot the before-values of our config keys and the links."""
     settings = (
         ce.load_json(ctx.settings.read_bytes()) if rec["has_claude"] else {}
     )
@@ -82,7 +82,7 @@ def _edit_config(ctx: Ctx, transform: Callable[[str], str]) -> None:
     )
 
 
-def _add_plugin(ctx: Ctx, rec: Record) -> Path:
+def _add_plugin(ctx: Ctx, rec: Record) -> bytes:
     """Have Codex install our plugin and check what it produced.
 
     Args:
@@ -90,7 +90,7 @@ def _add_plugin(ctx: Ctx, rec: Record) -> Path:
         rec: The run record; gains ``codex_plugin_version``.
 
     Returns:
-        The plugin's installed directory in Codex's cache.
+        The pinned hooks.json bytes, which the cached copy matched.
 
     Raises:
         StepFailedError: If Codex put the plugin somewhere unexpected, or
@@ -113,7 +113,7 @@ def _add_plugin(ctx: Ctx, rec: Record) -> Path:
         raise StepFailedError(
             "codex cache hooks.json differs from the pinned copy"
         )
-    return installed
+    return pinned
 
 
 def codex(ctx: Ctx, rec: Record) -> None:
@@ -131,10 +131,9 @@ def codex(ctx: Ctx, rec: Record) -> None:
         return
     _edit_config(ctx, drop_trust)
     _edit_config(ctx, lambda text: repoint(text, source))
-    _add_plugin(ctx, rec)
+    pinned = _add_plugin(ctx, rec)
     _edit_config(ctx, enable)
     if rec["trust"] == "auto":
-        pinned = (ctx.lib / CODEX_HOOKS_PIN).read_bytes()
         _edit_config(ctx, lambda text: write_trust(text, codex_hooks(pinned)))
     else:
         ctx.say(OWNER_STEP)

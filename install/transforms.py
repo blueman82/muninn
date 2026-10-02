@@ -33,8 +33,7 @@ def claude_paths(obj: Mapping[str, Any]) -> list[ce.JsonPath]:
     """List the only settings.json keys the installer may change.
 
     Args:
-        obj: The parsed settings; unused today, accepted so the allowed set
-            could depend on the file's content without changing callers.
+        obj: The parsed settings; ignored.
 
     Returns:
         One key path per hook event we manage.

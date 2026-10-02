@@ -52,8 +52,8 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
         # special files, so a hostile archive cannot escape ``tmp``.
         tf.extractall(tmp, filter="data")
     home = str(ctx.home).encode()
-    # Only these trees carry the placeholder; the repo itself is never
-    # edited, so the pinned release stays a faithful copy of the commit.
+    # Only these trees carry the placeholder. @HOME@ is substituted in this
+    # extracted copy only, never in the source repo.
     for sub in ("integrations", "launchd"):
         for path in (tmp / sub).rglob("*"):
             if path.is_symlink() or not path.is_file():
@@ -64,7 +64,7 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
 
 
 def pin(ctx: Ctx, rec: Record) -> None:
-    """Step 2: git archive into lib/<sha>, substitute @HOME@, relink."""
+    """Git archive into lib/<sha>, substitute @HOME@, relink."""
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
     if dry(ctx, f"pin {sha} -> {dest}; current, python, pctx relinked"):
         return
@@ -180,7 +180,7 @@ def _check_plist(ctx: Ctx, data: bytes) -> None:
 
 
 def start_new(ctx: Ctx, rec: Record) -> None:
-    """Step 6: install the pinned plist, bootstrap, live PID + heartbeat."""
+    """Install the pinned plist, bootstrap, live PID + heartbeat."""
     src = ctx.lib / PLIST_SOURCE
     if dry(ctx, f"install {src} as {ctx.plist}; launchctl bootstrap"):
         return

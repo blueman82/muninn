@@ -24,9 +24,10 @@ CODEX_KEYS = {
 # Substrings that mark a line as ours; none may appear outside our sections.
 MARKERS = (MKT_NAME, "provenance-context@")
 CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit")
-# Codex versions whose trust-hash algorithm we have checked against both the
-# source and a live ``hooks/list`` answer. Any other version leaves trusting
-# the hooks to the owner instead of writing a hash that might not match.
+# Codex versions whose trust-hash algorithm we have checked: 0.159.2 against
+# the Codex source and binary, 0.159.3 only against a live ``hooks/list``
+# currentHash. Any other version leaves trusting the hooks to the owner
+# instead of writing a hash that might not match.
 CODEX_VERIFIED = ("codex-cli 0.159.2", "codex-cli 0.159.3")
 PLIST = "Library/LaunchAgents/com.provenance-context.plist"
 # Longest age of status.json that still counts as a live heartbeat.

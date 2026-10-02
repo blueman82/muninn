@@ -110,17 +110,17 @@ class Ctx:
     probe: Callable[[Ctx], list[dict[str, Any]]] | None = None
     fresh: bool = False
     upgrade: bool = False
-    data: Path = dataclasses.field(init=False)
-    rdir: Path = dataclasses.field(init=False)
-    failed: Path = dataclasses.field(init=False)
-    lib: Path = dataclasses.field(init=False)
-    pctx: Path = dataclasses.field(init=False)
-    plist: Path = dataclasses.field(init=False)
-    settings: Path = dataclasses.field(init=False)
-    codex_home: Path = dataclasses.field(init=False)
-    config: Path = dataclasses.field(init=False)
-    cache: Path = dataclasses.field(init=False)
-    target: str = dataclasses.field(init=False)
+    data: Path = dataclasses.field(init=False, repr=False, compare=False)
+    rdir: Path = dataclasses.field(init=False, repr=False, compare=False)
+    failed: Path = dataclasses.field(init=False, repr=False, compare=False)
+    lib: Path = dataclasses.field(init=False, repr=False, compare=False)
+    pctx: Path = dataclasses.field(init=False, repr=False, compare=False)
+    plist: Path = dataclasses.field(init=False, repr=False, compare=False)
+    settings: Path = dataclasses.field(init=False, repr=False, compare=False)
+    codex_home: Path = dataclasses.field(init=False, repr=False, compare=False)
+    config: Path = dataclasses.field(init=False, repr=False, compare=False)
+    cache: Path = dataclasses.field(init=False, repr=False, compare=False)
+    target: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Derive every path from ``home`` and ``ts`` once."""

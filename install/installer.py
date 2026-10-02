@@ -1,8 +1,8 @@
-"""Install pctx on this machine: --fresh (new machine) or --upgrade (re-pin).
+r"""Install pctx on this machine: --fresh (new machine) or --upgrade (re-pin).
 
 Run from the repo root, at a clean commit:
 
-  python3.13 -E -s -B -m install.installer
+  python3.13 -E -s -B -m install.installer \
       --repo DIR --sha SHA (--fresh | --upgrade) [--dry-run]
 
 Any failure after the record is written runs ``install.rollback``. Every

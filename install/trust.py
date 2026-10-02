@@ -2,8 +2,8 @@
 
 Codex trusts a hook by the hash of its normalised identity. To pre-trust
 our hooks we must reproduce that hash exactly; a hash that differs by one
-byte makes Codex report the hook as modified. The test suite compares the
-result with a real Codex ``hooks/list`` answer.
+byte leaves the hook untrusted until the owner trusts it by hand. The test
+suite compares the result with a real Codex ``hooks/list`` answer.
 """
 
 from __future__ import annotations
