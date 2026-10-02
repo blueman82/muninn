@@ -17,9 +17,10 @@ import sqlite3
 import stat
 import time
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any, cast
 
 from pctx import classify
 from pctx.scope import scope_ids_for_read
@@ -180,6 +181,11 @@ def _guarded(func):
             raise
 
     return wrapper
+
+
+def guarded[F: Callable[..., Any]](func: F) -> F:
+    """Apply ``_guarded`` to a reader in another module, keeping its type."""
+    return cast(F, _guarded(func))
 
 
 def _ref(row: sqlite3.Row) -> str:
@@ -814,8 +820,8 @@ def open_event(
     context: int = 3,
     offset: int = 0,
     raw: bool = False,
-    status: Mapping | None = None,
-) -> dict:
+    status: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """One event in full (design 4.5): text, provenance, neighbours.
 
     ref is an event id or provider:thread_id:line.part (thread prefix ok).
@@ -1077,7 +1083,9 @@ def session(
 
 
 @_guarded
-def quote_check(conn: sqlite3.Connection, ref: str, quote: str) -> dict:
+def quote_check(
+    conn: sqlite3.Connection, ref: str, quote: str
+) -> dict[str, Any]:
     """{"match": bool, "span": [start, end] | None} for a quote in an event.
 
     A whitespace-collapsed, case-sensitive substring test; the span is in
