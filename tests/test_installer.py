@@ -229,3 +229,7 @@ class UpgradeTest(unittest.TestCase):
         (self.lib / "current").unlink()
         with self.assertRaises(co.StepFailedError):
             co.install(self.ctx, self.w.repo, self.sha2)
+
+
+if __name__ == "__main__":
+    unittest.main()

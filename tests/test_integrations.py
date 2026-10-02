@@ -345,3 +345,7 @@ class ConfigCleanupTest(unittest.TestCase):
         )
         self.assertEqual(config["strict"], ["pctx", "install", "tools"])
         self.assertNotIn("extraPaths", config)
+
+
+if __name__ == "__main__":
+    unittest.main()

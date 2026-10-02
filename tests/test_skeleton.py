@@ -111,3 +111,7 @@ class LauncherTests(unittest.TestCase):
         proc = run(cmd, cwd=ROOT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
+
+
+if __name__ == "__main__":
+    unittest.main()

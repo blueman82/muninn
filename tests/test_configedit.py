@@ -238,3 +238,7 @@ class EditFileTest(unittest.TestCase):
         with self.assertRaises(ce.RefusedError):
             ce.edit_file(self.path, stray, self.check)
         self.assertEqual(self.path.read_bytes(), before)
+
+
+if __name__ == "__main__":
+    unittest.main()
