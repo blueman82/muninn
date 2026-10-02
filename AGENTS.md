@@ -47,14 +47,25 @@ Instructions for coding agents working in this repo. Any parent-directory
 
 ## Check
 
-    python3.13 -m unittest discover -s tests -t .
-    python3.13 -m tools.check --full       # the whole gate
+    python3.13 -m tools.check --full       # the whole gate: standards, ruff, black,
+                                           # pyright strict, shellcheck, hooks, tests
+    python3.13 -m tools.run_tests          # the suite alone, in parallel (~8 s)
+    python3.13 -m unittest discover -s tests -t .   # the suite, serial (~35 s)
 
-Set up the gate tools once:
-`python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`
-and `git config core.hooksPath .githooks`. The pre-commit hook, the test suite,
-Claude Code's Stop hook and the installer all run the gate; a missing tool
-fails it.
+Set up once: `python3.13 -m venv .venv && .venv/bin/pip install -r
+requirements-dev.txt` and `git config core.hooksPath .githooks`. The pre-commit
+and pre-merge-commit hooks, `tests/test_standards.py` and the installer all run
+the gate, and Claude Code's Stop hook (`.claude/settings.json`) blocks stopping
+on a failure. Codex has no Stop hook: run `python3.13 -m tools.check --full`
+yourself before you say work is done, and report its result. A missing tool or
+a failing test fails the gate; it never skips.
+
+## Decisions you must not reverse without asking
+
+`docs/adr/`: one pinned release and in-place upgrade (0001); the installer has
+only `--fresh` and `--upgrade` (0002); `bin/pctx` finds its interpreter at run
+time (0003); logs hold no transcript text (0004); no hash-chained call log
+(0005); the standards are enforced by a gate (0006).
 
 ## Verify a change
 
