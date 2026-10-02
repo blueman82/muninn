@@ -57,6 +57,20 @@ The installer refuses a commit that breaks the stdlib standards rules.
   check rather than a real keyword-only signature (the signature would exceed
   the argument-count limit); the TypeError text differs slightly from Python's.
 
+## Next session: tasks, in order (owner said do all)
+
+Detail and rules: the memory note `project_pctx_next_tasks.md`. Work on a branch, through the gate.
+
+1. `bin/pctx-install --help` describes the wrapper, not the old argparse usage; drop the raw `step ...` lines from
+   default output and add the poller pid to the summary line; tests for both.
+2. ADR 0008 for the wrapper; list it in `docs/adr/README.md` and `AGENTS.md`.
+3. Extend the SessionStart hint in `pctx/hook_frame.py` so an agent without the skill can run `pctx know add`
+   correctly (about 150 more characters; same frame for Claude and Codex; update the frame tests and REFERENCE).
+4. Rewrite the recall-default wording in ADR 0007, `docs/REFERENCE.md` and `docs/QUICKSTART.md` on its merits, with no
+   history of the earlier system.
+5. Draft, do not add, `pctx know add` entries for the owner's standing decisions, quoting their exact words.
+6. Live-check the Codex Stop hook without the bypass flag (quiet repo; warn peer sessions first).
+
 ## Tests
 
     python3.13 -m unittest discover -s tests -t .
