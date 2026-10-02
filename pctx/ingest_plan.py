@@ -1,9 +1,10 @@
 """Ingest planning: find transcript files and decide what each one needs.
 
-Planning reads at most line 1 of a file and never writes a source row, with
-one exception: a file that came back after being marked missing is
-reactivated in its own small transaction.  The expensive work (parsing and
-inserting events) is left to `pctx.ingest`.
+Planning reads line 1 and the previously committed anchor line of a file,
+never the new lines, and never writes a source row, with one exception: a
+file that came back after being marked missing is reactivated in its own
+small transaction.  The expensive work (parsing and inserting events) is
+left to `pctx.ingest`.
 """
 
 from __future__ import annotations
