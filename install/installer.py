@@ -225,7 +225,6 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     step: Step = record
     try:
         for step in steps(ctx):
-            ctx.say(f"step {step.__name__}")
             step(ctx, rec)
             if not ctx.dry_run:
                 rec["steps"].append(step.__name__)

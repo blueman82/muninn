@@ -187,7 +187,6 @@ def prune(ctx: Ctx, rec: Record) -> None:
             )
         return
     for path in old:
-        ctx.say(f"prune {path.name}")
         shutil.rmtree(path)
 
 

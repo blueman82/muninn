@@ -7,8 +7,7 @@ Status: Accepted, 2026-10-02. Decided by: owner. Supersedes the earlier default 
 new system compared it with the old memory tool on 40 questions. Per the trial session's report, in 12 of the deliberate
 "wrong project" control questions the new system answered when it should have said "not this project", and it scored 8 fully
 correct answers against the old tool's 12 (p = 0.34 on 28 usable pairs, not statistically meaningful). Under the pre-set rule
-the cutover was held on that safety finding. Retrieval and answer-quality re-checks are still the next product work
-(`HANDOFF.md`).
+the cutover was held on that safety finding. Retrieval and answer-quality re-checks are still the next product work.
 
 **Decision.** `install --fresh` creates `recall.off` (mode 0600) in the data directory, so a new machine starts with
 per-prompt recall off. SessionStart memory stays on. `--upgrade` never creates or removes the file, so an owner's choice

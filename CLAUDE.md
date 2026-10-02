@@ -35,4 +35,3 @@ Line length is 79 (black and ruff, configured in `pyproject.toml`). Run the CLI 
 - Hooks must always print compact JSON and exit 0 (fail open), even on store errors.
 - Tests must use a temp `PCTX_HOME`, and `PCTX_ROOTS` to point at synthetic fixtures in `tests/fixtures`; installer tests use the fakes in `tests/test_installer.py` so nothing touches the real HOME, launchd or provider config.
 - `.claude/skills/pctx-*` mirror the CLI commands (`docs/SKILLS.md`). Keep them in step with `docs/REFERENCE.md`; the SessionStart/UserPromptSubmit frame text stays minimal and does not name them.
-- `HANDOFF.md` holds current status and deferred work; update it when work spans sessions.
