@@ -381,7 +381,7 @@ class CodexDelegationTests(unittest.TestCase):
     def test_reviewer_and_other_threads_return_events_normally(self) -> None:
         for meta in (
             codex_meta("guardian_review", "thr-g", source=GUARDIAN_SOURCE),
-            codex_meta("chatgpt_handoff", "thr-h"),
+            codex_meta("memory_consolidation", "thr-m"),
         ):
             with self.subTest(thread=meta["payload"]["id"]):
                 records = [meta, user_msg(1, "review this"), reply(2, "ok")]

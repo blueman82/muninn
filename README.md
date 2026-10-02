@@ -32,9 +32,9 @@ Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
 
 ## What it stores
 
-- Primary threads: Codex user sessions (`thread_source=user`, live and
-  archived) and Claude Code main transcripts. Only these are searched, pushed
-  and cited by default.
+- Primary threads: Codex user and `chatgpt_handoff` sessions (a handoff's
+  opening message is `harness`) and Claude Code main transcripts. Only these
+  are searched, pushed and cited by default.
 - Event kinds: `prompt`, `reply`, `tool_call`, tagged `harness` text, and
   `tool_error`, a redacted head and tail of an error-bearing tool output
   (never pushed and never citable).

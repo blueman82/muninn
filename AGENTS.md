@@ -84,7 +84,7 @@ time (0003); logs hold no transcript text (0004); no hash-chained call log
 (0005); the standards are enforced by a gate (0006); per-prompt recall starts
 off on a fresh install (0007); `bin/muninn-install` picks the mode and `--check`
 writes nothing (0008); `bin/muninn-uninstall` keeps the data unless told
-otherwise (0009).
+otherwise (0009); Codex ChatGPT-handoff sessions are primary (0010).
 
 ## Definition of done (Codex Stop hook plus manual fallback)
 

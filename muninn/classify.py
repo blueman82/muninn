@@ -50,7 +50,9 @@ from muninn.tool_errors import is_error_text as _is_error
 # Bump when classification changes in a way that requires re-reading sources.
 # 2: owner messages typed mid-turn (queued_command attachments) were not
 # indexed before, so old sources must be re-read to gain them.
-CLASSIFIER_VERSION = 2
+# 3: Codex chatgpt_handoff sessions were classed other and had no events, so
+# they must be re-read to gain them.
+CLASSIFIER_VERSION = 3
 # Deepest JSON nesting accepted; a hostile line cannot exhaust the stack.
 MAX_DEPTH = 1_000
 

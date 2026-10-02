@@ -14,6 +14,7 @@ import unittest
 from collections.abc import Callable
 
 from muninn import classify as c
+from muninn.codex_events import CHATGPT_HANDOFF
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -126,9 +127,13 @@ class CodexThreadTests(unittest.TestCase):
             (fresh.replay_mode, fresh.replay_before), ("none", None)
         )
 
-    def test_handoff_and_unknown_are_other(self) -> None:
+    def test_chatgpt_handoff_is_the_owners_primary_session(self) -> None:
+        info = c.codex_thread(codex_meta(CHATGPT_HANDOFF))
+        self.assertEqual(info.thread_class, "primary")
+        self.assertEqual(info.class_reason, f"thread_source={CHATGPT_HANDOFF}")
+
+    def test_other_and_unknown_thread_sources_are_other(self) -> None:
         cases = {
-            "chatgpt_handoff": "thread_source=chatgpt_handoff",
             "memory_consolidation": "thread_source=memory_consolidation",
             "some_future_kind": "thread_source=some_future_kind",
             None: "thread_source=missing",
