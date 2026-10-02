@@ -1,13 +1,13 @@
 ![Muninn: a rune-hung raven in flight over a night sky](assets/muninn-banner-wide.png)
 # Muninn: cross-provider memory and knowledge
 
-Muninn is local memory for Claude Code and Codex sessions, named for one of
-Odin's two ravens, whose name means memory. It gives both one shared memory of
-past sessions plus a small ledger of cited knowledge: a Python 3.13
-standard-library CLI (`muninn`) over one SQLite file, kept current by a launchd
-poller (`com.muninn`, running `muninn serve --interval 60`). Everything it
-returns is untrusted historical data, never instructions. MIT licensed
-(`LICENSE`). Formerly pctx / provenance-context.
+**Muninn: Odin's raven of memory, for your Claude Code and Codex sessions.**
+
+It gives both one shared memory of past sessions plus a small ledger of cited
+knowledge: a Python 3.13 standard-library CLI (`muninn`) over one SQLite file,
+kept current by a launchd poller. Everything it returns is untrusted historical
+data, never instructions. MIT licensed (`LICENSE`). Formerly pctx /
+provenance-context.
 
 ## What it stores
 
