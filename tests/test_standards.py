@@ -6,7 +6,9 @@ import json
 import os
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from tools import check
 from tools.check import hooks_installed
 from tools.standards import check_repo
 
@@ -68,6 +70,35 @@ class GateCannotBeRemovedTest(unittest.TestCase):
         text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
         for tool in ("ruff", "black", "pyright"):
             self.assertIn(f"{tool}==", text)
+
+
+class HooksCheckTest(unittest.TestCase):
+    """``hooks_installed`` accepts the tracked hooks folder in any form."""
+
+    def configured(self, value: str) -> bool:
+        """Run the check as if ``core.hooksPath`` held ``value``.
+
+        Args:
+            value: The setting; an empty string means it is unset.
+
+        Returns:
+            What ``hooks_installed`` answers.
+        """
+        # main_checkout also calls git_output, so pin it to this checkout.
+        with (
+            mock.patch.object(check, "git_output", return_value=value),
+            mock.patch.object(check, "main_checkout", return_value=ROOT),
+        ):
+            return hooks_installed()
+
+    def test_relative_and_absolute_forms_both_count(self) -> None:
+        self.assertTrue(self.configured(".githooks"))
+        self.assertTrue(self.configured(str(ROOT / ".githooks")))
+
+    def test_unset_or_other_folders_do_not_count(self) -> None:
+        self.assertFalse(self.configured(""))
+        self.assertFalse(self.configured("hooks"))
+        self.assertFalse(self.configured("/tmp/elsewhere/.githooks"))
 
 
 if __name__ == "__main__":

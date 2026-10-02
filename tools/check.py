@@ -92,12 +92,24 @@ def find_tool(name: str) -> str | None:
 def hooks_installed() -> bool:
     """Say whether this clone runs the hooks tracked in ``.githooks``.
 
-    Git cannot track its own ``core.hooksPath``, so the gate checks it.
+    Git cannot track its own ``core.hooksPath``, so the gate checks it. The
+    setting may be relative (``.githooks``, resolved per worktree) or an
+    absolute path; what matters is that it names the tracked hooks folder of
+    this checkout or of the main one.
 
     Returns:
-        True when ``core.hooksPath`` is ``.githooks``.
+        True when ``core.hooksPath`` resolves to a ``.githooks`` folder of
+        this checkout or the main checkout.
     """
-    return git_output("config", "core.hooksPath") == ".githooks"
+    configured = git_output("config", "core.hooksPath")
+    if not configured:
+        return False
+    path = Path(configured)
+    resolved = (path if path.is_absolute() else ROOT / path).resolve()
+    wanted = {
+        (base / ".githooks").resolve() for base in (ROOT, main_checkout())
+    }
+    return resolved in wanted
 
 
 def run_tools() -> int:
