@@ -58,7 +58,9 @@ class SessionEraseTests(EraseCase):
         self.write(rollout(TID), primary())
         fork = codex_meta("user", "thr-fork", forked_from_id=TID)
         self.write(rollout("thr-fork"), [fork, user_msg(1, "fork own")])
-        # k=None builds a subagent without a history-start ordinal.
+        # subagent_meta skips the history-start ordinal when k is None;
+        # its unannotated k=5 default makes a literal k=None fail type
+        # checking, so the override goes through a dict.
         no_history: dict[str, Any] = {"k": None}
         sub = subagent_meta(
             "thr-fsub",

@@ -21,6 +21,8 @@ from tests.store_support import (
     mode,
 )
 
+# Re-exported because other test modules still import these helpers from
+# here rather than from tests.store_support.
 __all__ = ["SPILLING_WRITER", "Child"]
 
 
