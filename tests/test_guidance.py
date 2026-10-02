@@ -1,7 +1,7 @@
 """Public help and rendered recall guide navigation and factual support."""
 
-from tests.test_cli import CliCase
 from tests.hook_support import RecallCase
+from tests.test_cli import CliCase
 from tests.test_ingest import TID
 
 
