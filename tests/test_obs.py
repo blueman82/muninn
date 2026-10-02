@@ -1,12 +1,17 @@
-"""Observability contract (design 7; spec O8d, O9, A14): stage log with an
-allowlist and rotation, status heartbeat, no transcript text anywhere."""
+"""Observability contract.
+
+The stage log keeps an allowlist and rotates, the status heartbeat merges
+writes, and no transcript text is ever written anywhere.
+"""
+
+from __future__ import annotations
 
 import json
-import os
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from pctx import obs
@@ -15,20 +20,32 @@ CANARY = "CANARY-OBS-" + "z9" * 8
 
 
 class ObsCase(unittest.TestCase):
-    def setUp(self):
+    """Base case with a private data directory and its call log path."""
+
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.home = Path(tmp.name) / "home"
         self.home.mkdir(mode=0o700)
         self.log = self.home / "calls.jsonl"
 
-    def lines(self, path=None):
+    def lines(self, path: Path | None = None) -> list[dict[str, Any]]:
+        """Parse a JSON-lines log.
+
+        Args:
+            path: Log to read; defaults to the call log.
+
+        Returns:
+            One decoded object per line.
+        """
         path = path or self.log
         return [json.loads(x) for x in path.read_text().splitlines()]
 
 
 class CallLogTests(ObsCase):
-    def test_allowlist_drops_text_and_unknown_fields(self):
+    """The call log keeps only allowlisted fields and stays bounded."""
+
+    def test_allowlist_drops_text_and_unknown_fields(self) -> None:
         ok = obs.log_call(
             self.home,
             {
@@ -64,15 +81,15 @@ class CallLogTests(ObsCase):
                 "ms",
             },
         )
-        self.assertEqual(os.stat(self.log).st_mode & 0o777, 0o600)
+        self.assertEqual(self.log.stat().st_mode & 0o777, 0o600)
 
-    def test_line_is_at_most_1kib(self):
+    def test_line_is_at_most_1kib(self) -> None:
         obs.log_call(
             self.home, {"cmd": "search", "returned_ids": list(range(10_000))}
         )
         self.assertLessEqual(len(self.log.read_bytes()), 1024)
 
-    def test_log_rotation_1mib(self):
+    def test_log_rotation_1mib(self) -> None:
         self.log.write_bytes(b"x" * (obs.ROTATE_BYTES - 10) + b"\n")
         obs.log_call(self.home, {"cmd": "stats"})
         rotated = self.home / "calls.jsonl.1"
@@ -86,17 +103,17 @@ class CallLogTests(ObsCase):
             ["calls.jsonl", "calls.jsonl.1"],
         )
 
-    def test_logged_false_when_append_denied(self):
+    def test_logged_false_when_append_denied(self) -> None:
         self.home.chmod(0o500)  # the Codex sandbox denies the append
         self.addCleanup(self.home.chmod, 0o700)
         self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
 
-    def test_no_calllog_env(self):
+    def test_no_calllog_env(self) -> None:
         env = {"PCTX_NO_CALLLOG": "1"}
         self.assertFalse(obs.log_call(self.home, {"cmd": "search"}, env))
         self.assertFalse(self.log.exists())
 
-    def test_actor_from_env(self):
+    def test_actor_from_env(self) -> None:
         cases = (
             (
                 {"CLAUDE_CODE_SESSION_ID": "1a23fdfe-0f0c-4c1e"},
@@ -111,7 +128,9 @@ class CallLogTests(ObsCase):
 
 
 class HumanBytesTests(unittest.TestCase):
-    def test_units(self):
+    """Byte counts render with binary units."""
+
+    def test_units(self) -> None:
         for n, want in (
             (0, "0 B"),
             (1023, "1023 B"),
@@ -125,7 +144,9 @@ class HumanBytesTests(unittest.TestCase):
 
 
 class PollerLogTests(ObsCase):
-    def test_line_is_allowlisted_and_log_rotates(self):
+    """The poller log applies the same allowlist and rotation."""
+
+    def test_line_is_allowlisted_and_log_rotates(self) -> None:
         path = self.home / "poller.log"
         self.assertTrue(
             obs.log_poller(
@@ -144,7 +165,9 @@ class PollerLogTests(ObsCase):
 
 
 class StatusTests(ObsCase):
-    def test_status_heartbeat_merges_and_is_private(self):
+    """Status heartbeat, install sha and freshness."""
+
+    def test_status_heartbeat_merges_and_is_private(self) -> None:
         obs.write_status(self.home, {"interval_s": 60, "pid": 7})
         obs.write_status(self.home, {"last_pass_at": 123.0})
         got = obs.read_status(self.home)
@@ -153,14 +176,14 @@ class StatusTests(ObsCase):
             (60, 7, 123.0),
         )
         path = self.home / "status.json"
-        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
-    def test_read_status_missing_or_corrupt_is_empty(self):
+    def test_read_status_missing_or_corrupt_is_empty(self) -> None:
         self.assertEqual(obs.read_status(self.home), {})
         (self.home / "status.json").write_text("{not json")
         self.assertEqual(obs.read_status(self.home), {})
 
-    def test_install_sha(self):
+    def test_install_sha(self) -> None:
         home = Path(tempfile.mkdtemp(dir=self.home))
         self.assertIsNone(obs.install_sha({"HOME": str(home)}))
         lib = home / ".local/lib/provenance-context"
@@ -170,7 +193,7 @@ class StatusTests(ObsCase):
         env = {"HOME": str(home), "PCTX_INSTALL_SHA": "fff0000"}
         self.assertEqual(obs.install_sha(env), "fff0000")
 
-    def test_poller_freshness(self):
+    def test_poller_freshness(self) -> None:
         now = time.time()
         with mock.patch("time.time", return_value=now):
             fresh = obs.freshness({"last_pass_at": now - 30, "interval_s": 60})
