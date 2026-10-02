@@ -1,12 +1,16 @@
 """Public help and rendered recall guide navigation and factual support."""
 
+from __future__ import annotations
+
 from tests.test_cli import CliCase
 from tests.test_hook import RecallCase
 from tests.test_ingest import TID
 
 
 class GuidanceTests(CliCase):
-    def test_help_explains_evidence_and_actual_paging_actions(self):
+    """CLI help and result notices carry the evidence guidance."""
+
+    def test_help_explains_evidence_and_actual_paging_actions(self) -> None:
         code, out, help_text = self.pctx("--help")
         self.assertEqual((code, out), (2, ""))
         for phrase in (
@@ -36,7 +40,9 @@ class GuidanceTests(CliCase):
                 with self.subTest(command=command, phrase=phrase):
                     self.assertIn(phrase, text)
 
-    def test_actual_result_notices_distinguish_eligibility_from_truth(self):
+    def test_actual_result_notices_distinguish_eligibility_from_truth(
+        self,
+    ) -> None:
         self.session(TID, "zebra navigation evidence", "zebra reply")
         self.run_ingest()
         for args in (
@@ -47,6 +53,7 @@ class GuidanceTests(CliCase):
         ):
             code, out, _ = self.pctx(*args)
             self.assertEqual(code, 0, out)
+            assert isinstance(out, dict)
             notice = out["preview_notice"]
             for phrase in (
                 "metadata",
@@ -63,7 +70,11 @@ class GuidanceTests(CliCase):
 
 
 class HookGuidanceTests(RecallCase):
-    def test_bounded_start_and_recall_contain_support_guidance_once(self):
+    """Hook output carries the guidance once, within its size caps."""
+
+    def test_bounded_start_and_recall_contain_support_guidance_once(
+        self,
+    ) -> None:
         self.talk("guidance", "alphaterm betaterm gammaterm deltaterm")
         for provider, cap in (("claude", 4000), ("codex", 2800)):
             text = self.body(self.start(provider))
