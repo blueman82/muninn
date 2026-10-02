@@ -50,7 +50,8 @@ class CodexMessageTests(unittest.TestCase):
         self.assertEqual((state.thread_class, state.cwd), ("primary", CWD))
 
     def test_records_below_replay_ordinal_dropped(self) -> None:
-        # A primary-labelled thread that carries a replay start ordinal still skips its replay.
+        # A primary-labelled thread with a replay start ordinal still
+        # skips its replay.
         meta = codex_meta("user", "thr-k", subagent_history_start_ordinal=3)
         records = [
             meta,
@@ -77,10 +78,12 @@ class CodexMessageTests(unittest.TestCase):
         ]
         no_ordinal = user_msg(0, "replayed, no ordinal")
         del no_ordinal["ordinal"]
-        records.insert(3, no_ordinal)  # line 4: position 3 is before the replay start
+        # Line 4, position 3: before the replay start.
+        records.insert(3, no_ordinal)
         late = reply(0, "late, no ordinal")
         del late["ordinal"]
-        records.append(late)  # line 8: position 7 is past the replay start, seq = line
+        # Line 8, position 7: past the replay start, so seq is the line.
+        records.append(late)
         events, state = run_codex(records)
         self.assertEqual(
             events,
@@ -94,9 +97,9 @@ class CodexMessageTests(unittest.TestCase):
 
     # Keeps the established test id, whose capital K the lint naming rule
     # rejects in a def statement.
-    locals()["test_subagent_records_below_K_never_emitted"] = (
-        _drops_records_below_replay_start
-    )
+    locals()[
+        "test_subagent_records_below_K_never_emitted"
+    ] = _drops_records_below_replay_start
 
     def test_history_base_fork_keeps_all(self) -> None:
         meta = codex_meta(
