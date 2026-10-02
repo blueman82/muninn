@@ -8,6 +8,19 @@ from typing import Any
 
 # Larger ages are reported as unknown, which keeps the metadata bounded.
 MAX_INDEX_AGE = 2**63 - 1
+# status.json key the poller refreshes while a long pass runs, so a pass that
+# outlasts the heartbeat window does not read as a dead poller.
+ALIVE_AT = "alive_at"
+
+
+def _since(stamp: object) -> int | None:
+    """Return whole seconds since ``stamp``, or None if it is unusable."""
+    if not isinstance(stamp, (int, float)):
+        return None
+    try:
+        return max(0, int(time.time() - stamp))
+    except (OverflowError, ValueError):  # inf or nan in a hand-edited file
+        return None
 
 
 def _unknown() -> dict[str, Any]:
@@ -27,18 +40,16 @@ def freshness(status: Mapping[str, Any] | None) -> dict[str, Any]:
     """
     if status is None:
         return {}
-    last = status.get("last_pass_at")
-    if not isinstance(last, (int, float)):
+    age = _since(status.get("last_pass_at"))
+    if age is None or age > MAX_INDEX_AGE:
         return _unknown()
     every = status.get("interval_s")
     every = every if isinstance(every, (int, float)) and every > 0 else 60
-    try:
-        age = max(0, int(time.time() - last))
-    except (OverflowError, ValueError):  # inf or nan in a hand-edited file
-        return _unknown()
-    if age > MAX_INDEX_AGE:
-        return _unknown()
+    # The index is as old as its last finished pass, but the poller is alive
+    # if it either finished a pass or said so recently.
+    alive = _since(status.get(ALIVE_AT))
+    seen = age if alive is None else min(age, alive)
     return {
         "index_age_s": age,
-        "poller": "ok" if age <= 3 * every else "stale",
+        "poller": "ok" if seen <= 3 * every else "stale",
     }

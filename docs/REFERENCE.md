@@ -162,7 +162,8 @@ the next prompt; no restart is needed.
 
 ## Files in the data directory
 
-`muninn.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only);
+`muninn.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only; `alive_at` is refreshed every few seconds while a pass runs, so a long
+re-read after a classifier change still shows `poller` `ok` while `index_age_s` keeps counting from the last finished pass);
 `calls.jsonl` and `calls.jsonl.1` one allowlisted line per CLI call (ids and counts, no text; rotated at 1 MiB);
 `poller.log` and `poller.log.1` poller events (rotated likewise); `tombstones.jsonl` erase records;
 `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). Anything else fails `unexpected_files`.

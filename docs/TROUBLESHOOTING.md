@@ -9,6 +9,7 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 |---|---|---|
 | `muninn: no Python 3.13+ found` | no interpreter on PATH or at the installer's link | set `MUNINN_PYTHON=/path/to/python3.13`, or re-run the installer under the right Python |
 | `poller: stale` in every answer, `heartbeat` fails | the launchd job is down or stuck | `launchctl print gui/$(id -u)/com.muninn`; read `poller.log`; `launchctl kickstart -k gui/$(id -u)/com.muninn` |
+| `poller: stale` while the poller runs | the pass is long (for example the one-time re-read after an upgrade that changes the classifier) and the poller is on a release older than the heartbeat-during-pass fix | wait for the pass to end, or check `poller.log`; a current poller stays `ok` through a long pass, so `stale` there means it is stuck or stopped |
 | `launchd_job` fails | job not loaded | re-run `bin/muninn-install` (it upgrades an installed machine) |
 | search finds little | few sources indexed | `muninn --pretty stats`: check `sources`, `events_by_provider` (a provider at 0 means its root was not found) and `last_pass.skipped_files`; `muninn doctor` shows `roots_present` |
 | `db_free_space` warns | many deletes left free pages | `muninn compact` (needs about one database's worth of free disk) |

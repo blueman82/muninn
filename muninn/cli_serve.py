@@ -20,8 +20,14 @@ from typing import Any, cast
 from muninn import ingest, obs, store
 from muninn.cli_core import Env, Record, Result
 from muninn.cli_maint import heartbeat
+from muninn.query.index_age import ALIVE_AT
 
 __all__ = ["serve"]
+
+# While a pass runs, say so at most this often. A pass after a classifier
+# change re-reads every transcript and takes minutes; without this the
+# poller looks dead to the installer and to doctor for all of that time.
+ALIVE_EVERY_S = 5.0
 
 
 class _ServeStopError(BaseException):
@@ -69,6 +75,7 @@ class _Poller:
         self.conn: _StopAfterCommit | None = None
         self.passes = self.skipped = self.quiet = 0
         self.idle_every = 1
+        self.alive_at = float("-inf")  # monotonic time of the last write
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Stop now if idle, else after the open transaction ends."""
@@ -101,8 +108,21 @@ class _Poller:
             },
         )
 
+    def _alive(self) -> None:
+        """Record that the poller is alive, at most every ``ALIVE_EVERY_S``."""
+        now = time.monotonic()
+        if now - self.alive_at < ALIVE_EVERY_S:
+            return
+        self.alive_at = now
+        # A heartbeat that cannot be written must not abort the pass.
+        with contextlib.suppress(OSError):
+            obs.write_status(
+                self.home, {ALIVE_AT: time.time(), "pid": os.getpid()}
+            )
+
     def _ingest(self) -> ingest.PassStats:
         """Run one ingest pass under the writer lock, never waiting for it."""
+        self._alive()
         with store.writer_lock(self.home, wait_s=0):
             raw = store.connect_rw(store.db_path(self.home))
             # The proxy only adds a stop hook around COMMIT/ROLLBACK and
@@ -111,7 +131,9 @@ class _Poller:
             self.conn = _StopAfterCommit(raw)
             try:
                 return ingest.ingest(
-                    cast(sqlite3.Connection, self.conn), self.roots
+                    cast(sqlite3.Connection, self.conn),
+                    self.roots,
+                    on_source=self._alive,
                 )
             finally:
                 raw.close()

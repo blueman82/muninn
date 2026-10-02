@@ -15,6 +15,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import obs
+from muninn.query.index_age import ALIVE_AT
 
 CANARY = "CANARY-OBS-" + "z9" * 8
 
@@ -204,3 +205,17 @@ class StatusTests(ObsCase):
         self.assertEqual(fresh, {"index_age_s": 30, "poller": "ok"})
         self.assertEqual(stale["poller"], "stale")
         self.assertEqual(none, {"index_age_s": None, "poller": "stale"})
+
+    def test_a_recent_alive_stamp_keeps_a_busy_poller_ok(self) -> None:
+        now = time.time()
+        old_pass = {"last_pass_at": now - 500, "interval_s": 60}
+        with mock.patch("time.time", return_value=now):
+            busy = obs.freshness({**old_pass, ALIVE_AT: now - 5})
+            gone = obs.freshness({**old_pass, ALIVE_AT: now - 400})
+            junk = obs.freshness({**old_pass, ALIVE_AT: float("inf")})
+            unseen = obs.freshness({ALIVE_AT: now})
+        # The index is still as old as its last finished pass.
+        self.assertEqual(busy, {"index_age_s": 500, "poller": "ok"})
+        self.assertEqual(gone["poller"], "stale")
+        self.assertEqual(junk["poller"], "stale")
+        self.assertEqual(unseen, {"index_age_s": None, "poller": "stale"})
