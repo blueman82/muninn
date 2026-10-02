@@ -221,10 +221,17 @@ def _vet(
 def _unchanged(
     conn: sqlite3.Connection, row: sqlite3.Row, st: os.stat_result
 ) -> bool:
-    """Whether stat and classifier version match and no fork awaits a parent.
+    """Report whether a known source needs no re-read.
 
-    The last condition means no 'unverified' fork is still waiting on a
-    parent that has since arrived.
+    Args:
+        conn: Connection used to look for an arrived parent.
+        row: The stored source row.
+        st: Current stat of the file.
+
+    Returns:
+        True when stat and classifier version match the row and no
+        'unverified' fork is still waiting on a parent that has since
+        arrived.
     """
     return (
         (row["ino"], row["size"], row["mtime_ns"])
