@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pctx import cli, ingest, knowledge, obs, store
+from pctx import cli, cli_core, ingest, knowledge, obs, store
 from tests.test_classify import SK, codex_meta, reply, user_msg
 from tests.test_ingest import TID, IngestCase, rollout
 from tests.test_store import SPILLING_WRITER, Child
@@ -243,7 +243,7 @@ class WriterTests(CliCase):
     def test_busy_exit_3(self):
         with (
             store.writer_lock(self.home, wait_s=0),
-            mock.patch.object(cli, "WRITER_WAIT_S", 0),
+            mock.patch.object(cli_core, "WRITER_WAIT_S", 0),
         ):
             code, out, _ = self.pctx("ingest")
         self.assertEqual((code, out["error"]), (3, "busy"))
@@ -885,7 +885,7 @@ class KnowTests(CliCase):
     def test_know_writers_are_busy_while_the_lock_is_held(self):
         with (
             store.writer_lock(self.home, wait_s=0),
-            mock.patch.object(cli, "WRITER_WAIT_S", 0),
+            mock.patch.object(cli_core, "WRITER_WAIT_S", 0),
         ):
             code, out, _ = self.add("--cite", self.ref, "--quote", self.QUOTE)
             self.assertEqual((code, out["error"]), (3, "busy"))
