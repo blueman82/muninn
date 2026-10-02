@@ -2,7 +2,8 @@
 
 Each loop is a pass, a heartbeat and a sleep.  A pass is skipped, not
 waited for, while another writer holds the lock; a human writer can still
-wait for a running pass, up to ``WRITER_WAIT_S``.
+wait for a running pass, up to ``WRITER_WAIT_S``.  While a pass runs it also
+stamps ``alive_at`` every few seconds, so a long re-read does not look dead.
 """
 
 from __future__ import annotations
@@ -20,8 +21,16 @@ from typing import Any, cast
 from muninn import ingest, obs, store
 from muninn.cli_core import Env, Record, Result
 from muninn.cli_maint import heartbeat
+from muninn.query.index_age import ALIVE_AT
 
 __all__ = ["serve"]
+
+# While a pass runs, say so at most this often. A pass after a classifier
+# change re-reads every transcript and takes minutes; without this the
+# poller looks dead to the installer and to doctor for all of that time.
+ALIVE_EVERY_S = 5.0
+# Before the first alive stamp of a pass: older than any monotonic reading.
+_NEVER = float("-inf")
 
 
 class _ServeStopError(BaseException):
@@ -69,6 +78,8 @@ class _Poller:
         self.conn: _StopAfterCommit | None = None
         self.passes = self.skipped = self.quiet = 0
         self.idle_every = 1
+        self.alive_at = _NEVER  # monotonic time of the last write
+        self.beat_failed = False  # logged already in this pass
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Stop now if idle, else after the open transaction ends."""
@@ -101,6 +112,45 @@ class _Poller:
             },
         )
 
+    def _alive(self) -> None:
+        """Record that a pass is making progress, at most every few seconds.
+
+        Called only from inside a pass that holds the writer lock, so a
+        poller that keeps failing or finding the lock busy never earns it.
+        """
+        now = time.monotonic()
+        if now - self.alive_at < ALIVE_EVERY_S:
+            return
+        # Stamped before the write: a failed write is not retried for a few
+        # seconds, which is better than retrying on every source.
+        self.alive_at = now
+        # A heartbeat that cannot be written must not abort the pass, but the
+        # poller would then go stale with no word why: log it, once a pass.
+        try:
+            obs.write_status(
+                self.home, {ALIVE_AT: time.time(), "pid": os.getpid()}
+            )
+        except OSError as exc:
+            if not self.beat_failed:
+                self.beat_failed = True
+                obs.log_poller(
+                    self.home,
+                    {"event": "heartbeat_failed", "exc": type(exc).__name__},
+                )
+
+    def _clear_alive(self) -> None:
+        """Forget the alive stamp once a pass ends, however it ended.
+
+        Between passes only a finished pass shows the poller is healthy, as
+        before; the stamp covers the time inside one.
+        """
+        self.beat_failed = False
+        if self.alive_at == _NEVER:
+            return
+        self.alive_at = _NEVER
+        with contextlib.suppress(OSError):
+            obs.write_status(self.home, {ALIVE_AT: None})
+
     def _ingest(self) -> ingest.PassStats:
         """Run one ingest pass under the writer lock, never waiting for it."""
         with store.writer_lock(self.home, wait_s=0):
@@ -111,7 +161,9 @@ class _Poller:
             self.conn = _StopAfterCommit(raw)
             try:
                 return ingest.ingest(
-                    cast(sqlite3.Connection, self.conn), self.roots
+                    cast(sqlite3.Connection, self.conn),
+                    self.roots,
+                    on_source=self._alive,
                 )
             finally:
                 raw.close()
@@ -159,6 +211,8 @@ class _Poller:
             name = type(exc).__name__
             obs.log_poller(self.home, {"event": "error", "exc": name})
             obs.write_status(self.home, {"last_error": name})
+        finally:
+            self._clear_alive()
 
     def run(self) -> Result:
         """Loop until a stop signal arrives; exit 0 with no output."""

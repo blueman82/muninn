@@ -13,6 +13,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import cli_core, obs, store
+from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CANARY, CliCase
 from tests.test_ingest import TID
 
@@ -208,6 +209,7 @@ class ServeTests(CliCase):
         self.assertLessEqual(
             {
                 "last_pass_at",
+                ALIVE_AT,
                 "files_seen",
                 "events_added",
                 "failed",

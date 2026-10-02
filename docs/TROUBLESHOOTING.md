@@ -9,6 +9,7 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 |---|---|---|
 | `muninn: no Python 3.13+ found` | no interpreter on PATH or at the installer's link | set `MUNINN_PYTHON=/path/to/python3.13`, or re-run the installer under the right Python |
 | `poller: stale` in every answer, `heartbeat` fails | the launchd job is down or stuck | `launchctl print gui/$(id -u)/com.muninn`; read `poller.log`; `launchctl kickstart -k gui/$(id -u)/com.muninn` |
+| `poller: stale` while the poller runs | one source is taking longer than 3 intervals (the alive stamp is written between sources, not inside one), or the poller is on a release older than the alive stamp | wait for the pass to end (`poller.log` gets a line only when a pass finishes); a pass that keeps failing or finding the lock busy never stamps, so it goes `stale` as it should |
 | `launchd_job` fails | job not loaded | re-run `bin/muninn-install` (it upgrades an installed machine) |
 | search finds little | few sources indexed | `muninn --pretty stats`: check `sources`, `events_by_provider` (a provider at 0 means its root was not found) and `last_pass.skipped_files`; `muninn doctor` shows `roots_present` |
 | `db_free_space` warns | many deletes left free pages | `muninn compact` (needs about one database's worth of free disk) |
@@ -25,7 +26,9 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 ## Logs
 
 - `poller.log`: one JSON line per event (`start`, `pass` when files changed or
-  failed, hourly `idle`, `error` with an exception class, `stop`). Rotates at
-  1 MiB to `poller.log.1`.
+  failed, hourly `idle`, `error` with an exception class, `heartbeat_failed`
+  with the class of the error when the alive stamp could not be written (once
+  per pass; the poller will then go `stale`), `stop`). Rotates at 1 MiB to
+  `poller.log.1`.
 - `calls.jsonl`: one line per CLI call, IDs and counts only; rotates likewise.
 - `status.json`: the last pass and heartbeat.

@@ -16,7 +16,7 @@ import json
 import os
 import sqlite3
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import NamedTuple, cast
 
@@ -129,12 +129,17 @@ def run_pass(
             conn.close()
 
 
+def _no_beat() -> None:
+    """Do nothing: the default when nobody watches the pass."""
+
+
 def ingest(
     conn: sqlite3.Connection,
     roots: Mapping[str, Path],
     *,
     only_threads: set[str] | None = None,
     full: bool = False,
+    on_source: Callable[[], None] = _no_beat,
 ) -> PassStats:
     """Run one pass over the roots with a store.connect_rw connection.
 
@@ -149,6 +154,8 @@ def ingest(
             continuation file also matches its base thread id); this also
             skips missing-source marking, which needs a view of every root.
         full: Re-read every source from the start.
+        on_source: Called after each source is planned or written, so a
+            caller can show that a long pass is still alive.
 
     Returns:
         Counters for the pass.
@@ -163,6 +170,7 @@ def ingest(
             work.append(item)
         elif item is not None:
             seen.add(item)  # an unchanged or skipped known source
+        on_source()
     # Parents before their old-format forks: the content-prefix rule reads
     # the parent's events, so they must be written first.  Python's sort is
     # stable, so every other order (path order) is kept.
@@ -170,8 +178,10 @@ def ingest(
     scopes: dict[str | None, int] = {}
     for item in work:
         _process(conn, item, stats, scopes, seen)
+        on_source()
     for item in late_forks(conn, opts, stats):
         _process(conn, item, stats, scopes, seen)
+        on_source()
     if only_threads is None:
         stats.missing = _mark_missing(conn, roots, seen)
     stats.duration_s = time.monotonic() - started

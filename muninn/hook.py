@@ -235,7 +235,7 @@ def _notice(code: str) -> str:
 
 
 def _stale(home: Path) -> tuple[str, ...]:
-    """A warning line when the poller's heartbeat is over 3x its interval."""
+    """A warning line when the poller shows no sign of life for 3 intervals."""
     fresh = obs.freshness(obs.read_status(home))
     if fresh["poller"] == "ok":
         return ()

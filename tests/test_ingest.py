@@ -82,6 +82,17 @@ class SourceModeTests(IngestCase):
         ).fetchone()[0]
         self.assertEqual(leaks, 0)
 
+    def test_progress_is_reported_for_every_source_planned_and_written(
+        self,
+    ) -> None:
+        for tid in ("thr-a", "thr-b"):
+            self.write(
+                rollout(tid), [codex_meta("user", tid), user_msg(1, "x")]
+            )
+        beats: list[int] = []
+        ingest.ingest(self.conn, self.roots, on_source=lambda: beats.append(1))
+        self.assertEqual(len(beats), 4)  # two planned, two written
+
     def test_non_primary_source_row_only_no_events(self) -> None:
         handoff = [codex_meta("chatgpt_handoff", "thr-h"), user_msg(1, "x")]
         unknown = codex_meta("user", "thr-u")

@@ -92,8 +92,8 @@ Data lives in `$MUNINN_HOME` (default `~/.local/share/muninn`).
 These are the only automatic push, installed for Claude Code and Codex. Both
 redact secrets, escape the frame delimiter, stay silent for subagent and
 reviewer transcripts, and fail open: on any error they exit 0 with a bounded
-"store unavailable" notice (or `{}` when disabled). A stale poller (heartbeat
-older than 3 intervals) is flagged in the hook block and in every CLI
+"store unavailable" notice (or `{}` when disabled). A stale poller (no finished pass
+or alive stamp within 3 intervals) is flagged in the hook block and in every CLI
 response.
 
 - SessionStart (`muninn hook session-start --provider claude|codex`): at most
