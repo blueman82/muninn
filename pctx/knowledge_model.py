@@ -73,7 +73,8 @@ def clean_text(text: str, code: str, low: int, high: int) -> str:
         The cleaned text.
 
     Raises:
-        RefusedError: If the cleaned length is not within ``low..high``.
+        RefusedError: If the text is longer than ``4 * high`` or its
+            cleaned length is not within ``low..high``.
     """
     if len(text) > 4 * high:  # not worth scanning
         raise RefusedError(code)

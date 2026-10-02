@@ -222,7 +222,8 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
 
     Args:
         conn: Read-write connection; the caller holds the writer lock.
-        **kwargs: The fields described by ``AddArgs``.
+        **kwargs: The fields described by ``AddArgs``; a missing or
+            unknown field raises ``TypeError``.
 
     Returns:
         The notice and the rendered new entry.

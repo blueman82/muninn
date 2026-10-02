@@ -21,8 +21,9 @@ from pctx.event_model import (
 )
 from pctx.redaction import redact
 
-# Tools that only poll or control other work: their calls carry no content
-# and their outputs are never stored.
+# Tools that only poll or control other work: their calls carry no content.
+# Only ``wait`` output can be stored, as the continuation of its exec call;
+# the other tools' outputs are never stored.
 WAIT_TOOLS = frozenset(
     {"wait", "wait_agent", "list_agents", "interrupt_agent", "sleep"}
 )
