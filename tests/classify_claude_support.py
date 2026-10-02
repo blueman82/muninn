@@ -142,3 +142,38 @@ def run_claude(records: list[Record], state: bool = True) -> list[c.EventRec]:
     for line, record in enumerate(records, start=1):
         events += c.claude_events(record, line, parse_state)
     return events
+
+
+def queued_attachment(
+    prompt: object,
+    *,
+    origin: str | None = "human",
+    sidechain: bool = False,
+    **extra: Any,
+) -> Record:
+    """Build the attachment record Claude Code writes for queued input.
+
+    Args:
+        prompt: Queued text, a string or a list of content blocks.
+        origin: The ``origin.kind``; ``None`` leaves the origin out.
+        sidechain: Mark the record as a subagent sidechain record.
+        **extra: Top-level keys to add or override.
+
+    Returns:
+        The record.
+    """
+    attachment: Record = {
+        "type": "queued_command",
+        "prompt": prompt,
+        "commandMode": "prompt",
+    }
+    if origin is not None:
+        attachment["origin"] = {"kind": origin}
+    return {
+        "type": "attachment",
+        "attachment": attachment,
+        "isSidechain": sidechain,
+        "uuid": "u1",
+        "timestamp": TS,
+        "sessionId": SESSION,
+    } | extra

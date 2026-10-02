@@ -24,6 +24,12 @@ from muninn.event_model import (
 )
 from muninn.tool_errors import register_call, tool_error
 
+# Input the owner types while Claude works is stored as an attachment of this
+# type; only the "human" origin is the owner, the rest are system notices,
+# other sessions or coordinators.
+QUEUED_COMMAND_TYPE = "queued_command"
+OWNER_ORIGIN_KIND = "human"
+
 # A Claude user text starting with one of these was written by the harness,
 # not typed by the person.
 CLAUDE_HARNESS_PREFIXES = (
@@ -157,6 +163,28 @@ def _user_events(
     return [make_event(origin, "user", Draft(kind, tag, text))]
 
 
+def _queued_events(record: Record, origin: Origin) -> list[EventRec]:
+    """Events for an attachment: only the owner's mid-turn typed prompt.
+
+    Task notices, peer sessions and coordinators also arrive as queued
+    commands but are not the owner speaking, so they stay unindexed.
+
+    Args:
+        record: The attachment record.
+        origin: Position and timestamp of the record.
+
+    Returns:
+        One prompt event for the owner's input, otherwise nothing.
+    """
+    att = as_record(record.get("attachment"))
+    if att is None or att.get("type") != QUEUED_COMMAND_TYPE:
+        return []
+    source = as_record(att.get("origin"))
+    if source is None or source.get("kind") != OWNER_ORIGIN_KIND:
+        return []
+    return _user_events(record, att.get("prompt"), origin)
+
+
 def claude_events(
     record: Record, line: int, state: CodexState | None = None
 ) -> list[EventRec]:
@@ -172,11 +200,13 @@ def claude_events(
         Zero or more events; empty for records that carry no stored text.
     """
     rtype, message = record.get("type"), as_record(record.get("message"))
+    origin = Origin(line, line, non_empty_str(record.get("timestamp")))
+    if rtype == "attachment":
+        return _queued_events(record, origin)
     if rtype not in ("user", "assistant") or message is None:
-        return []  # attachments (hook output), system, summary, titles ...
+        return []  # system, summary, titles ...
     if message.get("role") not in (rtype, None):
         return []
-    origin = Origin(line, line, non_empty_str(record.get("timestamp")))
     content = message.get("content")
     blocks = as_list(content) or []
     if rtype == "assistant":
