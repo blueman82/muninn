@@ -19,8 +19,8 @@ from pctx.query.constants import (
     PROVIDERS,
 )
 from pctx.query.filters import caller_root
-from pctx.query.freshness import freshness as _freshness
-from pctx.query.guard import guarded as _guarded
+from pctx.query.freshness import freshness
+from pctx.query.guard import guarded
 from pctx.query.listing import session, sessions
 from pctx.query.opening import open_event
 from pctx.query.quotes import quote_check
@@ -33,10 +33,10 @@ __all__ = [
     "PREVIEW_NOTICE",
     "PROVIDERS",
     "STOPWORDS",
-    "_freshness",
-    "_guarded",
     "build_fts_query",
     "caller_root",
+    "freshness",
+    "guarded",
     "open_event",
     "parse_ref",
     "quote_check",

@@ -2147,7 +2147,7 @@ class StoreTroubleTests(QueryCase):
                 "SELECT * FROM event_fts WHERE event_fts MATCH '\"'"
             )
         with self.assertRaises(sqlite3.OperationalError):
-            query._guarded(lambda: reader.execute("SELEC 1"))()
+            query.guarded(lambda: reader.execute("SELEC 1"))()
 
 
 class NoticeTests(unittest.TestCase):

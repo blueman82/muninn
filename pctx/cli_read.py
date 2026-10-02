@@ -156,6 +156,8 @@ def stats(a: Namespace, env: Env, home: Path, record: Record) -> Result:
 
 def doctor(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Run ``pctx doctor``; exit 1 when any check fails."""
-    out: dict[str, Any] = obs.doctor(home, env)
-    record["counts"] = {"failed": sum(c["ok"] is False for c in out["checks"])}
-    return (0 if out["ok"] else 1), out
+    report = obs.doctor(home, env)
+    failed = sum(check["ok"] is False for check in report["checks"])
+    record["counts"] = {"failed": failed}
+    out: dict[str, Any] = dict(report)
+    return (0 if report["ok"] else 1), out

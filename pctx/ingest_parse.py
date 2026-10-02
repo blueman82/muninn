@@ -15,7 +15,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import IO, TypedDict, cast
 
-from pctx import classify, ingest_model, scope
+from pctx import classify, event_model, ingest_model, scope, tool_errors
 from pctx.ingest_model import PROVIDER, Record, Work
 
 __all__ = [
@@ -365,8 +365,8 @@ def _count_output(record: Record, extra: _Extra, usage: Usage) -> None:
     output = payload.get("output")
     # ponytail: an exec cell still running reports later through wait();
     # only its first output is read here.
-    text = output if isinstance(output, str) else classify.join_blocks(output)
-    exits = classify.EXIT_STATUS.findall(text)
+    text = output if isinstance(output, str) else event_model.join_text(output)
+    exits = tool_errors.EXIT_CODE.findall(text)
     if text.startswith("Script failed") or any(
         int(a or b) != 0 for a, b in exits
     ):
