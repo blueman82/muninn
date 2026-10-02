@@ -47,7 +47,12 @@ def record(ctx: Ctx, rec: Record) -> None:
     }
     keys = [".".join(e["path"]) for e in rec["claude"]["settings"]]
     keys += [e["header"] for e in rec["codex"]]
-    if dry(ctx, f"record links and config keys {keys}"):
+    plan = (
+        "would not touch Claude or Codex settings"
+        if ctx.upgrade
+        else f"would record the links and config keys {keys}"
+    )
+    if dry(ctx, plan):
         return
     try:
         version = ctx.run(["codex", "--version"]).stdout.decode().strip()
@@ -61,10 +66,12 @@ def record(ctx: Ctx, rec: Record) -> None:
 
 def claude(ctx: Ctx, rec: Record) -> None:
     """Merge our two hooks into Claude settings."""
-    if dry(ctx, f"merge SessionStart+UserPromptSubmit into {ctx.settings}"):
-        return
     if not rec["has_claude"]:
         ctx.say(f"{ctx.settings} not found: Claude Code left unconfigured")
+        return
+    if dry(
+        ctx, f"would add SessionStart and UserPromptSubmit to {ctx.settings}"
+    ):
         return
     frag = ctx.lib / "current/integrations/claude/settings-hooks.json"
     fragment = json.loads(frag.read_bytes())["hooks"]
@@ -126,10 +133,14 @@ def codex(ctx: Ctx, rec: Record) -> None:
     identical to the pinned ones.
     """
     source = f"{ctx.lib}/current/integrations/codex"
-    if dry(ctx, "codex: drop trust keys, add plugin, enable, trust"):
-        return
     if not rec["has_codex"]:
         ctx.say(f"{ctx.config} not found: Codex left unconfigured")
+        return
+    if dry(
+        ctx,
+        "would add the Codex plugin, enable it and trust its hooks "
+        f"in {ctx.config}",
+    ):
         return
     _edit_config(ctx, drop_trust)
     _edit_config(ctx, lambda text: repoint(text, source))

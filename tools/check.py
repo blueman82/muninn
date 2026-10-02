@@ -26,7 +26,7 @@ TOOL_STEPS: tuple[tuple[str, ...], ...] = (
     ("ruff", "check", *PY_PATHS),
     ("black", "--check", "--quiet", *PY_PATHS),
     ("pyright", *PY_PATHS),
-    ("shellcheck", "bin/pctx"),
+    ("shellcheck", "bin/pctx", "bin/pctx-install"),
 )
 INSTALL_HINT = (
     "install the dev tools: python3.13 -m venv .venv && "

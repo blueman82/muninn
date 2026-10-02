@@ -13,12 +13,16 @@
 
 From the repo root (a clean worktree at the commit you want):
 
-    python3.13 -E -s -B -m install.installer \
-        --repo . --sha "$(git rev-parse HEAD)" --fresh --dry-run   # preview
-    python3.13 -E -s -B -m install.installer \
-        --repo . --sha "$(git rev-parse HEAD)" --fresh
+    bin/pctx-install --check    # plain-sentence preview; writes nothing
+    bin/pctx-install
 
-`--fresh` refuses if the data directory or the launchd plist already exists.
+`bin/pctx-install` installs this checkout's `HEAD`. With nothing installed it
+runs a fresh install; with pctx already installed it upgrades; if only half is
+there (data directory without a release, or the reverse) it stops and says so.
+`--status` compares the installed commit with `HEAD`. Any other arguments go
+straight to `install.installer` (`--repo`, `--sha`, `--fresh`, `--upgrade`,
+`--dry-run`, `--home`), which needs a full 40-hex `--sha` equal to `HEAD`.
+A fresh install refuses if the data directory or the launchd plist already exists.
 It pins the release, indexes your existing transcripts, starts the poller,
 merges the two hooks into Claude's settings, adds the Codex plugin, runs
 `pctx doctor`, and prunes to one release. Any failure rolls back.
@@ -28,13 +32,13 @@ run `/hooks` if the installer prints `OWNER STEP`.
 
 ## Upgrade an installed machine
 
-    python3.13 -E -s -B -m install.installer \
-        --repo . --sha "$(git rev-parse HEAD)" --upgrade
+    bin/pctx-install --check
+    bin/pctx-install
 
 It re-pins the commit, restarts the poller, verifies, then deletes every other
 release. Provider config is not touched. A failed upgrade returns to the old
-release; after a successful one the old release is gone (re-run `--upgrade`
-at an earlier commit to go back).
+release; after a successful one the old release is gone (check out an earlier
+commit and run `bin/pctx-install` to go back).
 
 ## Per-prompt recall starts off
 

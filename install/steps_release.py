@@ -22,7 +22,6 @@ from install.context import (
     dry,
     is_new,
     job,
-    link_text,
     must,
     wait,
 )
@@ -75,7 +74,7 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
 def pin(ctx: Ctx, rec: Record) -> None:
     """Unpack the pinned commit into lib/<sha>, fill @HOME@, and relink."""
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
-    if dry(ctx, f"pin {sha} -> {dest}; current, python, pctx relinked"):
+    if dry(ctx, f"would pin {sha} as {dest} and point current at it"):
         return
     argv = ["git", "-C", rec["repo"], "archive", "--format=tar", sha]
     # Archive first: a failure here must not leave a half-made temp dir.
@@ -137,7 +136,11 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
 
     ``doctor`` runs in verify, once the launchd job is up.
     """
-    if dry(ctx, f"PCTX_HOME={ctx.data} pctx ingest --full"):
+    if dry(
+        ctx,
+        f"would create {ctx.data}, start with recall off and index "
+        "existing transcripts",
+    ):
         return
     ctx.data.mkdir(parents=True, mode=0o700)
     flag = ctx.data / RECALL_OFF
@@ -155,7 +158,7 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
 
 def restart(ctx: Ctx, rec: Record) -> None:
     """Kickstart the running job so it runs the re-pinned release."""
-    if dry(ctx, f"launchctl kickstart -k {ctx.target}"):
+    if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
     started = ctx.now()
     must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
@@ -164,18 +167,24 @@ def restart(ctx: Ctx, rec: Record) -> None:
 
 
 def prune(ctx: Ctx, rec: Record) -> None:
-    """Delete every release dir but current's target.
+    """Delete every release dir but the one being installed.
 
     Runs last, so a failed install can still roll back to the old release.
+    A dry run has not pinned yet, so it keeps ``rec["sha"]``, which is what
+    ``current`` points at once the real run gets here.
     """
-    link = ctx.lib / "current"
-    keep = link_text(link) if link.is_symlink() else None
+    keep = rec["sha"]
     old = [
         p
         for p in sorted(ctx.lib.iterdir() if ctx.lib.is_dir() else [])
         if p.is_dir() and not p.is_symlink() and p.name != keep
     ]
-    if dry(ctx, f"prune {[p.name for p in old]}"):
+    if ctx.dry_run:
+        for p in old:
+            dry(
+                ctx,
+                f"would delete the previous release {p.name} (no way back)",
+            )
         return
     for path in old:
         ctx.say(f"prune {path.name}")
@@ -206,7 +215,7 @@ def _check_plist(ctx: Ctx, data: bytes) -> None:
 def start_new(ctx: Ctx, rec: Record) -> None:
     """Install the pinned plist, bootstrap, and await PID and heartbeat."""
     src = ctx.lib / PLIST_SOURCE
-    if dry(ctx, f"install {src} as {ctx.plist}; launchctl bootstrap"):
+    if dry(ctx, f"would install the launchd job {ctx.plist} and start it"):
         return
     data = src.read_bytes()
     _check_plist(ctx, data)

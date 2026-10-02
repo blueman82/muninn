@@ -113,8 +113,8 @@ themselves are never stored.
 
 ## Install and rollback
 
-See `docs/` (reference, quick start, troubleshooting, architecture). `install.installer`
-runs as `--fresh` (new machine) or `--upgrade` (re-pin); each ends with one
+See `docs/` (reference, quick start, troubleshooting, architecture). `bin/pctx-install`
+(`--check` previews, `--status` compares) runs `install.installer` as fresh or upgrade; each ends with one
 pinned release.
 
 The files here are templates. `@HOME@` is a literal placeholder that the

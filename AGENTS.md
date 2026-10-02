@@ -12,6 +12,8 @@ Instructions for coding agents working in this repo. Any parent-directory
   `tool_errors`, `redaction`; `query/` (package), `knowledge*`, `erase*`,
   `tombstones`, `hook*`, `obs*` (logs, stats, doctor, status), `scope`.
 - `bin/pctx`: launcher that finds the interpreter; do not hardcode a path.
+- `bin/pctx-install`: sh wrapper over `install/installer.py` (bare, `--check`,
+  `--status`); other arguments pass through.
 - `install/`: `installer.py` (`--fresh`, `--upgrade`; the runner),
   `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`,
   `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`, `tomledit.py`.

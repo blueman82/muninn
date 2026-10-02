@@ -147,7 +147,8 @@ def install_log(
 
     The log is 0600 and timestamped. It records messages, each command's
     name and exit status, and a failed command's stderr tail. It never
-    records stdout, which can carry transcript paths or text.
+    records stdout, which can carry transcript paths or text. Only messages
+    reach the screen; the command lines are for the log.
 
     Args:
         path: The log file; its directory is created on demand.
@@ -157,14 +158,17 @@ def install_log(
         ``(say, run)``: a printer that also logs, and the logging runner.
     """
 
-    def say(text: str) -> None:
-        print(text)
+    def note(text: str) -> None:
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         path.parent.mkdir(parents=True, exist_ok=True)
         # Create with 0600 atomically; chmod afterwards would leave a window.
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(f"{stamp} {text}\n")
+
+    def say(text: str) -> None:
+        print(text)
+        note(text)
 
     def logged(
         argv: Sequence[str | Path],
@@ -173,9 +177,9 @@ def install_log(
     ) -> subprocess.CompletedProcess[bytes]:
         r = run(argv, env=env, input=input)
         name = " ".join(str(a) for a in argv[:2])
-        say(f"run {name} -> {r.returncode}")
+        note(f"run {name} -> {r.returncode}")
         if r.returncode:
-            say("  stderr: " + r.stderr.decode(errors="replace")[-300:])
+            note("  stderr: " + r.stderr.decode(errors="replace")[-300:])
         return r
 
     return say, logged
@@ -285,5 +289,5 @@ def dry(ctx: Ctx, text: str) -> bool:
         their real work exactly when this is true.
     """
     if ctx.dry_run:
-        ctx.say(f"DRY-RUN {text}")
+        ctx.say(text)
     return ctx.dry_run

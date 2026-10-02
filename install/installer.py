@@ -241,9 +241,13 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
         shutil.rmtree(ctx.rdir)
         rec["record_removed"] = True
     install_record(ctx, rec, "ok")
-    done = "planned" if ctx.dry_run else "done"
-    where = "install-record.json" if rec.get("record_removed") else ctx.rdir
-    ctx.say(f"install {done}; record in {where}")
+    if ctx.dry_run:
+        ctx.say("dry run only: nothing was written")
+    else:
+        where = (
+            "install-record.json" if rec.get("record_removed") else ctx.rdir
+        )
+        ctx.say(f"install done; record in {where}")
     return rec
 
 
@@ -286,8 +290,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Files we create must not be readable by other users.
     os.umask(0o077)
     ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    say, run = install_log(
-        args.home / ".local/lib/provenance-context/install.log"
+    # A dry run writes nothing, not even the log.
+    say, run = (
+        (print, run_real)
+        if args.dry_run
+        else install_log(
+            args.home / ".local/lib/provenance-context/install.log"
+        )
     )
     ctx = Ctx(
         args.home,

@@ -1,0 +1,105 @@
+"""A dry run says plainly what a real run would do, and writes nothing."""
+
+from __future__ import annotations
+
+import contextlib
+import dataclasses
+import io
+import tempfile
+import unittest
+from pathlib import Path
+
+from install import installer as co
+from tests.installer_support import World, git
+
+
+def _main(*argv: str) -> tuple[int, str]:
+    """Run the installer's ``main``, capturing what it prints.
+
+    Args:
+        *argv: Command-line arguments.
+
+    Returns:
+        The exit status and the printed text.
+    """
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        status = co.main(list(argv))
+    return status, out.getvalue()
+
+
+class UpgradePlanTest(unittest.TestCase):
+    """--upgrade --dry-run on a machine that already runs pctx."""
+
+    def setUp(self) -> None:
+        self.w = w = World(self)
+        self.first = co.install(w.ctx(fresh=True), w.repo, w.sha)["sha"]
+        (w.repo / "bin/note").write_text("v2\n")
+        git(w.repo, "add", "-A")
+        git(w.repo, "commit", "-qm", "v2")
+        self.sha2 = git(w.repo, "rev-parse", "HEAD").decode().strip()
+        w.out.clear()
+        ctx = dataclasses.replace(
+            w.ctx(upgrade=True, dry_run=True), ts="20261002T000000Z"
+        )
+        co.install(ctx, w.repo, self.sha2)
+        self.said = "\n".join(w.out)
+
+    def test_names_the_release_a_real_upgrade_deletes(self) -> None:
+        self.assertIn(
+            f"would delete the previous release {self.first}", self.said
+        )
+        self.assertIn("no way back", self.said)
+
+    def test_says_provider_config_is_left_alone(self) -> None:
+        self.assertNotIn("config keys", self.said)
+        self.assertIn("would not touch Claude or Codex settings", self.said)
+
+    def test_does_not_name_a_record_directory_it_never_creates(self) -> None:
+        self.assertNotIn("record in", self.said)
+        self.assertIn("nothing was written", self.said)
+
+
+class FreshPlanTest(unittest.TestCase):
+    """--fresh --dry-run on a machine without the provider configs."""
+
+    def test_skips_providers_that_are_not_configured(self) -> None:
+        w = World(self)
+        (w.home / ".claude/settings.json").unlink()
+        (w.home / ".codex/config.toml").unlink()
+        co.install(w.ctx(fresh=True, dry_run=True), w.repo, w.sha)
+        said = "\n".join(w.out)
+        self.assertIn("Codex left unconfigured", said)
+        self.assertIn("Claude Code left unconfigured", said)
+        self.assertNotIn("add the Codex plugin", said)
+        self.assertNotIn("add SessionStart", said)
+
+
+class DryRunWritesNothingTest(unittest.TestCase):
+    """The command line's dry run leaves no log and no directory."""
+
+    def test_fresh_dry_run_into_an_empty_home_creates_nothing(self) -> None:
+        w = World(self)
+        with tempfile.TemporaryDirectory() as tmp:
+            status, _ = _main(
+                *("--repo", str(w.repo), "--sha", w.sha, "--fresh"),
+                *("--dry-run", "--home", tmp),
+            )
+            self.assertEqual(status, 0)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_a_refused_dry_run_does_not_append_to_the_log(self) -> None:
+        w = World(self)
+        co.install(w.ctx(fresh=True), w.repo, w.sha)
+        log = w.home / ".local/lib/provenance-context/install.log"
+        status, said = _main(
+            *("--repo", str(w.repo), "--sha", w.sha, "--fresh"),
+            *("--dry-run", "--home", str(w.home)),
+        )
+        self.assertEqual(status, 1)
+        self.assertIn("already installed", said)
+        self.assertFalse(log.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

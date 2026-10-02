@@ -9,6 +9,9 @@
   `skipped_files` in `stats`, structured `poller.log`, `--pretty`, an
   interpreter lookup in `bin/pctx`, an install record and install log, and
   `install.installer` with `--fresh` and `--upgrade` (one pinned release).
+- `bin/pctx-install` (bare, `--check`, `--status`) wraps the installer; dry
+  runs print plain sentences and write nothing, and command lines go to
+  `install.log` only. Not yet run for real on this machine.
 - Engineering standards are enforced by a gate (`docs/STANDARDS.md`, ADR 0006):
   every Python file at most 400 non-blank lines, every function at most 100,
   Google docstrings, full annotations (pyright strict for `pctx/`, `install/`,
@@ -31,8 +34,8 @@ the owner because the model is not allowed to edit its own hook settings.
 
 ## Upgrade this machine
 
-    python3.13 -E -s -B -m install.installer --repo . \
-        --sha "$(git rev-parse HEAD)" --upgrade
+    bin/pctx-install --check
+    bin/pctx-install
 
 The installer refuses a commit that breaks the stdlib standards rules.
 

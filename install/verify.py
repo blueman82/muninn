@@ -138,7 +138,7 @@ def verify(ctx: Ctx, rec: Record) -> None:
     Raises:
         StepFailedError: If any check came back definitely false.
     """
-    if dry(ctx, "verify: PID, heartbeat, hooks, doctor"):
+    if dry(ctx, "would check the poller, its heartbeat, the hooks and doctor"):
         return
     checks: list[dict[str, Any]] = []
 
