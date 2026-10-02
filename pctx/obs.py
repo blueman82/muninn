@@ -215,7 +215,8 @@ def _unowned_journal(home: Path) -> CheckResult:
 
 def _journal_mode(conn: sqlite3.Connection) -> CheckResult:
     """The store uses the rollback journal, not WAL."""
-    # Not WAL: a WAL file would keep erased text readable after delete.
+    # The checks expect the default rollback journal; any other mode is
+    # reported with its name.
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     return _result("journal_mode", mode == "delete", mode)
 
@@ -287,8 +288,8 @@ def _db_free_space(conn: sqlite3.Connection) -> CheckResult:
     """Free pages are not a large share of the file."""
     space = db_space(conn)
     free = space["freelist_count"] * space["page_size"]
-    # Both a ratio and an absolute floor: a small file is mostly "free"
-    # after a few deletes, and compacting it would gain nothing.
+    # Warn only above both a ratio and an absolute size, so a small file
+    # with a high free share does not trigger it.
     wasteful = space["free_ratio"] > FREE_WARN_RATIO and free > FREE_WARN_BYTES
     return _result(
         "db_free_space",
@@ -388,8 +389,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
     """Run the health checks.
 
     Only ``error`` level checks decide ``ok``; ``warn`` and ``info`` never
-    do. A missing provider source is information, not an error, because a
-    machine may use only one provider.
+    do. A missing provider source is information, not an error.
 
     Args:
         home: Data directory.

@@ -183,9 +183,8 @@ def erase(
 ) -> dict[str, object]:
     """Erase one session (with its forks), one event line or matching text.
 
-    Exactly one of ``session``, ``event_ref`` and ``match`` is given, else
-    ``ValueError`` is raised, as it is for a ``match`` shorter than
-    ``MIN_MATCH`` characters. The caller holds ``store.writer_lock``.
+    Exactly one of ``session``, ``event_ref`` and ``match`` is given. The
+    caller holds ``store.writer_lock``.
 
     Args:
         conn: Read-write connection.
@@ -198,6 +197,11 @@ def erase(
 
     Returns:
         Counts and paths only; never erased text or the match string.
+
+    A ``ValueError`` propagates when not exactly one selector is given,
+    ``match`` is shorter than ``MIN_MATCH`` characters or ``event_ref`` is
+    malformed; a ``LookupError`` when ``event_ref`` matches no thread,
+    several threads or no event.
     """
     mode = _pick_mode(session, event_ref, match)
     target = Target()
@@ -250,6 +254,10 @@ def run_erase(
 
     Returns:
         The result of ``erase``.
+
+    ``store.BusyError`` propagates if the writer lock is still held after
+    ``wait_s``; ``erase`` raises ``ValueError`` and ``LookupError`` as
+    documented there.
     """
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home))

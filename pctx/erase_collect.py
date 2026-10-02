@@ -119,6 +119,8 @@ def collect_event(conn: sqlite3.Connection, target: Target, ref: str) -> None:
         target: Plan to fill.
         ref: ``provider:thread:line.part``; the thread may be a prefix.
 
+    A malformed ``ref`` makes ``query.parse_ref`` raise ``ValueError``.
+
     Raises:
         LookupError: If the ref matches no thread, several threads, or no
             event.

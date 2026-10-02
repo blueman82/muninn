@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import sqlite3
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, Protocol, TypedDict, cast
 
 from pctx import knowledge, query
 from pctx.hook_frame import RecallEntry, RecallHit, recall_text
 
-# A prompt with fewer query terms recalls nothing: with one or two words
-# nearly every event matches and the block would be noise.
+# A prompt with fewer query terms recalls nothing; the search ORs terms, so
+# the floor keeps one or two common words from recalling loose matches.
 MIN_TERMS = 3
 MAX_EVENTS = 3  # events in a recall block
 EVENT_KINDS = frozenset({"prompt", "reply"})  # recalled at prompt time
@@ -31,7 +31,9 @@ class RecallRequest:
 
     terms: list[str]  # the prompt's query terms, from prompt_terms
     cwd: str  # working directory that scopes the search
-    notes: tuple[str, ...]  # extra lines, such as a stale-index warning
+    # Extra lines, such as a stale-index warning. Called only once something
+    # is recalled, so a prompt with no hit never reads the heartbeat file.
+    notes: Callable[[], tuple[str, ...]]
     limit: int  # maximum characters of the block
 
 
@@ -42,6 +44,18 @@ class SearchPage(TypedDict):
     hits: list[RecallHit]
     has_more: bool
     error: NotRequired[str]
+
+
+class _Query(Protocol):
+    """The ``query.search`` call recall makes, typed by its result."""
+
+    search: Callable[..., SearchPage]
+
+
+# query.search annotates its dict and status bare, which pyright strict
+# reads as partly unknown; the protocol types this one call. Its result has
+# the SearchPage keys (or an error key).
+_QUERY = cast("_Query", query)
 
 
 def _terms(fts: str | None) -> list[str]:
@@ -122,19 +136,15 @@ def _search_page(
 ) -> SearchPage:
     """Fetch one page of search results for the payload's prompt."""
     session = payload.get("session_id")
-    # search returns a plain dict with these keys (or an error key).
-    return cast(
-        "SearchPage",
-        query.search(
-            conn,
-            str(payload["prompt"]),
-            cwd=cwd,
-            env=env,
-            kinds=set(EVENT_KINDS),
-            limit=POOL_PAGE,
-            page=page,
-            current_session=session if isinstance(session, str) else None,
-        ),
+    return _QUERY.search(
+        conn,
+        str(payload["prompt"]),
+        cwd=cwd,
+        env=env,
+        kinds=set(EVENT_KINDS),
+        limit=POOL_PAGE,
+        page=page,
+        current_session=session if isinstance(session, str) else None,
     )
 
 
@@ -200,4 +210,4 @@ def recall_block(
     trace["stages"] = {"floor_dropped": dropped, "returned": len(hits)}
     if not entries and not hits:
         return ""
-    return recall_text(entries, hits, request.notes, request.limit)
+    return recall_text(entries, hits, request.notes(), request.limit)

@@ -18,7 +18,7 @@ import stat
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
-from typing import BinaryIO, cast
+from typing import BinaryIO, Protocol, cast
 
 from pctx import classify, knowledge, obs, scope, store
 from pctx.hook_frame import (
@@ -56,10 +56,39 @@ CODEX_BLOCK_LIMIT = 2800
 CODEX_RECALL_LIMIT = 900
 MAX_INPUT = 64 * 1024  # bytes of hook payload read
 FIRST_LINE = 1024 * 1024  # bytes of a transcript's first line read
-# Knowledge entries a SessionStart block may push. Kept small: the block is
-# prepended to every session, so each entry costs every conversation.
-SHOWN = 8
+SHOWN = 8  # knowledge entries a SessionStart block may push, newest first
 RECALL_OFF = "recall.off"  # in the data dir: UserPromptSubmit prints {}
+
+
+class _Classifier(Protocol):
+    """The ``pctx.classify`` calls the hook makes, with typed arguments."""
+
+    def codex_thread(self, meta: dict[str, object]) -> classify.ThreadInfo:
+        """Classify a Codex thread from its first record."""
+        ...
+
+    def claude_thread(
+        self, rel_path: str, first: dict[str, object]
+    ) -> classify.ThreadInfo:
+        """Classify a Claude transcript from its path and first record."""
+        ...
+
+
+class _Knowledge(Protocol):
+    """The ``pctx.knowledge`` call the hook makes, with typed results."""
+
+    def block_entries(
+        self, conn: sqlite3.Connection, scope_ids: list[int], limit: int
+    ) -> list[BlockEntry]:
+        """Current user-cited entries of the scopes, newest first."""
+        ...
+
+
+# classify and knowledge annotate their dicts bare, which pyright strict
+# reads as partly unknown; viewing the modules through these protocols
+# types the calls here without touching modules this file does not own.
+_CLASSIFY = cast("_Classifier", classify)
+_KNOWLEDGE = cast("_Knowledge", knowledge)
 
 # Builds the block text from an open read-only connection.
 Builder = Callable[
@@ -163,9 +192,9 @@ def _subagent(payload: Mapping[str, object], provider: str) -> bool:
         return False
     try:
         if provider == "codex":
-            info = classify.codex_thread(first)
+            info = _CLASSIFY.codex_thread(first)
         else:
-            info = classify.claude_thread(path, first)
+            info = _CLASSIFY.claude_thread(path, first)
     except ValueError:
         return False
     return info.thread_class in ("subagent", "reviewer")
@@ -235,7 +264,7 @@ def _label(conn: sqlite3.Connection, ids: list[int], cwd: str) -> str:
         f" ({','.join('?' * len(ids))}) LIMIT 1",
         ids,
     ).fetchone()
-    # Not Path.name: a trailing slash must give the whole cwd, as before.
+    # Not Path.name: a trailing slash must give the whole cwd.
     return row[0] if row else cwd.rpartition("/")[2] or cwd
 
 
@@ -325,10 +354,7 @@ def _start_block(
     del env  # part of the Builder signature; unused here
     cwd = _cwd(payload)
     ids = scope.scope_ids_for_read(conn, cwd)
-    # block_entries returns plain dicts with exactly these keys.
-    entries = cast(
-        "list[BlockEntry]", knowledge.block_entries(conn, ids, limit=SHOWN)
-    )
+    entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
     return render_block(
         entries, _label(conn, ids, cwd), notes=_stale(home), limit=limit
@@ -373,7 +399,7 @@ def _recall_block(
     limit: int,
 ) -> str:
     """Build the recall block for the payload's prompt."""
-    request = RecallRequest(terms, _cwd(payload), _stale(home), limit)
+    request = RecallRequest(terms, _cwd(payload), partial(_stale, home), limit)
     return recall_block(conn, payload, env, trace, request)
 
 
