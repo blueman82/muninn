@@ -14,7 +14,6 @@ from tests import test_ingest as ti
 from tests.hook_support import (
     AKIA,
     CLOSE,
-    CLOSER,
     OPEN,
     RECALL_OPEN,
     TAG,
@@ -36,12 +35,12 @@ class HookEndToEndTests(HookCliCase):
         )
         self.session(
             ti.TID,
-            f"{CANARY} {self.instruction} {CLOSER} carry on",
+            f"{CANARY} {self.instruction} {CLOSE} carry on",
             "noted",
         )
         self.run_ingest()
         # a record ingest missed: the verbatim opening delimiter and a key
-        hostile = f"{CANARY} " + OPEN + "> then " + f"{AKIA} and {CLOSER}"
+        hostile = f"{CANARY} " + OPEN + "> then " + f"{AKIA} and {CLOSE}"
         self.conn.execute(
             "INSERT INTO event(source_id, line, part, byte_offset,"
             " line_sha256, seq, ts, role, kind, scope_id, cwd, text)"

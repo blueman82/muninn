@@ -1,8 +1,7 @@
 """SessionStart hook: the pushed block, its limits, fail-open and suppression.
 
 Synthetic rows in temp dirs; the providers' payloads are built by hand.
-Nothing touches a live data dir or a provider root. The base cases other
-test modules import live in ``tests.hook_support`` and are re-exported here.
+Nothing touches a live data dir or a provider root.
 """
 
 from __future__ import annotations
@@ -26,13 +25,9 @@ from tests.hook_support import (
     TAG,
     USAGE,
     HookCase,
-    HookCliCase,
-    RecallCase,
     hook_output,
     notice,
 )
-
-__all__ = ["HookCase", "HookCliCase", "RecallCase"]
 
 
 class SessionStartTests(HookCase):

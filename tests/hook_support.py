@@ -34,7 +34,6 @@ HINT = "`pctx open <ref> --context 3`"
 Q = "alphaterm betaterm gammaterm deltaterm"
 LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
 HOOKS_JSON = LAUNCHER.parent.parent / "integrations/codex/hooks/hooks.json"
-CLOSER = "</pctx-memory>"
 
 
 def notice(
