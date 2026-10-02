@@ -1,0 +1,5 @@
+# Developer tools for `python3.13 -m tools.check --full`. Pinned so every
+# machine and every agent judges the code the same way.
+ruff==0.16.10
+black==26.5.1
+pyright==1.1.414

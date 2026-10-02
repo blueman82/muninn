@@ -330,7 +330,7 @@ class FreshInstallTest(unittest.TestCase):
     def test_refuses_when_already_installed(self):
         h = self.w.home
         (h / ".local/share/provenance-context").mkdir(parents=True)
-        with self.assertRaises(co.StepFailed):
+        with self.assertRaises(co.StepFailedError):
             self.install()
         self.assertFalse(self.lib.exists())
 
@@ -351,7 +351,7 @@ class FreshInstallTest(unittest.TestCase):
     def test_failed_start_rolls_back_and_records_it(self):
         w, h = self.w, self.w.home
         w.fake.heartbeat = False
-        with self.assertRaises(co.StepFailed):
+        with self.assertRaises(co.StepFailedError):
             self.install()
         out = json.loads((self.lib / "install-record.json").read_text())
         self.assertEqual(out["outcome"], "rolled_back")
@@ -361,7 +361,7 @@ class FreshInstallTest(unittest.TestCase):
 
     def test_failed_doctor_rolls_back(self):
         self.w.fake.doctor = 1
-        with self.assertRaises(co.StepFailed):
+        with self.assertRaises(co.StepFailedError):
             self.install()
         self.assertFalse(
             (self.w.home / ".local/share/provenance-context").exists()
@@ -369,7 +369,7 @@ class FreshInstallTest(unittest.TestCase):
 
     def test_wrong_codex_answer_rolls_back(self):
         self.w.fake.probe_mode = "wrong"
-        with self.assertRaises(co.StepFailed):
+        with self.assertRaises(co.StepFailedError):
             self.install()
 
     def test_silent_probe_leaves_the_owner_step(self):
@@ -439,7 +439,7 @@ class UpgradeTest(unittest.TestCase):
         w = self.w
         w.fake.heartbeat = False
         w.fake.clock[0] += 1000  # the first install's heartbeat is stale
-        with self.assertRaises(co.StepFailed):
+        with self.assertRaises(co.StepFailedError):
             co.install(self.ctx, w.repo, self.sha2)
         self.assertEqual(os.readlink(self.lib / "current"), self.first)
         self.assertTrue((self.lib / self.first).is_dir())
@@ -449,7 +449,7 @@ class UpgradeTest(unittest.TestCase):
 
     def test_refuses_when_nothing_is_installed(self):
         (self.lib / "current").unlink()
-        with self.assertRaises(co.StepFailed):
+        with self.assertRaises(co.StepFailedError):
             co.install(self.ctx, self.w.repo, self.sha2)
 
 

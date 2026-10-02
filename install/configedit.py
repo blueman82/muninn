@@ -2,7 +2,7 @@
 
 JSON is edited by key path and re-serialised in the file's own indent.
 TOML is edited only as whole named sections found by a line-oriented
-scan; any layout we do not recognise raises Refused and nothing is
+scan; any layout we do not recognise raises RefusedError and nothing is
 written. Other TOML keys are never parsed. Error messages carry line
 numbers and our own section headers only, never file content:
 ~/.codex/config.toml holds a credential.
@@ -16,11 +16,11 @@ import tomllib
 from pathlib import Path
 
 
-class Refused(Exception):
+class RefusedError(Exception):
     """Unexpected layout or unproven edit; nothing was written."""
 
 
-class Raced(Exception):
+class RacedError(Exception):
     """The file kept changing under us; our edit was not applied."""
 
 
@@ -63,7 +63,7 @@ def atomic_write(path: Path, data: bytes, mode: int) -> None:
 def edit_file(path: Path, transform, check, retries: int = 3):
     """Re-read, transform, prove, then replace atomically (A7).
 
-    transform(bytes) -> bytes; check(before, after) raises Refused. If
+    transform(bytes) -> bytes; check(before, after) raises RefusedError. If
     the file changes between our read and our replace, the edit is
     recomputed from the new content (re-merge). The written file is
     re-read and re-checked. Returns (before, after).
@@ -86,10 +86,10 @@ def edit_file(path: Path, transform, check, retries: int = 3):
         _fsync_dir(path.parent)
         on_disk = _read(path)
         if on_disk != after:
-            raise Raced(f"{path.name} changed right after our write")
+            raise RacedError(f"{path.name} changed right after our write")
         check(before, on_disk)
         return before, after
-    raise Raced(f"{path.name} kept changing; gave up after {retries} tries")
+    raise RacedError(f"{path.name} kept changing; gave up after {retries} tries")
 
 
 # ---- JSON -------------------------------------------------------------
@@ -98,7 +98,7 @@ def edit_file(path: Path, transform, check, retries: int = 3):
 def load_json(data: bytes) -> dict:
     obj = json.loads(data)
     if not isinstance(obj, dict):
-        raise Refused("top level is not a JSON object")
+        raise RefusedError("top level is not a JSON object")
     return obj
 
 
@@ -117,7 +117,7 @@ def _parent(obj, path, create):
         if not isinstance(obj, dict):
             if obj is None and not create:
                 return None
-            raise Refused(f"{'.'.join(path)}: parent is not an object")
+            raise RefusedError(f"{'.'.join(path)}: parent is not an object")
     return obj
 
 
@@ -156,7 +156,7 @@ def json_check(before: bytes, after: bytes, paths) -> None:
             jset(obj, path, "\0touched")
         masked.append(obj)
     if masked[0] != masked[1]:
-        raise Refused("keys outside the edited paths changed")
+        raise RefusedError("keys outside the edited paths changed")
 
 
 # ---- TOML -------------------------------------------------------------
@@ -234,7 +234,7 @@ def _blocks(text: str):
 def _only(blocks, header):
     found = [b for b in blocks if b[0] == header]
     if len(found) > 1:
-        raise Refused(f"{header} appears {len(found)} times")
+        raise RefusedError(f"{header} appears {len(found)} times")
     return found[0] if found else None
 
 
@@ -269,7 +269,7 @@ def put_section(text: str, header: str, block, at=None) -> str:
         pos = blocks[at][1]
     else:
         if lines and not lines[-1].endswith("\n"):
-            raise Refused("file does not end with a newline")
+            raise RefusedError("file does not end with a newline")
         pos = len(lines)
     if pos < len(lines) and not block.endswith("\n"):
         block += "\n"
@@ -290,7 +290,7 @@ def parse_section(text: str, header: str, keys):
             continue
         m = _BODY.fullmatch(line)
         if not m or m.group(1) not in keys or m.group(1) in seen:
-            raise Refused(f"{header}: unexpected line {n} of the section")
+            raise RefusedError(f"{header}: unexpected line {n} of the section")
         seen.add(m.group(1))
     table = tomllib.loads(raw)
     while len(table) == 1 and isinstance(next(iter(table.values())), dict):
@@ -302,7 +302,7 @@ def _check_markers(lines, blocks, headers, markers) -> None:
     ours = {b[2] for b in blocks if b[0] in headers}
     for i, line in enumerate(lines):
         if i not in ours and any(m in line for m in markers):
-            raise Refused(f"line {i + 1}: our identifier outside our sections")
+            raise RefusedError(f"line {i + 1}: our identifier outside our sections")
 
 
 def scan_named(text: str, keys: dict, markers) -> dict:
@@ -327,4 +327,4 @@ def toml_check(before: str, after: str, headers, markers) -> None:
                 del lines[b[1] : b[3]]
         keep.append("".join(lines))
     if keep[0] != keep[1]:
-        raise Refused("bytes outside the named sections changed")
+        raise RefusedError("bytes outside the named sections changed")

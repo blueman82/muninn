@@ -83,7 +83,7 @@ class TomlSectionTest(unittest.TestCase):
 
     def test_toml_check_catches_a_change_outside_named_sections(self):
         bad = TOML.replace('model = "gpt-test"', 'model = "other"')
-        with self.assertRaises(ce.Refused) as cm:
+        with self.assertRaises(ce.RefusedError) as cm:
             ce.toml_check(TOML, bad, NAMED, MARKERS)
         self.assertNotIn("other", str(cm.exception))
 
@@ -116,12 +116,12 @@ class TomlSectionTest(unittest.TestCase):
         self.assertEqual(ok[PLUGIN], {"enabled": False})
         for name, text in cases.items():
             with self.subTest(name):
-                with self.assertRaises(ce.Refused) as cm:
+                with self.assertRaises(ce.RefusedError) as cm:
                     ce.scan_named(text, keys, MARKERS)
                 self.assertNotIn(CRED, str(cm.exception))
 
     def test_append_needs_trailing_newline(self):
-        with self.assertRaises(ce.Refused):
+        with self.assertRaises(ce.RefusedError):
             ce.put_section("a = 1", PLUGIN, f"\n{PLUGIN}\nenabled = true\n")
 
 
@@ -144,7 +144,7 @@ class JsonTest(unittest.TestCase):
         before = dump(SETTINGS)
         obj = json.loads(before)
         obj["env"]["TOKEN"] = "changed"
-        with self.assertRaises(ce.Refused) as cm:
+        with self.assertRaises(ce.RefusedError) as cm:
             ce.json_check(before, dump(obj), [("hooks", "SessionStart")])
         self.assertNotIn(CRED, str(cm.exception))
 
@@ -203,7 +203,7 @@ class EditFileTest(unittest.TestCase):
             return data
 
         with mock.patch.object(ce, "_read", always_racing):
-            with self.assertRaises(ce.Raced):
+            with self.assertRaises(ce.RacedError):
                 ce.edit_file(self.path, self.enable, self.check)
         self.assertIn(b"enabled = false", self.path.read_bytes())
 
@@ -213,7 +213,7 @@ class EditFileTest(unittest.TestCase):
         def stray(data):
             return data.replace(b"gpt-test", b"gpt-x")
 
-        with self.assertRaises(ce.Refused):
+        with self.assertRaises(ce.RefusedError):
             ce.edit_file(self.path, stray, self.check)
         self.assertEqual(self.path.read_bytes(), before)
 

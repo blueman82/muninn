@@ -117,7 +117,7 @@ class ReaderTests(CliCase):
         self.assertIn("notice", out)
         with (
             mock.patch.object(
-                cli.store, "connect_ro", side_effect=store.HotJournal("hot")
+                cli.store, "connect_ro", side_effect=store.HotJournalError("hot")
             ),
             mock.patch.object(
                 cli.store, "heal_hot_journal", return_value=False

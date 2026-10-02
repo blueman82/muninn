@@ -305,11 +305,11 @@ def _run(args, env) -> int:
     record = {"cmd": args.cmd, "actor": obs.actor(env)}
     try:
         code, out = _HANDLERS[args.cmd](args, env, home, record)
-    except store.Busy:
+    except store.BusyError:
         code, out = 3, {"error": "busy"}
-    except store.HotJournal:
+    except store.HotJournalError:
         code, out = 4, {"error": "hot_journal"}
-    except store.StoreUnavailable:
+    except store.StoreUnavailableError:
         code, out = 4, {"error": "store_unavailable"}
     except (ValueError, LookupError) as refused:  # e.g. erase arguments
         code, out = 2, {"error": "refused", "reason": str(refused)[:200]}
@@ -357,7 +357,7 @@ def _redacted(value, key=None):
 
 def _reader(home: Path, work):
     """work(conn) on a read-only connection.  A hot journal is healed once
-    when this process may write (O4c), else HotJournal (exit 4)."""
+    when this process may write (O4c), else HotJournalError (exit 4)."""
     db = store.db_path(home)
     for attempt in (1, 2):
         try:
@@ -366,7 +366,7 @@ def _reader(home: Path, work):
                 return work(conn)
             finally:
                 conn.close()
-        except store.HotJournal:
+        except store.HotJournalError:
             if attempt == 2 or not store.heal_hot_journal(db, home):
                 raise
 
@@ -612,7 +612,7 @@ def _serve(a, env, home, record):
                             "counts": stats.errors,
                         },
                     )
-            except store.Busy:
+            except store.BusyError:
                 skipped += 1
                 obs.write_status(home, {"busy_skips": skipped})
             except Exception as exc:  # poller.log: the class name only
@@ -642,7 +642,7 @@ def _compact(a, env, home, record):
     It needs about one database's worth of free disk for the copy."""
     db = store.db_path(home)
     if not db.exists():
-        raise store.StoreUnavailable("no store")
+        raise store.StoreUnavailableError("no store")
     with store.writer_lock(home, wait_s=WRITER_WAIT_S):
         conn = store.connect_rw(db)
         try:
@@ -824,7 +824,7 @@ def _citations(cited) -> tuple[list[tuple[str, str]], str | None]:
     return pairs, (alone[0] if alone else None)
 
 
-def _refused(refused: knowledge.Refused):
+def _refused(refused: knowledge.RefusedError):
     return 2, {"error": refused.code}
 
 
@@ -845,7 +845,7 @@ def _know_add(a, env, home, record):
             roots=ingest.default_roots(env),
             env=env,
         )
-    except knowledge.Refused as refused:
+    except knowledge.RefusedError as refused:
         return _refused(refused)
     record["knowledge_ids"] = [int(out["entry"]["id"][1:])]
     return 0, out
@@ -860,7 +860,7 @@ def _know_retract(a, env, home, record):
             reason=a.reason,
             actor=obs.actor(env),
         )
-    except knowledge.Refused as refused:
+    except knowledge.RefusedError as refused:
         return _refused(refused)
     record["knowledge_ids"] = [int(out["entry"]["id"][1:])]
     return 0, out

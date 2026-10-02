@@ -159,15 +159,15 @@ CREATE INDEX tombstone_thread ON tombstone(provider, thread_id);
 """
 
 
-class StoreUnavailable(Exception):
+class StoreUnavailableError(Exception):
     """The store is absent, unreadable or not a schema this code speaks."""
 
 
-class HotJournal(StoreUnavailable):
+class HotJournalError(StoreUnavailableError):
     """A crashed writer left a journal that only a writer can roll back."""
 
 
-class Busy(Exception):
+class BusyError(Exception):
     """Another process holds the writer lock."""
 
 
@@ -222,7 +222,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     if version == SCHEMA_VERSION:
         return
     if version != 0:
-        raise StoreUnavailable(f"schema v{version}, need v{SCHEMA_VERSION}")
+        raise StoreUnavailableError(f"schema v{version}, need v{SCHEMA_VERSION}")
     # All-or-nothing: DDL and user_version commit together. On failure the
     # transaction stays open and connect_rw's close() rolls it back.
     conn.executescript(
@@ -249,7 +249,7 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
         conn.execute(f"PRAGMA fullfsync={'ON' if fullfsync else 'OFF'}")
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         if mode != "delete":
-            raise StoreUnavailable(f"journal_mode is {mode!r}, need 'delete'")
+            raise StoreUnavailableError(f"journal_mode is {mode!r}, need 'delete'")
         _init_schema(conn)
     except BaseException:
         conn.close()
@@ -259,7 +259,7 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
 
 @contextmanager
 def writer_lock(home: Path, wait_s: float = 15.0) -> Iterator[None]:
-    """Hold the flock on home/writer.lock; Busy after wait_s (0 = no wait).
+    """Hold the flock on home/writer.lock; BusyError after wait_s (0 = no wait).
 
     Not reentrant (a second open() in one process conflicts): take it once
     at command entry and never nest. Never fork while holding it.
@@ -274,7 +274,7 @@ def writer_lock(home: Path, wait_s: float = 15.0) -> Iterator[None]:
                 break
             except BlockingIOError:  # contention raises, it does not return
                 if time.monotonic() >= deadline:
-                    raise Busy("writer lock is held elsewhere") from None
+                    raise BusyError("writer lock is held elsewhere") from None
                 time.sleep(0.1)
         yield
     finally:
@@ -286,9 +286,9 @@ def _uri(path: Path, mode: str) -> str:
 
 
 def connect_ro(path: Path) -> sqlite3.Connection:
-    """Open the store read-only; StoreUnavailable if it cannot be read.
+    """Open the store read-only; StoreUnavailableError if it cannot be read.
 
-    Raises HotJournal when a crashed writer left a journal that this
+    Raises HotJournalError when a crashed writer left a journal that this
     read-only connection cannot roll back (see heal_hot_journal).
     """
     conn = None
@@ -305,14 +305,14 @@ def connect_ro(path: Path) -> sqlite3.Connection:
             conn.close()
         code = getattr(exc, "sqlite_errorcode", None)
         if code == sqlite3.SQLITE_READONLY_ROLLBACK:
-            raise HotJournal(
+            raise HotJournalError(
                 "hot journal: a writer must roll it back"
             ) from exc
         name = getattr(exc, "sqlite_errorname", type(exc).__name__)
-        raise StoreUnavailable(f"cannot read the store ({name})") from exc
+        raise StoreUnavailableError(f"cannot read the store ({name})") from exc
     if version != SCHEMA_VERSION:
         conn.close()
-        raise StoreUnavailable(f"schema v{version}, need v{SCHEMA_VERSION}")
+        raise StoreUnavailableError(f"schema v{version}, need v{SCHEMA_VERSION}")
     return conn
 
 
@@ -330,6 +330,6 @@ def heal_hot_journal(path: Path, home: Path) -> bool:
                 conn.execute("PRAGMA user_version").fetchone()
             finally:
                 conn.close()
-    except (Busy, OSError, sqlite3.Error):
+    except (BusyError, OSError, sqlite3.Error):
         return False
     return True

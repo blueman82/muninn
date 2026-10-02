@@ -280,15 +280,22 @@ class HomeSubstitutionTest(unittest.TestCase):
 
 
 class ConfigCleanupTest(unittest.TestCase):
-    def test_pyproject_has_no_per_file_ignores(self):
-        config = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
-        self.assertNotIn("per-file-ignores", config["tool"]["ruff"]["lint"])
+    """The lint and type configs keep the standards the checks rely on."""
 
-    def test_pyright_targets_the_new_layout(self):
+    def test_ruff_enforces_google_docstrings_and_limits(self):
+        lint = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+        lint = lint["tool"]["ruff"]["lint"]
+        self.assertEqual(lint["pydocstyle"]["convention"], "google")
+        self.assertTrue({"D", "DOC", "ANN", "N", "PTH"} <= set(lint["select"]))
+        self.assertLessEqual(lint["mccabe"]["max-complexity"], 10)
+        self.assertLessEqual(lint["pylint"]["max-statements"], 50)
+
+    def test_pyright_is_strict_for_runtime_code(self):
         config = load(PYRIGHT)
         self.assertEqual(
-            config["include"], ["pctx", "install", "tests"]
+            config["include"], ["pctx", "install", "tools", "tests"]
         )
+        self.assertEqual(config["strict"], ["pctx", "install", "tools"])
         self.assertNotIn("extraPaths", config)
 
 

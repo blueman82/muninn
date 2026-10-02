@@ -79,7 +79,7 @@ class KnowCase(tq.QueryCase):
     def refused(self, code, **kw):
         """add() must refuse with `code` and write nothing at all."""
         before = self.counts()
-        with self.assertRaises(knowledge.Refused) as caught:
+        with self.assertRaises(knowledge.RefusedError) as caught:
             self.add(**kw)
         self.assertEqual(caught.exception.code, code)
         self.assertEqual(self.counts(), before)
@@ -93,7 +93,7 @@ class KnowCase(tq.QueryCase):
 
 class AddCitationTests(KnowCase):
     def test_add_requires_citation(self):
-        self.assertEqual(knowledge.Refused("uncited").code, "uncited")
+        self.assertEqual(knowledge.RefusedError("uncited").code, "uncited")
         self.refused("uncited", cites=[])
         self.refused("uncited", cites=[], cwd="/brand/new")  # no scope row
 
@@ -428,20 +428,20 @@ class LedgerTests(KnowCase):
         ):
             with (
                 self.subTest(bad),
-                self.assertRaises(knowledge.Refused) as caught,
+                self.assertRaises(knowledge.RefusedError) as caught,
             ):
                 knowledge.retract(self.rw, bad, reason="x", actor="user")
             self.assertEqual(caught.exception.code, code)
         old = kid(self.add())
         self.add(supersedes=old)
-        with self.assertRaises(knowledge.Refused) as caught:  # superseded
+        with self.assertRaises(knowledge.RefusedError) as caught:  # superseded
             knowledge.retract(self.rw, old, reason="x", actor="user")
         self.assertEqual(caught.exception.code, "not_current")
         fresh = kid(self.add())
-        with self.assertRaises(knowledge.Refused) as caught:
+        with self.assertRaises(knowledge.RefusedError) as caught:
             knowledge.retract(self.rw, fresh, reason="r" * 201, actor="user")
         self.assertEqual(caught.exception.code, "reason_length")
-        with self.assertRaises(knowledge.Refused) as caught:
+        with self.assertRaises(knowledge.RefusedError) as caught:
             knowledge.retract(self.rw, fresh, reason="ok", actor="")
         self.assertEqual(caught.exception.code, "bad_actor")
         self.assertEqual(self.row(fresh)["status"], "current")
@@ -974,7 +974,7 @@ class QuoteOnlyTests(ti.IngestCase):
         )
 
     def refused_add(self, code, **kw):
-        with self.assertRaises(knowledge.Refused) as caught:
+        with self.assertRaises(knowledge.RefusedError) as caught:
             self.add(**kw)
         self.assertEqual(caught.exception.code, code)
 
@@ -1169,9 +1169,9 @@ class RunnerTests(KnowCase):
             self.assertEqual(waits.default, 15.0)
 
     def test_a_refusal_still_releases_the_lock(self):
-        with self.assertRaises(knowledge.Refused):
+        with self.assertRaises(knowledge.RefusedError):
             knowledge.run_add(self.home, **self.kw(cites=[]))
-        with self.assertRaises(knowledge.Refused):
+        with self.assertRaises(knowledge.RefusedError):
             knowledge.run_retract(self.home, kid=999, reason="x", actor="user")
         with store.writer_lock(self.home, wait_s=0):
             pass
@@ -1180,9 +1180,9 @@ class RunnerTests(KnowCase):
     def test_run_add_is_busy_while_another_writer_holds_the_lock(self):
         holder = tst.Child(self, tst.HOLD_LOCK, self.home, 60)
         holder.wait_ready()
-        with self.assertRaises(store.Busy):
+        with self.assertRaises(store.BusyError):
             knowledge.run_add(self.home, wait_s=0, **self.kw())
-        with self.assertRaises(store.Busy):
+        with self.assertRaises(store.BusyError):
             knowledge.run_retract(
                 self.home, wait_s=0, kid=1, reason="x", actor="user"
             )
@@ -1292,7 +1292,7 @@ class EdgeTests(KnowCase):
 
 
 class StoreTroubleTests(KnowCase):
-    """A store that cannot be read is StoreUnavailable (exit 4), not a
+    """A store that cannot be read is StoreUnavailableError (exit 4), not a
     sqlite traceback, for every public reader and writer."""
 
     def test_store_lost_mid_call(self):
@@ -1328,7 +1328,7 @@ class StoreTroubleTests(KnowCase):
         }
         self.db.write_bytes(os.urandom(8192))  # no database any more
         for name, call in calls.items():
-            with self.subTest(name), self.assertRaises(store.StoreUnavailable):
+            with self.subTest(name), self.assertRaises(store.StoreUnavailableError):
                 call()
 
 
@@ -1391,6 +1391,6 @@ class LifecycleTests(ti.IngestCase):
             ([(f"codex:{self.tid}:99.1", "a made up citation")], "not_found"),
             ([(codex, "a quote that is not there")], "quote_not_found"),
         ):
-            with self.subTest(code), self.assertRaises(knowledge.Refused) as c:
+            with self.subTest(code), self.assertRaises(knowledge.RefusedError) as c:
                 self.add(cites=cites)
             self.assertEqual(c.exception.code, code)

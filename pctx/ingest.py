@@ -88,7 +88,7 @@ def run_pass(
     fullfsync: bool = True,
     wait_s: float = 0.0,
 ) -> PassStats:
-    """Take the writer lock (store.Busy if held; the poller passes 0 and
+    """Take the writer lock (store.BusyError if held; the poller passes 0 and
     skips the pass), open the store, run one ingest pass, close."""
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home), fullfsync=fullfsync)

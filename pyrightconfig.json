@@ -1,5 +1,6 @@
 {
-  "include": ["pctx", "install", "tests"],
+  "include": ["pctx", "install", "tools", "tests"],
   "pythonVersion": "3.13",
-  "typeCheckingMode": "basic"
+  "typeCheckingMode": "standard",
+  "strict": ["pctx", "install", "tools"]
 }

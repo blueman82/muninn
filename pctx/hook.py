@@ -165,11 +165,11 @@ def _subagent(payload: Mapping, provider: str) -> bool:
 
 def _open(home: Path):
     """A read-only connection; a crashed writer's hot journal is healed
-    once when this process may write, else HotJournal."""
+    once when this process may write, else HotJournalError."""
     db = store.db_path(home)
     try:
         return store.connect_ro(db)
-    except store.HotJournal:
+    except store.HotJournalError:
         if not store.heal_hot_journal(db, home):
             raise
         return store.connect_ro(db)
@@ -232,10 +232,10 @@ def _respond(event, payload, provider, env, trace, build) -> dict:
             text = build(conn, home, payload, env, trace)
         finally:
             conn.close()
-    except store.HotJournal:
+    except store.HotJournalError:
         trace["error"] = "hot_journal"
         text = _notice("hot_journal")
-    except store.StoreUnavailable:
+    except store.StoreUnavailableError:
         trace["error"] = "store_unavailable"
         text = _notice("store_unavailable")
     except Exception:

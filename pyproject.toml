@@ -7,11 +7,44 @@ line-length = 79
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+# preview is needed for the DOC (pydoclint) rules.
+preview = true
+select = [
+    "E", "W",    # PEP 8 style (pycodestyle)
+    "F",         # pyflakes
+    "I",         # import order (replaces isort)
+    "N",         # PEP 8 naming
+    "UP",        # PEP 585 / 604 / 695 modern syntax
+    "FA",        # PEP 563 future annotations
+    "D", "DOC",  # PEP 257 docstrings, Google layout, sections match code
+    "ANN",       # PEP 484 annotations
+    "B", "SIM", "C4", "PIE", "PERF", "RET", "RUF",
+    "PTH",       # pathlib over os.path
+    "ERA",       # no commented-out code
+    "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",  # complexity limits
+]
+ignore = ["D203", "D213", "ANN401"]
 
-[tool.isort]
-profile = "black"
-line_length = 79
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pydoclint]
+# A one-line docstring needs no Args/Returns sections.
+ignore-one-line-docstrings = true
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 7
+max-branches = 12
+max-returns = 6
+max-statements = 50
+
+[tool.ruff.lint.per-file-ignores]
+# Test method and helper docstrings are enforced by tools/standards.py, which
+# knows the test_* / fixture-hook exemptions ruff cannot express.
+"tests/*" = ["D102", "D103", "D105", "D107", "DOC"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

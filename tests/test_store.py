@@ -287,7 +287,7 @@ class SchemaTests(StoreCase):
         raw = sqlite3.connect(self.db)
         raw.execute("PRAGMA user_version=2")
         raw.close()
-        with self.assertRaises(store.StoreUnavailable):
+        with self.assertRaises(store.StoreUnavailableError):
             store.connect_rw(self.db)
 
     def test_journal_mode_is_delete(self):
@@ -307,7 +307,7 @@ class SchemaTests(StoreCase):
         raw.execute("CREATE TABLE x (y)")
         raw.commit()
         raw.close()
-        with self.assertRaises(store.StoreUnavailable):
+        with self.assertRaises(store.StoreUnavailableError):
             store.connect_rw(self.db)
 
     def test_writer_pragmas(self):
@@ -611,14 +611,14 @@ class ErasureTests(StoreCase):
 
 class ReaderTests(StoreCase):
     def test_connect_ro_missing_raises_store_unavailable(self):
-        with self.assertRaises(store.StoreUnavailable):
+        with self.assertRaises(store.StoreUnavailableError):
             store.connect_ro(self.db)
         self.assertFalse(self.db.exists())
 
     def assert_plain_unavailable(self):
-        with self.assertRaises(store.StoreUnavailable) as caught:
+        with self.assertRaises(store.StoreUnavailableError) as caught:
             store.connect_ro(self.db)
-        self.assertNotIsInstance(caught.exception, store.HotJournal)
+        self.assertNotIsInstance(caught.exception, store.HotJournalError)
 
     def test_connect_ro_rejects_uninitialised_and_foreign_schema(self):
         store.ensure_private_dir(self.home)
@@ -660,9 +660,9 @@ class HotJournalTests(StoreCase):
 
     def test_connect_ro_hot_journal_raises_hotjournal(self):
         self.leave_hot_journal()
-        with self.assertRaises(store.HotJournal) as caught:
+        with self.assertRaises(store.HotJournalError) as caught:
             store.connect_ro(self.db)
-        self.assertIsInstance(caught.exception, store.StoreUnavailable)
+        self.assertIsInstance(caught.exception, store.StoreUnavailableError)
 
     def test_heal_hot_journal_rolls_back_uncommitted_writes(self):
         self.leave_hot_journal()
@@ -678,7 +678,7 @@ class HotJournalTests(StoreCase):
         with store.writer_lock(self.home):
             self.assertFalse(store.heal_hot_journal(self.db, self.home))
         self.assertTrue(Path(f"{self.db}-journal").exists())
-        with self.assertRaises(store.HotJournal):
+        with self.assertRaises(store.HotJournalError):
             store.connect_ro(self.db)
         self.assertTrue(store.heal_hot_journal(self.db, self.home))
 
@@ -692,7 +692,7 @@ class WriterLockTests(StoreCase):
     def test_writer_lock_busy(self):
         holder = Child(self, HOLD_LOCK, self.home, 60)
         holder.wait_ready()
-        with self.assertRaises(store.Busy):
+        with self.assertRaises(store.BusyError):
             with store.writer_lock(self.home, wait_s=0):
                 self.fail("lock was granted while another process held it")
         holder.kill()  # SIGKILL releases the flock: no stale lock
@@ -703,7 +703,7 @@ class WriterLockTests(StoreCase):
         holder = Child(self, HOLD_LOCK, self.home, 60)
         holder.wait_ready()
         start = time.monotonic()
-        with self.assertRaises(store.Busy):
+        with self.assertRaises(store.BusyError):
             with store.writer_lock(self.home, wait_s=0.3):
                 pass
         elapsed = time.monotonic() - start
@@ -720,7 +720,7 @@ class WriterLockTests(StoreCase):
 
     def test_writer_lock_is_not_reentrant_in_process(self):
         with store.writer_lock(self.home, wait_s=0):
-            with self.assertRaises(store.Busy):
+            with self.assertRaises(store.BusyError):
                 with store.writer_lock(self.home, wait_s=0):
                     pass
 

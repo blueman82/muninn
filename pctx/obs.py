@@ -360,7 +360,7 @@ def _lock_free(home: Path) -> bool:
     try:
         with store.writer_lock(home, wait_s=0):
             return True
-    except (store.Busy, OSError):
+    except (store.BusyError, OSError):
         return False
 
 
@@ -405,7 +405,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> dict:
     db = store.db_path(home)
     try:
         conn = store.connect_ro(db)
-    except store.StoreUnavailable as exc:
+    except store.StoreUnavailableError as exc:
         check("store_readable", False, type(exc).__name__)
     else:
         try:

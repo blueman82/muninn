@@ -453,7 +453,7 @@ class TombstoneAndReplayTests(IngestCase):
         self.addCleanup(holder.kill)
         self.assertEqual(holder.stdout.readline().strip(), "ready")
         holder.stdout.close()
-        with self.assertRaises(store.Busy):
+        with self.assertRaises(store.BusyError):
             ingest.run_pass(self.home, self.roots, fullfsync=False)
         holder.kill()
         holder.wait()

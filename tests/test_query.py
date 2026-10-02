@@ -2046,7 +2046,7 @@ class QuoteCheckTests(QueryCase):
 
 
 class StoreTroubleTests(QueryCase):
-    """A store that cannot be read surfaces as StoreUnavailable (exit 4)."""
+    """A store that cannot be read surfaces as StoreUnavailableError (exit 4)."""
 
     def calls(self, conn):
         return {
@@ -2062,12 +2062,12 @@ class StoreTroubleTests(QueryCase):
 
     def test_reader_missing_db_exit4(self):
         missing = store.db_path(self.tmp / "nowhere")
-        with self.assertRaises(store.StoreUnavailable):
+        with self.assertRaises(store.StoreUnavailableError):
             store.connect_ro(missing)
         self.assertFalse(missing.parent.exists())  # a reader creates nothing
         junk = self.tmp / "junk.sqlite"
         junk.write_bytes(b"this is not a database" * 100)
-        with self.assertRaises(store.StoreUnavailable):
+        with self.assertRaises(store.StoreUnavailableError):
             store.connect_ro(junk)
 
     def test_store_lost_mid_query_is_store_unavailable(self):
@@ -2077,7 +2077,7 @@ class StoreTroubleTests(QueryCase):
         self.assertEqual(len(self.calls(reader)["search"]()["hits"]), 1)
         self.db.write_bytes(os.urandom(8192))  # the file is no database now
         for name, call in self.calls(reader).items():
-            with self.subTest(name), self.assertRaises(store.StoreUnavailable):
+            with self.subTest(name), self.assertRaises(store.StoreUnavailableError):
                 call()
 
     def test_locked_store_is_store_unavailable_not_a_traceback(self):
@@ -2087,7 +2087,7 @@ class StoreTroubleTests(QueryCase):
         try:
             for name, call in self.calls(reader).items():
                 with self.subTest(name):
-                    with self.assertRaises(store.StoreUnavailable) as caught:
+                    with self.assertRaises(store.StoreUnavailableError) as caught:
                         call()
                     self.assertNotIn("zebra", str(caught.exception))
         finally:
@@ -2131,11 +2131,11 @@ class StoreTroubleTests(QueryCase):
         for name, call in self.calls(reader).items():
             with (
                 self.subTest(name),
-                self.assertRaises(store.HotJournal) as got,
+                self.assertRaises(store.HotJournalError) as got,
             ):
                 call()
-            self.assertIsInstance(got.exception, store.StoreUnavailable)
-        with self.assertRaises(store.HotJournal):
+            self.assertIsInstance(got.exception, store.StoreUnavailableError)
+        with self.assertRaises(store.HotJournalError):
             store.connect_ro(self.db)  # the same class at open time
         self.assertTrue(store.heal_hot_journal(self.db, self.home))
         self.assertEqual(len(self.calls(self.ro())["search"]()["hits"]), 1)

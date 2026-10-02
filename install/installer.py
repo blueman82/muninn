@@ -63,7 +63,7 @@ OWNER_STEP = (
 GIT_ENV = dict(os.environ, GIT_OPTIONAL_LOCKS="0")
 
 
-class StepFailed(Exception):
+class StepFailedError(Exception):
     """An install step could not complete; rollback follows."""
 
 
@@ -135,7 +135,7 @@ def must(ctx, argv, env=None, input=None, quiet=False):
     if r.returncode:
         tail = "" if quiet else r.stderr.decode(errors="replace")[-300:]
         name = f"{Path(str(argv[0])).name} {argv[1]}"
-        raise StepFailed(f"{name} exited {r.returncode} {tail}".strip())
+        raise StepFailedError(f"{name} exited {r.returncode} {tail}".strip())
     return r
 
 
@@ -143,7 +143,7 @@ def wait(ctx, cond, seconds, what):
     deadline = ctx.now() + seconds
     while not cond():
         if ctx.now() >= deadline:
-            raise StepFailed(what)
+            raise StepFailedError(what)
         ctx.sleep(1)
 
 
@@ -193,7 +193,7 @@ def codex_hooks(data: bytes) -> list:
         for gi, group in enumerate(groups):
             for hi, h in enumerate(group["hooks"]):
                 if h.get("type") != "command" or event not in LABELS:
-                    raise StepFailed(f"unsupported Codex hook in {event}")
+                    raise StepFailedError(f"unsupported Codex hook in {event}")
                 handler = {
                     "type": "command",
                     "command": h["command"],
@@ -247,7 +247,7 @@ def edit_settings(data, fragment):
     for event in CLAUDE_EVENTS:
         current = ce.jget(obj, ("hooks", event))[1] or []
         if not isinstance(current, list):
-            raise ce.Refused(f"settings.json hooks.{event} is not a list")
+            raise ce.RefusedError(f"settings.json hooks.{event} is not a list")
         keep = [g for g in current if not ours(g)]
         ce.jset(obj, ("hooks", event), keep + fragment[event])
     return ce.dump_like(data, obj)
@@ -290,7 +290,7 @@ def repoint(text, source):
     if mkt is None:
         text = set_line(text, MARKETPLACE, "source_type", '"local"')
     elif mkt.get("source_type") != "local":
-        raise ce.Refused(f"{MARKETPLACE}: source_type is not local")
+        raise ce.RefusedError(f"{MARKETPLACE}: source_type is not local")
     return set_line(text, MARKETPLACE, "source", json.dumps(source))
 
 
@@ -302,7 +302,7 @@ def write_trust(text, hooks):
     codex_scan(text)
     for hook in hooks:
         if not hook["suffix"].endswith(":0:0"):
-            raise ce.Refused(f"no trust key for hook {hook['suffix']}")
+            raise ce.RefusedError(f"no trust key for hook {hook['suffix']}")
         header = TRUST[hook["event"]]
         block = f'\n{header}\ntrusted_hash = "{hook["hash"]}"\n'
         text = ce.put_section(text, header, block)
@@ -391,42 +391,42 @@ def load_record(path):
 def preflight(ctx, repo, sha):
     """Check everything and dry-apply every config edit; change nothing."""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise StepFailed("--sha must be a full 40-hex commit id")
+        raise StepFailedError("--sha must be a full 40-hex commit id")
 
     def rgit(*args):
         return must(ctx, ["git", "-C", repo, *args], env=GIT_ENV).stdout
 
     if rgit("rev-parse", "HEAD").decode().strip() != sha:
-        raise StepFailed("repo HEAD is not --sha")
+        raise StepFailedError("repo HEAD is not --sha")
     if rgit("status", "--porcelain", "--untracked-files=all"):
-        raise StepFailed("repo worktree is not clean")
+        raise StepFailedError("repo worktree is not clean")
     if not rgit("ls-tree", sha, "bin/pctx").startswith(b"100755 "):
-        raise StepFailed("bin/pctx is not an executable file at --sha")
+        raise StepFailedError("bin/pctx is not an executable file at --sha")
     home = str(ctx.home).encode()
     files = {
         r: rgit("show", f"{sha}:{r}").replace(b"@HOME@", home) for r in PINNED
     }
     fragment = json.loads(files[PINNED[0]])["hooks"]
     if set(fragment) != set(CLAUDE_EVENTS):
-        raise StepFailed(
+        raise StepFailedError(
             "Claude hook fragment must be SessionStart+UserPromptSubmit"
         )
     if ctx.upgrade:
         if not (ctx.data.is_dir() and ctx.plist.exists()):
-            raise StepFailed("nothing to upgrade: no data dir or plist")
+            raise StepFailedError("nothing to upgrade: no data dir or plist")
         if not (ctx.lib / "current").is_symlink():
-            raise StepFailed("nothing to upgrade: no current release")
+            raise StepFailedError("nothing to upgrade: no current release")
     if ctx.fresh:
         if sys.version_info < (3, 13):
-            raise StepFailed("the installer needs Python 3.13+")
+            raise StepFailedError("the installer needs Python 3.13+")
         for path in (ctx.data, ctx.plist):
             if os.path.lexists(path):
-                raise StepFailed(f"{path} exists: already installed")
+                raise StepFailedError(f"{path} exists: already installed")
     for path in (ctx.rdir, ctx.failed):
         if os.path.lexists(path):
-            raise StepFailed(f"{path} already exists")
+            raise StepFailedError(f"{path} already exists")
     if ctx.pctx.exists() and not ctx.pctx.is_symlink():
-        raise StepFailed(f"{ctx.pctx} is not a symlink")
+        raise StepFailedError(f"{ctx.pctx} is not a symlink")
     touch = not ctx.upgrade  # an upgrade leaves provider config alone
     if touch and ctx.settings.exists():
         edit_settings(ctx.settings.read_bytes(), fragment)
@@ -594,11 +594,11 @@ def start_new(ctx, rec):
     prog = f"{ctx.lib}/current/bin/pctx"
     plist = plistlib.loads(data)
     if b"@HOME@" in data or plist.get("Label") != LABEL:
-        raise StepFailed(
+        raise StepFailedError(
             "pinned plist is not substituted or has another label"
         )
     if plist["ProgramArguments"][0] != prog or not os.access(prog, os.X_OK):
-        raise StepFailed("pinned plist does not run current/bin/pctx")
+        raise StepFailedError("pinned plist does not run current/bin/pctx")
     ctx.plist.parent.mkdir(parents=True, exist_ok=True)
     ce.atomic_write(ctx.plist, data, 0o644)
     started = ctx.now()
@@ -655,9 +655,9 @@ def codex(ctx, rec):
     rec["codex_plugin_version"] = out["version"]
     installed = Path(out["installedPath"]).resolve()
     if installed != (ctx.cache / out["version"]).resolve():
-        raise StepFailed("codex installed the plugin somewhere unexpected")
+        raise StepFailedError("codex installed the plugin somewhere unexpected")
     if (installed / "hooks/hooks.json").read_bytes() != pinned:
-        raise StepFailed("codex cache hooks.json differs from the pinned copy")
+        raise StepFailedError("codex cache hooks.json differs from the pinned copy")
     edit(enable)
     if rec["trust"] == "auto":
         edit(lambda text: write_trust(text, codex_hooks(pinned)))
@@ -709,7 +709,7 @@ def verify(ctx, rec):
     ce.atomic_write(ctx.rdir / "verify.json", report, 0o600)
     failed = [c["check"] for c in checks if c["ok"] is False]
     if failed:
-        raise StepFailed("verify failed: " + ", ".join(failed))
+        raise StepFailedError("verify failed: " + ", ".join(failed))
 
 
 def codex_checks(ctx, rec, check):
@@ -876,7 +876,7 @@ def main(argv=None):
     )
     try:
         install(ctx, args.repo.resolve(), args.sha)
-    except (StepFailed, ce.Refused, ce.Raced) as exc:
+    except (StepFailedError, ce.RefusedError, ce.RacedError) as exc:
         say(f"FAILED: {exc}")
         return 1
     return 0

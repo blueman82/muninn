@@ -233,7 +233,7 @@ class FailOpenTests(HookCase):
             )
         with (
             mock.patch.object(
-                store, "connect_ro", side_effect=store.HotJournal("hot")
+                store, "connect_ro", side_effect=store.HotJournalError("hot")
             ),
             mock.patch.object(store, "heal_hot_journal", return_value=False),
         ):
@@ -247,14 +247,14 @@ class FailOpenTests(HookCase):
         with mock.patch.object(
             hook.knowledge,
             "block_entries",
-            side_effect=store.StoreUnavailable("x"),
+            side_effect=store.StoreUnavailableError("x"),
         ):
             self.assertEqual(self.start(), notice("store_unavailable"))
 
     def test_a_hot_journal_is_healed_when_this_process_may_write(self):
         self.add()
         real = store.connect_ro
-        calls = [store.HotJournal("hot"), None]
+        calls = [store.HotJournalError("hot"), None]
 
         def flaky(path):
             step = calls.pop(0)

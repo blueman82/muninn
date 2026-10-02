@@ -5,7 +5,7 @@ primary prompt, reply or tool_call event plus a verbatim quote of it, checked
 when the entry is written. Writers (add, retract) must run under
 store.writer_lock with a store.connect_rw connection; run_add and run_retract
 do that. Readers (list_entries, show, check, verify_citation, block_entries,
-user_cited) work on a connect_ro connection. A refused write raises Refused
+user_cited) work on a connect_ro connection. A refused write raises RefusedError
 and leaves nothing behind.
 """
 
@@ -37,7 +37,7 @@ _PUSHABLE_CITE = "m.state = 'live' AND m.role = 'user' AND m.kind = 'prompt'"
 _FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
 
 
-class Refused(Exception):
+class RefusedError(Exception):
     """A write was refused and nothing was written (exit 2).
 
     code: bad_kind, bad_actor, text_length, reason_length, uncited, bad_ref,
@@ -55,10 +55,10 @@ def _clean(text: str, code: str, low: int, high: int) -> str:
     """Stripped, secrets redacted, then frame delimiters escaped; refused
     with `code` unless low..high characters."""
     if len(text) > 4 * high:  # not worth scanning
-        raise Refused(code)
+        raise RefusedError(code)
     body = _FRAME.sub("&lt;", classify.redact(text.strip())[0])
     if not low <= len(body) <= high:
-        raise Refused(code)
+        raise RefusedError(code)
     return body
 
 
@@ -80,26 +80,26 @@ def _cite(conn: sqlite3.Connection, ref: str, quote: str) -> dict:
     """
     opened = query.open_event(conn, ref, roots={}, context=0)
     if "error" in opened:
-        raise Refused(opened["error"])
+        raise RefusedError(opened["error"])
     prov = opened["provenance"]
     if (
         prov.get("class", "primary") != "primary"
         or prov["kind"] not in CITABLE
         or opened["flagged"]
     ):
-        raise Refused("not_citable")
+        raise RefusedError("not_citable")
     wanted = " ".join(quote.split())
     if not wanted or len(wanted) > QUOTE_MAX:
-        raise Refused("quote_length")
+        raise RefusedError("quote_length")
     found = query.quote_check(conn, str(opened["id"]), quote)
     if not found["match"]:
-        raise Refused("quote_not_found")
+        raise RefusedError("quote_not_found")
     short = len(wanted) < QUOTE_MIN
     if short and not (
         (prov["role"], prov["kind"]) == ("user", "prompt")
         and " ".join(opened["text"].split()) == wanted
     ):
-        raise Refused("quote_length")
+        raise RefusedError("quote_length")
     return {
         "event": opened["id"],
         "provider": prov["provider"],
@@ -132,7 +132,7 @@ def _proposals(conn: sqlite3.Connection, cites: list[dict]) -> None:
             (cite["event"],),
         ).fetchone()
         if before is None or before["id"] not in cited:
-            raise Refused("approval_needs_reply")
+            raise RefusedError("approval_needs_reply")
 
 
 def _caller(conn, roots, env) -> str | None:
@@ -152,7 +152,7 @@ def _caller_prompt(conn: sqlite3.Connection, root: str, quote: str) -> dict:
     """The caller's latest citable user prompt that holds the quote."""
     wanted = " ".join(quote.split())
     if not wanted or len(wanted) > QUOTE_MAX:
-        raise Refused("quote_length")
+        raise RefusedError("quote_length")
     rows = conn.execute(
         "SELECT e.id FROM event e JOIN source s ON s.id = e.source_id"
         " WHERE s.session_root = ? AND e.kind = 'prompt' AND e.role = 'user'"
@@ -164,9 +164,9 @@ def _caller_prompt(conn: sqlite3.Connection, root: str, quote: str) -> dict:
     for row in rows:
         try:
             return _cite(conn, str(row["id"]), quote)
-        except Refused:  # not this prompt: not citable, or another wording
+        except RefusedError:  # not this prompt: not citable, or another wording
             continue
-    raise Refused("quote_not_found")
+    raise RefusedError("quote_not_found")
 
 
 def _insert(conn, sid, kind, body, actor, cites, old) -> int:
@@ -214,7 +214,7 @@ def _supersedable(conn, given, sid) -> int:
         else None
     )
     if row is None or row["status"] != "current" or row["scope_id"] != sid:
-        raise Refused("bad_supersedes")
+        raise RefusedError("bad_supersedes")
     return old
 
 
@@ -233,21 +233,21 @@ def add(
     roots: Mapping[str, Path],
     env: Mapping[str, str],
 ) -> dict:
-    """Write one cited entry in a single transaction, or raise Refused.
+    """Write one cited entry in a single transaction, or raise RefusedError.
 
     cites are (ref, quote) pairs; the quote must be 12..300 characters of the
     event, whitespace collapsed. A preference needs a cited user prompt.
     """
     if kind not in KINDS:
-        raise Refused("bad_kind")
+        raise RefusedError("bad_kind")
     if not actor:
-        raise Refused("bad_actor")
+        raise RefusedError("bad_actor")
     body = _clean(text, "text_length", 1, TEXT_MAX)
     if not cites and quote_only is None:
-        raise Refused("uncited")
+        raise RefusedError("uncited")
     root = _caller(conn, roots, env)
     if quote_only is not None and root is None:
-        raise Refused("no_caller_session")
+        raise RefusedError("no_caller_session")
     conn.execute("BEGIN IMMEDIATE")
     try:
         sid = (
@@ -263,7 +263,7 @@ def add(
         if kind == "preference" and not any(
             (c["role"], c["kind"]) == ("user", "prompt") for c in found
         ):
-            raise Refused("preference_needs_user")
+            raise RefusedError("preference_needs_user")
         old = None
         if supersedes is not None:
             old = _supersedable(conn, supersedes, sid)
@@ -369,7 +369,7 @@ def retract(
 ) -> dict:
     """Retract a current entry (its text stays, with the reason)."""
     if not actor:
-        raise Refused("bad_actor")
+        raise RefusedError("bad_actor")
     why = _clean(reason, "reason_length", 0, REASON_MAX)
     number = _kid(kid)
     conn.execute("BEGIN IMMEDIATE")
@@ -382,9 +382,9 @@ def retract(
             else None
         )
         if row is None:
-            raise Refused("not_found")
+            raise RefusedError("not_found")
         if row["status"] != "current":
-            raise Refused("not_current")
+            raise RefusedError("not_current")
         conn.execute(
             "UPDATE knowledge SET status = 'retracted', retract_reason = ?"
             " WHERE id = ?",

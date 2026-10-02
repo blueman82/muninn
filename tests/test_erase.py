@@ -381,7 +381,7 @@ class ScopeOfEraseTests(EraseCase):
         self.addCleanup(holder.kill)
         self.assertEqual(holder.stdout.readline().strip(), "ready")
         holder.stdout.close()
-        with self.assertRaises(store.Busy):
+        with self.assertRaises(store.BusyError):
             erase.run_erase(self.home, session=TID, env=self.env, wait_s=0)
         holder.kill()
         holder.wait()
