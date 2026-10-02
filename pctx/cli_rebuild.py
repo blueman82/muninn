@@ -15,7 +15,7 @@ import sqlite3
 from argparse import Namespace
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pctx import cli_core, erase, ingest, store
 from pctx.cli_core import Env, Record, Result
@@ -24,10 +24,7 @@ __all__ = ["REBUILD", "rebuild"]
 
 REBUILD = "pctx.sqlite.rebuild"
 # Tables copied before and after the re-ingest.  Scopes and tombstones go
-# first because ingest consults tombstones to skip deleted threads; the
-# knowledge tables are copied after ingest; their citations name events by
-# provider, thread and line rather than by event id, so they do not depend
-# on the ids ingest assigns.
+# first because ingest consults tombstones to skip deleted threads.
 _BEFORE = ("scope", "scope_path", "tombstone")
 _AFTER = ("knowledge", "citation", "knowledge_log")
 
@@ -92,11 +89,7 @@ def _copy_old(
 
 def _insert(conn: sqlite3.Connection, sql: str, params: Sequence[Any]) -> int:
     """Run an INSERT and return the new row's id."""
-    rowid = conn.execute(sql, tuple(params)).lastrowid
-    # sqlite3 types lastrowid as optional; it is only None for non-INSERTs.
-    if rowid is None:
-        raise sqlite3.DatabaseError("INSERT produced no row id")
-    return rowid
+    return cast("int", conn.execute(sql, tuple(params)).lastrowid)
 
 
 def _copy_events(
