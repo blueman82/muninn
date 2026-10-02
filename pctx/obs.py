@@ -215,8 +215,6 @@ def _unowned_journal(home: Path) -> CheckResult:
 
 def _journal_mode(conn: sqlite3.Connection) -> CheckResult:
     """The store uses the rollback journal, not WAL."""
-    # The checks expect the default rollback journal; any other mode is
-    # reported with its name.
     mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     return _result("journal_mode", mode == "delete", mode)
 

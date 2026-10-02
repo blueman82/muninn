@@ -52,8 +52,7 @@ def tombstone_row(
 ) -> TombstoneRow:
     """Build a tombstone from ids and hashes.
 
-    Only identifiers are accepted, so erased text or the match string can
-    never leak into the log by accident.
+    The row has a fixed set of fields, so no free-form field can be added.
 
     Args:
         provider: ``codex`` or ``claude``.

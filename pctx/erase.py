@@ -198,10 +198,12 @@ def erase(
     Returns:
         Counts and paths only; never erased text or the match string.
 
-    A ``ValueError`` propagates when not exactly one selector is given,
-    ``match`` is shorter than ``MIN_MATCH`` characters or ``event_ref`` is
-    malformed; a ``LookupError`` when ``event_ref`` matches no thread,
-    several threads or no event.
+    Raises:
+        ValueError: If not exactly one selector is given, ``match`` is
+            shorter than ``MIN_MATCH`` characters or ``event_ref`` is
+            malformed.
+        LookupError: If ``event_ref`` matches no thread, several threads
+            or no event.
     """
     mode = _pick_mode(session, event_ref, match)
     target = Target()
@@ -255,9 +257,10 @@ def run_erase(
     Returns:
         The result of ``erase``.
 
-    ``store.BusyError`` propagates if the writer lock is still held after
-    ``wait_s``; ``erase`` raises ``ValueError`` and ``LookupError`` as
-    documented there.
+    Raises:
+        store.BusyError: If the writer lock is still held after ``wait_s``.
+        ValueError: As ``erase`` raises it.
+        LookupError: As ``erase`` raises it.
     """
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home))

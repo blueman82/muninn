@@ -126,8 +126,8 @@ def log_call(
         return False
     line = clean_record({**record, "at": round(time.time(), 3)})
     data = _encode(line)
-    # One write per line keeps it atomic under O_APPEND, so long id lists
-    # are halved until the line fits rather than being split.
+    # Halve long id lists until the line fits LINE_BYTES; a truncated list
+    # stays valid JSON, unlike cutting the encoded line.
     for key in _ID_LISTS:
         while len(data) > LINE_BYTES and line.get(key):
             # clean_record guarantees a list of ints for these keys.
@@ -141,8 +141,9 @@ def _append(home: Path, name: str, data: bytes) -> bool:
     """Append to ``home/name``, rotating to ``name.1`` at ``ROTATE_BYTES``.
 
     At most two generations exist, which bounds disk use. Rotation is not
-    locked: two racing processes may each rotate once, which loses at most
-    one old generation.
+    locked, so racing processes can both rotate and overwrite ``name.1``,
+    or lose the race and hit a missing file in the replace, in which case
+    that one line is dropped and False is returned.
 
     Returns:
         False when the append is denied.

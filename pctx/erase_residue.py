@@ -117,7 +117,11 @@ def _load_doc_ids(conn: sqlite3.Connection, ids: list[int]) -> None:
 
 
 def _rare_in(conn: sqlite3.Connection, table: str, ids: list[int]) -> set[str]:
-    """Terms of one FTS table found only in the given documents."""
+    """Terms of one FTS table found only in a few of the given documents.
+
+    A term counts as rare when at most ``RARE_MAX_DOCS`` documents hold it
+    and all of them are among ``ids``.
+    """
     _load_doc_ids(conn, ids)
     instance, row = (
         _vocab(conn, table, "instance"),
