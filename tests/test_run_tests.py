@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,6 +38,60 @@ class DiscoveryTest(unittest.TestCase):
         jobs = run_tests.default_jobs()
         self.assertGreaterEqual(jobs, 1)
         self.assertLessEqual(jobs, run_tests.DEFAULT_JOBS_CAP)
+
+
+class CleanEnvironmentTest(unittest.TestCase):
+    """Tests never inherit the git variables a commit hook exports."""
+
+    def test_repo_locating_variables_are_removed_and_others_kept(self) -> None:
+        env = {"GIT_DIR": "/x", "GIT_INDEX_FILE": "/y", "PATH": "/bin"}
+        self.assertEqual(run_tests.clean_environment(env), {"PATH": "/bin"})
+
+    def git(self, cwd: Path, *args: str, env: dict[str, str]) -> str:
+        """Run git quietly in a throwaway directory.
+
+        Args:
+            cwd: Directory to run in.
+            *args: Arguments after ``git``.
+            env: The environment to run with.
+
+        Returns:
+            Trimmed standard output.
+        """
+        done = subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return done.stdout.strip()
+
+    def test_git_init_under_a_worktree_hook_env_cannot_flip_bare(self) -> None:
+        # Reproduces the real incident in a temp repo: with the worktree's
+        # GIT_DIR exported, `git init` marks the SHARED repository bare.
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            plain = {"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"}
+            self.git(base, "init", "-q", "main", env=plain)
+            main = base / "main"
+            self.git(
+                main, "commit", "-q", "--allow-empty", "-m", "i", env=plain
+            )
+            self.git(
+                main, "worktree", "add", "-q", "../wt", "-b", "s", env=plain
+            )
+            gitdir = self.git(
+                base / "wt", "rev-parse", "--absolute-git-dir", env=plain
+            )
+            (base / "scratch").mkdir()
+            hook_env = run_tests.clean_environment(
+                {**plain, "GIT_DIR": gitdir}
+            )
+            self.git(base / "scratch", "init", "-q", env=hook_env)
+            bare = self.git(main, "config", "core.bare", env=plain)
+            self.assertEqual(bare, "false")
 
 
 class ReportTest(unittest.TestCase):

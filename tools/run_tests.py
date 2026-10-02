@@ -17,7 +17,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +27,20 @@ DEFAULT_JOBS_CAP = 12
 # unittest exits 5 for a module that defines no tests (a re-export shim).
 NO_TESTS_EXIT = 5
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.M)
+# Variables git exports to a hook. Committing from a linked worktree sets them
+# to paths inside the shared .git, and a test that runs `git init` in a temp
+# directory would then flip the real repository's core.bare to true.
+GIT_REPO_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_QUARANTINE_PATH",
+    "GIT_NAMESPACE",
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +89,18 @@ def parse_ran(output: str) -> int:
     return int(match[1]) if match else 0
 
 
+def clean_environment(env: Mapping[str, str]) -> dict[str, str]:
+    """Copy an environment without the variables that locate a git repository.
+
+    Args:
+        env: The environment to copy, normally ``os.environ``.
+
+    Returns:
+        The same variables minus ``GIT_REPO_VARS``.
+    """
+    return {k: v for k, v in env.items() if k not in GIT_REPO_VARS}
+
+
 def run_module(module: str, root: Path = ROOT) -> ModuleResult:
     """Run one test module in a fresh interpreter.
 
@@ -89,6 +115,7 @@ def run_module(module: str, root: Path = ROOT) -> ModuleResult:
     done = subprocess.run(
         [sys.executable, "-m", "unittest", module],
         cwd=root,
+        env=clean_environment(os.environ),
         capture_output=True,
         text=True,
         check=False,
