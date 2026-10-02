@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from muninn import classify as c
+from muninn.claude_events import OWNER_ORIGIN_KIND, QUEUED_COMMAND_TYPE
 from muninn.event_model import Record
 from tests.classify_support import CWD, TS
 
@@ -147,7 +148,7 @@ def run_claude(records: list[Record], state: bool = True) -> list[c.EventRec]:
 def queued_attachment(
     prompt: object,
     *,
-    origin: str | None = "human",
+    origin: str | None = OWNER_ORIGIN_KIND,
     sidechain: bool = False,
     in_attachment: Record | None = None,
     **extra: Any,
@@ -165,7 +166,7 @@ def queued_attachment(
         The record.
     """
     attachment: Record = {
-        "type": "queued_command",
+        "type": QUEUED_COMMAND_TYPE,
         "prompt": prompt,
         "commandMode": "prompt",
     } | (in_attachment or {})

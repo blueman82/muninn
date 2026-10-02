@@ -6,7 +6,13 @@ import unittest
 
 from muninn import classify as c
 from muninn import knowledge
-from muninn.claude_events import CHANNEL_HUMAN_FLAG, CLAUDE_HARNESS_PREFIXES
+from muninn.claude_events import (
+    CHANNEL_HUMAN_FLAG,
+    CLAUDE_HARNESS_PREFIXES,
+    META_FLAG,
+    OWNER_ORIGIN_KIND,
+    QUEUED_COMMAND_TYPE,
+)
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -27,6 +33,12 @@ NOT_OWNER = ("task-notification", "peer", "coordinator", "auto-continuation")
 
 class QueuedClassifyTests(unittest.TestCase):
     """What ``claude_events`` makes of queued_command attachments."""
+
+    def test_the_names_match_what_claude_code_writes(self) -> None:
+        """The fixtures use the constants, so pin the real wire names here."""
+        self.assertEqual(QUEUED_COMMAND_TYPE, "queued_command")
+        self.assertEqual(OWNER_ORIGIN_KIND, "human")
+        self.assertEqual(META_FLAG, "isMeta")
 
     def test_owner_string_prompt_is_a_prompt(self) -> None:
         events = c.claude_events(queued_attachment(OWNER_TEXT), 7)
@@ -65,16 +77,17 @@ class QueuedClassifyTests(unittest.TestCase):
         self.assertEqual(c.claude_events(record, 7), [])
 
     def test_an_attachment_marked_meta_is_harness_text(self) -> None:
-        record = queued_attachment(OWNER_TEXT, in_attachment={"isMeta": True})
+        record = queued_attachment(OWNER_TEXT, in_attachment={META_FLAG: True})
         (event,) = c.claude_events(record, 7)
         self.assertEqual(event.kind, "harness")
 
     def test_only_a_true_meta_flag_makes_harness_text(self) -> None:
-        unset = queued_attachment(OWNER_TEXT, in_attachment={"isMeta": False})
+        unset = queued_attachment(OWNER_TEXT, in_attachment={META_FLAG: False})
         self.assertEqual(
             c.claude_events(unset, 7), [cev("prompt", OWNER_TEXT)]
         )
-        on_record = queued_attachment(OWNER_TEXT, isMeta=True)
+        on_record = queued_attachment(OWNER_TEXT)
+        on_record[META_FLAG] = True
         (event,) = c.claude_events(on_record, 7)
         self.assertEqual(event.kind, "harness")
 

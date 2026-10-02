@@ -32,6 +32,9 @@ OWNER_ORIGIN_KIND = "human"
 # A person in a chat channel can also carry the "human" origin; that is not
 # the owner typing into this session.
 CHANNEL_HUMAN_FLAG = "verifiedSlackHumanTurn"
+# Set by the harness on text it injected; user records carry it on the record,
+# queued input on the attachment.
+META_FLAG = "isMeta"
 
 # A Claude user text starting with one of these was written by the harness,
 # not typed by the person.
@@ -156,7 +159,7 @@ def _user_events(
     if not text.strip():
         return []
     tag = starting_tag(text, CLAUDE_HARNESS_PREFIXES)
-    for flag in ("isCompactSummary", "isMeta"):
+    for flag in ("isCompactSummary", META_FLAG):
         if tag is None and record.get(flag) is True:
             tag = flag
     thread_class = (
@@ -177,7 +180,8 @@ def _queued_events(record: Record, origin: Origin) -> list[EventRec]:
         origin: Position and timestamp of the record.
 
     Returns:
-        One prompt event for the owner's input, otherwise nothing.
+        One user event (normally a prompt) for the owner's input, otherwise
+        nothing.
     """
     att = as_record(record.get("attachment"))
     if att is None or att.get("type") != QUEUED_COMMAND_TYPE:
@@ -189,7 +193,8 @@ def _queued_events(record: Record, origin: Origin) -> list[EventRec]:
         return []
     # The meta flag sits on the attachment here, not on the record, so lift
     # it to where ordinary user records carry it.
-    lifted = record | ({"isMeta": True} if att.get("isMeta") is True else {})
+    meta = {META_FLAG: True} if att.get(META_FLAG) is True else {}
+    lifted = record | meta
     return _user_events(lifted, att.get("prompt"), origin)
 
 
