@@ -114,10 +114,12 @@ def fresh(ctx: Ctx, since: float) -> bool:
 
     Args:
         ctx: The run context.
-        since: Timestamp the heartbeat must not predate.
+        since: Timestamp the heartbeat must not predate by more than one
+            second.
 
     Returns:
-        True when status.json is newer than ``since`` and recent enough.
+        True when status.json was written at most one second before
+        ``since`` or later, and is less than ``HEARTBEAT_S`` old.
     """
     try:
         mtime = (ctx.data / "status.json").stat().st_mtime

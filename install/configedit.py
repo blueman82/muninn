@@ -222,7 +222,7 @@ def _parent(
             if child is None and not create:
                 return None
             raise RefusedError(f"{'.'.join(path)}: parent is not an object")
-        node = cast(dict[str, Any], child)  # JSON keys are strings
+        node = cast(dict[str, Any], child)
     return node
 
 

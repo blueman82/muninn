@@ -270,7 +270,7 @@ def parse_section(
         (only,) = table.values()
         if not isinstance(only, dict):
             break
-        table = cast(dict[str, Any], only)  # TOML keys are strings
+        table = cast(dict[str, Any], only)
     return table
 
 

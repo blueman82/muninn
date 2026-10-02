@@ -10,10 +10,13 @@ external effect goes through ``ctx.run`` (launchctl, ps, git, pctx, codex),
 so tests rehearse the whole sequence in a temp HOME. Each run ends with
 exactly one pinned release.
 
-The work is split by responsibility: ``preflight``, ``transforms`` and
-``trust`` (config edits and the Codex trust hash), ``steps_release``,
-``steps_config`` and ``verify`` (the steps) and this module (the runner). The
-names callers and tests use are re-exported here.
+The work is split by responsibility: ``constants`` and ``context`` (shared
+names, the run context and command runner), ``record`` and ``rollback`` (the
+run record and undoing it), ``preflight``, ``transforms`` and ``trust``
+(checks, config edits and the Codex trust hash), ``steps_release``,
+``steps_config``, ``probe`` and ``verify`` (the steps and the Codex probe)
+and this module (the runner). The names the steps and tests use are
+re-exported here.
 """
 
 from __future__ import annotations
@@ -208,6 +211,11 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
 
     Returns:
         The final run record.
+
+    Note:
+        Preflight's StepFailedError, RefusedError and RacedError propagate.
+        Any step exception is re-raised after the rollback; in a dry run it
+        is re-raised without one.
     """
     rec = preflight(ctx, Path(repo), sha)
     record(ctx, rec)
