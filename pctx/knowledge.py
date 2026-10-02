@@ -77,7 +77,9 @@ class AddArgs(TypedDict):
     Attributes:
         kind: One of ``KINDS``.
         text: Entry text, 1 to ``TEXT_MAX`` characters once cleaned.
-        cites: (event ref, quote) pairs; quotes are 12 to 300 characters.
+        cites: (event ref, quote) pairs; quotes are 12 to 300 characters, except
+            that a shorter quote is accepted when it is the whole text of a
+            user prompt (an approval).
         quote_only: A quote to find in the caller's own session prompts.
         supersedes: Entry id this one replaces.
         global_scope: Store in the global scope instead of the repo scope.
@@ -101,7 +103,7 @@ class AddArgs(TypedDict):
 
 @dataclass(frozen=True)
 class _AddRequest:
-    """Validated form of ``AddArgs`` with defaults filled in."""
+    """``AddArgs`` with defaults filled in."""
 
     kind: str
     text: str
@@ -213,8 +215,9 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
     """Write one cited entry in a single transaction, or refuse.
 
     Each cite is a (ref, quote) pair; the quote must be 12 to 300 characters
-    of the event, whitespace collapsed. A preference needs a cited user
-    prompt.
+    of the event, whitespace collapsed, unless it is the whole text of a user
+    prompt (an approval), which may be shorter. A preference needs a cited
+    user prompt.
 
     Args:
         conn: Read-write connection; the caller holds the writer lock.

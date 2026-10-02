@@ -138,7 +138,8 @@ def cwd_of(record: Record, state: CodexState | None) -> str | None:
         record: The parsed transcript line.
         state: Codex state, whose cwd comes from line 1 and from
             ``turn_context`` records after any replay; None for Claude, whose
-            records carry their own ``cwd``.
+            records carry their own ``cwd``. A state with no cwd falls back
+            to the record's own.
 
     Returns:
         The working directory, or None when the record has none.
