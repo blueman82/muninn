@@ -85,7 +85,7 @@ class _Poller:
     def prepare(self) -> None:
         """Tighten the log mode, install signal handlers, log the start."""
         # launchd opens StandardOutPath before Umask applies, leaving it
-        # 0644; poller output can name files, so make it owner-only.
+        # 0644; the log must be owner-only.
         with contextlib.suppress(FileNotFoundError):  # not run by launchd
             (self.home / "poller.log").chmod(0o600)
         for sig in (signal.SIGTERM, signal.SIGHUP):

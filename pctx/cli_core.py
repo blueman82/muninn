@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 # CLI writers wait this long for the writer lock.  The poller never waits
-# (it skips the pass), so a human command wins within one poll interval.
+# (it skips the pass), so a human command is not starved by the poller.
 WRITER_WAIT_S = 15.0
 
 type Env = Mapping[str, str]

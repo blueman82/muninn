@@ -33,7 +33,7 @@ from pctx import (
     obs,
     store,
 )
-from pctx.cli_core import WRITER_WAIT_S, Env, Handler, Out, Record, Result
+from pctx.cli_core import Env, Handler, Out, Record, Result
 from pctx.cli_hook import HOOKS, PROVIDERS, hook_main
 from pctx.cli_output import redacted
 from pctx.cli_parser import build_parser
@@ -42,13 +42,10 @@ __all__ = [
     "HOOKS",
     "NOTICE",
     "PROVIDERS",
-    "WRITER_WAIT_S",
     "main",
 ]
 
 NOTICE = classify.NOTICE
-# WRITER_WAIT_S is re-exported for old imports only.  Handlers read
-# cli_core.WRITER_WAIT_S at call time, so patch it there.
 
 
 _HANDLERS: dict[str, Handler] = {

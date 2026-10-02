@@ -23,8 +23,9 @@ from pctx.cli_core import Env, Record, Result
 __all__ = ["REBUILD", "rebuild"]
 
 REBUILD = "pctx.sqlite.rebuild"
-# Tables copied before and after the re-ingest.  Knowledge references events
-# through citations, so it is copied only once the events exist again.
+# Tables copied before and after the re-ingest.  Scopes and tombstones go
+# first because ingest consults tombstones to skip deleted threads; the
+# knowledge tables are copied after ingest, as the original rebuild did.
 _BEFORE = ("scope", "scope_path", "tombstone")
 _AFTER = ("knowledge", "citation", "knowledge_log")
 
@@ -218,6 +219,9 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     Returns:
         Exit 0 and a summary, 2 if the new file fails its check, or 4 if
         it left a hot journal.
+
+    A busy writer lock propagates ``store.BusyError``; the dispatcher
+    maps it to exit 3.
     """
     db, new = store.db_path(home), home / REBUILD
     with store.writer_lock(home, wait_s=cli_core.WRITER_WAIT_S):

@@ -70,7 +70,7 @@ def _add(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     try:
         out: Out = knowledge.run_add(
             home,
-            # Read at call time so tests (and operators) can change the wait.
+            # Looked up on cli_core at call time so tests can patch it.
             wait_s=cli_core.WRITER_WAIT_S,
             kind=a.kind,
             text=a.text,
