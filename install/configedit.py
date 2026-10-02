@@ -1,34 +1,64 @@
 """Race-safe, key-scoped edits of provider config files (JSON and TOML).
 
-JSON is edited by key path and re-serialised in the file's own indent.
-TOML is edited only as whole named sections found by a line-oriented
-scan; any layout we do not recognise raises RefusedError and nothing is
-written. Other TOML keys are never parsed. Error messages carry line
-numbers and our own section headers only, never file content:
-~/.codex/config.toml holds a credential.
+JSON is edited by key path and re-serialised in the file's own indent. TOML
+is edited only as whole named sections (see ``install.tomledit``); other TOML
+keys are never parsed. Error messages carry line numbers and our own section
+headers only, never file content: ~/.codex/config.toml holds a credential.
+
+The TOML helpers and both error types are re-exported here so callers have
+one place to import from.
 """
+
+from __future__ import annotations
 
 import json
 import os
 import re
 import tempfile
-import tomllib
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any, cast
 
+from install.errors import RacedError, RefusedError
+from install.tomledit import (
+    get_section,
+    index_of,
+    parse_section,
+    put_section,
+    scan_named,
+    toml_check,
+)
 
-class RefusedError(Exception):
-    """Unexpected layout or unproven edit; nothing was written."""
+__all__ = [
+    "JsonPath",
+    "RacedError",
+    "RefusedError",
+    "atomic_write",
+    "dump_like",
+    "edit_file",
+    "get_section",
+    "index_of",
+    "jdel",
+    "jget",
+    "jset",
+    "json_check",
+    "load_json",
+    "parse_section",
+    "put_section",
+    "scan_named",
+    "toml_check",
+]
 
-
-class RacedError(Exception):
-    """The file kept changing under us; our edit was not applied."""
+JsonPath = tuple[str, ...]
 
 
 def _read(path: Path) -> bytes:
+    """Read a file; a seam so tests can simulate a concurrent writer."""
     return path.read_bytes()
 
 
 def _fsync_dir(path: Path) -> None:
+    """Flush a directory entry so a completed rename survives a crash."""
     fd = os.open(path, os.O_RDONLY)
     try:
         os.fsync(fd)
@@ -37,6 +67,20 @@ def _fsync_dir(path: Path) -> None:
 
 
 def _write_temp(path: Path, data: bytes, mode: int) -> Path:
+    """Write ``data`` to a fsynced temp file next to ``path``.
+
+    The temp file lives in the same directory so the later rename stays on
+    one filesystem and is therefore atomic.
+
+    Args:
+        path: The file the data is destined for.
+        data: Bytes to write.
+        mode: Permission bits, applied before any data is written so the
+            content is never readable under a wider mode.
+
+    Returns:
+        The temp file's path.
+    """
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as f:
@@ -51,22 +95,46 @@ def _write_temp(path: Path, data: bytes, mode: int) -> Path:
 
 
 def atomic_write(path: Path, data: bytes, mode: int) -> None:
-    """Temp file in the same dir, fsync, rename over `path`, fsync dir."""
+    """Write a file atomically: temp, fsync, rename over ``path``, fsync dir.
+
+    Args:
+        path: Destination file.
+        data: Bytes to write.
+        mode: Permission bits for the new file.
+    """
     tmp = _write_temp(path, data, mode)
     try:
-        os.replace(tmp, path)
+        tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
     _fsync_dir(path.parent)
 
 
-def edit_file(path: Path, transform, check, retries: int = 3):
-    """Re-read, transform, prove, then replace atomically (A7).
+def edit_file(
+    path: Path,
+    transform: Callable[[bytes], bytes],
+    check: Callable[[bytes, bytes], None],
+    retries: int = 3,
+) -> tuple[bytes, bytes]:
+    """Re-read, transform, prove, then replace a file atomically.
 
-    transform(bytes) -> bytes; check(before, after) raises RefusedError. If
-    the file changes between our read and our replace, the edit is
-    recomputed from the new content (re-merge). The written file is
-    re-read and re-checked. Returns (before, after).
+    If the file changes between our read and our replace, the edit is
+    recomputed from the new content. The written file is re-read and
+    re-checked.
+
+    Args:
+        path: The file to edit; it must exist.
+        transform: Maps the current bytes to the edited bytes.
+        check: Called as ``check(before, after)``; raises ``RefusedError``
+            when the edit touches more than it should.
+        retries: How many times to recompute after losing a race.
+
+    Returns:
+        The bytes before and after the edit.
+
+    Raises:
+        RacedError: If the file kept changing, or changed right after our
+            write.
     """
     for _ in range(retries):
         before = _read(path)
@@ -74,13 +142,14 @@ def edit_file(path: Path, transform, check, retries: int = 3):
         check(before, after)
         if after == before:
             return before, after
+        # Keep the file's own permissions; the providers may use 0600.
         tmp = _write_temp(path, after, path.stat().st_mode & 0o777)
         try:
             # ponytail: compare-then-rename leaves a sub-millisecond window;
             # the providers take no lock we could share.
             if _read(path) != before:
                 continue
-            os.replace(tmp, path)
+            tmp.replace(path)
         finally:
             tmp.unlink(missing_ok=True)
         _fsync_dir(path.parent)
@@ -89,242 +158,142 @@ def edit_file(path: Path, transform, check, retries: int = 3):
             raise RacedError(f"{path.name} changed right after our write")
         check(before, on_disk)
         return before, after
-    raise RacedError(f"{path.name} kept changing; gave up after {retries} tries")
+    raise RacedError(
+        f"{path.name} kept changing; gave up after {retries} tries"
+    )
 
 
-# ---- JSON -------------------------------------------------------------
+def load_json(data: bytes) -> dict[str, Any]:
+    """Parse a JSON document that must be an object.
 
+    Args:
+        data: The file bytes.
 
-def load_json(data: bytes) -> dict:
-    obj = json.loads(data)
+    Returns:
+        The parsed object.
+
+    Raises:
+        RefusedError: If the top level is not an object.
+    """
+    obj: Any = json.loads(data)
     if not isinstance(obj, dict):
         raise RefusedError("top level is not a JSON object")
-    return obj
+    # JSON object keys are always strings; isinstance cannot say so.
+    return cast(dict[str, Any], obj)
 
 
-def dump_like(original: bytes, obj) -> bytes:
-    """Serialise in the original's indent, keeping its final newline."""
+def dump_like(original: bytes, obj: dict[str, Any]) -> bytes:
+    """Serialise in the original's indent, keeping its final newline.
+
+    Args:
+        original: The file bytes the object was loaded from.
+        obj: The edited object.
+
+    Returns:
+        The new file bytes.
+    """
     m = re.search(rb"\n( +)\S", original)
     text = json.dumps(obj, indent=len(m.group(1)) if m else 2)
     return (text + ("\n" if original.endswith(b"\n") else "")).encode()
 
 
-def _parent(obj, path, create):
+def _parent(
+    obj: dict[str, Any], path: JsonPath, create: bool
+) -> dict[str, Any] | None:
+    """Walk to the object that holds the last key of ``path``.
+
+    Args:
+        obj: The document root.
+        path: Key path whose parent is wanted.
+        create: Create missing intermediate objects instead of stopping.
+
+    Returns:
+        The parent object, or None when it is absent and not created.
+
+    Raises:
+        RefusedError: If an intermediate value exists but is not an object.
+    """
+    node = obj
     for key in path[:-1]:
-        if key not in obj and create:
-            obj[key] = {}
-        obj = obj.get(key)
-        if not isinstance(obj, dict):
-            if obj is None and not create:
+        if key not in node and create:
+            node[key] = {}
+        child: Any = node.get(key)
+        if not isinstance(child, dict):
+            if child is None and not create:
                 return None
             raise RefusedError(f"{'.'.join(path)}: parent is not an object")
-    return obj
+        node = cast(dict[str, Any], child)  # JSON keys are strings
+    return node
 
 
-def jget(obj, path):
-    """(present, value, index-in-parent) for a key path."""
+def jget(obj: dict[str, Any], path: JsonPath) -> tuple[bool, Any, int | None]:
+    """Look up a key path.
+
+    Args:
+        obj: The document root.
+        path: Key path to read.
+
+    Returns:
+        ``(present, value, index-in-parent)``; the index lets a restore put
+        the key back in its original position.
+    """
     parent = _parent(obj, path, create=False)
     if parent is None or path[-1] not in parent:
         return False, None, None
     return True, parent[path[-1]], list(parent).index(path[-1])
 
 
-def jset(obj, path, value, index=None) -> None:
-    """Set in place; a new key goes at `index` (default: last)."""
+def jset(
+    obj: dict[str, Any],
+    path: JsonPath,
+    value: Any,
+    index: int | None = None,
+) -> None:
+    """Set a key path in place; a new key goes at ``index`` (default last).
+
+    Args:
+        obj: The document root.
+        path: Key path to write.
+        value: The value to store.
+        index: Position for a key that does not exist yet.
+    """
     parent = _parent(obj, path, create=True)
+    assert parent is not None  # create=True always yields an object
     if path[-1] in parent or index is None:
         parent[path[-1]] = value
         return
+    # dicts cannot insert at a position, so rebuild in the wanted order.
     items = list(parent.items())
     items.insert(index, (path[-1], value))
     parent.clear()
     parent.update(items)
 
 
-def jdel(obj, path) -> None:
+def jdel(obj: dict[str, Any], path: JsonPath) -> None:
+    """Delete a key path in place; absent keys are ignored."""
     parent = _parent(obj, path, create=False)
     if parent is not None:
         parent.pop(path[-1], None)
 
 
-def json_check(before: bytes, after: bytes, paths) -> None:
-    """Prove that nothing outside `paths` changed (A7)."""
-    masked = []
+def json_check(before: bytes, after: bytes, paths: Sequence[JsonPath]) -> None:
+    """Prove that nothing outside ``paths`` changed.
+
+    Args:
+        before: File bytes before the edit.
+        after: File bytes after the edit.
+        paths: The key paths we are allowed to change.
+
+    Raises:
+        RefusedError: If the documents differ anywhere else.
+    """
+    masked: list[dict[str, Any]] = []
     for data in (before, after):
         obj = load_json(data)
         for path in paths:
+            # Overwrite our keys with one sentinel so only foreign changes
+            # make the two documents differ.
             jset(obj, path, "\0touched")
         masked.append(obj)
     if masked[0] != masked[1]:
         raise RefusedError("keys outside the edited paths changed")
-
-
-# ---- TOML -------------------------------------------------------------
-
-_KEY = r"""(?:[A-Za-z0-9_-]+|"(?:[^"\\\n]|\\.)*"|'[^'\n]*')"""
-_HEADER = re.compile(
-    rf"\s*\[\[?\s*{_KEY}(?:\s*\.\s*{_KEY})*\s*\]\]?\s*(?:#.*)?"
-)
-_VALUE = r"""("(?:[^"\\\n]|\\.)*"|'[^'\n]*'|true|false)"""
-_BODY = re.compile(rf"\s*([A-Za-z0-9_-]+)\s*=\s*{_VALUE}\s*")
-
-
-def _find_close(line: str, quote: str, start: int) -> int:
-    """Index of the closing `quote` token, honouring basic-string escapes."""
-    j = start
-    while True:
-        k = line.find(quote, j)
-        if k < 0 or quote.startswith("'"):
-            return k
-        slashes = len(line[:k]) - len(line[:k].rstrip("\\"))
-        if slashes % 2 == 0:
-            return k
-        j = k + 1
-
-
-def _scan(line: str, ml):
-    """Return the multi-line string still open at the end of `line`."""
-    j = 0
-    while j < len(line):
-        if ml:
-            k = _find_close(line, ml, j)
-            if k < 0:
-                return ml
-            ml, j = None, k + 3
-            continue
-        if line[j] == "#":
-            return None
-        if line.startswith(('"""', "'''"), j):
-            ml, j = line[j : j + 3], j + 3
-            continue
-        if line[j] in "\"'":
-            k = _find_close(line, line[j], j + 1)
-            if k < 0:
-                return None  # invalid TOML; the header scan stays conservative
-            j = k + 1
-            continue
-        j += 1
-    return None
-
-
-def _blocks(text: str):
-    """(lines, [(header, start, header_line, end)]) for every table.
-
-    A block owns the blank lines right above its header, so removing or
-    re-inserting a block never changes its neighbours' bytes.
-    """
-    lines = text.splitlines(keepends=True)
-    heads, ml = [], None
-    for i, line in enumerate(lines):
-        if ml is None and _HEADER.fullmatch(line.rstrip("\r\n")):
-            heads.append(i)
-            continue
-        ml = _scan(line, ml)
-    blocks, floor = [], 0
-    for h in heads:
-        s = h
-        while s > floor and not lines[s - 1].strip():
-            s -= 1
-        blocks.append([lines[h].strip(), s, h])
-        floor = h + 1
-    ends = [b[1] for b in blocks[1:]] + [len(lines)]
-    return lines, [(*b, e) for b, e in zip(blocks, ends)]
-
-
-def _only(blocks, header):
-    found = [b for b in blocks if b[0] == header]
-    if len(found) > 1:
-        raise RefusedError(f"{header} appears {len(found)} times")
-    return found[0] if found else None
-
-
-def get_section(text: str, header: str):
-    """Raw block text (with its leading blank lines), or None."""
-    lines, blocks = _blocks(text)
-    b = _only(blocks, header)
-    return None if b is None else "".join(lines[b[1] : b[3]])
-
-
-def index_of(text: str, header: str):
-    """Position of `header`'s block among all tables, or None."""
-    _, blocks = _blocks(text)
-    names = [b[0] for b in blocks]
-    return names.index(header) if header in names else None
-
-
-def put_section(text: str, header: str, block, at=None) -> str:
-    """Replace `header`'s block with `block` (None removes it).
-
-    A new block is inserted before the table now at index `at`, or at
-    the end of the file when `at` is None or past the last table.
-    """
-    lines, blocks = _blocks(text)
-    b = _only(blocks, header)
-    if b is not None:
-        lines[b[1] : b[3]] = [block] if block else []
-        return "".join(lines)
-    if not block:
-        return text
-    if at is not None and at < len(blocks):
-        pos = blocks[at][1]
-    else:
-        if lines and not lines[-1].endswith("\n"):
-            raise RefusedError("file does not end with a newline")
-        pos = len(lines)
-    if pos < len(lines) and not block.endswith("\n"):
-        block += "\n"
-    lines[pos:pos] = [block]
-    return "".join(lines)
-
-
-def parse_section(text: str, header: str, keys):
-    """Values of one named block, refusing anything but simple lines."""
-    raw = get_section(text, header)
-    if raw is None:
-        return None
-    body = raw.splitlines()
-    first = next(i for i, line in enumerate(body) if line.strip())
-    seen = set()
-    for n, line in enumerate(body[first + 1 :], first + 2):
-        if not line.strip():
-            continue
-        m = _BODY.fullmatch(line)
-        if not m or m.group(1) not in keys or m.group(1) in seen:
-            raise RefusedError(f"{header}: unexpected line {n} of the section")
-        seen.add(m.group(1))
-    table = tomllib.loads(raw)
-    while len(table) == 1 and isinstance(next(iter(table.values())), dict):
-        table = next(iter(table.values()))
-    return table
-
-
-def _check_markers(lines, blocks, headers, markers) -> None:
-    ours = {b[2] for b in blocks if b[0] in headers}
-    for i, line in enumerate(lines):
-        if i not in ours and any(m in line for m in markers):
-            raise RefusedError(f"line {i + 1}: our identifier outside our sections")
-
-
-def scan_named(text: str, keys: dict, markers) -> dict:
-    """Parse our named sections; refuse any other use of our markers.
-
-    Returns {header: values or None}. Lines outside our sections are
-    only searched for the marker strings, never parsed.
-    """
-    lines, blocks = _blocks(text)
-    _check_markers(lines, blocks, keys, markers)
-    return {h: parse_section(text, h, k) for h, k in keys.items()}
-
-
-def toml_check(before: str, after: str, headers, markers) -> None:
-    """Prove that only the named sections changed: the rest is identical."""
-    keep = []
-    for text in (before, after):
-        lines, blocks = _blocks(text)
-        _check_markers(lines, blocks, headers, markers)
-        for b in reversed(blocks):
-            if b[0] in headers:
-                del lines[b[1] : b[3]]
-        keep.append("".join(lines))
-    if keep[0] != keep[1]:
-        raise RefusedError("bytes outside the named sections changed")

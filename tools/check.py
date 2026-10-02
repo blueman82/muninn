@@ -74,7 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(prog="tools.check")
     parser.add_argument("--full", action="store_true", help="also run tools")
-    parser.add_argument("--summary", action="store_true", help="count per file")
+    parser.add_argument(
+        "--summary", action="store_true", help="count per file"
+    )
     args = parser.parse_args(argv)
     found = check_repo(ROOT)
     if args.summary:
