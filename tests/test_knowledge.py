@@ -10,7 +10,7 @@ from pctx import knowledge
 from tests import test_query as tq
 from tests.knowledge_support import PROMPT, SECRET, KnowCase, kid
 
-# Other test modules import these helpers from here.
+# test_hook reaches these helpers through this module.
 __all__ = ["KnowCase", "kid"]
 
 
