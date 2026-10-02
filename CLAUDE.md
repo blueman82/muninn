@@ -13,7 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Line length is 79 (black and ruff, configured in `pyproject.toml`). Run the CLI from source with `bin/pctx ...` (or `python3.13 -m pctx`). Upgrade the installed machine copy:
 
-    python3.13 -E -s -B -m install.installer --repo . --sha "$(git rev-parse HEAD)" --upgrade
+    bin/pctx-install --check   # plain-sentence preview, writes nothing
+    bin/pctx-install           # fresh or upgrade, installs HEAD
 
 ## Architecture (the parts that span files)
 
