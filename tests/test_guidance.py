@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from tests.hook_support import RecallCase
 from tests.test_cli import CliCase
-from tests.test_hook import RecallCase
 from tests.test_ingest import TID
 
 

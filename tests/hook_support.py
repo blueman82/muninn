@@ -1,0 +1,281 @@
+"""Shared fixtures for the hook tests: the frame constants and base cases.
+
+Synthetic rows in temp dirs; the providers' payloads are built by hand.
+Nothing touches a live data dir or a provider root.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import time
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from pctx import hook, obs
+from tests import test_cli as tcli
+from tests import test_knowledge as tk
+
+OPEN = '<pctx-memory source="pctx" trust="untrusted-data">'
+CLOSE = "</pctx-memory>"
+USAGE = (
+    "Before answering about earlier work or re-deciding a recorded choice, run"
+    ' `pctx search "<words>"` and open what you cite; record durable owner'
+    " decisions with `pctx know add … --quote`."
+)
+TAG = re.compile(r"(?i)<\s*/?\s*pctx-(?:memory|recall)")
+AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
+RECALL_OPEN = (
+    '<pctx-memory source="pctx" trust="untrusted-data" kind="recall">'
+)
+HINT = "`pctx open <ref> --context 3`"
+Q = "alphaterm betaterm gammaterm deltaterm"
+LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
+HOOKS_JSON = LAUNCHER.parent.parent / "integrations/codex/hooks/hooks.json"
+
+
+def notice(
+    code: str, event: str = "SessionStart"
+) -> dict[str, dict[str, str]]:
+    """Build the fail-open notice a hook answers when it cannot read.
+
+    Args:
+        code: Reason code shown in the notice text.
+        event: Hook event name echoed in the output.
+
+    Returns:
+        The provider JSON the hook prints.
+    """
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": (
+                '<pctx-memory source="pctx" trust="untrusted-data"'
+                f' kind="notice">\npctx: store unavailable ({code})\n' + CLOSE
+            ),
+        }
+    }
+
+
+def hook_output(out: object) -> dict[str, Any]:
+    """Return the ``hookSpecificOutput`` object of a hook answer.
+
+    Args:
+        out: Parsed provider JSON.
+
+    Returns:
+        The inner object, narrowed from ``object`` for indexing.
+    """
+    assert isinstance(out, dict)
+    found = out["hookSpecificOutput"]
+    assert isinstance(found, dict)
+    return found
+
+
+class HookCase(tk.KnowCase):
+    """A repo scope with a fresh poller heartbeat."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.env = {"PCTX_HOME": str(self.home)}
+        obs.write_status(
+            self.home, {"last_pass_at": time.time(), "interval_s": 60}
+        )
+
+    def payload(self, **kw: object) -> dict[str, object]:
+        """Build a SessionStart payload for the repo.
+
+        Args:
+            **kw: Fields that override the defaults.
+
+        Returns:
+            The payload dict.
+        """
+        base: dict[str, object] = {
+            "hook_event_name": "SessionStart",
+            "cwd": "/repo",
+            "session_id": "sess-now",
+            "source": "startup",
+        }
+        return base | kw
+
+    def start(
+        self,
+        provider: str = "claude",
+        env: dict[str, str] | None = None,
+        **kw: object,
+    ) -> dict[str, object]:
+        """Run the SessionStart hook in process.
+
+        Args:
+            provider: Provider the payload is for.
+            env: Environment entries that override the test environment.
+            **kw: Payload fields that override the defaults.
+
+        Returns:
+            The provider JSON the hook returns.
+        """
+        return hook.session_start(
+            self.payload(**kw), provider, self.env | (env or {})
+        )
+
+    @staticmethod
+    def body(out: object) -> str:
+        """Return the ``additionalContext`` text of a hook answer.
+
+        Args:
+            out: Parsed provider JSON.
+
+        Returns:
+            The context text.
+        """
+        text = hook_output(out)["additionalContext"]
+        assert isinstance(text, str)
+        return text
+
+    def raw_text(self, number: int, text: str) -> None:
+        """Store text the way an older writer might: unescaped.
+
+        Args:
+            number: Knowledge entry id.
+            text: Text to write unchanged.
+        """
+        self.rw.execute(
+            "UPDATE knowledge SET text = ? WHERE id = ?", (text, number)
+        )
+
+
+class RecallCase(HookCase):
+    """Sessions that talk about the four made-up terms."""
+
+    def ask(
+        self,
+        prompt: object = Q,
+        provider: str = "claude",
+        env: dict[str, str] | None = None,
+        **kw: object,
+    ) -> dict[str, object]:
+        """Run the UserPromptSubmit hook in process.
+
+        Args:
+            prompt: Prompt value; deliberately not limited to strings.
+            provider: Provider the payload is for.
+            env: Environment entries that override the test environment.
+            **kw: Payload fields that override the defaults.
+
+        Returns:
+            The provider JSON the hook returns.
+        """
+        payload: dict[str, object] = {
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": "/repo",
+            "session_id": "sess-now",
+            "prompt": prompt,
+        } | kw
+        return hook.prompt_submit(payload, provider, self.env | (env or {}))
+
+    def talk(
+        self,
+        name: str,
+        text: str,
+        scope_id: int | None = None,
+        **kw: Any,
+    ) -> int:
+        """Add a root event of a made-up session.
+
+        Args:
+            name: Thread name; the session is ``<name>-root``.
+            text: Event text.
+            scope_id: Scope of the event; the repo when omitted.
+            **kw: Extra event fields; ``provider`` picks the source's.
+
+        Returns:
+            The new event id.
+        """
+        src = self.add_source(
+            name, session=f"{name}-root", provider=kw.pop("provider", "codex")
+        )
+        event = self.add_event(src, scope_id or self.repo, text, **kw)
+        assert event is not None
+        return event
+
+    def lines(self, out: object) -> list[str]:
+        """Return the bullet lines of a hook answer.
+
+        Args:
+            out: Parsed provider JSON.
+
+        Returns:
+            Lines of the context text that start with ``- ``.
+        """
+        return [x for x in self.body(out).split("\n") if x.startswith("- ")]
+
+
+class HookCliCase(tcli.CliCase):
+    """The installed-command form: bin/pctx in a subprocess.
+
+    The payload goes on stdin and only the provider JSON is read from
+    stdout.
+    """
+
+    def run_hook(
+        self,
+        event: str,
+        provider: str,
+        payload: Mapping[str, object],
+        env: dict[str, str] | None = None,
+        raw: bytes | None = None,
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Run ``pctx hook`` as the provider would.
+
+        Args:
+            event: Hook command name, such as ``prompt``.
+            provider: Provider passed with ``--provider``.
+            payload: Payload serialized to stdin unless ``raw`` is given.
+            env: Environment entries that override the test environment.
+            raw: Exact stdin bytes to send instead of the payload.
+
+        Returns:
+            The finished process with captured output.
+        """
+        body = json.dumps(payload).encode() if raw is None else raw
+        return subprocess.run(
+            [str(LAUNCHER), "hook", event, "--provider", provider],
+            input=body,
+            capture_output=True,
+            env=self.env | (env or {}),
+            cwd=self.repo,
+            timeout=60,
+        )
+
+    def payload(self, **kw: object) -> dict[str, object]:
+        """Build a UserPromptSubmit payload for the repo.
+
+        Args:
+            **kw: Fields that override the defaults.
+
+        Returns:
+            The payload dict.
+        """
+        base: dict[str, object] = {
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": str(self.repo),
+            "session_id": "sess-now",
+        }
+        return base | kw
+
+    def parsed(self, done: subprocess.CompletedProcess[bytes]) -> Any:
+        """Check a hook run printed exactly one JSON line and parse it.
+
+        Args:
+            done: The finished hook process.
+
+        Returns:
+            The parsed JSON.
+        """
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, b"")
+        self.assertEqual(done.stdout.count(b"\n"), 1)  # one JSON line
+        return json.loads(done.stdout)
