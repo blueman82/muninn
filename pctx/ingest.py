@@ -106,6 +106,9 @@ def run_pass(
 ) -> PassStats:
     """Take the writer lock, open the store, run one ingest pass, close.
 
+    store.BusyError propagates if the lock is still held after ``wait_s``,
+    and ValueError if a root name is not a known provider.
+
     Args:
         home: Data home that holds the store and the lock.
         roots: Provider root name to directory.
@@ -116,9 +119,7 @@ def run_pass(
             the pass when another writer is busy.
 
     Returns:
-        Counters for the pass.  store.BusyError propagates if the writer
-        lock is still held after ``wait_s``, and ValueError if a root name
-        is not a known provider.
+        Counters for the pass.
     """
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home), fullfsync=fullfsync)
@@ -138,7 +139,8 @@ def ingest(
     """Run one pass over the roots with a store.connect_rw connection.
 
     The caller must hold store.writer_lock for the whole call: writers are
-    serialised by it, and the lock is not reentrant.
+    serialised by it, and the lock is not reentrant.  ValueError propagates
+    if a root name is not a known provider.
 
     Args:
         conn: Read-write connection from store.connect_rw.
@@ -149,8 +151,7 @@ def ingest(
         full: Re-read every source from the start.
 
     Returns:
-        Counters for the pass.  ValueError propagates if a root name is not
-        a known provider.
+        Counters for the pass.
     """
     started = time.monotonic()
     opts = PlanOptions(roots, full, only_threads)

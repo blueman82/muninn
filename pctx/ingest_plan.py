@@ -16,6 +16,7 @@ import sqlite3
 import stat
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import Any, cast
 
 from pctx import classify, ingest_model
 from pctx.ingest_model import (
@@ -91,8 +92,8 @@ def late_forks(
     The first planning round skips such a fork as unchanged, because its
     parent was not indexed yet; once the parent's source is written the
     content-prefix rule can finally be applied.  The fork is planned again
-    with ``full`` off: it is picked up only because _parent_arrived makes
-    _unchanged false for it.
+    with ``full`` off: it is picked up only because its parent's arrival
+    makes it count as changed.
     """
     rows = conn.execute(
         "SELECT root, path FROM source WHERE replay_mode = 'unverified'"
@@ -311,11 +312,14 @@ def _identify(
         return None, None
     if not isinstance(record, dict):
         return None, None
+    # isinstance leaves the element types unknown; JSON object keys are
+    # strings.
+    header = cast(dict[str, Any], record)
     if PROVIDER[name] == "claude":
         rel = path.relative_to(root).as_posix()
-        return classify.claude_thread(rel, record), None
+        return classify.claude_thread(rel, header), None
     try:
-        info = classify.codex_thread(record)
+        info = classify.codex_thread(header)
     except ValueError:  # not a session_meta with an id
         return None, None
     own = _NAME_ID.search(path.stem)

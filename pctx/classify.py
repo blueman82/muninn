@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import Any
 
 CLASSIFIER_VERSION = 1
 MAX_DEPTH = 1_000
@@ -141,7 +142,7 @@ def _codex_class(payload: dict) -> tuple[str, str]:
     return "other", f"thread_source={(_str(kind) or 'missing')[:64]}"
 
 
-def codex_thread(meta: dict) -> ThreadInfo:
+def codex_thread(meta: dict[str, Any]) -> ThreadInfo:
     """Classify a Codex thread from its line-1 session_meta record only."""
     is_meta = meta.get("type") == "session_meta"
     payload = meta.get("payload") if is_meta else None
@@ -421,7 +422,9 @@ def _tool_error(
     ]
 
 
-def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
+def codex_events(
+    record: dict[str, Any], line: int, state: CodexState
+) -> list[EventRec]:
     """Events of one Codex rollout record (design 3.4; spec O1, O2)."""
     rtype, payload = record.get("type"), record.get("payload")
     if not isinstance(payload, dict):
@@ -504,7 +507,7 @@ def codex_events(record: dict, line: int, state: CodexState) -> list[EventRec]:
     return []
 
 
-def cwd_of(record: dict, state: CodexState | None) -> str | None:
+def cwd_of(record: dict[str, Any], state: CodexState | None) -> str | None:
     """The cwd for a record's events.  With a Codex state: the cwd that
     codex_events keeps from line 1 and post-replay turn_context records.
     Otherwise the record's own cwd (Claude records carry one)."""
@@ -533,7 +536,7 @@ CLAUDE_HARNESS_PREFIXES = (  # design 3.4: a Claude user text starting so
 )
 
 
-def claude_thread(rel_path: str, first: dict) -> ThreadInfo:
+def claude_thread(rel_path: str, first: dict[str, Any]) -> ThreadInfo:
     """Classify a Claude transcript from its path under the projects root
     and its first record.  Main files: thread = sessionId (= file stem);
     <session>/subagents/ files: thread = file stem, session = sessionId."""
@@ -561,7 +564,7 @@ def _claude_text(content: object) -> str:
 
 
 def claude_events(
-    record: dict, line: int, state: CodexState | None = None
+    record: dict[str, Any], line: int, state: CodexState | None = None
 ) -> list[EventRec]:
     """Events of one Claude transcript record (design 3.4; spec O1, O2).
     Pass one CodexState per source to get tool_error events: an output is

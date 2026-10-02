@@ -207,14 +207,12 @@ def ensure_private_dir(path: Path) -> None:
 def write_json_atomic(path: Path, obj: object) -> None:
     """Write JSON to a 0600 temp file in the same dir, then rename it over.
 
+    A value JSON cannot encode raises TypeError or ValueError before anything
+    is written; OSError propagates from the temp-file operations.
+
     Args:
         path: Destination file.
         obj: JSON-serialisable value; keys are sorted for stable bytes.
-
-    A value json cannot encode raises TypeError or ValueError before anything
-    is written; OSError propagates from the temp-file operations.  Ruff's
-    docstring rules reject a Raises section for exceptions raised only by
-    callees, so they are described here instead.
     """
     payload = json.dumps(obj, sort_keys=True).encode("utf-8")  # may raise
     # The temp file lives beside the target: rename is only atomic within one
