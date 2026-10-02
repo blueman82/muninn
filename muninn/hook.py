@@ -20,7 +20,7 @@ from functools import partial
 from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 
-from muninn import classify, knowledge, obs, scope, store
+from muninn import classify, knowledge, scope, store
 from muninn.hook_frame import (
     BLOCK_LIMIT,
     RECALL_LIMIT,
@@ -29,6 +29,7 @@ from muninn.hook_frame import (
     frame,
     render_block,
 )
+from muninn.hook_notes import index_notes
 from muninn.hook_recall import (
     MAX_EVENTS,
     MIN_TERMS,
@@ -234,19 +235,6 @@ def _notice(code: str) -> str:
     return frame(' kind="notice"', [f"muninn: store unavailable ({code})"])
 
 
-def _stale(home: Path) -> tuple[str, ...]:
-    """A warning line when the poller shows no sign of life for 3 intervals."""
-    fresh = obs.freshness(obs.read_status(home))
-    if fresh["poller"] == "ok":
-        return ()
-    age = fresh["index_age_s"]
-    since = "no heartbeat" if age is None else f"last pass {age}s ago"
-    return (
-        f"muninn: the index is stale ({since});"
-        " recent sessions may be missing.",
-    )
-
-
 def _cwd(payload: Mapping[str, object]) -> str:
     """The payload's working directory, else the process's, else empty."""
     cwd = payload.get("cwd")
@@ -391,7 +379,7 @@ def _start_block(
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
     trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
     return render_block(
-        entries, _label(conn, ids, cwd), notes=_stale(home), limit=limit
+        entries, _label(conn, ids, cwd), notes=index_notes(home), limit=limit
     )
 
 
@@ -433,7 +421,9 @@ def _recall_block(
     limit: int,
 ) -> str:
     """Build the recall block for the payload's prompt."""
-    request = RecallRequest(terms, _cwd(payload), partial(_stale, home), limit)
+    request = RecallRequest(
+        terms, _cwd(payload), partial(index_notes, home), limit
+    )
     return recall_block(conn, payload, env, trace, request)
 
 
