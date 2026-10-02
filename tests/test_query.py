@@ -974,7 +974,7 @@ class SearchBytePagingTests(QueryCase):
             (999, 1000),
             (1000, 999),
         )
-        with patch("pctx.query.time.time", return_value=10000):
+        with patch("time.time", return_value=10000):
             for before, after in transitions:
                 statuses = [
                     {"last_pass_at": 10000 - age} for age in (before, after)
@@ -1021,7 +1021,7 @@ class SearchBytePagingTests(QueryCase):
 
     def test_unrepresentable_freshness_is_unknown_and_bounded(self):
         self.add_event(self.add_source("age"), self.repo, "zebra")
-        with patch("pctx.query.time.time", return_value=0):
+        with patch("time.time", return_value=0):
             for last in (
                 -(2**63),
                 -(10**400),
