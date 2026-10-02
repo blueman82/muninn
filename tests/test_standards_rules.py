@@ -7,8 +7,7 @@ import unittest
 
 from tools import model, standards
 
-GOOD = textwrap.dedent(
-    '''\
+GOOD = textwrap.dedent('''\
     """Module summary."""
 
     from __future__ import annotations
@@ -33,8 +32,7 @@ GOOD = textwrap.dedent(
         def size(self) -> int:
             """Return the size."""
             return 1
-    '''
-)
+    ''')
 
 
 def rules(source: str, rel: str = "pctx/sample.py") -> set[str]:

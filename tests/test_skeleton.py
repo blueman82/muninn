@@ -1,42 +1,65 @@
 """Skeleton contract: the pctx entry point and its bin/pctx launcher."""
 
+from __future__ import annotations
+
 import contextlib
 import io
 import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
+
+from pctx.cli import main
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "bin" / "pctx"
 VERSION_LINE = "pctx 0.1.0\n"
 
 
-def call_main(argv):
-    """Run pctx.cli.main in-process; return (code, stdout, stderr)."""
-    from pctx.cli import main
+def call_main(argv: Sequence[str]) -> tuple[int, str, str]:
+    """Run pctx.cli.main in-process.
 
+    Args:
+        argv: Command-line arguments after the program name.
+
+    Returns:
+        The exit code, stdout and stderr.
+    """
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main(argv)
     return code, out.getvalue(), err.getvalue()
 
 
-def run(cmd, cwd):
+def run(
+    cmd: Sequence[str], cwd: str | Path
+) -> subprocess.CompletedProcess[str]:
+    """Run a command with captured text output and a timeout.
+
+    Args:
+        cmd: Program and arguments.
+        cwd: Working directory.
+
+    Returns:
+        The finished process.
+    """
     return subprocess.run(
         cmd, cwd=cwd, capture_output=True, text=True, timeout=30
     )
 
 
 class MainTests(unittest.TestCase):
-    def test_version_returns_zero_and_prints_version(self):
+    """pctx.cli.main answers --version and rejects anything else."""
+
+    def test_version_returns_zero_and_prints_version(self) -> None:
         code, out, err = call_main(["--version"])
         self.assertEqual(code, 0)
         self.assertEqual(out, VERSION_LINE)
         self.assertEqual(err, "")
 
-    def test_anything_else_returns_two_with_usage(self):
+    def test_anything_else_returns_two_with_usage(self) -> None:
         cases = (
             [],
             ["frobnicate"],
@@ -54,13 +77,15 @@ class MainTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
-    def test_version_from_foreign_cwd(self):
+    """bin/pctx works from any cwd, through a symlink, and as a module."""
+
+    def test_version_from_foreign_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             proc = run([str(LAUNCHER), "--version"], cwd=tmp)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
 
-    def test_version_via_symlink(self):
+    def test_version_via_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             link = Path(tmp) / "pctx-link"
             link.symlink_to(LAUNCHER)
@@ -68,25 +93,21 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
 
-    def test_exit_code_propagates(self):
+    def test_exit_code_propagates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             proc = run([str(LAUNCHER), "frobnicate"], cwd=tmp)
         self.assertEqual(proc.returncode, 2)
         self.assertIn("usage:", proc.stderr)
 
-    def test_ignores_stdlib_shadowing_in_cwd(self):
+    def test_ignores_stdlib_shadowing_in_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "argparse.py").write_text("raise RuntimeError\n")
             proc = run([str(LAUNCHER), "--version"], cwd=tmp)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
 
-    def test_module_entry_point(self):
+    def test_module_entry_point(self) -> None:
         cmd = [sys.executable, "-B", "-m", "pctx", "--version"]
         proc = run(cmd, cwd=ROOT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
-
-
-if __name__ == "__main__":
-    unittest.main()
