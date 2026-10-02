@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import time
 import unittest
 from argparse import Namespace
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -42,6 +44,14 @@ class ServeAliveTests(CliCase):
             self.alive_writes.append(fields[ALIVE_AT])
         REAL_WRITE_STATUS(self.home, fields)
 
+    def keep_signal_handlers(self) -> None:
+        """Put the process's SIGTERM and SIGHUP handlers back after the test.
+
+        ``serve`` installs its own and this test process outlives it.
+        """
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            self.addCleanup(signal.signal, sig, signal.getsignal(sig))
+
     def serve_one_pass(
         self,
         fake: Callable[..., ingest.PassStats],
@@ -55,11 +65,7 @@ class ServeAliveTests(CliCase):
             write_status: Stands in for ``obs.write_status`` (called with the
                 home and the fields); defaults to the real one.
         """
-        saved = {
-            s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)
-        }
-        for sig, handler in saved.items():
-            self.addCleanup(signal.signal, sig, handler)
+        self.keep_signal_handlers()
         spy = write_status or (lambda _home, fields: self.spy_status(fields))
         with (
             mock.patch.object(cli_serve.ingest, "ingest", fake),
@@ -73,6 +79,71 @@ class ServeAliveTests(CliCase):
             self.assertRaises(KeyboardInterrupt),
         ):
             cli_serve.serve(Namespace(interval=60.0), self.env, self.home, {})
+
+    def test_a_stop_arriving_just_after_a_status_write_still_stops(
+        self,
+    ) -> None:
+        """SIGTERM right after the rename must stop the poller, not pass."""
+        real_replace = Path.replace
+        fired: list[int] = []
+
+        def replace_then_sigterm(src: Path, dst: Path) -> Path:
+            moved = real_replace(src, dst)
+            if not fired and dst.name == "status.json":
+                fired.append(1)
+                os.kill(os.getpid(), signal.SIGTERM)  # the poller's handler
+            return moved
+
+        def fake(
+            conn: object,
+            roots: object,
+            *,
+            on_source: Callable[[], None],
+            **_: Any,
+        ) -> ingest.PassStats:
+            on_source()
+            return ingest.PassStats()
+
+        self.keep_signal_handlers()
+        with (
+            mock.patch.object(cli_serve.ingest, "ingest", fake),
+            mock.patch.object(Path, "replace", replace_then_sigterm),
+            mock.patch.object(
+                cli_serve.time,
+                "sleep",
+                side_effect=AssertionError("kept running after the stop"),
+            ),
+        ):
+            result = cli_serve.serve(
+                Namespace(interval=60.0), self.env, self.home, {}
+            )
+        self.assertEqual(result, (0, None))
+        self.assertEqual(fired, [1])
+
+    def test_a_stop_noted_mid_transaction_survives_a_silent_rollback(
+        self,
+    ) -> None:
+        """No COMMIT or ROLLBACK statement ever consumes the wrapper's flag."""
+
+        def fake(conn: Any, roots: object, **_: Any) -> ingest.PassStats:
+            conn.execute("BEGIN IMMEDIATE")
+            os.kill(os.getpid(), signal.SIGTERM)  # handler sees the txn
+            conn.rollback()  # ends it without going through execute()
+            return ingest.PassStats()
+
+        self.keep_signal_handlers()
+        with (
+            mock.patch.object(cli_serve.ingest, "ingest", fake),
+            mock.patch.object(
+                cli_serve.time,
+                "sleep",
+                side_effect=AssertionError("kept running after the stop"),
+            ),
+        ):
+            result = cli_serve.serve(
+                Namespace(interval=60.0), self.env, self.home, {}
+            )
+        self.assertEqual(result, (0, None))
 
     def test_a_running_pass_reads_ok_and_the_stamp_goes_when_it_ends(
         self,
