@@ -121,6 +121,14 @@ def _rare_in(conn: sqlite3.Connection, table: str, ids: list[int]) -> set[str]:
 
     A term counts as rare when at most ``RARE_MAX_DOCS`` documents hold it
     and all of them are among ``ids``.
+
+    Args:
+        conn: Read connection.
+        table: FTS table name.
+        ids: Document ids that are being erased.
+
+    Returns:
+        The rare terms.
     """
     _load_doc_ids(conn, ids)
     instance, row = (

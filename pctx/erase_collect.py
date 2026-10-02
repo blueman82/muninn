@@ -114,13 +114,14 @@ def collect_session(
 def collect_event(conn: sqlite3.Connection, target: Target, ref: str) -> None:
     """Collect the one event line a REF names.
 
+    A malformed ``ref`` makes ``query.parse_ref`` raise ``ValueError``.
+
     Args:
         conn: Read connection.
         target: Plan to fill.
         ref: ``provider:thread:line.part``; the thread may be a prefix.
 
     Raises:
-        ValueError: If ``ref`` is malformed (from ``query.parse_ref``).
         LookupError: If the ref matches no thread, several threads, or no
             event.
     """

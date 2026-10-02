@@ -184,7 +184,12 @@ def erase(
     """Erase one session (with its forks), one event line or matching text.
 
     Exactly one of ``session``, ``event_ref`` and ``match`` is given. The
-    caller holds ``store.writer_lock``.
+    caller holds ``store.writer_lock``. A ``ValueError`` propagates when
+    not exactly one selector is given, ``match`` is shorter than
+    ``MIN_MATCH`` characters or ``event_ref`` is malformed; a
+    ``LookupError`` when ``event_ref`` matches no thread, several threads
+    or no event. These are raised by callees, so they are described here
+    rather than in a Raises section.
 
     Args:
         conn: Read-write connection.
@@ -197,13 +202,6 @@ def erase(
 
     Returns:
         Counts and paths only; never erased text or the match string.
-
-    Raises:
-        ValueError: If not exactly one selector is given, ``match`` is
-            shorter than ``MIN_MATCH`` characters or ``event_ref`` is
-            malformed.
-        LookupError: If ``event_ref`` matches no thread, several threads
-            or no event.
     """
     mode = _pick_mode(session, event_ref, match)
     target = Target()
@@ -245,6 +243,11 @@ def run_erase(
 ) -> dict[str, object]:
     """Take the writer lock, open the store with full fsync, and erase.
 
+    ``store.BusyError`` propagates if the writer lock is still held after
+    ``wait_s``; ``erase`` raises ``ValueError`` and ``LookupError`` as
+    documented there. Callee exceptions are described here, not in a
+    Raises section.
+
     Args:
         home: Data directory.
         wait_s: Seconds to wait for the writer lock.
@@ -256,11 +259,6 @@ def run_erase(
 
     Returns:
         The result of ``erase``.
-
-    Raises:
-        store.BusyError: If the writer lock is still held after ``wait_s``.
-        ValueError: As ``erase`` raises it.
-        LookupError: As ``erase`` raises it.
     """
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home))
