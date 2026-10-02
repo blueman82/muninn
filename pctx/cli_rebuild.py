@@ -210,7 +210,8 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     Scopes, knowledge, tombstones and the events of deleted sources are
     copied from the old file when it is readable; ``tombstones.jsonl`` is
     re-applied first.  The old file is replaced only after the new one
-    passes ``quick_check`` and has no hot journal.
+    passes ``quick_check`` and has no hot journal.  A writer lock that stays
+    busy propagates ``store.BusyError``; the dispatcher maps it to exit 3.
 
     Args:
         a: Parsed arguments (unused).
@@ -221,10 +222,6 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     Returns:
         Exit 0 and a summary, 2 if the new file fails its check, or 4 if
         it left a hot journal.
-
-    Raises:
-        store.BusyError: If the writer lock stays busy past the wait; the
-            dispatcher maps it to exit 3.
     """
     db, new = store.db_path(home), home / REBUILD
     with store.writer_lock(home, wait_s=cli_core.WRITER_WAIT_S):

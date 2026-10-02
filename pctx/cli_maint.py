@@ -96,7 +96,6 @@ def compact(a: Namespace, env: Env, home: Path, record: Record) -> Result:
         Exit 0 and the sizes plus the new space report.
 
     Raises:
-        store.BusyError: If the writer lock stays busy past the wait.
         StoreUnavailableError: If there is no store yet.
         ValueError: If the disk is too full to hold the copy.
     """

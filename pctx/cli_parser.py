@@ -92,7 +92,7 @@ class _Commands:
     def add(
         self, name: str, help: str | None = None
     ) -> argparse.ArgumentParser:
-        """Register subcommand ``name``; ``help=None`` leaves it out of the help list."""
+        """Register subcommand ``name``; ``help=None`` hides it from help."""
         # Passing help=None would still list the command, so leave it out.
         extra: dict[str, Any] = {} if help is None else {"help": help}
         return self._sub.add_parser(name, allow_abbrev=False, **extra)
