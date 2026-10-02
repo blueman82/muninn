@@ -169,10 +169,11 @@ class ToolErrorLinkTests(unittest.TestCase):
         self.assertEqual(run_claude([bash("ls"), ok])[1:], [])
 
     def _skips_pctx_transcript_reads_and_nested_markers(self) -> None:
-        """Pin that errors from reading transcripts or pctx output vanish.
+        """Pin that errors echoing pctx's own inputs or noise are dropped.
 
-        Re-ingesting such output would feed the store its own text back, so
-        the error must not be stored.
+        Covers pctx calls, transcript reads, nested markers, orphan outputs
+        and the wait_agent family.  Re-ingesting such output would feed the
+        store its own text back, so the error must not be stored.
         """
         fail = PROC.format(1) + "Output:\nTraceback (most recent call last):"
         calls = (
