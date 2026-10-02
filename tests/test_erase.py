@@ -1,73 +1,25 @@
-"""Erase contract (design 4.3, 3.8, 5; spec O4d, O10, O13, A13).
+"""Erase contract: sessions, event lines, text matches and verification.
 
 Synthetic provider trees and a temp PCTX_HOME only (IngestCase); knowledge
 rows are inserted directly.  Canaries are synthetic.
 """
 
-import hashlib
-import json
-import os
-import subprocess
-import sys
-from pathlib import Path
+from __future__ import annotations
+
+import pathlib
+import unittest
+from typing import Any
 
 from pctx import erase, erase_residue, store
+from tests.erase_support import CANARY, EraseCase, digest
 from tests.test_classify import codex_meta, reply, subagent_meta, user_msg
-from tests.test_ingest import (
-    BASE,
-    HOLD_LOCK,
-    ROOT,
-    SEG,
-    TID,
-    IngestCase,
-    primary,
-    rollout,
-)
-
-CANARY = "CANARY-ERASE-" + "q7" * 10  # 33 chars, one token
-
-
-def digest(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-class EraseCase(IngestCase):
-    def setUp(self):
-        super().setUp()
-        self.env = {
-            "HOME": str(self.tmp / "userhome"),
-            "PCTX_ROOTS": json.dumps(
-                {k: str(v) for k, v in self.roots.items()}
-            ),
-        }
-
-    def erase(self, **kw):
-        return erase.erase(self.conn, home=self.home, env=self.env, **kw)
-
-    def count(self, sql, *args):
-        return self.conn.execute(sql, args).fetchone()[0]
-
-    def knowledge(self, text, cites):
-        """A current entry citing (thread_id, line, part, quote) events."""
-        sid = self.count("SELECT id FROM scope LIMIT 1")
-        kid = self.conn.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at) VALUES (?, 'fact', ?, 'current', 'user', 0)",
-            (sid, text),
-        ).lastrowid
-        for thread, line, part, quote in cites:
-            self.conn.execute(
-                "INSERT INTO citation(knowledge_id, provider, thread_id, line,"
-                " part, line_sha256, role, kind, quote, span_start, span_end)"
-                " VALUES (?, 'codex', ?, ?, ?, 'h', 'user', 'prompt', ?,"
-                " 0, 1)",
-                (kid, thread, line, part, quote),
-            )
-        return kid
+from tests.test_ingest import BASE, SEG, TID, primary, rollout
 
 
 class SessionEraseTests(EraseCase):
-    def test_erase_session_then_rescan_absent(self):
+    """Erasing a whole session and what a rescan may restore."""
+
+    def test_erase_session_then_rescan_absent(self) -> None:
         path = self.write(rollout(), primary())
         self.write(rollout("thr-keep"), primary("thr-keep"))
         self.run_ingest()
@@ -80,14 +32,14 @@ class SessionEraseTests(EraseCase):
         self.run_ingest(full=True)  # rescan: the tombstone holds
         self.assertEqual(self.events(), [])
         self.assertEqual(len(self.events("thr-keep")), 2)
-        os.rename(path, self.roots["codex-archived"] / path.name)
+        pathlib.Path(path).rename(self.roots["codex-archived"] / path.name)
         self.run_ingest()  # an archive move cannot resurrect it
         self.assertEqual(
             self.count("SELECT count(*) FROM source WHERE thread_id = ?", TID),
             0,
         )
 
-    def test_erase_session_covers_continuation_files(self):
+    def test_erase_session_covers_continuation_files(self) -> None:
         self.write(rollout(BASE), [codex_meta("user", BASE), user_msg(1, "a")])
         hb = {
             "end_byte_offset": 1,
@@ -102,15 +54,17 @@ class SessionEraseTests(EraseCase):
         self.run_ingest(full=True)
         self.assertEqual(self.count("SELECT count(*) FROM source"), 0)
 
-    def test_forks_of_erased_session_erased(self):
+    def test_forks_of_erased_session_erased(self) -> None:
         self.write(rollout(TID), primary())
         fork = codex_meta("user", "thr-fork", forked_from_id=TID)
         self.write(rollout("thr-fork"), [fork, user_msg(1, "fork own")])
+        # k=None builds a subagent without a history-start ordinal.
+        no_history: dict[str, Any] = {"k": None}
         sub = subagent_meta(
             "thr-fsub",
-            k=None,
             session_id="thr-fork",
             parent_thread_id="thr-fork",
+            **no_history,
         )
         self.write(rollout("thr-fsub"), [sub, user_msg(1, "sub task")])
         self.write(rollout("thr-other"), primary("thr-other"))
@@ -123,7 +77,7 @@ class SessionEraseTests(EraseCase):
         ]
         self.assertEqual(left, ["thr-other"])
 
-    def test_unknown_session_is_tombstoned_for_later_ingest(self):
+    def test_unknown_session_is_tombstoned_for_later_ingest(self) -> None:
         out = self.erase(session=TID)
         self.assertEqual(out["sources"], 0)
         self.write(rollout(), primary())
@@ -132,8 +86,10 @@ class SessionEraseTests(EraseCase):
 
 
 class EventAndMatchTests(EraseCase):
-    def test_erase_event_line_tombstone(self):
-        records = primary() + [user_msg(3, "q two")]
+    """Erasing one event line or every text that matches."""
+
+    def test_erase_event_line_tombstone(self) -> None:
+        records = [*primary(), user_msg(3, "q two")]
         self.write(rollout(), records)
         self.run_ingest()
         out = self.erase(event_ref=f"codex:{TID[:13]}:2.1")  # id prefix ok
@@ -146,11 +102,13 @@ class EventAndMatchTests(EraseCase):
         self.run_ingest(full=True)  # a replace skips only that line
         self.assertEqual([e[3] for e in self.events()], ["a one", "q two"])
         for bad in ("codex:nope:2.1", f"codex:{TID}:9.1", "garbage"):
-            with self.subTest(ref=bad):
-                with self.assertRaises((LookupError, ValueError)):
-                    self.erase(event_ref=bad)
+            with (
+                self.subTest(ref=bad),
+                self.assertRaises((LookupError, ValueError)),
+            ):
+                self.erase(event_ref=bad)
 
-    def test_erase_match_scrubs_knowledge_and_quotes(self):
+    def test_erase_match_scrubs_knowledge_and_quotes(self) -> None:
         self.write(
             rollout(),
             [
@@ -205,20 +163,24 @@ class EventAndMatchTests(EraseCase):
         self.assertEqual(logs, 3)
         self.assertEqual(out["knowledge"], 3)
 
-    def test_match_needs_a_real_string_and_one_target(self):
-        for kw in (
-            {},
-            {"match": ""},
-            {"match": "  ab "},
-            {"session": TID, "match": CANARY},
+    def test_match_needs_a_real_string_and_one_target(self) -> None:
+        for session, match in (
+            (None, None),
+            (None, ""),
+            (None, "  ab "),
+            (TID, CANARY),
         ):
-            with self.subTest(kw=kw):
-                with self.assertRaises(ValueError):
-                    self.erase(**kw)
+            with (
+                self.subTest(session=session, match=match),
+                self.assertRaises(ValueError),
+            ):
+                self.erase(session=session, match=match)
 
 
 class VerificationTests(EraseCase):
-    def test_residue_scan_zero_over_home(self):
+    """Residue, vocabulary and dry-run guarantees after an erase."""
+
+    def test_residue_scan_zero_over_home(self) -> None:
         self.write(
             rollout(),
             [codex_meta("user", TID), user_msg(1, f"{CANARY} in a prompt")],
@@ -239,7 +201,7 @@ class VerificationTests(EraseCase):
 
     def test_vocab_check_passes_after_erase_and_fails_on_unsecured_delete(
         self,
-    ):
+    ) -> None:
         self.write(
             rollout(), [codex_meta("user", TID), user_msg(1, f"{CANARY} rare")]
         )
@@ -260,7 +222,7 @@ class VerificationTests(EraseCase):
             erase_residue.vocab_left(self.conn, rare), len(rare["event_fts"])
         )
 
-    def test_dry_run_changes_nothing(self):
+    def test_dry_run_changes_nothing(self) -> None:
         self.write(rollout(), primary())
         self.run_ingest()
         before = digest(store.db_path(self.home))
@@ -274,159 +236,5 @@ class VerificationTests(EraseCase):
         self.assertEqual(len(self.events()), 2)
 
 
-class TombstoneFileTests(EraseCase):
-    def ingest_canaries(self):
-        self.write(
-            rollout(),
-            [
-                codex_meta("user", TID),
-                user_msg(1, f"{CANARY} one"),
-                user_msg(2, f"{CANARY} two"),
-            ],
-        )
-        self.write(
-            rollout("thr-m"),
-            [codex_meta("user", "thr-m"), user_msg(1, f"see {CANARY}")],
-        )
-        self.run_ingest()
-
-    def test_tombstone_stores_no_text(self):
-        self.ingest_canaries()
-        self.erase(event_ref=f"codex:{TID}:2.1")
-        self.erase(match=CANARY)
-        self.erase(session="thr-m")
-        dumped = json.dumps(
-            [tuple(r) for r in self.conn.execute("SELECT * FROM tombstone")]
-        )
-        logs = json.dumps(
-            [
-                tuple(r)
-                for r in self.conn.execute("SELECT * FROM knowledge_log")
-            ]
-        )
-        journal = (self.home / "tombstones.jsonl").read_text()
-        for blob in (dumped, logs, journal):
-            self.assertNotIn(CANARY, blob)
-            self.assertNotIn("one", blob)
-        levels = sorted(
-            r[0] for r in self.conn.execute("SELECT level FROM tombstone")
-        )
-        self.assertEqual(levels, ["line", "line", "line", "session"])
-
-    def test_tombstones_jsonl_written_and_reapplied(self):
-        self.ingest_canaries()
-        self.erase(session=TID)
-        self.erase(match=CANARY)
-        path = self.home / "tombstones.jsonl"
-        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
-        rows = [json.loads(line) for line in path.read_text().splitlines()]
-        self.assertEqual(
-            len(rows), self.count("SELECT count(*) FROM tombstone")
-        )
-        self.assertEqual(erase.reapply_tombstones(self.conn, self.home), 0)
-        self.conn.execute("DELETE FROM tombstone")  # e.g. a rebuild
-        restored = erase.reapply_tombstones(self.conn, self.home)
-        self.assertEqual(restored, len(rows))
-        self.run_ingest(full=True)
-        self.assertEqual(self.count("SELECT count(*) FROM event"), 0)
-
-    def test_provider_files_untouched(self):
-        self.ingest_canaries()
-        files = sorted(
-            p for r in self.roots.values() for p in r.rglob("*") if p.is_file()
-        )
-        before = {p: digest(p) for p in files}
-        out = self.erase(session=TID)
-        self.erase(match=CANARY)
-        self.assertEqual({p: digest(p) for p in files}, before)
-        self.assertEqual(
-            out["provider_files"],
-            [str(self.roots["codex-sessions"] / rollout())],
-        )
-
-
-class ScopeOfEraseTests(EraseCase):
-    def test_out_of_scope_listing(self):
-        home = Path(self.env["HOME"])
-        present = [
-            home / ".codex/plugins/cache/provenance-context-local",
-            home / ".codex/memories",
-        ]
-        for path in present:
-            path.mkdir(parents=True)
-        out = self.erase(session=TID, dry_run=True)
-        self.assertEqual(out["out_of_scope"], sorted(map(str, present)))
-        for path in present:
-            self.assertTrue(path.is_dir())  # listed, never deleted
-        for note in ("Time Machine", "free filesystem blocks"):
-            self.assertTrue(any(note in n for n in out["not_covered"]))
-
-    def test_run_erase_takes_the_writer_lock(self):
-        self.write(rollout(), primary())
-        self.run_ingest()
-        holder = subprocess.Popen(
-            [
-                sys.executable,
-                "-I",
-                "-B",
-                "-c",
-                HOLD_LOCK,
-                str(ROOT),
-                str(self.home),
-            ],
-            stdout=subprocess.PIPE,
-            text=True,
-        )
-        self.addCleanup(holder.wait)
-        self.addCleanup(holder.kill)
-        self.assertEqual(holder.stdout.readline().strip(), "ready")
-        holder.stdout.close()
-        with self.assertRaises(store.BusyError):
-            erase.run_erase(self.home, session=TID, env=self.env, wait_s=0)
-        holder.kill()
-        holder.wait()
-        out = erase.run_erase(self.home, session=TID, env=self.env)
-        self.assertEqual(out["events"], 2)
-        self.assertEqual(len(self.events()), 0)
-
-
-class ResidueFilterTests(EraseCase):
-    def test_text_surviving_in_another_session_is_not_residue(self):
-        same = f"{CANARY} repeated in two sessions"
-        self.write(rollout(), [codex_meta("user", TID), user_msg(1, same)])
-        self.write(
-            rollout("thr-dup"),
-            [codex_meta("user", "thr-dup"), user_msg(1, same)],
-        )
-        self.run_ingest()
-        out = self.erase(session=TID)
-        self.assertEqual((out["residue"], out["needles"]), (0, 0))
-        self.assertEqual(len(self.events("thr-dup")), 1)
-
-    def test_session_erase_scrubs_citing_knowledge(self):
-        self.write(rollout(), primary())
-        self.write(rollout("thr-keep"), primary("thr-keep"))
-        self.run_ingest()
-        gone = self.knowledge("only from the erased", [(TID, 2, 1, "q one")])
-        kept = self.knowledge(
-            "two sources", [(TID, 3, 1, "a one"), ("thr-keep", 2, 1, "q one")]
-        )
-        out = self.erase(session=TID)
-        status = dict(self.conn.execute("SELECT id, status FROM knowledge"))
-        self.assertEqual((status[gone], status[kept]), ("erased", "current"))
-        self.assertEqual((out["knowledge"], out["citations"]), (1, 2))
-        quotes = [
-            r[0]
-            for r in self.conn.execute(
-                "SELECT quote FROM citation WHERE state = 'live'"
-            )
-        ]
-        self.assertEqual(quotes, ["q one"])  # the surviving session's quote
-
-
-class RefFormatTests(EraseCase):
-    def test_event_ref_uses_the_query_ref_format(self):
-        self.write(rollout(), primary())
-        self.run_ingest()
-        out = self.erase(event_ref=f"codex:{TID}:2")  # part defaults to 1
-        self.assertEqual((out["lines"], out["events"]), (1, 1))
+if __name__ == "__main__":
+    unittest.main()
