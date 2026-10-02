@@ -149,6 +149,7 @@ def queued_attachment(
     *,
     origin: str | None = "human",
     sidechain: bool = False,
+    in_attachment: Record | None = None,
     **extra: Any,
 ) -> Record:
     """Build the attachment record Claude Code writes for queued input.
@@ -157,6 +158,7 @@ def queued_attachment(
         prompt: Queued text, a string or a list of content blocks.
         origin: The ``origin.kind``; ``None`` leaves the origin out.
         sidechain: Mark the record as a subagent sidechain record.
+        in_attachment: Keys to add inside the attachment itself.
         **extra: Top-level keys to add or override.
 
     Returns:
@@ -166,7 +168,7 @@ def queued_attachment(
         "type": "queued_command",
         "prompt": prompt,
         "commandMode": "prompt",
-    }
+    } | (in_attachment or {})
     if origin is not None:
         attachment["origin"] = {"kind": origin}
     return {

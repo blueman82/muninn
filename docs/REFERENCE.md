@@ -45,7 +45,10 @@ even if a page has no hits.
 `candidates` the ranked rows fetched for this page (capped); `session_capped` and `tool_capped` dropped by the
 per-session and tool-call caps; `returned` hits on this page.
 
-**Event kinds:** `prompt` a user message, including one the owner typed while Claude was working (Claude queued input with origin `human`; task, peer and coordinator notices are not indexed); `reply` an assistant message; `tool_call` a tool invocation (excluded from
+**Event kinds:** `prompt` a user message, including one the owner typed while Claude was working (queued input with
+origin `human`; task, peer and coordinator notices and chat-channel participants are not indexed, and one flagged as
+meta is `harness`). Inside a subagent thread such a message follows the usual subagent rule and is `delegation`.
+`reply` an assistant message; `tool_call` a tool invocation (excluded from
 default search, never citable); `harness` provider-injected text; `delegation` a message from a parent into a subagent
 thread; `tool_error` redacted head and tail of an error-bearing tool output (never pushed, never citable).
 **Thread classes:** `primary` (searched by default), `subagent`, `reviewer`, `other` (unrecognised format, never guessed

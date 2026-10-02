@@ -6,6 +6,7 @@ import unittest
 
 from muninn import classify as c
 from muninn import knowledge
+from muninn.claude_events import CHANNEL_HUMAN_FLAG
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -17,6 +18,9 @@ from tests.classify_claude_support import (
 from tests.ingest_support import IngestCase
 
 OWNER_TEXT = "please also cover the zebra cache"
+# The classifier version before queued owner input was indexed; sources
+# stamped with it must be re-read.
+BEFORE_QUEUED_INPUT = 1
 NOT_OWNER = ("task-notification", "peer", "coordinator", "auto-continuation")
 
 
@@ -52,6 +56,17 @@ class QueuedClassifyTests(unittest.TestCase):
             with self.subTest(origin=origin):
                 record = queued_attachment(OWNER_TEXT, origin=origin)
                 self.assertEqual(c.claude_events(record, 7), [])
+
+    def test_a_channel_participant_is_not_the_owner(self) -> None:
+        record = queued_attachment(
+            OWNER_TEXT, in_attachment={CHANNEL_HUMAN_FLAG: True}
+        )
+        self.assertEqual(c.claude_events(record, 7), [])
+
+    def test_an_attachment_marked_meta_is_harness_text(self) -> None:
+        record = queued_attachment(OWNER_TEXT, in_attachment={"isMeta": True})
+        (event,) = c.claude_events(record, 7)
+        self.assertEqual(event.kind, "harness")
 
     def test_other_attachments_and_queue_operations_stay_out(self) -> None:
         other = queued_attachment(OWNER_TEXT)
@@ -102,9 +117,10 @@ class QueuedIngestTests(IngestCase):
 
     def test_old_classifier_version_is_reread_without_duplicates(self) -> None:
         self.run_ingest()
+        self.assertGreater(c.CLASSIFIER_VERSION, BEFORE_QUEUED_INPUT)
         self.conn.execute(
             "UPDATE source SET classifier_version = ?",
-            (c.CLASSIFIER_VERSION - 1,),
+            (BEFORE_QUEUED_INPUT,),
         )
         self.conn.execute("DELETE FROM event WHERE line = 2")
         self.conn.commit()

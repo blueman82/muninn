@@ -29,6 +29,9 @@ from muninn.tool_errors import register_call, tool_error
 # other sessions or coordinators.
 QUEUED_COMMAND_TYPE = "queued_command"
 OWNER_ORIGIN_KIND = "human"
+# A person in a chat channel can also carry the "human" origin; that is not
+# the owner typing into this session.
+CHANNEL_HUMAN_FLAG = "verifiedSlackHumanTurn"
 
 # A Claude user text starting with one of these was written by the harness,
 # not typed by the person.
@@ -182,7 +185,12 @@ def _queued_events(record: Record, origin: Origin) -> list[EventRec]:
     source = as_record(att.get("origin"))
     if source is None or source.get("kind") != OWNER_ORIGIN_KIND:
         return []
-    return _user_events(record, att.get("prompt"), origin)
+    if att.get(CHANNEL_HUMAN_FLAG) is True:
+        return []
+    # The meta flag sits on the attachment here, not on the record, so lift
+    # it to where ordinary user records carry it.
+    lifted = record | ({"isMeta": True} if att.get("isMeta") is True else {})
+    return _user_events(lifted, att.get("prompt"), origin)
 
 
 def claude_events(
