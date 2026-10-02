@@ -77,9 +77,9 @@ class AddArgs(TypedDict):
     Attributes:
         kind: One of ``KINDS``.
         text: Entry text, 1 to ``TEXT_MAX`` characters once cleaned.
-        cites: (event ref, quote) pairs; quotes are 12 to 300 characters, except
-            that a shorter quote is accepted when it is the whole text of a
-            user prompt (an approval).
+        cites: (event ref, quote) pairs; quotes are 12 to 300 characters,
+            except that a shorter quote is accepted when it is the whole text
+            of a user prompt (an approval).
         quote_only: A quote to find in the caller's own session prompts.
         supersedes: Entry id this one replaces.
         global_scope: Store in the global scope instead of the repo scope.
