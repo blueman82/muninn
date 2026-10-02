@@ -1,4 +1,4 @@
-"""Contract tests for pctx.classify: threads, identity, redaction and commit hints.
+"""Contract tests for pctx.classify: threads, identity, redaction, hints.
 
 Every record here is synthetic.  Key names and value types mirror real
 Codex rollouts and Claude transcripts; no transcript text is used.
