@@ -40,8 +40,12 @@ Instructions for coding agents working in this repo. Any parent-directory
   parameter and return is annotated (pyright strict); comments explain why and
   never cite a design, spec or work-unit label; imports are explicit and at
   the top; ruff and black are clean.
-- There is no `noqa`, no `# type: ignore` and no exemption list. If a rule is
-  wrong, change `tools/` or `pyproject.toml` with an ADR; do not work around it.
+- The only exemptions are the ones the checker encodes: `test_*` methods and
+  fixture hooks (`setUp`, `tearDown`) need no docstring, closures (functions
+  nested in functions) need none, and tests use pyright standard mode (every
+  annotation is still required). There is no `noqa`, no `# type: ignore` and
+  no other exemption. If a rule is wrong, change `tools/` or `pyproject.toml`
+  with an ADR; do not work around it.
 - A skill or guideline that says otherwise (for example "public docstrings
   only") does not override `docs/STANDARDS.md`.
 
@@ -54,11 +58,10 @@ Instructions for coding agents working in this repo. Any parent-directory
 
 Set up once: `python3.13 -m venv .venv && .venv/bin/pip install -r
 requirements-dev.txt` and `git config core.hooksPath .githooks`. The pre-commit
-and pre-merge-commit hooks, `tests/test_standards.py` and the installer all run
-the gate, and Claude Code's Stop hook (`.claude/settings.json`) blocks stopping
-on a failure. Codex has no Stop hook: run `python3.13 -m tools.check --full`
-yourself before you say work is done, and report its result. A missing tool or
-a failing test fails the gate; it never skips.
+and pre-merge-commit hooks and `tests/test_standards.py` run the whole gate;
+the installer runs only the standards rules (S1 to S8), not ruff, pyright or the
+tests; Claude Code's Stop hook (`.claude/settings.json`) blocks stopping on a
+failure. A missing tool or a failing test fails the gate; it never skips.
 
 ## Decisions you must not reverse without asking
 
@@ -66,6 +69,20 @@ a failing test fails the gate; it never skips.
 only `--fresh` and `--upgrade` (0002); `bin/pctx` finds its interpreter at run
 time (0003); logs hold no transcript text (0004); no hash-chained call log
 (0005); the standards are enforced by a gate (0006).
+
+## Definition of done (Codex has no Stop hook, so this is on you)
+
+- Work is not done until `python3.13 -m tools.check --full` passes on the final
+  tree, run after your last edit. If another agent changes a checked file
+  afterwards, your result is void: run it again.
+- Report a failing gate as unfinished work with the failing lines, never as
+  done. State the gate's result verbatim in your final message.
+- Your sandbox may not allow writes under `.git`, so you may be unable to
+  commit or set hooks. Then leave the changes uncommitted, say so, and let the
+  owner or the Claude session commit them; the git hook is the enforcement
+  point. Do not try to edit `.git/config` or hooks yourself.
+- If `git status` says "must be run in a work tree", the repo's `core.bare`
+  was flipped to true by something. Stop and tell the owner.
 
 ## Verify a change
 

@@ -22,7 +22,8 @@ One-time setup per clone (the first two are checked by the gate and the tests):
     cp tools/claude-settings.json .claude/settings.json  # Claude Code: gate after every edit, no stopping on a failure
 
 Layers, each of which catches what the one before it can be made to skip: Claude Code's hooks, the git hooks,
-`tests/test_standards.py`, and the installer (it refuses to pin a commit that breaks a rule).
+`tests/test_standards.py`, and the installer (it refuses to pin a commit that breaks the stdlib rules S1 to S8; it does
+not run ruff, pyright or the tests).
 
 ## Limits
 
@@ -61,7 +62,7 @@ Pathlib over `os.path` (ruff `PTH`), no commented-out code (`ERA`), comprehensio
 
 Every module, class and function in `pctx/`, `install/` and `tools/` has one. In `tests/`, modules, classes and helper
 functions do; `test_*` methods and fixture hooks (`setUp`, `tearDown`) do not, because their names are their
-documentation. A one-line docstring is enough for a trivial private helper; anything longer uses the sections below, and
+documentation. A closure (a function defined inside another function) needs none anywhere. A one-line docstring is enough for a trivial private helper; anything longer uses the sections below, and
 the sections must match the code (ruff `D417`, `DOC201`, `DOC402`, `DOC501`).
 
 ```python
