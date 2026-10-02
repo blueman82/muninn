@@ -213,9 +213,14 @@ class StatusTests(ObsCase):
             busy = obs.freshness({**old_pass, ALIVE_AT: now - 5})
             gone = obs.freshness({**old_pass, ALIVE_AT: now - 400})
             junk = obs.freshness({**old_pass, ALIVE_AT: float("inf")})
+            future = obs.freshness({**old_pass, ALIVE_AT: now + 1e6})
+            skewed = obs.freshness({**old_pass, ALIVE_AT: now + 1})
             unseen = obs.freshness({ALIVE_AT: now})
         # The index is still as old as its last finished pass.
         self.assertEqual(busy, {"index_age_s": 500, "poller": "ok"})
         self.assertEqual(gone["poller"], "stale")
         self.assertEqual(junk["poller"], "stale")
+        # A stamp from the future must not keep a dead poller alive.
+        self.assertEqual(future["poller"], "stale")
+        self.assertEqual(skewed["poller"], "ok")  # within the clock skew
         self.assertEqual(unseen, {"index_age_s": None, "poller": "stale"})

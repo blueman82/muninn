@@ -117,7 +117,7 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `fts_secure_delete` | error | both full-text indexes have secure delete on | none |
 | `quick_check` | error | SQLite's `quick_check` says `ok` | its first 80 characters |
 | `writer_secure_delete` | error | writer connections turn secure delete on | none |
-| `heartbeat` | error | the poller finished a pass recently (`poller: ok`) | `index_age_s` |
+| `heartbeat` | error | the poller finished a pass, or a running pass stamped `alive_at`, within 3 intervals (`poller: ok`) | `index_age_s` |
 | `launchd_job` | error | the launchd job is loaded with a live process | its pid |
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
