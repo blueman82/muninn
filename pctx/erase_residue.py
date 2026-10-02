@@ -72,7 +72,7 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
     session; such a needle is not residue.
 
     Args:
-        conn: Connection that reads main and can write TEMP objects.
+        conn: Connection used to read the stored rows.
         needle: Bytes to look for.
 
     Returns:
