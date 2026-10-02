@@ -12,3 +12,4 @@ implementer chose it inside work the owner ordered.
 | [0005](0005-no-hash-chained-call-log.md) | No hash-chained call log for now |
 | [0006](0006-mechanical-standards.md) | Engineering standards are enforced by a gate, not by instructions |
 | [0007](0007-recall-off-by-default.md) | Per-prompt recall starts off on a fresh install |
+| [0008](0008-install-wrapper.md) | `bin/pctx-install` picks the install mode and previews without writing |

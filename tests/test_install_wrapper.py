@@ -77,6 +77,25 @@ class WrapperTest(unittest.TestCase):
         self.assertIn("--upgrade", self.argv())
         self.assertIn(f"installed {self.sha[:7]} (upgrade)", r.stdout)
 
+    def test_the_summary_line_names_the_poller_pid(self) -> None:
+        self.installed("a" * 40)
+        (self.data / "status.json").write_text('{"passes": 1, "pid": 4242}')
+        r = self.run_wrapper()
+        self.assertIn("(upgrade); poller pid 4242; doctor ok;", r.stdout)
+
+    def test_the_summary_line_survives_a_missing_status_file(self) -> None:
+        r = self.run_wrapper()
+        self.assertIn("poller pid unknown", r.stdout)
+
+    def test_help_describes_the_wrapper_and_writes_nothing(self) -> None:
+        for flag in ("--help", "-h"):
+            r = self.run_wrapper(flag)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("--check", r.stdout)
+            self.assertIn("--status", r.stdout)
+        self.assertEqual(self.argv(), "")
+        self.assertEqual(list(self.home.iterdir()), [])
+
     def test_a_failed_install_prints_no_success_line(self) -> None:
         r = self.run_wrapper(rc=1)
         self.assertEqual(r.returncode, 1)

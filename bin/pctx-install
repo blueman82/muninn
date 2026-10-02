@@ -3,6 +3,7 @@
 #   bin/pctx-install           fresh install, or upgrade when already installed
 #   bin/pctx-install --check   say what would happen; write nothing
 #   bin/pctx-install --status  installed commit against this checkout's HEAD
+#   bin/pctx-install --help    describe the above
 # Any other arguments go straight to install.installer (--repo, --sha, ...).
 # Interpreter order is bin/pctx's (ADR 0003).
 set -eu
@@ -45,6 +46,23 @@ else
 fi
 
 case "${1:-}" in
+  -h | --help)
+    cat <<'HELP'
+usage: bin/pctx-install [--check | --status]
+
+Install or upgrade pctx from this checkout at its HEAD. It picks a fresh
+install or an upgrade by looking at what is on this machine.
+
+  (no argument)  install or upgrade, restart the poller, run doctor
+  --check        say what would happen; write nothing
+  --status       show the installed commit against this checkout's HEAD
+
+Advanced: any other arguments go straight to install.installer
+(--repo, --sha, --fresh, --upgrade, --dry-run, --home). Details are in
+docs/REFERENCE.md.
+HELP
+    exit 0
+    ;;
   --status)
     if [ "$mode" = fresh ]; then
       echo "not installed; checkout is at $short"
@@ -81,5 +99,8 @@ if [ "${1:-}" = --check ]; then
   echo "OK to run: bin/pctx-install"
 else
   "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "--$mode"
-  echo "installed $short ($mode); doctor ok; log: $lib/install.log"
+  pid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' \
+    "$data/status.json" 2>/dev/null || true)
+  echo "installed $short ($mode); poller pid ${pid:-unknown}; doctor ok;" \
+    "log: $lib/install.log"
 fi
