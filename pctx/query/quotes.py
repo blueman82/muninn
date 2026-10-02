@@ -48,8 +48,9 @@ def quote_check(
         quote: The text to look for.
 
     Returns:
-        ``{"match": bool, "span": [start, end] | None}``; an unknown ref
-        adds ``error``.
+        ``{"match": bool, "span": [start, end] | None}``; a bad,
+        ambiguous or unknown ref adds ``error`` (``bad_ref``,
+        ``ambiguous_ref`` or ``not_found``).
     """
     row, problem = locate(conn, ref)
     if row is None:

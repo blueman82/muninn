@@ -98,7 +98,9 @@ def _other_scopes(other: Counter[str]) -> dict[str, int]:
 
 
 def _check_keywords(args: Mapping[str, object]) -> None:
-    """Reject unknown or missing keywords as a plain signature would.
+    """Reject unknown or missing keywords, much like a signature would.
+
+    Unlike a real signature it reports only the first missing keyword.
 
     ``search`` takes ``**args`` only because a signature with this many
     parameters trips the argument-count limit; the type checker sees the
@@ -134,8 +136,9 @@ def search(
     global knowledge; ``scope`` narrows to events whose cwd equals it
     exactly, ``all_projects`` drops the filter. The caller's own session
     (env, or ``current_session``) is left out unless ``include_current``.
-    ``session`` lists every match in one session (a root or unambiguous
-    prefix), uncapped. Knowledge (page 1, not in a session listing) ignores
+    ``session`` lists matches in one session (a root or unambiguous
+    prefix) with no per-session cap; candidates are still limited to
+    CANDIDATES and paged. Knowledge (page 1, not in a session listing) ignores
     kinds, provider and times. ``include_subagents`` adds subagent threads
     and the reports a parent thread stores as harness/agent_message.
 
@@ -149,7 +152,9 @@ def search(
             ``current_session`` and ``status`` (a parsed status.json).
 
     Returns:
-        The answer, or ``{"error": code}`` for bad input.
+        The answer, or ``{"error": code}`` for bad input. An unknown or
+        missing keyword raises TypeError, and an unreadable store raises
+        StoreUnavailableError or HotJournalError through ``guarded``.
     """
     _check_keywords(args)
     limit = min(max(args.get("limit", 10), 1), PAGE_MAX)
