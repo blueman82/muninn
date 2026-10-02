@@ -22,6 +22,7 @@ class ScopeCase(unittest.TestCase):
     """Base case with a temp HOME, a temp store and git helpers."""
 
     def setUp(self) -> None:
+        """Create the temp home, point HOME at it and pick a store path."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(os.path.realpath(tmp.name))  # /var -> /private/var

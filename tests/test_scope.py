@@ -69,7 +69,7 @@ class MatrixTests(ScopeCase):
             conn: Open read-write store connection.
             repo: Main repo that already has a scope.
             wt: Linked worktree of ``repo`` that already has a scope.
-            plain: Non-git directory that already has a scope.
+            plain: Non-git directory; its scope is created by this check.
         """
         key = str(repo)
         with self.subTest("a deleted worktree resolves from the cache"):
