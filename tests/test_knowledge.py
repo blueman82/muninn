@@ -13,11 +13,11 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-from pctx import erase, ingest, knowledge, store
+from pctx import erase, ingest, knowledge, query, store
 from tests import test_classify as tc
 from tests import test_ingest as ti
-from tests import test_query as tq
 from tests import test_store as tst
+from tests.query_support import NOTICE, QueryCase
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -27,7 +27,7 @@ CALL = "Bash: pytest -q tests/test_lookup.py"
 SECRET = "sk-abcdefghijklmnopqrstuvwxyz0123"
 
 
-class KnowCase(tq.QueryCase):
+class KnowCase(QueryCase):
     """A repo scope with one primary thread: a prompt, a reply, a call."""
 
     def setUp(self):
@@ -195,7 +195,7 @@ class AddEntryTests(KnowCase):
     def test_add_stores_entry_citation_identity_and_log(self):
         got = self.add(kind="fact", text="  The lookup path uses the cache  ")
         entry = got["entry"]
-        self.assertEqual(got["notice"], tq.NOTICE)
+        self.assertEqual(got["notice"], NOTICE)
         row = self.rw.execute("SELECT * FROM knowledge").fetchone()
         self.assertEqual(entry["id"], f"K{row['id']}")
         self.assertEqual(
@@ -407,7 +407,7 @@ class LedgerTests(KnowCase):
             actor="user",
         )
         entry = got["entry"]
-        self.assertEqual(got["notice"], tq.NOTICE)
+        self.assertEqual(got["notice"], NOTICE)
         self.assertEqual(entry["status"], "retracted")
         self.assertEqual(
             entry["retract_reason"],
@@ -492,13 +492,13 @@ class ListShowTests(KnowCase):
         self.assertEqual(self.ids(kind="preference"), [w])
         self.assertEqual(self.ids(status="all", kind="fact"), [b])
         bad = knowledge.list_entries(self.ro(), cwd="/repo", status="old")
-        self.assertEqual(bad, {"error": "bad_status", "notice": tq.NOTICE})
+        self.assertEqual(bad, {"error": "bad_status", "notice": NOTICE})
         bad = knowledge.list_entries(self.ro(), cwd="/repo", kind="rumor")
-        self.assertEqual(bad, {"error": "bad_kind", "notice": tq.NOTICE})
+        self.assertEqual(bad, {"error": "bad_kind", "notice": NOTICE})
 
     def test_list_entries_carry_actor_date_and_citation_states(self):
         got = knowledge.list_entries(self.ro(), cwd="/repo")
-        self.assertEqual((got["notice"], got["count"]), (tq.NOTICE, 3))
+        self.assertEqual((got["notice"], got["count"]), (NOTICE, 3))
         entry = got["entries"][-1]  # the oldest: A
         self.assertEqual(entry["id"], f"K{self.a}")
         self.assertEqual(entry["actor"], "claude:abc123")
@@ -516,7 +516,7 @@ class ListShowTests(KnowCase):
             with self.subTest(ref):
                 self.assertEqual(
                     knowledge.show(ro, ref),
-                    {"error": "not_found", "notice": tq.NOTICE},
+                    {"error": "not_found", "notice": NOTICE},
                 )
         retracted = knowledge.show(ro, self.b)["entry"]
         self.assertEqual(retracted["retract_reason"], "not true")
@@ -618,7 +618,7 @@ class VerifyTests(KnowCase):
             (erased,),
         )
         got = knowledge.check(self.ro())
-        self.assertEqual(got["notice"], tq.NOTICE)
+        self.assertEqual(got["notice"], NOTICE)
         self.assertEqual(got["citations"], 4)
         counts = (got["ok"], got["changed"], got["missing"], got["erased"])
         self.assertEqual(counts, (1, 1, 1, 1))
@@ -1193,7 +1193,7 @@ class SearchSeesKnowledgeTests(KnowCase):
     """The entries add() writes are what query.search's knowledge shows."""
 
     def hits(self, text="zebra"):
-        found = tq.query.search(self.ro(), text, cwd="/repo", env={})
+        found = query.search(self.ro(), text, cwd="/repo", env={})
         return [(k["id"], k["text"], k["cites"]) for k in found["knowledge"]]
 
     def test_search_shows_current_entries_until_superseded_or_retracted(self):
@@ -1365,10 +1365,10 @@ class LifecycleTests(ti.IngestCase):
         codex = f"codex:{self.tid}:2.1"
         claude = f"claude:{tc.SESSION}:1.1"
         one = self.add(cites=[(codex, "build flag is off")])["entry"]
-        found = tq.query.search(self.conn, "build flag", cwd=tc.CWD, env={})
+        found = query.search(self.conn, "build flag", cwd=tc.CWD, env={})
         self.assertEqual([k["id"] for k in found["knowledge"]], [one["id"]])
         self.assertEqual(found["knowledge"][0]["cites"], [codex])
-        opened = tq.query.open_event(
+        opened = query.open_event(
             self.conn, codex, roots=self.roots, raw=True
         )
         self.assertTrue(opened["hash_ok"])  # the citation opens the original
@@ -1377,7 +1377,7 @@ class LifecycleTests(ti.IngestCase):
             cites=[(claude, "build flag is on")],
             supersedes=one["id"],
         )["entry"]
-        found = tq.query.search(self.conn, "build flag", cwd=tc.CWD, env={})
+        found = query.search(self.conn, "build flag", cwd=tc.CWD, env={})
         self.assertEqual([k["id"] for k in found["knowledge"]], [two["id"]])
         history = knowledge.show(self.conn, one["id"])
         self.assertEqual(history["entry"]["text"], "The build flag is off")

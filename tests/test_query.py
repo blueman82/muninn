@@ -7,10 +7,7 @@ import unittest
 from typing import Any, cast
 
 from pctx import classify, query
-from tests.query_support import NOTICE, QueryCase
-
-# Other test modules reach these through this module.
-__all__ = ["NOTICE", "QueryCase", "query"]
+from tests.query_support import QueryCase
 
 
 class RefTests(unittest.TestCase):
