@@ -88,8 +88,8 @@ response.
 
 Per-prompt recall switch: if `recall.off` exists in the data directory, the
 UserPromptSubmit hook prints `{}` without opening the database; SessionStart is
-unaffected. Default OFF: `--fresh` creates it (`--upgrade` never does). Why and
-how to turn it on: `docs/adr/0007-recall-off-by-default.md`, `docs/REFERENCE.md`.
+unaffected and shows you the entries it pushed (a `systemMessage` line). Default
+OFF: `--fresh` creates it (`--upgrade` never does). To turn it on: `docs/REFERENCE.md`.
 
 `<pctx-memory` and `<pctx-recall` are the only automatic-injection markers.
 Ingest flags any stored text that contains either (or the CLI notice
