@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pctx import classify, ingest, store
+from pctx import classify, ingest, ingest_model, ingest_plan, store
 from tests.test_classify import (
     CWD,
     PARENT,
@@ -248,7 +248,7 @@ class SourceModeTests(IngestCase):
         with open(path, "ab") as handle:
             handle.write(b'{"pad":"' + b"x" * 5000 + b'"}\n')
         self.append(path, [user_msg(4, "after the big one")])
-        with mock.patch.object(ingest, "MAX_LINE_BYTES", 4096):
+        with mock.patch.object(ingest_model, "MAX_LINE_BYTES", 4096):
             stats = self.run_ingest()
         self.assertEqual(stats.skipped_lines, 1)
         self.assertEqual(
@@ -429,7 +429,10 @@ class TombstoneAndReplayTests(IngestCase):
             root="claude-projects",
         )
         self.run_ingest()
-        with mock.patch("builtins.open", wraps=open) as opened:
+        # The pass opens files with Path.open, which bypasses builtins.open.
+        with mock.patch.object(
+            Path, "open", autospec=True, side_effect=Path.open
+        ) as opened:
             stats = self.run_ingest()
         self.assertEqual(opened.call_count, 0)
         self.assertEqual((stats.files_seen, stats.files_changed), (2, 0))
@@ -770,14 +773,14 @@ class RaceTests(IngestCase):
     def test_file_vanishing_mid_pass_is_skipped(self):
         gone = self.write(rollout("thr-gone"), primary("thr-gone"))
         self.write(rollout(), primary())
-        real = ingest._first_line
+        real = ingest_plan._first_line
 
         def racing(path):
             if path == gone:
                 gone.unlink()  # archived or deleted after discovery
             return real(path)
 
-        with mock.patch.object(ingest, "_first_line", racing):
+        with mock.patch.object(ingest_plan, "_first_line", racing):
             stats = self.run_ingest()
         self.assertEqual(stats.skipped_files, 1)
         self.assertEqual(len(self.events()), 2)

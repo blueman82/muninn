@@ -637,3 +637,9 @@ def claude_events(
     thread_class = "subagent" if side else "primary"
     kind = _user_kind(tag, thread_class)
     return [_event(line, line, ts, "user", kind, tag, text)]
+
+
+# Public names for ingest, which reads the exit status of a pctx call's
+# output without re-implementing classify's block joining and exit regex.
+join_blocks = _join
+EXIT_STATUS = _EXIT
