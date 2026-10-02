@@ -126,10 +126,11 @@ SessionStart (`pctx hook session-start`) is not affected; `PCTX_HOOK_DISABLE=1` 
 a usage line, identical for Claude Code and Codex, that tells an agent how to search, open a hit and record an owner
 decision with `pctx know add --kind decision --text … --cite REF --quote "<verbatim>"`.
 
-The hook output also carries a top-level `systemMessage`, one content-free line for the person at the keyboard (Claude Code
-shows it in the transcript; Codex records it as a `warning` hook entry): `pctx: memory loaded (3 knowledge entries: K1, K2,
-K3)` at SessionStart, or `pctx: memory unavailable (<code>)` when the store cannot be read. The model block stays model-only.
-Per-prompt recall adds no line.
+The hook output also carries a top-level `systemMessage` for the person at the keyboard (Claude Code shows it in the
+transcript; Codex records it as a `warning` hook entry). At SessionStart it lists every pushed knowledge entry's headline
+(its `text`, in full, control characters replaced by spaces), one per line under `pctx: memory loaded (N knowledge
+entries)`; when the store cannot be read it is `pctx: memory unavailable (<code>)`. The entry text is never written to the
+call log. Per-prompt recall adds no line.
 
 **Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints how to turn recall on. `--upgrade`
 never creates or removes it, so an existing machine keeps whatever it had: a machine installed before this default has no

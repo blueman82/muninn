@@ -325,6 +325,8 @@ def _respond(
         trace["skipped"] = "subagent"
         return {}
     text = _build_text(build, data, env, trace)
+    # Popped, not left in the trace: the stage log must never see entry text.
+    shown = cast("list[str]", trace.pop("shown", []))
     if not text:
         return {}
     out: dict[str, object] = {
@@ -333,30 +335,36 @@ def _respond(
             "additionalContext": text,
         }
     }
-    line = _status_line(event, trace)
+    line = _status_line(event, trace, shown)
     if line:
         out["systemMessage"] = line
     return out
 
 
-def _status_line(event: str, trace: Mapping[str, object]) -> str:
-    """The one line both providers show the human, apart from the model block.
+def _status_line(
+    event: str, trace: Mapping[str, object], shown: list[str]
+) -> str:
+    """What both providers show the human, apart from the model block.
 
-    Counts and ids only (ADR 0004): never stored text. Recall stays silent
-    because it runs on every prompt.
+    SessionStart lists every pushed entry in full so the person can see what
+    the model was told. Recall stays silent because it runs on every prompt.
 
     Returns:
-        The line, or an empty string when there is nothing to show.
+        The message, or an empty string when there is nothing to show.
     """
     if "error" in trace:
         return f"pctx: memory unavailable ({trace['error']})"
     if event != "SessionStart":
         return ""
-    ids = cast("list[int]", trace.get("knowledge_ids", []))
-    if not ids:
+    if not shown:
         return "pctx: memory loaded (no knowledge entries yet)"
-    shown = ", ".join(f"K{i}" for i in ids)
-    return f"pctx: memory loaded ({len(ids)} knowledge entries: {shown})"
+    head = f"pctx: memory loaded ({len(shown)} knowledge entries)"
+    return "\n".join([head, *shown])
+
+
+def _printable(text: str) -> str:
+    """Replace control characters so stored text cannot drive a terminal."""
+    return "".join(c if c.isprintable() else " " for c in text)
 
 
 def _limits(provider: str) -> tuple[int, int]:
@@ -380,6 +388,7 @@ def _start_block(
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
+    trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
     return render_block(
         entries, _label(conn, ids, cwd), notes=_stale(home), limit=limit
     )

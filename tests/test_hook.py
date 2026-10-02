@@ -43,10 +43,11 @@ class SessionStartTests(HookCase):
                 self.assertEqual(
                     list(out), ["hookSpecificOutput", "systemMessage"]
                 )
-                # What the human sees: a count and ids, never entry text.
+                # What the human sees: each entry's headline, in full.
                 self.assertEqual(
                     out["systemMessage"],
-                    f"pctx: memory loaded (1 knowledge entries: K{first})",
+                    "pctx: memory loaded (1 knowledge entries)\n"
+                    f"- K{first}: Use the zebra cache",
                 )
                 block = hook_output(out)
                 self.assertEqual(
@@ -201,6 +202,20 @@ class FailOpenTests(HookCase):
         self.assertEqual(self.start(env={"PCTX_HOOK_DISABLE": "1"}), {})
         out = self.start(env={"PCTX_HOOK_DISABLE": "0"})
         self.assertIn("hookSpecificOutput", out)
+
+    def test_the_status_line_is_terminal_safe_and_stays_out_of_the_log(
+        self,
+    ) -> None:
+        self.add(text="Use the zebra\x1b[31m cache\n\rnow", actor="user")
+        trace: dict[str, object] = {}
+        out = hook.session_start(
+            self.payload(), "claude", self.env, trace=trace
+        )
+        line = str(out["systemMessage"])
+        self.assertNotIn("\x1b", line)
+        self.assertNotIn("\r", line)
+        self.assertIn("Use the zebra [31m cache  now", line)
+        self.assertNotIn("shown", trace)  # the stage log reads this dict
 
     def test_hook_fail_open(self) -> None:
         self.add()
