@@ -104,6 +104,18 @@ class FreshInstallTest(unittest.TestCase):
             self.install()
         self.assertFalse(self.lib.exists())
 
+    def test_refuses_a_commit_that_breaks_the_standards(self) -> None:
+        w = self.w
+        (w.repo / "pctx").mkdir()
+        (w.repo / "pctx/sloppy.py").write_text("x = 1\n")
+        git(w.repo, "add", "-A")
+        git(w.repo, "commit", "-qm", "sloppy")
+        sha = git(w.repo, "rev-parse", "HEAD").decode().strip()
+        with self.assertRaises(co.StepFailedError) as caught:
+            co.install(w.ctx(fresh=True), w.repo, sha)
+        self.assertIn("standards violation", str(caught.exception))
+        self.assertFalse(self.lib.exists())
+
     def test_dry_run_changes_nothing_and_touches_no_service(self) -> None:
         h = self.w.home
         before = snapshot(h)

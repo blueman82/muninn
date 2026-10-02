@@ -19,7 +19,6 @@ from pctx.query.filters import (
     scope_label,
     times,
 )
-from pctx.query.freshness import freshness
 from pctx.query.guard import guarded
 from pctx.query.hits import (
     CANDIDATES,
@@ -29,6 +28,7 @@ from pctx.query.hits import (
     render,
     tally,
 )
+from pctx.query.index_age import freshness
 from pctx.query.paging import paginate
 from pctx.query.terms import build_fts_query
 from pctx.scope import scope_ids_for_read
@@ -64,15 +64,16 @@ def _eligibility(
 ) -> tuple[str | None, Where]:
     """Resolve the session filter and build the eligibility clauses.
 
-    A bad session, kind, provider or date raises BadArgumentError, which
-    ``search`` turns into an error answer.
-
     Args:
         conn: Read-only store connection.
         args: The keyword arguments of ``search``.
 
     Returns:
         The resolved session root (or None) and the eligibility clauses.
+
+    Raises:
+        BadArgumentError: If the session, a kind, the provider or a date is
+            invalid; ``search`` turns it into an error answer.
     """
     session = args.get("session")
     root = resolve_session(conn, session) if session else None
@@ -152,9 +153,14 @@ def search(
             ``current_session`` and ``status`` (a parsed status.json).
 
     Returns:
-        The answer, or ``{"error": code}`` for bad input. An unknown or
-        missing keyword raises TypeError, and an unreadable store raises
-        StoreUnavailableError or HotJournalError through ``guarded``.
+        The answer, or ``{"error": code}`` for bad input.
+
+    Raises:
+        TypeError: If a keyword is unknown or ``cwd`` or ``env`` is missing.
+        StoreUnavailableError: If the store cannot be read (through
+            ``guarded``).
+        HotJournalError: If a crashed writer left a journal (through
+            ``guarded``).
     """
     _check_keywords(args)
     limit = min(max(args.get("limit", 10), 1), PAGE_MAX)

@@ -19,8 +19,8 @@ from pctx.query.constants import (
     PROVIDERS,
 )
 from pctx.query.filters import caller_root
-from pctx.query.freshness import freshness
 from pctx.query.guard import guarded
+from pctx.query.index_age import freshness
 from pctx.query.listing import session, sessions
 from pctx.query.opening import open_event
 from pctx.query.quotes import quote_check

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from pctx import knowledge
-from tests import test_query as tq
+from tests.query_support import QueryCase
 
 __all__ = ["CALL", "PROMPT", "REPLY", "ROOT", "SECRET", "KnowCase", "kid"]
 
@@ -18,7 +18,7 @@ CALL = "Bash: pytest -q tests/test_lookup.py"
 SECRET = "sk-abcdefghijklmnopqrstuvwxyz0123"
 
 
-class KnowCase(tq.QueryCase):
+class KnowCase(QueryCase):
     """A repo scope with one primary thread: a prompt, a reply, a call."""
 
     def setUp(self) -> None:

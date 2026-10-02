@@ -11,8 +11,8 @@ from typing import Any
 from pctx import erase, knowledge
 from tests import test_classify as tc
 from tests import test_ingest as ti
-from tests import test_query as tq
 from tests.knowledge_support import PROMPT, ROOT, KnowCase, kid
+from tests.query_support import NOTICE
 
 
 class VerifyTests(KnowCase):
@@ -101,7 +101,7 @@ class VerifyTests(KnowCase):
             (erased,),
         )
         got = knowledge.check(self.ro())
-        self.assertEqual(got["notice"], tq.NOTICE)
+        self.assertEqual(got["notice"], NOTICE)
         self.assertEqual(got["citations"], 4)
         counts = (got["ok"], got["changed"], got["missing"], got["erased"])
         self.assertEqual(counts, (1, 1, 1, 1))

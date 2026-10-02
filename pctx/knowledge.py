@@ -222,14 +222,14 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
 
     Args:
         conn: Read-write connection; the caller holds the writer lock.
-        **kwargs: The fields described by ``AddArgs``; a missing or
-            unknown field raises ``TypeError``.
+        **kwargs: The fields described by ``AddArgs``.
 
     Returns:
         The notice and the rendered new entry.
 
     Raises:
         RefusedError: If any rule is broken; nothing is written.
+        TypeError: If a required field is missing or a field is unknown.
     """
     request = _AddRequest(**kwargs)
     if request.kind not in KINDS:

@@ -15,9 +15,11 @@ REDACTED = "[redacted:secret]"
 # untrusted, and a catastrophic backtrack here would stall whichever caller
 # redacts, including ingest. Repeats are therefore bounded ({0,16384}),
 # tempered (the (?!-----BEGIN ) guard) or limited to horizontal whitespace.
-# The remaining unbounded repeats (\S+, \s*, the base64 run) never nest or
-# overlap, so a failed match cannot backtrack exponentially. Re-check
-# this when adding a pattern.
+# The remaining unbounded repeats (\S+, \s*, the base64 run) are not
+# ambiguous about where one repeat ends and the next begins; the one nested
+# repeat, the base64 lines of a truncated key, is safe only because each
+# iteration must start at a newline that the base64 class excludes. The canary
+# test feeds hostile text through redact; re-check this when adding a pattern.
 _URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
 _KEYS = (
     r"api[_-]?key|access[_-]?token|client[_-]?secret|token|"

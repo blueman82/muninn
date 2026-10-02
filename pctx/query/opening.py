@@ -19,8 +19,8 @@ from pctx.query.answers import (
     preview,
 )
 from pctx.query.constants import NOTICE, PREVIEW_NOTICE
-from pctx.query.freshness import freshness
 from pctx.query.guard import guarded
+from pctx.query.index_age import freshness
 from pctx.query.terms import parse_ref
 
 OPEN_BYTES = 12_000  # text bytes per open page

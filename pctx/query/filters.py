@@ -118,8 +118,11 @@ def times(since: str | None, until: str | None) -> Where:
             day), or None.
 
     Returns:
-        The SQL clauses and their parameters. A malformed bound raises
-        BadArgumentError (``bad_date``) through ``_iso``.
+        The SQL clauses and their parameters.
+
+    Raises:
+        BadArgumentError: With code ``bad_date`` if a bound is not a date or
+            timestamp.
     """
     clauses: list[str] = []
     params: list[Any] = []

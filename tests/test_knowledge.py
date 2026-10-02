@@ -7,8 +7,8 @@ through the query test builders and are read back with plain SQL.
 from __future__ import annotations
 
 from pctx import knowledge
-from tests import test_query as tq
 from tests.knowledge_support import PROMPT, SECRET, KnowCase, kid
+from tests.query_support import NOTICE
 
 # test_hook reaches these helpers through this module.
 __all__ = ["KnowCase", "kid"]
@@ -122,7 +122,7 @@ class AddEntryTests(KnowCase):
     def test_add_stores_entry_citation_identity_and_log(self) -> None:
         got = self.add(kind="fact", text="  The lookup path uses the cache  ")
         entry = got["entry"]
-        self.assertEqual(got["notice"], tq.NOTICE)
+        self.assertEqual(got["notice"], NOTICE)
         row = self.rw.execute("SELECT * FROM knowledge").fetchone()
         self.assertEqual(entry["id"], f"K{row['id']}")
         self.assertEqual(

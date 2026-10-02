@@ -176,6 +176,28 @@ class ServeTests(CliCase):
             time.sleep(0.05)
         raise AssertionError(f"no {key} in status.json")
 
+    def wait_started(self, timeout: float = 60) -> None:
+        """Wait until the poller has installed its handlers and said so.
+
+        The ``start`` line is logged after the SIGTERM handler is installed,
+        so a signal sent once it appears is always handled. Signalling a
+        process that is still starting up kills it with the default action
+        (exit -15), which is what made this test flaky under load.
+
+        Args:
+            timeout: Seconds to wait before failing the test.
+
+        Raises:
+            AssertionError: If the poller never logs its start.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            text = (self.home / "poller.log").read_text()
+            if '"event":"start"' in text:
+                return
+            time.sleep(0.05)
+        raise AssertionError("poller never logged its start")
+
     def test_serve_sigterm_between_sources(self) -> None:
         self.session(TID, f"{CANARY} in a prompt", "a reply")
         proc = self.start_serve()
@@ -222,7 +244,8 @@ class ServeTests(CliCase):
         for n in range(300):
             self.session(f"thr-{n:04d}", f"prompt {n}", f"reply {n}")
         proc = self.start_serve(interval="60")
-        time.sleep(0.4)  # most likely inside the first pass
+        self.wait_started()
+        time.sleep(0.2)  # most likely inside the first pass
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(timeout=60), 0)
         self.assertFalse((self.home / "pctx.sqlite-journal").exists())

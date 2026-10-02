@@ -212,10 +212,13 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     Returns:
         The final run record.
 
-    Note:
-        Preflight's StepFailedError, RefusedError and RacedError propagate.
-        Any step exception is re-raised after the rollback; in a dry run it
-        is re-raised without one.
+    Raises:
+        StepFailedError: If a precondition fails in preflight or a step
+            fails; a failed step is re-raised after the rollback.
+        RefusedError: If a provider config has a layout the edits refuse.
+        RacedError: If a provider config changed while it was being edited.
+        Exception: Any other step exception, re-raised after the rollback (in
+            a dry run, re-raised without one).
     """
     rec = preflight(ctx, Path(repo), sha)
     record(ctx, rec)

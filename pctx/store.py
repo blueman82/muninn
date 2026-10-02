@@ -326,8 +326,7 @@ def writer_lock(home: Path, wait_s: float = 15.0) -> Generator[None]:
     Not reentrant (a second open() in one process conflicts): take it once
     at command entry and never nest. Never fork while holding it, because
     the child would inherit the descriptor and keep the lock after the
-    parent releases it. Filesystem errors creating the home directory or
-    opening the lock file propagate as OSError.
+    parent releases it.
 
     Args:
         home: Data home; the lock file lives beside the database.
@@ -338,6 +337,8 @@ def writer_lock(home: Path, wait_s: float = 15.0) -> Generator[None]:
 
     Raises:
         BusyError: If the lock is still held elsewhere after ``wait_s``.
+        OSError: If the home directory cannot be created or the lock file
+            cannot be opened.
     """
     _ensure_dir(home)
     fd = os.open(home / "writer.lock", os.O_CREAT | os.O_RDWR, 0o600)

@@ -23,6 +23,7 @@ from install.transforms import (
     write_trust,
 )
 from install.trust import codex_hooks
+from tools.standards import check_repo
 
 CODEX_HOOKS_FILE = "integrations/codex/hooks/hooks.json"
 
@@ -51,7 +52,8 @@ def _check_repo(
         groups per event parsed from the first of them.
 
     Raises:
-        StepFailedError: If HEAD is not ``sha``, the worktree is dirty,
+        StepFailedError: If HEAD is not ``sha``, the worktree is dirty, the
+            code breaks a standards rule (``tools.standards``),
             ``bin/pctx`` is not executable, or the Claude hook fragment has
             the wrong events.
     """
@@ -59,6 +61,15 @@ def _check_repo(
         raise StepFailedError("repo HEAD is not --sha")
     if _git(ctx, repo, "status", "--porcelain", "--untracked-files=all"):
         raise StepFailedError("repo worktree is not clean")
+    # The tree is clean, so what is checked is exactly what gets pinned: a
+    # commit that breaks the standards never reaches the live machine.
+    broken = check_repo(repo)
+    if broken:
+        first = "; ".join(str(v) for v in broken[:3])
+        raise StepFailedError(
+            f"{len(broken)} standards violation(s) at --sha ({first}); "
+            "run: python3.13 -m tools.check"
+        )
     if not _git(ctx, repo, "ls-tree", sha, "bin/pctx").startswith(b"100755 "):
         raise StepFailedError("bin/pctx is not an executable file at --sha")
     home = str(ctx.home).encode()
@@ -146,8 +157,9 @@ def _dry_apply(
         files: The pinned files from ``_check_repo``.
         fragment: The Claude hook groups per event.
 
-    Note:
-        ``configedit.RefusedError`` and ``json.JSONDecodeError`` propagate.
+    Raises:
+        RefusedError: If a config file has a layout the edits refuse.
+        json.JSONDecodeError: If settings.json is not valid JSON.
     """
     if ctx.settings.exists():
         edit_settings(ctx.settings.read_bytes(), fragment)
@@ -172,11 +184,9 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
 
     Raises:
         StepFailedError: If any precondition fails.
-
-    Note:
-        ``configedit.RefusedError`` propagates when a config file has a
-        layout the edits cannot handle; ``main`` reports it as a refusal.
-        ``json.JSONDecodeError`` propagates for an invalid settings.json.
+        RefusedError: If a config file has a layout the edits cannot handle;
+            ``main`` reports it as a refusal.
+        json.JSONDecodeError: If settings.json is not valid JSON.
     """
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise StepFailedError("--sha must be a full 40-hex commit id")

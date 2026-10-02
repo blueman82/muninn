@@ -8,10 +8,9 @@ import sqlite3
 from typing import Any
 from unittest import mock
 
-from pctx import knowledge, store
+from pctx import knowledge, query, store
 from tests import test_classify as tc
 from tests import test_ingest as ti
-from tests import test_query as tq
 from tests import test_store as tst
 from tests.knowledge_support import KnowCase, kid
 
@@ -206,7 +205,7 @@ class SearchSeesKnowledgeTests(KnowCase):
         Returns:
             ``(id, text, cites)`` for every knowledge hit.
         """
-        found = tq.query.search(self.ro(), text, cwd="/repo", env={})
+        found = query.search(self.ro(), text, cwd="/repo", env={})
         return [(k["id"], k["text"], k["cites"]) for k in found["knowledge"]]
 
     def test_search_shows_current_entries_until_superseded_or_retracted(
@@ -312,19 +311,17 @@ class LifecycleTests(ti.IngestCase):
         codex = f"codex:{self.tid}:2.1"
         claude = f"claude:{tc.SESSION}:1.1"
         one = self.add(cites=[(codex, "build flag is off")])["entry"]
-        found = tq.query.search(self.conn, "build flag", cwd=tc.CWD, env={})
+        found = query.search(self.conn, "build flag", cwd=tc.CWD, env={})
         self.assertEqual([k["id"] for k in found["knowledge"]], [one["id"]])
         self.assertEqual(found["knowledge"][0]["cites"], [codex])
-        opened = tq.query.open_event(
-            self.conn, codex, roots=self.roots, raw=True
-        )
+        opened = query.open_event(self.conn, codex, roots=self.roots, raw=True)
         self.assertTrue(opened["hash_ok"])  # the citation opens the original
         two = self.add(
             text="The build flag is on",
             cites=[(claude, "build flag is on")],
             supersedes=one["id"],
         )["entry"]
-        found = tq.query.search(self.conn, "build flag", cwd=tc.CWD, env={})
+        found = query.search(self.conn, "build flag", cwd=tc.CWD, env={})
         self.assertEqual([k["id"] for k in found["knowledge"]], [two["id"]])
         history = knowledge.show(self.conn, one["id"])
         self.assertEqual(history["entry"]["text"], "The build flag is off")

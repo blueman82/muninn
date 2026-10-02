@@ -7,7 +7,7 @@ from typing import Any
 
 from pctx import classify
 from pctx.query.answers import Answer, error
-from pctx.query.freshness import MAX_INDEX_AGE
+from pctx.query.index_age import MAX_INDEX_AGE
 
 OUTPUT_LIMIT = 6144  # bytes of json.dumps
 

@@ -23,7 +23,9 @@ select = [
     "ERA",       # no commented-out code
     "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",  # complexity limits
 ]
-ignore = ["D203", "D213", "ANN401"]
+# DOC502 would forbid `Raises:` for an exception that a callee raises and the
+# function deliberately lets propagate; that is exactly what a caller needs.
+ignore = ["D203", "D213", "ANN401", "DOC502"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

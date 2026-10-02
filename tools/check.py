@@ -2,8 +2,9 @@
 
 Run ``python3.13 -m tools.check`` for the stdlib rules (what the test suite
 runs) and ``python3.13 -m tools.check --full`` for the whole gate: those
-rules plus ruff, black, pyright and shellcheck. A missing tool is a failure,
-never a skip, so a machine without the dev tools cannot pass the full gate.
+rules plus ruff, black, pyright and shellcheck, and a check that the git
+hooks in ``.githooks`` are switched on. A missing tool or an unswitched hook is
+a failure, never a skip, so a machine without them cannot pass the full gate.
 """
 
 from __future__ import annotations
@@ -29,10 +30,49 @@ INSTALL_HINT = (
     "install the dev tools: python3.13 -m venv .venv && "
     ".venv/bin/pip install -r requirements-dev.txt"
 )
+HOOKS_HINT = "switch the git hooks on: git config core.hooksPath .githooks"
+
+
+def git_output(*args: str) -> str:
+    """Run a read-only git command in the repository.
+
+    Args:
+        *args: Arguments after ``git``.
+
+    Returns:
+        Trimmed standard output, or an empty string if git fails or is
+        missing.
+    """
+    try:
+        done = subprocess.run(
+            ["git", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def main_checkout() -> Path:
+    """Find the main working tree, which may differ from ``ROOT``.
+
+    A linked worktree has no ``.venv`` of its own; the dev tools live in the
+    main checkout, whose ``.git`` directory is the shared common dir.
+
+    Returns:
+        The main checkout, or ``ROOT`` when git cannot say.
+    """
+    common = git_output(
+        "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    return Path(common).parent if common else ROOT
 
 
 def find_tool(name: str) -> str | None:
-    """Locate a dev tool in ``.venv/bin`` first, then on PATH.
+    """Locate a dev tool in this checkout's venv, the main one, then PATH.
 
     Args:
         name: Executable name, such as ``ruff``.
@@ -40,8 +80,22 @@ def find_tool(name: str) -> str | None:
     Returns:
         The absolute path, or None when the tool is not installed.
     """
-    local = ROOT / ".venv" / "bin" / name
-    return str(local) if local.exists() else shutil.which(name)
+    for base in (ROOT, main_checkout()):
+        local = base / ".venv" / "bin" / name
+        if local.exists():
+            return str(local)
+    return shutil.which(name)
+
+
+def hooks_installed() -> bool:
+    """Say whether this clone runs the hooks tracked in ``.githooks``.
+
+    Git cannot track its own ``core.hooksPath``, so the gate checks it.
+
+    Returns:
+        True when ``core.hooksPath`` is ``.githooks``.
+    """
+    return git_output("config", "core.hooksPath") == ".githooks"
 
 
 def run_tools() -> int:
@@ -51,6 +105,9 @@ def run_tools() -> int:
         The number of failed or missing tools.
     """
     failures = 0
+    if not hooks_installed():
+        print(f"FAIL git hooks: {HOOKS_HINT}")
+        failures += 1
     for name, *args in TOOL_STEPS:
         exe = find_tool(name)
         if exe is None:

@@ -7,6 +7,7 @@ import os
 import unittest
 from pathlib import Path
 
+from tools.check import hooks_installed
 from tools.standards import check_repo
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,6 +47,17 @@ class GateCannotBeRemovedTest(unittest.TestCase):
         edit = json.dumps(hooks["PostToolUse"])
         self.assertIn("tools.check", edit)
         self.assertIn("Edit", edit)
+
+    def test_git_hooks_are_switched_on(self) -> None:
+        self.assertTrue(
+            hooks_installed(),
+            "run: git config core.hooksPath .githooks",
+        )
+
+    def test_merge_commits_run_the_gate_too(self) -> None:
+        hook = ROOT / ".githooks" / "pre-merge-commit"
+        self.assertTrue(os.access(hook, os.X_OK), "hook is not executable")
+        self.assertIn("tools.check --full", hook.read_text(encoding="utf-8"))
 
     def test_dev_tools_are_pinned(self) -> None:
         text = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")

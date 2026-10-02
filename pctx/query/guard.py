@@ -35,6 +35,12 @@ def guarded[**P, R](func: Callable[P, R]) -> Callable[P, R]:
 
     Returns:
         ``func`` with the same signature and the translated failures.
+
+    Raises:
+        StoreUnavailableError: From the returned wrapper, when the store
+            cannot be read between statements.
+        HotJournalError: From the returned wrapper, when a crashed writer
+            left a journal.
     """
 
     @functools.wraps(func)

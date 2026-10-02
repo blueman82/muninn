@@ -6,8 +6,8 @@ import sqlite3
 from typing import Any, cast
 
 from pctx import knowledge
-from tests import test_query as tq
 from tests.knowledge_support import SECRET, KnowCase, kid
+from tests.query_support import NOTICE
 
 
 class LedgerTests(KnowCase):
@@ -136,7 +136,7 @@ class LedgerTests(KnowCase):
             actor="user",
         )
         entry = got["entry"]
-        self.assertEqual(got["notice"], tq.NOTICE)
+        self.assertEqual(got["notice"], NOTICE)
         self.assertEqual(entry["status"], "retracted")
         self.assertEqual(
             entry["retract_reason"],
@@ -235,13 +235,13 @@ class ListShowTests(KnowCase):
         self.assertEqual(self.ids(kind="preference"), [w])
         self.assertEqual(self.ids(status="all", kind="fact"), [b])
         bad = knowledge.list_entries(self.ro(), cwd="/repo", status="old")
-        self.assertEqual(bad, {"error": "bad_status", "notice": tq.NOTICE})
+        self.assertEqual(bad, {"error": "bad_status", "notice": NOTICE})
         bad = knowledge.list_entries(self.ro(), cwd="/repo", kind="rumor")
-        self.assertEqual(bad, {"error": "bad_kind", "notice": tq.NOTICE})
+        self.assertEqual(bad, {"error": "bad_kind", "notice": NOTICE})
 
     def test_list_entries_carry_actor_date_and_citation_states(self) -> None:
         got = knowledge.list_entries(self.ro(), cwd="/repo")
-        self.assertEqual((got["notice"], got["count"]), (tq.NOTICE, 3))
+        self.assertEqual((got["notice"], got["count"]), (NOTICE, 3))
         entry = got["entries"][-1]  # the oldest: A
         self.assertEqual(entry["id"], f"K{self.a}")
         self.assertEqual(entry["actor"], "claude:abc123")
@@ -266,7 +266,7 @@ class ListShowTests(KnowCase):
             with self.subTest(ref):
                 self.assertEqual(
                     knowledge.show(ro, cast("Any", ref)),
-                    {"error": "not_found", "notice": tq.NOTICE},
+                    {"error": "not_found", "notice": NOTICE},
                 )
         retracted = knowledge.show(ro, self.b)["entry"]
         self.assertEqual(retracted["retract_reason"], "not true")

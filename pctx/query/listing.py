@@ -21,8 +21,8 @@ from pctx.query.filters import (
     scope_label,
     times,
 )
-from pctx.query.freshness import freshness
 from pctx.query.guard import guarded
+from pctx.query.index_age import freshness
 from pctx.scope import scope_ids_for_read
 
 SESSIONS_MAX = 100

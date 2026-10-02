@@ -74,9 +74,8 @@ def codex_scan(text: str) -> dict[str, dict[str, Any] | None]:
     Returns:
         Each of our sections parsed, or None when it is absent.
 
-    Note:
-        ``configedit.RefusedError`` propagates for a stray marker or
-        unrecognised layout.
+    Raises:
+        RefusedError: For a stray marker or unrecognised layout.
     """
     return ce.scan_named(text, CODEX_KEYS, MARKERS)
 
@@ -88,9 +87,9 @@ def codex_check(before: bytes, after: bytes) -> None:
         before: The file bytes before the edit.
         after: The file bytes after the edit.
 
-    Note:
-        ``configedit.RefusedError`` propagates when the edit touched anything
-        else or left a stray marker or unrecognised layout.
+    Raises:
+        RefusedError: If the edit touched anything else or left a stray
+            marker or unrecognised layout.
     """
     ce.toml_check(before.decode(), after.decode(), CODEX_KEYS, MARKERS)
     codex_scan(after.decode())
@@ -108,9 +107,8 @@ def set_line(text: str, header: str, key: str, value: str) -> str:
     Returns:
         The edited text.
 
-    Note:
-        ``configedit.RefusedError`` propagates for a stray marker or
-        unrecognised layout.
+    Raises:
+        RefusedError: For a stray marker or unrecognised layout.
     """
     codex_scan(text)
     raw, line = ce.get_section(text, header), f"{key} = {value}\n"
@@ -135,9 +133,8 @@ def drop_trust(text: str) -> str:
     Returns:
         The text without our trust sections.
 
-    Note:
-        ``configedit.RefusedError`` propagates for a stray marker or
-        unrecognised layout.
+    Raises:
+        RefusedError: For a stray marker or unrecognised layout.
     """
     codex_scan(text)
     for header in TRUST.values():
