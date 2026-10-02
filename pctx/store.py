@@ -209,6 +209,8 @@ _WRITER_PRAGMAS = (
     "PRAGMA synchronous=FULL",
     "PRAGMA cache_size=-262144",  # 256 MiB: big replaces must not spill
 )
+# Public name so doctor can check the same pragmas without a real store.
+WRITER_PRAGMAS = _WRITER_PRAGMAS
 
 
 def _ensure_dir(path: Path) -> None:

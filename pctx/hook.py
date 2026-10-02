@@ -1,25 +1,54 @@
-"""pctx provider hooks (design 4.8, 5; spec 9.2, O3, O5b, O8d, A5).
+"""pctx provider hooks: SessionStart and UserPromptSubmit.
 
-session_start and prompt_submit take the provider's hook payload and return
-its hook output: {"hookSpecificOutput": {"hookEventName", "additionalContext"}}
-or {}. Whatever comes from the store is framed as untrusted data, redacted,
-delimiter-escaped and bounded. A failing store gives a short framed notice
-instead of silence (E13); {} only when PCTX_HOOK_DISABLE=1 or the transcript
-belongs to a subagent or reviewer thread.
+``session_start`` and ``prompt_submit`` take the provider's hook payload and
+return its hook output: ``{"hookSpecificOutput": {"hookEventName",
+"additionalContext"}}`` or ``{}``. Whatever comes from the store is framed
+as untrusted data, redacted, delimiter-escaped and bounded (see
+``hook_frame``). A failing store gives a short framed notice instead of
+silence; ``{}`` is returned only when ``PCTX_HOOK_DISABLE=1`` or the
+transcript belongs to a subagent or reviewer thread.
 """
+
+from __future__ import annotations
 
 import json
 import os
-import re
+import sqlite3
 import stat
-from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
+from typing import BinaryIO, Protocol, cast
 
-from pctx import classify, knowledge, obs, query, scope, store
+from pctx import classify, knowledge, obs, scope, store
+from pctx.hook_frame import (
+    BLOCK_LIMIT,
+    RECALL_LIMIT,
+    BlockEntry,
+    escape_delimiter,
+    frame,
+    render_block,
+)
+from pctx.hook_recall import (
+    MAX_EVENTS,
+    MIN_TERMS,
+    RecallRequest,
+    prompt_terms,
+    recall_block,
+)
 
-BLOCK_LIMIT = 4000  # SessionStart block, characters
-RECALL_LIMIT = 1500  # prompt-time recall block, characters
+__all__ = [
+    "BLOCK_LIMIT",
+    "MAX_EVENTS",
+    "MIN_TERMS",
+    "RECALL_LIMIT",
+    "escape_delimiter",
+    "prompt_submit",
+    "read_input",
+    "render_block",
+    "session_start",
+]
+
 # Codex counts additionalContext in tokens (1500 SessionStart, 500 prompt:
 # integrations/codex/hooks/hooks.json) and dense refs and timestamps cost
 # about 1.8 characters a token, so its blocks are capped lower.
@@ -27,93 +56,64 @@ CODEX_BLOCK_LIMIT = 2800
 CODEX_RECALL_LIMIT = 900
 MAX_INPUT = 64 * 1024  # bytes of hook payload read
 FIRST_LINE = 1024 * 1024  # bytes of a transcript's first line read
-ENTRY_TEXT = 300  # characters of one entry's text in a block
-SHOWN = 8  # knowledge entries a SessionStart block may push (O5b)
-MIN_TERMS = 3  # a prompt with fewer query terms recalls nothing (spec 9.2)
-MAX_EVENTS = 3  # events in a recall block
-EVENT_KINDS = frozenset({"prompt", "reply"})  # recalled at prompt time
+SHOWN = 8  # knowledge entries a SessionStart block may push, newest first
 RECALL_OFF = "recall.off"  # in the data dir: UserPromptSubmit prints {}
-POOL_PAGE, POOL_PAGES = 5, 4  # search pages read to find MAX_EVENTS
-SNIPPET = 300  # characters of one recalled snippet
-
-OPEN = '<pctx-memory source="pctx" trust="untrusted-data"'
-CLOSE = "</pctx-memory>"
-USAGE = (
-    "Before answering about earlier work or re-deciding a recorded choice, run"
-    ' `pctx search "<words>"` and open what you cite; record durable owner'
-    " decisions with `pctx know add … --quote`."
-)
-OPEN_HINT = (
-    "Open a hit with `pctx open <ref> --context 3`;"
-    " browse with `pctx sessions`. Search page sizes vary: if has_more,"
-    " repeat the search with --page N+1. See `pctx --help` for cursors. "
-    + query.PREVIEW_NOTICE
-)
-RECALL_HINT = (
-    "Previews are navigation only. Support claims with opened, cited eligible"
-    " originals; omit unsupported claims or label them unknown.\n"
-    "Open a hit with `pctx open <ref> --context 3`."
-)
-
-# the `<` of a frame delimiter, however spaced or cased (design 4.8)
-_FRAME = re.compile(r"(?i)<(?=\s*/?\s*pctx-(?:memory|recall))")
 
 
-def escape_delimiter(text: str) -> str:
-    """Every `<pctx-memory` / `<pctx-recall` opening or closing delimiter
-    (any case, any inner spacing) loses its `<`, so a frame closes once."""
-    return _FRAME.sub("&lt;", text)
+class _Classifier(Protocol):
+    """The ``pctx.classify`` calls the hook makes, with typed arguments."""
+
+    def codex_thread(self, meta: dict[str, object]) -> classify.ThreadInfo:
+        """Classify a Codex thread from its first record."""
+        ...
+
+    def claude_thread(
+        self, rel_path: str, first: dict[str, object]
+    ) -> classify.ThreadInfo:
+        """Classify a Claude transcript from its path and first record."""
+        ...
 
 
-def _clean(text: object, limit: int) -> str:
-    """One line, secrets redacted, delimiters escaped, cut to `limit`."""
-    flat = " ".join(str(text).split())
-    safe = escape_delimiter(classify.redact(flat)[0])
-    return safe if len(safe) <= limit else safe[: limit - 1] + "…"
+class _Knowledge(Protocol):
+    """The ``pctx.knowledge`` call the hook makes, with typed results."""
+
+    def block_entries(
+        self, conn: sqlite3.Connection, scope_ids: list[int], limit: int
+    ) -> list[BlockEntry]:
+        """Current user-cited entries of the scopes, newest first."""
+        ...
 
 
-def _entry_line(entry: Mapping) -> str:
-    text = _clean(entry["text"], ENTRY_TEXT)
-    quote = _clean(entry["quote"], 120)
-    return (
-        f"- {entry['id']} [{entry['kind']} {entry['date']}"
-        f" by:{_clean(entry['actor'], 40)}] {text}"
-        f' (quote: "{quote}"; cite: {_clean(entry["cite"], 120)})'
-    )
+# classify and knowledge annotate their dicts bare, which pyright strict
+# reads as partly unknown; viewing the modules through these protocols
+# types the calls here without touching modules this file does not own.
+_CLASSIFY = cast("_Classifier", classify)
+_KNOWLEDGE = cast("_Knowledge", knowledge)
+
+# Builds the block text from an open read-only connection.
+Builder = Callable[
+    [
+        sqlite3.Connection,
+        Path,
+        Mapping[str, object],
+        Mapping[str, str],
+        dict[str, object],
+    ],
+    str,
+]
 
 
-def _frame(attrs: str, lines: list[str]) -> str:
-    return "\n".join([f"{OPEN}{attrs}>", *lines, CLOSE])
+def read_input(stream: BinaryIO) -> dict[str, object]:
+    """Read the hook payload from a binary stream.
 
+    A bad payload must never fail a hook, so every problem gives ``{}``.
 
-def render_block(
-    entries: list[dict],
-    scope_label: str,
-    *,
-    notes: tuple[str, ...] = (),
-    limit: int = BLOCK_LIMIT,
-) -> str:
-    """The SessionStart block: block_entries output, the usage lines and
-    any notes, framed; the last entries are dropped until it fits."""
-    label = _clean(scope_label, 80)
-    tail = [USAGE, OPEN_HINT, *(_clean(n, 200) for n in notes)]
-    for shown in range(len(entries), -1, -1):
-        head = []
-        if shown:
-            head = [
-                f"Project knowledge for {label} ({shown} current; cited; may"
-                " be stale — verify with `pctx know show K<id>`):",
-                *(_entry_line(e) for e in entries[:shown]),
-            ]
-        block = _frame("", head + tail)
-        if len(block) <= limit:
-            return block
-    return block[: limit - len(CLOSE) - 1] + "\n" + CLOSE
+    Args:
+        stream: Binary stream, usually stdin's buffer.
 
-
-def read_input(stream) -> dict:
-    """The hook payload from a binary stream: at most MAX_INPUT bytes of a
-    JSON object, else {} (a bad payload must never fail a hook)."""
+    Returns:
+        The JSON object, read from at most ``MAX_INPUT`` bytes, else ``{}``.
+    """
     try:
         raw = stream.read(MAX_INPUT + 1)
         if len(raw) > MAX_INPUT:
@@ -121,12 +121,23 @@ def read_input(stream) -> dict:
         payload = json.loads(raw)
     except (OSError, ValueError, RecursionError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    # json.loads gives Any; JSON object keys are always strings.
+    return (
+        cast("dict[str, object]", payload) if isinstance(payload, dict) else {}
+    )
 
 
-def _first_record(path: str) -> dict | None:
-    """Line 1 of a transcript as a dict: a regular file only, never
-    through a symlink, never blocking on a FIFO, at most FIRST_LINE bytes."""
+def _as_payload(raw: object) -> Mapping[str, object]:
+    """Treat anything that is not a JSON object as an empty payload."""
+    return (
+        cast("Mapping[str, object]", raw) if isinstance(raw, Mapping) else {}
+    )
+
+
+def _read_first_line(path: str) -> bytes | None:
+    """Read line 1 of a regular file, or None if it cannot be read safely."""
+    # O_NOFOLLOW: a symlink could point the hook at any file the user can
+    # read. O_NONBLOCK: opening a FIFO must not hang the provider.
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except (OSError, ValueError):  # ValueError: a NUL in the path
@@ -134,38 +145,81 @@ def _first_record(path: str) -> dict | None:
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        line = os.fdopen(fd, "rb", closefd=False).readline(FIRST_LINE)
+        return os.fdopen(fd, "rb", closefd=False).readline(FIRST_LINE)
     except OSError:
         return None
     finally:
         os.close(fd)
+
+
+def _first_record(path: str) -> dict[str, object] | None:
+    """Parse line 1 of a transcript as a JSON object.
+
+    Only a regular file is read, never through a symlink, never blocking on
+    a FIFO, and at most ``FIRST_LINE`` bytes.
+
+    Returns:
+        The record, or None if the file is unsafe, unreadable or not a
+        JSON object.
+    """
+    line = _read_first_line(path)
+    if line is None:
+        return None
     try:
         record = json.loads(line)  # a line cut at the cap is not JSON
     except (ValueError, RecursionError):
         return None
-    return record if isinstance(record, dict) else None
+    # json.loads gives Any; JSON object keys are always strings.
+    return (
+        cast("dict[str, object]", record) if isinstance(record, dict) else None
+    )
 
 
-def _subagent(payload: Mapping, provider: str) -> bool:
-    """Whether the payload's transcript is a subagent or reviewer thread;
-    unknown, unreadable or unclassifiable is treated as a main session."""
+def _subagent(payload: Mapping[str, object], provider: str) -> bool:
+    """Whether the transcript is a subagent or reviewer thread.
+
+    Unknown, unreadable or unclassifiable counts as a main session, so a
+    classification problem never silences a real session.
+
+    Returns:
+        True for a subagent or reviewer thread.
+    """
     path = payload.get("transcript_path")
-    first = _first_record(path) if isinstance(path, str) and path else None
+    if not isinstance(path, str) or not path:
+        return False
+    first = _first_record(path)
     if first is None:
         return False
     try:
         if provider == "codex":
-            info = classify.codex_thread(first)
+            info = _CLASSIFY.codex_thread(first)
         else:
-            info = classify.claude_thread(path, first)
+            info = _CLASSIFY.claude_thread(path, first)
     except ValueError:
         return False
     return info.thread_class in ("subagent", "reviewer")
 
 
-def _open(home: Path):
-    """A read-only connection; a crashed writer's hot journal is healed
-    once when this process may write, else HotJournalError."""
+def _skip_as_subagent(payload: Mapping[str, object], provider: str) -> bool:
+    """Like ``_subagent``, but any failure means "not a subagent"."""
+    try:
+        return _subagent(payload, provider)
+    except Exception:  # an odd transcript is not a reason to stay silent
+        return False
+
+
+def _open(home: Path) -> sqlite3.Connection:
+    """Open the store read-only.
+
+    A crashed writer's hot journal is healed once if this process may
+    write; otherwise ``HotJournalError`` propagates.
+
+    Returns:
+        A read-only connection.
+
+    Raises:
+        HotJournalError: If the journal is hot and cannot be healed.
+    """
     db = store.db_path(home)
     try:
         return store.connect_ro(db)
@@ -176,12 +230,12 @@ def _open(home: Path):
 
 
 def _notice(code: str) -> str:
-    """What a provider sees when the store cannot be read (E13, A5)."""
-    return _frame(' kind="notice"', [f"pctx: store unavailable ({code})"])
+    """The block a provider sees when the store cannot be read."""
+    return frame(' kind="notice"', [f"pctx: store unavailable ({code})"])
 
 
 def _stale(home: Path) -> tuple[str, ...]:
-    """A line when the poller's heartbeat is older than 3x its interval."""
+    """A warning line when the poller's heartbeat is over 3x its interval."""
     fresh = obs.freshness(obs.read_status(home))
     if fresh["poller"] == "ok":
         return ()
@@ -192,55 +246,85 @@ def _stale(home: Path) -> tuple[str, ...]:
     )
 
 
-def _cwd(payload: Mapping) -> str:
+def _cwd(payload: Mapping[str, object]) -> str:
+    """The payload's working directory, else the process's, else empty."""
     cwd = payload.get("cwd")
     if isinstance(cwd, str) and cwd:
         return cwd
     try:
-        return os.getcwd()
-    except OSError:
+        return str(Path.cwd())
+    except OSError:  # the directory was deleted under us
         return ""
 
 
-def _label(conn, ids: list[int], cwd: str) -> str:
+def _label(conn: sqlite3.Connection, ids: list[int], cwd: str) -> str:
+    """Name the scope: its stored label, else the last path component."""
     row = conn.execute(
         "SELECT label FROM scope WHERE kind != 'global' AND id IN"
         f" ({','.join('?' * len(ids))}) LIMIT 1",
         ids,
     ).fetchone()
-    return row[0] if row else os.path.basename(cwd) or cwd
+    # Not Path.name: a trailing slash must give the whole cwd.
+    return row[0] if row else cwd.rpartition("/")[2] or cwd
 
 
-def _respond(event, payload, provider, env, trace, build) -> dict:
-    """The common path: disabled or subagent -> {}; else build(...) on a
-    read-only connection; any failure -> a framed notice (fail-open)."""
-    trace = {} if trace is None else trace
-    if env.get("PCTX_HOOK_DISABLE") == "1":
-        trace["skipped"] = "disabled"
-        return {}
-    payload = payload if isinstance(payload, Mapping) else {}
-    try:
-        if _subagent(payload, provider):
-            trace["skipped"] = "subagent"
-            return {}
-    except Exception:  # an odd transcript is not a reason to stay silent
-        pass
+def _build_text(
+    build: Builder,
+    payload: Mapping[str, object],
+    env: Mapping[str, str],
+    trace: dict[str, object],
+) -> str:
+    """Run the builder on a read-only connection.
+
+    Any failure becomes a framed notice: a hook must tell the model that
+    memory is unavailable rather than fail or say nothing.
+
+    Returns:
+        The block text, or a framed notice describing the failure.
+    """
     try:
         home = store.data_home(env)
         conn = _open(home)
         try:
-            text = build(conn, home, payload, env, trace)
+            return build(conn, home, payload, env, trace)
         finally:
             conn.close()
     except store.HotJournalError:
         trace["error"] = "hot_journal"
-        text = _notice("hot_journal")
+        return _notice("hot_journal")
     except store.StoreUnavailableError:
         trace["error"] = "store_unavailable"
-        text = _notice("store_unavailable")
-    except Exception:
+        return _notice("store_unavailable")
+    except Exception:  # fail open: never break the provider's session
         trace["error"] = "error"
-        text = _notice("error")
+        return _notice("error")
+
+
+def _respond(
+    event: str,
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    trace: dict[str, object] | None,
+    build: Builder,
+) -> dict[str, object]:
+    """The path both hooks share.
+
+    Disabled or subagent gives ``{}``; otherwise ``build`` runs and its
+    text is wrapped in the provider's hook output.
+
+    Returns:
+        The hook output, or ``{}`` when there is nothing to say.
+    """
+    trace = {} if trace is None else trace
+    if env.get("PCTX_HOOK_DISABLE") == "1":
+        trace["skipped"] = "disabled"
+        return {}
+    data = _as_payload(payload)
+    if _skip_as_subagent(data, provider):
+        trace["skipped"] = "subagent"
+        return {}
+    text = _build_text(build, data, env, trace)
     if not text:
         return {}
     return {
@@ -258,10 +342,19 @@ def _limits(provider: str) -> tuple[int, int]:
     return BLOCK_LIMIT, RECALL_LIMIT
 
 
-def _start_block(conn, home, payload, env, trace, limit) -> str:
+def _start_block(
+    conn: sqlite3.Connection,
+    home: Path,
+    payload: Mapping[str, object],
+    env: Mapping[str, str],
+    trace: dict[str, object],
+    limit: int,
+) -> str:
+    """Build the SessionStart block for the payload's repository."""
+    del env  # part of the Builder signature; unused here
     cwd = _cwd(payload)
     ids = scope.scope_ids_for_read(conn, cwd)
-    entries = knowledge.block_entries(conn, ids, limit=SHOWN)
+    entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
     return render_block(
         entries, _label(conn, ids, cwd), notes=_stale(home), limit=limit
@@ -269,162 +362,80 @@ def _start_block(conn, home, payload, env, trace, limit) -> str:
 
 
 def session_start(
-    payload: dict, provider: str, env: Mapping[str, str], *, trace=None
-) -> dict:
-    """SessionStart: the user-cited knowledge of this repo and global
-    (spec O5b) plus the usage line (O3). trace, if given, receives counts
-    and the skip/error code for the stage log. The block is capped at
-    BLOCK_LIMIT, or CODEX_BLOCK_LIMIT for Codex."""
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Handle SessionStart: push the repo's user-cited knowledge.
+
+    The block holds this repo's and the global knowledge that carries a
+    user citation, plus the usage line. It is capped at ``BLOCK_LIMIT``, or
+    ``CODEX_BLOCK_LIMIT`` for Codex.
+
+    Args:
+        payload: The provider's hook payload; non-objects count as empty.
+        provider: ``claude`` or ``codex``.
+        env: Environment, for the data directory and kill switch.
+        trace: If given, receives counts and the skip or error code for the
+            stage log.
+
+    Returns:
+        The provider's hook output, or ``{}``.
+    """
     limit = _limits(provider)[0]
-
-    def build(conn, home, payload, env, trace):
-        return _start_block(conn, home, payload, env, trace, limit)
-
+    build = partial(_start_block, limit=limit)
     return _respond("SessionStart", payload, provider, env, trace, build)
 
 
-def _terms(fts: str | None) -> list[str]:
-    """The quoted single-word terms of an FTS query, phrases left out."""
-    return [e for e in (fts or "").split(" OR ") if e and " " not in e]
-
-
-def _matched(conn, terms: list[str], ids: list[int]) -> Counter:
-    """How many of the terms each event matches (FTS5, same tokenizer)."""
-    counts = Counter()
-    marks = ",".join("?" * len(ids))
-    for term in terms:
-        rows = conn.execute(
-            "SELECT rowid FROM event_fts WHERE event_fts MATCH ?"
-            f" AND rowid IN ({marks})",
-            (term, *ids),
-        )
-        counts.update(row[0] for row in rows)
-    return counts
-
-
-def _knowledge_line(entry: Mapping) -> str:
-    cites = ", ".join(_clean(c, 120) for c in entry["cites"])
-    return (
-        f"- {entry['id']} [{entry['kind']} {entry['date']}"
-        f" by:{_clean(entry['actor'], 40)}]"
-        f" {_clean(entry['text'], ENTRY_TEXT)}"
-        + (f" (cites: {cites})" if cites else "")
-    )
-
-
-def _hit_line(hit: Mapping, cap: int) -> str:
-    plain = hit["snippet"].replace("«", "").replace("»", "")
-    head = " · ".join(
-        _clean(part, 120)
-        for part in (
-            f"{hit['provider']} {hit['role']} {hit['kind']}",
-            f"session {hit['session']}",
-            hit["ts"] or "no ts",
-            hit["ref"],
-        )
-    )
-    return f"- [{head}] {_clean(plain, cap)}"
-
-
-def _recall_text(entries, hits, notes, limit=RECALL_LIMIT) -> str:
-    """The recall block within `limit`: knowledge, then hits, the last
-    ones dropped (then the snippets shortened) until it fits."""
-    tail = [*(_clean(n, 200) for n in notes), RECALL_HINT]
-    for cap in (SNIPPET, 200, 120):
-        items = [_knowledge_line(e) for e in entries]
-        items += [_hit_line(h, cap) for h in hits]
-        for count in range(len(items), 0, -1):
-            lines = [classify.NOTICE, *items[:count], *tail]
-            block = _frame(' kind="recall"', lines)
-            if len(block) <= limit:
-                return block
-    # ponytail: a lone item over the cap gives no block; the longest
-    # realistic one is about 470 characters against Codex's 900
-    return ""
-
-
-def _prompt_terms(payload, trace) -> list[str] | None:
-    """The query terms of the prompt, or None when it recalls nothing:
-    no prompt, a slash command, or fewer than MIN_TERMS terms."""
-    prompt = payload.get("prompt") if isinstance(payload, Mapping) else None
-    if not isinstance(prompt, str) or prompt.lstrip().startswith("/"):
-        trace["skipped"] = "prompt"
-        return None
-    terms = _terms(query.build_fts_query(prompt))
-    trace["n_terms"] = len(terms)
-    if len(terms) < MIN_TERMS:
-        trace["skipped"] = "short"
-        return None
-    return terms
-
-
-def _pushable(conn, entries: list[dict]) -> list[dict]:
-    """The matched entries a hook may push without being asked (spec O5b):
-    those with a live user-prompt citation, as at SessionStart."""
-    ids = [int(e["id"][1:]) for e in entries]
-    allowed = knowledge.user_cited(conn, ids)
-    return [e for e, kid in zip(entries, ids) if kid in allowed]
-
-
-def _recall_block(conn, home, payload, env, trace, terms, limit) -> str:
-    prompt = payload["prompt"]
-    session = payload.get("session_id")
-    entries, hits, dropped = [], [], 0
-    for page in range(1, POOL_PAGES + 1):
-        found = query.search(
-            conn,
-            prompt,
-            cwd=_cwd(payload),
-            env=env,
-            kinds=set(EVENT_KINDS),
-            limit=POOL_PAGE,
-            page=page,
-            current_session=session if isinstance(session, str) else None,
-        )
-        if "error" in found:
-            break
-        if page == 1:
-            entries = _pushable(conn, found["knowledge"])
-        counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
-        for hit in found["hits"]:
-            if counts[hit["id"]] >= MIN_TERMS:
-                hits.append(hit)
-            else:
-                dropped += 1
-        if len(hits) >= MAX_EVENTS or not found["has_more"]:
-            break
-    hits = hits[:MAX_EVENTS]
-    trace["returned_ids"] = [h["id"] for h in hits]
-    trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
-    trace["stages"] = {"floor_dropped": dropped, "returned": len(hits)}
-    if not entries and not hits:
-        return ""
-    return _recall_text(entries, hits, _stale(home), limit)
+def _recall_block(
+    conn: sqlite3.Connection,
+    home: Path,
+    payload: Mapping[str, object],
+    env: Mapping[str, str],
+    trace: dict[str, object],
+    terms: list[str],
+    limit: int,
+) -> str:
+    """Build the recall block for the payload's prompt."""
+    request = RecallRequest(terms, _cwd(payload), partial(_stale, home), limit)
+    return recall_block(conn, payload, env, trace, request)
 
 
 def prompt_submit(
-    payload: dict, provider: str, env: Mapping[str, str], *, trace=None
-) -> dict:
-    """UserPromptSubmit (spec 9.2): recall for the prompt, or {}.
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Handle UserPromptSubmit: recall for the prompt, or ``{}``.
 
-    Matching knowledge first (user-cited entries only, as at SessionStart:
-    the others stay pull-only), then at most MAX_EVENTS prompt/reply events
-    of this repo, never the caller's own session, each matching at least
-    MIN_TERMS (3) distinct query terms. Prompts with fewer than MIN_TERMS
-    terms, slash commands and subagent transcripts recall nothing. The block
-    is capped at RECALL_LIMIT, or CODEX_RECALL_LIMIT for Codex.
+    Matching knowledge comes first (user-cited entries only, as at
+    SessionStart: the others stay pull-only). Then come at most
+    ``MAX_EVENTS`` prompt and reply events of this repo, never the caller's
+    own session, each matching at least ``MIN_TERMS`` distinct query terms.
+    Prompts with fewer terms, slash commands and subagent transcripts
+    recall nothing. The block is capped at ``RECALL_LIMIT``, or
+    ``CODEX_RECALL_LIMIT`` for Codex.
+
+    Args:
+        payload: The provider's hook payload; non-objects count as empty.
+        provider: ``claude`` or ``codex``.
+        env: Environment, for the data directory and kill switches.
+        trace: If given, receives counts and the skip or error code for the
+            stage log.
+
+    Returns:
+        The provider's hook output, or ``{}``.
     """
     trace = {} if trace is None else trace
     if (store.data_home(env) / RECALL_OFF).exists():  # owner switch
         trace["skipped"] = "recall_off"
         return {}
-    terms = _prompt_terms(payload, trace)
+    terms = prompt_terms(_as_payload(payload), trace)
     if terms is None:  # nothing to recall: the store is not even opened
         return {}
-
-    limit = _limits(provider)[1]
-
-    def build(conn, home, payload, env, trace):
-        return _recall_block(conn, home, payload, env, trace, terms, limit)
-
+    build = partial(_recall_block, terms=terms, limit=_limits(provider)[1])
     return _respond("UserPromptSubmit", payload, provider, env, trace, build)
