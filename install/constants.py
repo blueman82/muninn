@@ -37,6 +37,8 @@ REMOVED_PREFIX = "muninn-removed-"
 # create gets masked to: nobody but the owner may read them.
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 PRIVATE_UMASK = 0o077
+# The mode of every directory we create that holds our own state.
+PRIVATE_DIR_MODE = 0o700
 # The value-free summary an install leaves in the lib dir for support.
 INSTALL_RECORD = "install-record.json"
 # Longest age of status.json that still counts as a live heartbeat.

@@ -34,6 +34,7 @@ from install import configedit as ce
 from install.constants import (
     CLAUDE_EVENTS,
     CODEX_KEYS,
+    PRIVATE_DIR_MODE,
     PRIVATE_UMASK,
     TS_FORMAT,
 )
@@ -221,7 +222,7 @@ def _remove_release(ctx: Ctx) -> bool:
 
 def _move_data(ctx: Ctx) -> None:
     """Move the data dir into a new private dir, undoing it on failure."""
-    ctx.removed.mkdir(mode=0o700)
+    ctx.removed.mkdir(mode=PRIVATE_DIR_MODE)
     try:
         ctx.data.rename(ctx.removed / ctx.data.name)
     except OSError:

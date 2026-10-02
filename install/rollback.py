@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install.constants import PRIVATE_UMASK
+from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real, wait
 from install.record import Record, load_record
 from install.steps_release import relink
@@ -73,7 +73,7 @@ def restore_toml(text: str, sections: Sequence[Mapping[str, Any]]) -> str:
 
 def aside(ctx: Ctx, path: Path, name: str) -> None:
     """Move a new-system artefact into the failed dir (never delete)."""
-    ctx.failed.mkdir(mode=0o700, exist_ok=True)
+    ctx.failed.mkdir(mode=PRIVATE_DIR_MODE, exist_ok=True)
     path.rename(ctx.failed / name)
 
 

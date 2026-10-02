@@ -54,7 +54,7 @@ are. If a provider config cannot be edited safely it stops before changing
 anything, says why, and exits 1; fix that and run it again.
 
 The data directory (the index and the knowledge ledger) is moved to
-`~/.local/share/muninn-removed-<timestamp>/data`, not deleted, because the
+`~/.local/share/muninn-removed-<timestamp>/muninn`, not deleted, because the
 ledger cannot be rebuilt from transcripts. Add `--purge-data` to delete it.
 Running it again, or on a machine without muninn, changes nothing and says so.
 After an uninstall `bin/muninn-install` does a fresh install.

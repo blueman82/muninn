@@ -30,7 +30,8 @@ if [ -z "$py" ]; then
   exit 127
 fi
 
-# Removing needs no commit, so it must work where git or the checkout is gone.
+# Removing needs no commit, so it must work where git is missing or this
+# copy of the repo is not a git checkout.
 if [ "${1:-}" = --uninstall ]; then
   shift
   cd "$root"
@@ -56,7 +57,7 @@ fi
 case "${1:-}" in
   -h | --help)
     cat <<'HELP'
-usage: bin/muninn-install [--check | --status]
+usage: bin/muninn-install [--check | --status | --uninstall]
 
 Install or upgrade muninn from this checkout at its HEAD. It picks a fresh
 install or an upgrade by looking at what is on this machine.
