@@ -224,8 +224,11 @@ def write_json_atomic(path: Path, obj: object) -> None:
         Path(tmp).replace(path)
     except BaseException:
         # BaseException so an interrupt does not leave a stray temp file
-        # holding the payload.
-        Path(tmp).unlink()
+        # holding the payload. missing_ok because the interrupt may land just
+        # after the rename, when the temp file is already gone; a failing
+        # cleanup would then replace the interrupt and the poller would
+        # carry on instead of stopping.
+        Path(tmp).unlink(missing_ok=True)
         raise
 
 

@@ -10,6 +10,8 @@ import sqlite3
 import time
 import unittest
 from pathlib import Path
+from typing import NoReturn
+from unittest import mock
 
 from muninn import store
 from tests.store_support import (
@@ -74,6 +76,24 @@ class PathTests(StoreCase):
         self.assertEqual(
             sorted(p.name for p in self.tmp.iterdir()),
             ["blocked", "status.json"],
+        )
+
+    def test_an_interrupt_after_the_rename_is_not_masked(self) -> None:
+        target = self.tmp / "status.json"
+        real_replace = Path.replace
+
+        def replace_then_interrupt(src: Path, dst: Path) -> NoReturn:
+            real_replace(src, dst)
+            raise KeyboardInterrupt  # a signal handler firing just after
+
+        with (
+            mock.patch.object(Path, "replace", replace_then_interrupt),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            store.write_json_atomic(target, {"ok": True})
+        self.assertEqual(json.loads(target.read_text()), {"ok": True})
+        self.assertEqual(
+            sorted(p.name for p in self.tmp.iterdir()), ["status.json"]
         )
 
 
