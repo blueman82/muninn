@@ -219,8 +219,8 @@ def recall_text(
         limit: Maximum characters.
 
     Returns:
-        The framed block, or an empty string when even a single item does
-        not fit.
+        The framed block, or an empty string when there are no items or
+        not even one fits.
     """
     tail = [*(clean(n, 200) for n in notes), RECALL_HINT]
     for cap in (SNIPPET, 200, 120):
