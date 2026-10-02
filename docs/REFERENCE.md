@@ -124,17 +124,23 @@ characters: matching knowledge entries first, then up to 3 earlier prompts or re
 `recall.off` exists in the data directory, that hook prints `{}` and never opens the database, so no recall is added.
 SessionStart (`pctx hook session-start`) is not affected; `PCTX_HOOK_DISABLE=1` silences both hooks.
 
-**Default for new installs: ON.** The file does not exist after `--fresh` or `--upgrade`; neither creates it. Recall stays on
-until someone creates the file.
+**Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints how to turn recall on. `--upgrade`
+never creates or removes it, so an existing machine keeps whatever it had: a machine installed before this default has no
+file and stays on.
+
+**Why off.** A pre-release trial found the new system answering for the wrong project in 12 of its deliberate wrong-project
+questions (per the trial report; the overall difference was not statistically meaningful). Recall is the one memory pctx
+pushes without being asked, so it waits for the retrieval re-check. Full reasoning and the sources to open with
+`pctx open` are in `docs/adr/0007-recall-off-by-default.md`.
 
 | To | Run |
 |---|---|
-| turn recall off | `install -m 600 /dev/null ~/.local/share/provenance-context/recall.off` |
 | turn recall on | `unlink ~/.local/share/provenance-context/recall.off` |
+| turn recall off | `install -m 600 /dev/null ~/.local/share/provenance-context/recall.off` |
 | check | `ls ~/.local/share/provenance-context/recall.off` (present = off) |
 
-The file must be mode 0600, otherwise `pctx doctor` fails `file_modes`. Its contents are ignored. An `--upgrade` leaves it
-as it is, so the setting survives upgrades. (On the owner's machine it is set to off.)
+The file must be mode 0600, otherwise `pctx doctor` fails `file_modes`. Its contents are ignored. The change takes effect on
+the next prompt; no restart is needed.
 
 ## Files in the data directory
 

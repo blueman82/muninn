@@ -81,6 +81,21 @@ class FreshInstallTest(unittest.TestCase):
         self.assertFalse(os.path.lexists(self.lib / "python"))
         self.assertFalse(os.path.lexists(h / ".local/bin/pctx"))
 
+    def test_fresh_install_starts_with_recall_off_and_says_how_to_enable(
+        self,
+    ) -> None:
+        flag = self.w.home / ".local/share/provenance-context/recall.off"
+        self.install()
+        self.assertEqual(flag.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(flag.read_bytes(), b"")
+        said = "\n".join(self.w.out)
+        self.assertIn(f"unlink {flag}", said)
+        self.assertIn("docs/adr/0007", said)
+
+    def test_dry_run_creates_no_recall_switch(self) -> None:
+        self.install(dry_run=True)
+        self.assertFalse((self.w.home / ".local/share").exists())
+
     def test_trust_auto_only_for_verified_codex_versions(self) -> None:
         self.w.fake.version = b"codex-cli 9.9.9\n"
         self.assertEqual(self.install()["trust"], "owner")
@@ -220,6 +235,15 @@ class UpgradeTest(unittest.TestCase):
             sorted(p.name for p in (h / ".local/share").iterdir()),
             shares,  # no leftover record dir
         )
+
+    def test_upgrade_leaves_the_recall_switch_as_the_owner_set_it(
+        self,
+    ) -> None:
+        w = self.w
+        flag = w.home / ".local/share/provenance-context/recall.off"
+        flag.unlink()  # the owner turned recall on
+        co.install(self.ctx, w.repo, self.sha2)
+        self.assertFalse(flag.exists())
 
     def test_failed_upgrade_returns_to_the_old_release_and_keeps_running(
         self,

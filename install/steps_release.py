@@ -15,7 +15,7 @@ import tarfile
 from pathlib import Path
 
 from install import configedit as ce
-from install.constants import GIT_ENV, HEARTBEAT_S, LABEL
+from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
 from install.context import (
     Ctx,
     StepFailedError,
@@ -132,11 +132,24 @@ def fresh(ctx: Ctx, since: float) -> bool:
 def ingest_fresh(ctx: Ctx, rec: Record) -> None:
     """Create the data dir and index what already exists (fresh install).
 
+    Also creates ``recall.off`` so per-prompt recall starts off, and says how
+    to turn it on; only a fresh install does, never an upgrade.
+
     ``doctor`` runs in verify, once the launchd job is up.
     """
     if dry(ctx, f"PCTX_HOME={ctx.data} pctx ingest --full"):
         return
     ctx.data.mkdir(parents=True, mode=0o700)
+    flag = ctx.data / RECALL_OFF
+    # Mode 0600 from creation: doctor fails file_modes on a looser file.
+    os.close(os.open(flag, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    ctx.say(
+        "Per-prompt recall starts OFF: pctx will not add earlier prompts to "
+        "your prompts until you turn it on. SessionStart memory is "
+        "unaffected. Why off: a pre-release trial answered for the wrong "
+        "project, so recall waits for a re-check (docs/adr/0007). "
+        f"To turn recall on: unlink {flag}"
+    )
     must(ctx, [ctx.pctx, "ingest", "--full"], env=pctx_env(ctx.data))
 
 

@@ -36,11 +36,15 @@ release. Provider config is not touched. A failed upgrade returns to the old
 release; after a successful one the old release is gone (re-run `--upgrade`
 at an earlier commit to go back).
 
-## Per-prompt recall is on by default
+## Per-prompt recall starts off
 
-A new install adds recall to each prompt. To turn it off, run
-`install -m 600 /dev/null ~/.local/share/provenance-context/recall.off`; to turn it back on, `unlink` that file. Details in
-`docs/REFERENCE.md`.
+A `--fresh` install creates `~/.local/share/provenance-context/recall.off`, so pctx does not add earlier prompts to each of
+your prompts. Session-start memory and `pctx search` still work. A pre-release trial answered for the wrong project in some
+test questions, so recall waits for a re-check (`docs/adr/0007-recall-off-by-default.md`).
+
+To turn recall on: `unlink ~/.local/share/provenance-context/recall.off`. To turn it off again:
+`install -m 600 /dev/null ~/.local/share/provenance-context/recall.off`. Details in `docs/REFERENCE.md`. An `--upgrade` never
+changes the file.
 
 ## Check it works
 

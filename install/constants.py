@@ -45,6 +45,17 @@ OWNER_STEP = (
     "OWNER STEP: start a new Codex session, run /hooks and trust the two "
     "provenance-context hooks (session_start, user_prompt_submit)."
 )
+# The per-prompt recall switch pctx checks for in its data dir (pctx/hook.py).
+# A fresh install creates it, so recall starts off; an upgrade leaves it be.
+RECALL_OFF = "recall.off"
 # Read-only git calls must not take index.lock, or they would race the
 # owner's own git commands in the same repository.
-GIT_ENV = dict(os.environ, GIT_OPTIONAL_LOCKS="0")
+# The repository is always named with -C, so an inherited GIT_DIR,
+# GIT_INDEX_FILE or GIT_WORK_TREE (set inside a git hook) must not redirect
+# these calls: a commit hook running the tests once staged a temp repo into
+# the real index.
+GIT_ENV = {
+    k: v
+    for k, v in os.environ.items()
+    if k not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")
+} | {"GIT_OPTIONAL_LOCKS": "0"}

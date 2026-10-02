@@ -40,6 +40,10 @@ The installer refuses a commit that breaks the stdlib standards rules.
 
 - Retrieval and answer-quality checks are the next product work (see the
   memory file `project_memsys_pctx_rebuild.md`).
+- `--fresh` now creates `recall.off`, so per-prompt recall starts off
+  (ADR 0007; merged to main but not installed until the next `--upgrade`,
+  and an upgrade does not change an existing machine). To restore the old default, stop creating it in
+  `install/steps_release.py: ingest_fresh` once the retrieval re-check passes.
 - `--fresh` has only been rehearsed in a temp HOME, never on a second machine.
 - Deferred by the owner: a hash-chained call log.
 - `.claude/skills/pctx-*` (11 skills, `docs/SKILLS.md`) are committed. Not

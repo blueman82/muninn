@@ -68,7 +68,8 @@ failure. A missing tool or a failing test fails the gate; it never skips.
 `docs/adr/`: one pinned release and in-place upgrade (0001); the installer has
 only `--fresh` and `--upgrade` (0002); `bin/pctx` finds its interpreter at run
 time (0003); logs hold no transcript text (0004); no hash-chained call log
-(0005); the standards are enforced by a gate (0006).
+(0005); the standards are enforced by a gate (0006); per-prompt recall starts
+off on a fresh install (0007).
 
 ## Definition of done (Codex has no Stop hook, so this is on you)
 

@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from collections.abc import Mapping, Sequence
@@ -91,3 +93,24 @@ class CodexContractTest(unittest.TestCase):
         self.assertEqual(
             (got["name"], got["version"]), ("provenance-context", "0.2.0")
         )
+
+
+class GitEnvTest(unittest.TestCase):
+    """The installer's git calls ignore a repository set by the caller."""
+
+    def test_repository_variables_from_a_hook_are_not_inherited(self) -> None:
+        env = dict(
+            os.environ, GIT_INDEX_FILE="x", GIT_DIR="y", GIT_WORK_TREE="z"
+        )
+        code = "from install.constants import GIT_ENV; print(sorted(GIT_ENV))"
+        out = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=ROOT,
+            env=env,
+        ).stdout
+        for name in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE"):
+            self.assertNotIn(name, out)
+        self.assertIn("GIT_OPTIONAL_LOCKS", out)

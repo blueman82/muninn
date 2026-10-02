@@ -54,7 +54,7 @@ def git(cwd: Path, *args: str) -> bytes:
     Returns:
         The command's stdout.
     """
-    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t")
+    env = dict(co.GIT_ENV, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t")
     env.update(GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
