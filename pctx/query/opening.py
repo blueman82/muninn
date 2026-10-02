@@ -88,9 +88,10 @@ def locate(
 def _read_line(roots: Mapping[str, Path], row: sqlite3.Row) -> bytes | None:
     """Read the line at byte_offset, terminator included.
 
-    Only an active source under a known root is read, never through a
-    symlink or out of the root, and never blocking on a non-regular file
-    (a FIFO planted at the path would otherwise hang the reader).
+    Only an active source under a known root is read. A symlinked final
+    component and any path that normalises outside the root are refused,
+    and a non-regular file is never blocked on (a FIFO planted at the path
+    would otherwise hang the reader).
 
     Args:
         roots: Root name to directory.
@@ -233,7 +234,9 @@ def open_event(
         status: A parsed status.json, for freshness fields.
 
     Returns:
-        The answer, or ``{"error": code}`` for a bad or unknown reference.
+        The answer, or ``{"error": code}``: ``bad_ref``, ``ambiguous_ref``
+        or ``not_found`` for the reference, ``bad_offset`` for a negative
+        offset, ``offset_past_end`` for an offset beyond the text.
     """
     row, problem = locate(conn, ref)
     if row is None:

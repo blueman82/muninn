@@ -30,8 +30,9 @@ SESSION_PAGE_MAX = 200
 FIRST_PROMPT = 120  # chars of a session's first prompt
 ROW_PREVIEW = 80  # chars per line of a session timeline
 
-# Primary threads only: forks and subagents are counted separately, so the
-# per-session event totals describe what the user actually conversed about.
+# Primary threads only, so the event counts (events, kinds) leave out
+# subagent and other non-primary threads; the threads and forks fields
+# count every thread.
 _PRIMARY_EVENTS = (
     " FROM event e JOIN source s ON s.id = e.source_id"
     " JOIN scope sc ON sc.id = e.scope_id"
@@ -167,8 +168,15 @@ def _keyset(
 ) -> tuple[str, list[Any]] | None:
     """Return the clause and parameters that resume at event ``from_id``.
 
+    Args:
+        conn: Read-only store connection.
+        root: The session root the event must belong to.
+        from_id: Id of the event to resume at.
+
     Returns:
-        None when the event is not part of this session.
+        The SQL clause and its parameters that keep events at or after the
+        event's (ts, thread, line, part) tuple, or None when the event is
+        not part of this session.
     """
     start = conn.execute(
         f"SELECT {_TIMELINE_ORDER} FROM event e"

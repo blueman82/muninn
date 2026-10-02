@@ -174,8 +174,8 @@ def render(
 ) -> list[Answer]:
     """Render the shown entries as hits.
 
-    A session that hit its cap reports how many of its matches no hit
-    stands for (``more_in_session``).
+    A session with at least PER_SESSION hits reports how many of its
+    in-scope matches no hit stands for (``more_in_session``).
 
     Args:
         conn: Read-only store connection.

@@ -69,7 +69,9 @@ def resolve_session(conn: sqlite3.Connection, given: str) -> str:
     """
     if not given:
         raise BadArgumentError("unknown_session")
-    # LIMIT 3 is enough to tell "one", "exact plus longer" and "ambiguous".
+    # No ORDER BY, so LIMIT 3 could cut an exact root that has 3+ longer
+    # prefix matches. Session roots are all UUIDs of equal length, so an
+    # exact match is also the only possible prefix match.
     found = conn.execute(
         "SELECT DISTINCT session_root FROM source WHERE session_root = ?"
         " OR substr(session_root, 1, ?) = ? LIMIT 3",
