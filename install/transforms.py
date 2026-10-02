@@ -59,14 +59,25 @@ def edit_settings(data: bytes, fragment: Mapping[str, Sequence[Any]]) -> bytes:
         current: Any = ce.jget(obj, ("hooks", event))[1] or []
         if not isinstance(current, list):
             raise ce.RefusedError(f"settings.json hooks.{event} is not a list")
-        groups = cast(list[dict[str, Any]], current)  # hook group objects
+        groups = cast(list[dict[str, Any]], current)
         keep = [g for g in groups if not ours(g)]
         ce.jset(obj, ("hooks", event), keep + list(fragment[event]))
     return ce.dump_like(data, obj)
 
 
 def codex_scan(text: str) -> dict[str, dict[str, Any] | None]:
-    """Parse our config.toml sections and refuse stray markers."""
+    """Parse our config.toml sections and refuse stray markers.
+
+    Args:
+        text: The whole config.toml.
+
+    Returns:
+        Each of our sections parsed, or None when it is absent.
+
+    Note:
+        ``configedit.RefusedError`` propagates for a stray marker or
+        unrecognised layout.
+    """
     return ce.scan_named(text, CODEX_KEYS, MARKERS)
 
 
@@ -77,8 +88,9 @@ def codex_check(before: bytes, after: bytes) -> None:
         before: The file bytes before the edit.
         after: The file bytes after the edit.
 
-    A refusal (``configedit.RefusedError``) propagates when the edit touched
-    anything else or left a stray marker or unrecognised layout.
+    Note:
+        ``configedit.RefusedError`` propagates when the edit touched anything
+        else or left a stray marker or unrecognised layout.
     """
     ce.toml_check(before.decode(), after.decode(), CODEX_KEYS, MARKERS)
     codex_scan(after.decode())
@@ -94,8 +106,11 @@ def set_line(text: str, header: str, key: str, value: str) -> str:
         value: TOML literal to store.
 
     Returns:
-        The edited text; a refusal (``configedit.RefusedError``) propagates
-        for a stray marker or unrecognised layout.
+        The edited text.
+
+    Note:
+        ``configedit.RefusedError`` propagates for a stray marker or
+        unrecognised layout.
     """
     codex_scan(text)
     raw, line = ce.get_section(text, header), f"{key} = {value}\n"
@@ -118,8 +133,10 @@ def drop_trust(text: str) -> str:
         text: The whole config.toml.
 
     Returns:
-        The text without our trust sections; a refusal
-        (``configedit.RefusedError``) propagates for a stray marker or
+        The text without our trust sections.
+
+    Note:
+        ``configedit.RefusedError`` propagates for a stray marker or
         unrecognised layout.
     """
     codex_scan(text)

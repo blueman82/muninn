@@ -103,8 +103,7 @@ def _check_installable(ctx: Ctx) -> None:
     Raises:
         StepFailedError: If Python is too old or pctx data or a plist exist.
     """
-    # Needed even though the project targets 3.13: the installer can be
-    # started by whatever python3 is first on PATH, which may be older.
+    # Guards a mistaken invocation; the documented one is python3.13.
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         raise StepFailedError("the installer needs Python 3.13+")
     for path in (ctx.data, ctx.plist):
@@ -139,13 +138,16 @@ def _dry_apply(
 ) -> None:
     """Run every config transform on the real files and discard the result.
 
-    Any refusal (``configedit.RefusedError`` for a layout we do not
-    recognise or a stray marker) surfaces now, before the first change.
+    Any refusal for a layout we do not recognise or a stray marker surfaces
+    now, before the first change.
 
     Args:
         ctx: The run context.
         files: The pinned files from ``_check_repo``.
         fragment: The Claude hook groups per event.
+
+    Note:
+        ``configedit.RefusedError`` and ``json.JSONDecodeError`` propagate.
     """
     if ctx.settings.exists():
         edit_settings(ctx.settings.read_bytes(), fragment)
@@ -160,9 +162,6 @@ def _dry_apply(
 def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     """Check everything and dry-apply every config edit; change nothing.
 
-    A config file the edits cannot handle raises
-    ``configedit.RefusedError``, which ``main`` reports as a refusal.
-
     Args:
         ctx: The run context.
         repo: The source repository.
@@ -173,6 +172,11 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
 
     Raises:
         StepFailedError: If any precondition fails.
+
+    Note:
+        ``configedit.RefusedError`` propagates when a config file has a
+        layout the edits cannot handle; ``main`` reports it as a refusal.
+        ``json.JSONDecodeError`` propagates for an invalid settings.json.
     """
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise StepFailedError("--sha must be a full 40-hex commit id")

@@ -28,6 +28,10 @@ def _call(
 
     Returns:
         The response message carrying the same id.
+
+    Note:
+        ``queue.Empty`` propagates when no line arrives within ``timeout``,
+        and ``OSError`` when the server has exited and stdin is closed.
     """
     msg_id, method, params = request
     payload = {"id": msg_id, "method": method, "params": params}
@@ -51,6 +55,13 @@ def codex_probe(ctx: Ctx, timeout: float = 60) -> list[dict[str, Any]]:
 
     Returns:
         The hook entries Codex reports for ``ctx.home``.
+
+    Note:
+        Nothing is caught: ``OSError`` (``codex`` missing or its stdin
+        closed), ``queue.Empty`` (silent past ``timeout``), ``KeyError`` (a
+        reply without ``result``, ``data`` or ``hooks``) and
+        ``subprocess.TimeoutExpired`` all propagate. The caller treats any of
+        them as no answer.
     """
     env = dict(os.environ, CODEX_HOME=str(ctx.codex_home))
     p = subprocess.Popen(
