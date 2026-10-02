@@ -49,7 +49,7 @@ class FreshInstallTest(unittest.TestCase):
         self.assertEqual(w.fake.loaded, "new")
         python = (self.lib / "python").readlink()
         self.assertEqual(python, Path(sys.executable))
-        out = json.loads((self.lib / "install-record.json").read_text())
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(
             (out["outcome"], out["fresh"], out["sha"], out["python"]["path"]),
             ("ok", True, w.sha, sys.executable),
@@ -58,7 +58,7 @@ class FreshInstallTest(unittest.TestCase):
         # The record is shared with colleagues, so it must hold no secret.
         self.assertNotIn(CRED, json.dumps(out))
         self.assertEqual(
-            (self.lib / "install-record.json").stat().st_mode & 0o777, 0o600
+            (self.lib / co.INSTALL_RECORD).stat().st_mode & 0o777, 0o600
         )
         s = json.loads((h / ".claude/settings.json").read_bytes())
         (group,) = s["hooks"]["SessionStart"]
@@ -110,7 +110,7 @@ class FreshInstallTest(unittest.TestCase):
         self.assertEqual((rec["has_claude"], rec["has_codex"]), (False, False))
         self.assertFalse((h / ".claude/settings.json").exists())
         self.assertTrue(any("left unconfigured" in x for x in w.out))
-        out = json.loads((self.lib / "install-record.json").read_text())
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(out["config_keys"], [])
 
     def test_refuses_when_already_installed(self) -> None:
@@ -152,7 +152,7 @@ class FreshInstallTest(unittest.TestCase):
         w.fake.heartbeat = False
         with self.assertRaises(co.StepFailedError):
             self.install()
-        out = json.loads((self.lib / "install-record.json").read_text())
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(out["outcome"], "rolled_back")
         self.assertEqual(out["failed"]["step"], "start_new")
         self.assertFalse((h / ".local/share/muninn").exists())
@@ -225,7 +225,7 @@ class UpgradeTest(unittest.TestCase):
         self.assertIn(kick, w.fake.calls)
         for rel, data in configs.items():
             self.assertEqual((h / rel).read_bytes(), data, rel)
-        out = json.loads((self.lib / "install-record.json").read_text())
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(
             (out["outcome"], out["upgrade"], out["sha"]),
             ("ok", True, self.sha2),
@@ -239,7 +239,7 @@ class UpgradeTest(unittest.TestCase):
         """The record path is absolute, like the log path the wrapper shows."""
         w = self.w
         co.install(self.ctx, w.repo, self.sha2)
-        record = self.lib / "install-record.json"
+        record = self.lib / co.INSTALL_RECORD
         self.assertIn(f"record in {record}", "\n".join(w.out))
 
     def test_upgrade_leaves_the_recall_switch_as_the_owner_set_it(
@@ -264,7 +264,7 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual((self.lib / "current").readlink(), Path(self.first))
         self.assertTrue((self.lib / self.first).is_dir())
         self.assertEqual(w.fake.loaded, "new")  # the job was not left stopped
-        out = json.loads((self.lib / "install-record.json").read_text())
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(out["outcome"], "rolled_back")
 
     def test_refuses_when_nothing_is_installed(self) -> None:

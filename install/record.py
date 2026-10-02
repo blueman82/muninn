@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install.constants import CODEX_KEYS
+from install.constants import CODEX_KEYS, INSTALL_RECORD
 from install.context import Ctx
 from install.transforms import codex_scan
 
@@ -117,7 +117,7 @@ def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
         ),
     }
     ce.atomic_write(
-        ctx.lib / "install-record.json",
+        ctx.lib / INSTALL_RECORD,
         json.dumps(out, indent=1).encode(),
         0o600,
     )

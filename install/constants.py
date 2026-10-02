@@ -30,6 +30,8 @@ CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit")
 # instead of writing a hash that might not match.
 CODEX_VERIFIED = ("codex-cli 0.159.2", "codex-cli 0.159.3")
 PLIST = "Library/LaunchAgents/com.muninn.plist"
+# The value-free summary an install leaves in the lib dir for support.
+INSTALL_RECORD = "install-record.json"
 # Longest age of status.json that still counts as a live heartbeat.
 HEARTBEAT_S = 120
 # Files read from git at the pinned commit, never from the working tree. The

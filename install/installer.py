@@ -36,6 +36,7 @@ from install.constants import (
     EVENTS,
     GIT_ENV,
     HEARTBEAT_S,
+    INSTALL_RECORD,
     LABEL,
     MARKERS,
     MARKETPLACE,
@@ -103,6 +104,7 @@ __all__ = [
     "FRESH_STEPS",
     "GIT_ENV",
     "HEARTBEAT_S",
+    "INSTALL_RECORD",
     "LABEL",
     "LABELS",
     "MARKERS",
@@ -244,9 +246,7 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
         ctx.say("dry run only: nothing was written")
     else:
         where = (
-            ctx.lib / "install-record.json"
-            if rec.get("record_removed")
-            else ctx.rdir
+            ctx.lib / INSTALL_RECORD if rec.get("record_removed") else ctx.rdir
         )
         ctx.say(f"install done; record in {where}")
     return rec
