@@ -144,7 +144,9 @@ def reread(conn: sqlite3.Connection) -> dict[str, int]:
 
     After a release that changes classification the poller re-reads every
     source once; this says how far along that is. Missing sources are left
-    out because their files are gone and are never read again.
+    out because their files are not there to read; one that returns is
+    counted again. A source that fails, or is skipped for an unusable first
+    line, is never re-stamped and stays pending.
 
     Args:
         conn: Read connection.
@@ -159,6 +161,26 @@ def reread(conn: sqlite3.Connection) -> dict[str, int]:
         (classify.CLASSIFIER_VERSION,),
     ).fetchone()
     return {"pending": int(pending), "of": int(total)}
+
+
+def _alive_age(status: Mapping[str, object]) -> int | None:
+    """Return the age of the alive stamp of a pass that is still running.
+
+    Args:
+        status: Parsed status.json.
+
+    Returns:
+        Seconds since a running pass last stamped alive, or None between
+        passes and when no usable stamp exists (not written yet, failed to
+        write, or from the future).
+    """
+    alive = seconds_since(status.get(ALIVE_AT), future_ok=False)
+    last = seconds_since(status.get("last_pass_at"))
+    # A stamp older than the last finished pass was left by a poller that
+    # died mid-pass, not by a pass that is running now.
+    if alive is None or (last is not None and alive >= last):
+        return None
+    return alive
 
 
 def _usage(conn: sqlite3.Connection) -> dict[str, object]:
@@ -206,11 +228,10 @@ def stats(
     out = _table_counts(conn)
     out["db_bytes"] = db.stat().st_size if db.exists() else 0
     out["db_space"] = db_space(conn)
-    # alive_age_s is set only while a pass is running: it ends with the pass.
     out["last_pass"] = (
         {k: status.get(k) for k in _LAST_PASS_FIELDS}
         | freshness(status)
-        | {"alive_age_s": seconds_since(status.get(ALIVE_AT), future_ok=False)}
+        | {"alive_age_s": _alive_age(status)}
     )
     out["reread"] = reread(conn)
     out["install_sha"] = install_sha(env) or status.get("install_sha")

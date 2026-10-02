@@ -90,6 +90,7 @@ class StatsDoctorTests(CliCase):
                 "db_bytes",
                 "db_space",
                 "last_pass",
+                "reread",
                 "classifier_version",
                 "hash_mismatches",
             }

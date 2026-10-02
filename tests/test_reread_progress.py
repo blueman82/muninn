@@ -20,7 +20,7 @@ class RereadProgressTests(CliCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.session(TID, "hello there", "hi")
+        self.path = self.session(TID, "hello there", "hi")
         self.assertEqual(self.muninn("ingest")[0], 0)
 
     def stamp_sources(self, version: int) -> None:
@@ -55,8 +55,38 @@ class RereadProgressTests(CliCase):
         self.assertEqual(self.stats()["reread"], {"pending": 1, "of": 1})
         code, check = self.reread_check()
         self.assertEqual(
-            (code, check["ok"], check["detail"]), (0, True, "1 of 1")
+            (code, check["level"], check["ok"], check["detail"]),
+            (0, "info", True, "1 of 1"),
         )
+
+    def count_events(self) -> int:
+        """Return how many events the store holds."""
+        return self.conn.execute("SELECT count(*) FROM event").fetchone()[0]
+
+    def test_a_pass_brings_pending_back_to_zero_without_losing_events(
+        self,
+    ) -> None:
+        events = self.count_events()
+        self.stamp_sources(OLDER)
+        self.assertEqual(self.stats()["reread"]["pending"], 1)
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        self.assertEqual(self.stats()["reread"], {"pending": 0, "of": 1})
+        self.assertEqual(self.count_events(), events)
+
+    def test_a_source_that_cannot_be_read_stays_pending(self) -> None:
+        self.stamp_sources(OLDER)
+        rest = self.path.read_text().split("\n", 1)[1]
+        self.path.write_text("this is not a thread header\n" + rest)
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        self.assertEqual(self.stats()["reread"], {"pending": 1, "of": 1})
+
+    def test_missing_sources_stay_out_of_both_counts(self) -> None:
+        self.session("thr-two", "second", "one")
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        self.path.unlink()
+        self.assertEqual(self.muninn("ingest")[0], 0)  # marks it missing
+        self.stamp_sources(OLDER)
+        self.assertEqual(self.stats()["reread"], {"pending": 1, "of": 1})
 
     def test_sources_whose_files_are_gone_are_not_counted(self) -> None:
         for path in self.roots["codex-sessions"].rglob("*.jsonl"):
@@ -67,8 +97,19 @@ class RereadProgressTests(CliCase):
 
     def test_alive_age_shows_only_while_a_pass_is_running(self) -> None:
         self.assertIsNone(self.stats()["last_pass"]["alive_age_s"])
-        obs.write_status(self.home, {ALIVE_AT: time.time() - 5})
+        now = time.time()
+        running = {"last_pass_at": now - 100, ALIVE_AT: now - 5}
+        obs.write_status(self.home, running)
         age = self.stats()["last_pass"]["alive_age_s"]
         self.assertTrue(5 <= age <= 60, age)
-        obs.write_status(self.home, {ALIVE_AT: time.time() + 1e6})
+        obs.write_status(self.home, {ALIVE_AT: now + 1e6})
+        self.assertIsNone(self.stats()["last_pass"]["alive_age_s"])
+
+    def test_a_stamp_older_than_the_last_pass_is_not_a_running_pass(
+        self,
+    ) -> None:
+        """A stamp left by a poller killed mid-pass is outdated by a pass."""
+        now = time.time()
+        left_behind = {"last_pass_at": now - 5, ALIVE_AT: now - 100}
+        obs.write_status(self.home, left_behind)
         self.assertIsNone(self.stats()["last_pass"]["alive_age_s"])

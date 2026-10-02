@@ -9,8 +9,8 @@ description: Show muninn counts and index health with `muninn stats`. Use when t
 
 Useful fields:
 - `events`, `events_by_provider`, `sources` (provider/root/thread class/status).
-- `last_pass`: `files_changed`, `events_added`, `skipped_files`, `failed`, `errors`, `index_age_s`, `poller`, and `alive_age_s` (set only while a pass is running).
-- `reread`: `pending` of `of` active sources still to be re-read after an upgrade changed the classifier; `pending: 0` means it is done.
+- `last_pass`: `files_changed`, `events_added`, `skipped_files`, `failed`, `errors`, `index_age_s`, `poller`, and `alive_age_s` (seconds since a running pass last stamped alive; null between passes, and growing if the poller was killed mid-pass and not restarted).
+- `reread`: `pending` (active sources still to be re-read after an upgrade changed the classifier) and `of` (all active sources). `pending` normally falls to 0; sources that fail or are skipped stay pending, so check `last_pass.failed` and `skipped_files`.
 - `db_bytes`, `db_space.free_ratio` (high ratio: consider `muninn compact`).
 - `install_sha`: the pinned release; compare with `git rev-parse HEAD` to see if an upgrade is pending.
 - `hash_mismatches`, `skipped_lines`, `issues`, `flags` (marker, redacted, truncated).
