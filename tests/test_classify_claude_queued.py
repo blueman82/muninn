@@ -6,7 +6,7 @@ import unittest
 
 from muninn import classify as c
 from muninn import knowledge
-from muninn.claude_events import CHANNEL_HUMAN_FLAG
+from muninn.claude_events import CHANNEL_HUMAN_FLAG, CLAUDE_HARNESS_PREFIXES
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -15,6 +15,7 @@ from tests.classify_claude_support import (
     queued_attachment,
     text_block,
 )
+from tests.classify_support import GHP
 from tests.ingest_support import IngestCase
 
 OWNER_TEXT = "please also cover the zebra cache"
@@ -67,6 +68,29 @@ class QueuedClassifyTests(unittest.TestCase):
         record = queued_attachment(OWNER_TEXT, in_attachment={"isMeta": True})
         (event,) = c.claude_events(record, 7)
         self.assertEqual(event.kind, "harness")
+
+    def test_only_a_true_meta_flag_makes_harness_text(self) -> None:
+        unset = queued_attachment(OWNER_TEXT, in_attachment={"isMeta": False})
+        self.assertEqual(
+            c.claude_events(unset, 7), [cev("prompt", OWNER_TEXT)]
+        )
+        on_record = queued_attachment(OWNER_TEXT, isMeta=True)
+        (event,) = c.claude_events(on_record, 7)
+        self.assertEqual(event.kind, "harness")
+
+    def test_a_harness_prefix_makes_harness_text_as_for_any_user(self) -> None:
+        text = CLAUDE_HARNESS_PREFIXES[0] + " injected"
+        queued = c.claude_events(queued_attachment(text), 7)
+        ordinary = c.claude_events(claude_rec("user", text), 7)
+        self.assertEqual(queued, ordinary)
+        self.assertEqual(queued[0].kind, "harness")
+
+    def test_a_secret_is_redacted_as_in_any_user_message(self) -> None:
+        text = f"my token is {GHP}"
+        queued = c.claude_events(queued_attachment(text), 7)
+        ordinary = c.claude_events(claude_rec("user", text), 7)
+        self.assertEqual(queued, ordinary)
+        self.assertNotIn(GHP, queued[0].text)
 
     def test_other_attachments_and_queue_operations_stay_out(self) -> None:
         other = queued_attachment(OWNER_TEXT)

@@ -212,7 +212,7 @@ def claude_events(
     if rtype == "attachment":
         return _queued_events(record, origin)
     if rtype not in ("user", "assistant") or message is None:
-        return []  # system, summary, titles ...
+        return []  # system, summary, titles, queue-operation ...
     if message.get("role") not in (rtype, None):
         return []
     content = message.get("content")
