@@ -36,7 +36,8 @@ flowchart LR
   provider config, verify, prune. `install/rollback.py`
   reverses it from the recorded values. `install/uninstall.py` takes an
   installed machine back out by removing our own entries (no record survives an
-  upgrade) and moves the data dir aside instead of deleting it.
+  upgrade) and moves the data dir aside instead of deleting it (unless
+  `--purge-data`).
 - **Trust.** Everything stored is untrusted historical data. Secrets are
   redacted at ingest and on output; automatic injection is framed so pasted
   copies are flagged on ingest. See the README for the full list.

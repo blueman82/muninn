@@ -48,8 +48,10 @@ commit and run `bin/muninn-install` to go back).
 It stops the poller, removes the launchd plist, takes only muninn's hooks out
 of `~/.claude/settings.json` and only muninn's sections out of
 `~/.codex/config.toml`, deletes the Codex plugin cache, and removes
-`~/.local/bin/muninn` and `~/.local/lib/muninn`. Your transcripts and every
-other setting stay as they are.
+`~/.local/lib/muninn` and the `~/.local/bin/muninn` link (only if it points into
+that release directory). Your transcripts and every other setting stay as they
+are. If a provider config cannot be edited safely it stops before changing
+anything, says why, and exits 1; fix that and run it again.
 
 The data directory (the index and the knowledge ledger) is moved to
 `~/.local/share/muninn-removed-<timestamp>/data`, not deleted, because the

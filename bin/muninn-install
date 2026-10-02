@@ -30,6 +30,13 @@ if [ -z "$py" ]; then
   exit 127
 fi
 
+# Removing needs no commit, so it must work where git or the checkout is gone.
+if [ "${1:-}" = --uninstall ]; then
+  shift
+  cd "$root"
+  exec "$py" -E -s -B -m install.uninstall "$@"
+fi
+
 # A commit hook exports these; git would then act on the wrong repository.
 head=$(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
   git -C "$root" rev-parse HEAD)
@@ -76,11 +83,6 @@ HELP
         "checkout $short: upgrade needed"
     fi
     exit 0
-    ;;
-  --uninstall)
-    shift
-    cd "$root"
-    exec "$py" -E -s -B -m install.uninstall "$@"
     ;;
   --check | "") ;;
   *)

@@ -33,6 +33,10 @@ PLIST = "Library/LaunchAgents/com.muninn.plist"
 # An uninstall moves the data dir to a sibling of this name plus the run's
 # timestamp instead of deleting it.
 REMOVED_PREFIX = "muninn-removed-"
+# The run timestamp that names per-run dirs, and the mode every file we
+# create gets masked to: nobody but the owner may read them.
+TS_FORMAT = "%Y%m%dT%H%M%SZ"
+PRIVATE_UMASK = 0o077
 # The value-free summary an install leaves in the lib dir for support.
 INSTALL_RECORD = "install-record.json"
 # Longest age of status.json that still counts as a live heartbeat.

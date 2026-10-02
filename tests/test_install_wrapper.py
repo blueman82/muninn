@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -101,6 +102,14 @@ class WrapperTest(unittest.TestCase):
         r = self.run_wrapper("--uninstall")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("install.uninstall", self.argv())
+
+    def test_uninstall_needs_neither_git_nor_a_commit(self) -> None:
+        bare = self.home.parent / "tarball/bin"
+        bare.mkdir(parents=True)
+        shutil.copy2(WRAPPER, bare / "muninn-install")
+        r = self.run_wrapper("--uninstall", script=bare / "muninn-install")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-m install.uninstall", self.argv())
 
     def test_the_uninstall_command_is_the_uninstall_flag(self) -> None:
         r = self.run_wrapper("--dry-run", script=ROOT / "bin/muninn-uninstall")
