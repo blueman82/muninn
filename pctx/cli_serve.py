@@ -68,8 +68,7 @@ class _Poller:
         self.roots = ingest.default_roots(env)
         self.conn: _StopAfterCommit | None = None
         self.passes = self.skipped = self.quiet = 0
-        # Hourly "idle" line, so a silent log still shows the poller alive.
-        self.idle_every = max(1, round(3600 / interval))
+        self.idle_every = 1
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Stop now if idle, else after the open transaction ends."""
@@ -91,6 +90,8 @@ class _Poller:
             (self.home / "poller.log").chmod(0o600)
         for sig in (signal.SIGTERM, signal.SIGHUP):
             signal.signal(sig, self._on_signal)
+        # Hourly "idle" line, so a silent log still shows the poller alive.
+        self.idle_every = max(1, round(3600 / self.interval))
         obs.log_poller(
             self.home,
             {

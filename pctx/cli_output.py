@@ -9,8 +9,7 @@ from pctx import classify
 
 __all__ = ["redacted"]
 
-# Fields that carry transcript or user text.  Everything else is an id,
-# count or fixed code and cannot hold a secret.
+# Fields known to carry transcript or user text; only these are redacted.
 _TEXT_KEYS = frozenset(
     {"text", "snippet", "preview", "quote", "first_prompt", "retract_reason"}
 )
@@ -50,7 +49,8 @@ def redacted(value: Any, key: str | None = None) -> Any:
         key: Name of the field holding ``value``; only text fields change.
 
     Returns:
-        A copy of the same shape.
+        A copy of the same shape, except that a ``raw`` string the
+        redactor would change is replaced by a ``raw_redacted: True`` key.
     """
     # The value is parsed JSON, so dict keys are always strings and list
     # items are JSON values; isinstance alone leaves their types unknown.
