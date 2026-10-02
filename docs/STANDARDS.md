@@ -10,6 +10,7 @@ not work around it. There is no `noqa`, no `# type: ignore` and no exemption lis
 |---|---|---|
 | Stdlib rules S1 to S8 | `python3.13 -m tools.check` (also run by `tests/test_standards.py`) | size, docstrings, comments, imports, annotations |
 | Everything | `python3.13 -m tools.check --full` | the above plus ruff, black, pyright strict, shellcheck |
+| Tests, fast | `python3.13 -m tools.run_tests` (`-j N` for N processes) | the whole suite with each test module in its own process, about 5x faster than `unittest discover` (roughly 9 s against 42 s on 15 cores) |
 | Set up the tools | `python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt` | pinned versions in `requirements-dev.txt` |
 
 A missing tool fails the gate; it never skips. So does a clone whose git hooks are off.
