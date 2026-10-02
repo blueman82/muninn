@@ -17,7 +17,7 @@ ALIVE_AT = "alive_at"
 CLOCK_SKEW_S = 5
 
 
-def _since(stamp: object, *, future_ok: bool = True) -> int | None:
+def seconds_since(stamp: object, *, future_ok: bool = True) -> int | None:
     """Return whole seconds since ``stamp``, or None if it is unusable.
 
     Args:
@@ -59,14 +59,14 @@ def freshness(status: Mapping[str, Any] | None) -> dict[str, Any]:
     """
     if status is None:
         return {}
-    age = _since(status.get("last_pass_at"))
+    age = seconds_since(status.get("last_pass_at"))
     if age is None or age > MAX_INDEX_AGE:
         return _unknown()
     every = status.get("interval_s")
     every = every if isinstance(every, (int, float)) and every > 0 else 60
     # The index is as old as its last finished pass, but the poller is alive
     # if it either finished a pass or said so recently.
-    alive = _since(status.get(ALIVE_AT), future_ok=False)
+    alive = seconds_since(status.get(ALIVE_AT), future_ok=False)
     seen = age if alive is None else min(age, alive)
     return {
         "index_age_s": age,

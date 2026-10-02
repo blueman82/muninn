@@ -94,7 +94,12 @@ Entries are superseded or retracted, never edited.
 `not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status; `citations` by state;
 `tombstones` by level (`session`, `thread`, `line`); `db_bytes` file size; `db_space` `page_count`, `freelist_count`,
 `page_size`, `free_ratio`; `last_pass` (`last_pass_at`, `duration_s`, `files_changed`, `events_added`, `skipped_files`,
-`failed`, `errors`, `busy_skips`, `index_age_s`, `poller`); `install_sha`; `classifier_version`; `hash_mismatches` (open-time
+`failed`, `errors`, `busy_skips`, `index_age_s`, `poller`, and `alive_age_s`, the seconds since a running pass last stamped
+alive: null between passes and when no usable stamp exists, and growing if the poller was killed mid-pass and not
+restarted); `reread`
+(`pending` active sources still read under an older classifier version, `of` all active sources: the progress of the
+one-time re-read after a classifier change; it normally falls to 0, and a source that fails or is skipped stays pending,
+so look at `last_pass.failed` and `skipped_files`); `install_sha`; `classifier_version`; `hash_mismatches` (open-time
 line hash failures seen in the call log). `--usage` adds `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen
 in transcripts) and `usage_totals` per provider.
 
@@ -128,6 +133,7 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
 | `missing_sources` | info | always | count of indexed files no longer on disk |
 | `other_threads` | info | always | count of unrecognised thread types |
+| `reread` | info | always | `N of M`: active sources still to be re-read after a classifier change; failing sources are reported by `failed_sources` |
 | `roots_present` | info | always | names of provider roots that do not exist |
 
 ## Per-prompt recall switch (`recall.off`)
