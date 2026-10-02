@@ -101,5 +101,29 @@ class HooksCheckTest(unittest.TestCase):
         self.assertFalse(self.configured("/tmp/elsewhere/.githooks"))
 
 
+class RepositoryStateTest(unittest.TestCase):
+    """The gate notices a checkout that has been flagged bare."""
+
+    def flag(self, value: str) -> bool:
+        """Run the check as if ``core.bare`` held ``value``.
+
+        Args:
+            value: The setting; an empty string means it is unset.
+
+        Returns:
+            What ``repository_is_bare`` answers.
+        """
+        with mock.patch.object(check, "git_output", return_value=value):
+            return check.repository_is_bare()
+
+    def test_only_true_counts_as_bare(self) -> None:
+        self.assertTrue(self.flag("true"))
+        self.assertFalse(self.flag("false"))
+        self.assertFalse(self.flag(""))
+
+    def test_this_checkout_is_not_bare(self) -> None:
+        self.assertFalse(check.repository_is_bare())
+
+
 if __name__ == "__main__":
     unittest.main()

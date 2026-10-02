@@ -33,6 +33,9 @@ INSTALL_HINT = (
     ".venv/bin/pip install -r requirements-dev.txt"
 )
 HOOKS_HINT = "switch the git hooks on: git config core.hooksPath .githooks"
+BARE_HINT = (
+    "the checkout is marked bare; restore it: git config core.bare false"
+)
 
 
 def git_output(*args: str) -> str:
@@ -89,6 +92,19 @@ def find_tool(name: str) -> str | None:
     return shutil.which(name)
 
 
+def repository_is_bare() -> bool:
+    """Say whether git has been told this checkout is a bare repository.
+
+    A bare flag on a checkout that has a working tree makes every git command
+    there fail ("must be run in a work tree"), which silently disables the
+    commit hooks. Something flipped it once, so the gate watches for it.
+
+    Returns:
+        True when ``core.bare`` is set to true.
+    """
+    return git_output("config", "core.bare") == "true"
+
+
 def hooks_installed() -> bool:
     """Say whether this clone runs the hooks tracked in ``.githooks``.
 
@@ -119,6 +135,9 @@ def run_tools() -> int:
         The number of failed or missing tools plus one if a test failed.
     """
     failures = 0
+    if repository_is_bare():
+        print(f"FAIL repository: {BARE_HINT}")
+        failures += 1
     if not hooks_installed():
         print(f"FAIL git hooks: {HOOKS_HINT}")
         failures += 1
