@@ -114,28 +114,23 @@ themselves are never stored.
   it. Provider transcripts, Time Machine and free disk blocks are out of its
   reach; `erase` prints the provider file paths and other derived copies.
 
-## Install and rollback
+## Install, upgrade, rollback
 
-See `docs/` (reference, quick start, troubleshooting, architecture).
-`bin/muninn-install` (`--check` previews, `--status` compares) runs
-`install.installer` as fresh or upgrade; each ends with one pinned release.
-The files here are templates; the installer replaces the literal `@HOME@`.
+Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
 
-- `integrations/claude/settings-hooks.json`: the `hooks` fragment merged into
-  `~/.claude/settings.json` (SessionStart and UserPromptSubmit).
-- `integrations/codex/`: the Codex plugin `muninn`, version 0.2.0, hooks only
-  (no MCP server, no skills): `.codex-plugin/plugin.json` and
-  `hooks/hooks.json`. Codex skips plugin hooks until they are trusted with
-  `/hooks`, unless the installer verified the trust hash.
-- `launchd/com.muninn.plist`: the poller job. It runs
-  `~/.local/lib/muninn/current/bin/muninn serve --interval 60` with
-  `KeepAlive`, `Umask` "077" and no environment except `PATH`.
+    git clone https://github.com/blueman82/muninn && cd muninn
+    bin/muninn-install --check   # plain-sentence preview, writes nothing
+    bin/muninn-install           # fresh install, or upgrade if installed
 
-`install/installer.py` records only the config keys it touches, pins the
-release under `~/.local/lib/muninn/`, indexes existing
-transcripts (`--fresh`), starts or restarts the launchd job, merges provider
-config, ends with `muninn doctor`, and deletes every other release.
-`install/rollback.py` restores the recorded values from an interrupted run.
+- Upgrade: `git pull`, then the same two commands (`--status` compares the
+  installed commit with `HEAD`). One pinned release is kept.
+- Rollback: a failed install or upgrade restores itself. After a successful
+  upgrade the old release is gone; check out an earlier commit and rerun.
+- Codex: if the installer prints `OWNER STEP`, run `/hooks` and trust the
+  two muninn hooks.
+- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin) and
+  `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). More:
+  `docs/QUICKSTART.md`, `docs/REFERENCE.md`, `docs/TROUBLESHOOTING.md`.
 
 ## Development
 
