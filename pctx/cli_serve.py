@@ -1,7 +1,8 @@
 """``pctx serve``: the KeepAlive poller that launchd runs.
 
-Each loop is a pass, a heartbeat and a sleep.  A pass is skipped while
-another writer holds the lock, so the poller never delays a human command.
+Each loop is a pass, a heartbeat and a sleep.  A pass is skipped, not
+waited for, while another writer holds the lock; a human writer can still
+wait for a running pass, up to ``WRITER_WAIT_S``.
 """
 
 from __future__ import annotations

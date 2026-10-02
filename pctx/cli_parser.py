@@ -55,7 +55,7 @@ class _Parser(argparse.ArgumentParser):
         super().print_help(sys.stderr)
 
     def exit(self, status: int = 0, message: str | None = None) -> NoReturn:
-        """Exit with 2 instead of argparse's 0 for help and version."""
+        """Exit with 2 instead of argparse's 0 for help."""
         if message:
             sys.stderr.write(message)
         raise SystemExit(2 if status == 0 else status)
@@ -92,7 +92,7 @@ class _Commands:
     def add(
         self, name: str, help: str | None = None
     ) -> argparse.ArgumentParser:
-        """Register subcommand ``name``; ``help=None`` lists it unlabelled."""
+        """Register subcommand ``name``; ``help=None`` leaves it out of the help list."""
         # Passing help=None would still list the command, so leave it out.
         extra: dict[str, Any] = {} if help is None else {"help": help}
         return self._sub.add_parser(name, allow_abbrev=False, **extra)

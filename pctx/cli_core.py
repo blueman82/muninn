@@ -30,8 +30,8 @@ __all__ = [
     "read_store",
 ]
 
-# CLI writers wait this long for the writer lock.  The poller never waits
-# (it skips the pass), so a human command is not starved by the poller.
+# CLI writers wait this long for the writer lock, which a poller pass may
+# hold.  The poller itself never waits: it skips the pass instead.
 WRITER_WAIT_S = 15.0
 
 type Env = Mapping[str, str]
