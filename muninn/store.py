@@ -9,6 +9,7 @@ briefly delay a writer's commit; that is why the writer sets busy_timeout.
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import json
 import os
@@ -224,8 +225,12 @@ def write_json_atomic(path: Path, obj: object) -> None:
         Path(tmp).replace(path)
     except BaseException:
         # BaseException so an interrupt does not leave a stray temp file
-        # holding the payload.
-        Path(tmp).unlink()
+        # holding the payload. The cleanup must not fail: the interrupt may
+        # land just after the rename, when the temp file is already gone, and
+        # a failing cleanup would replace the interrupt, so a poller told to
+        # stop would carry on.
+        with contextlib.suppress(OSError):
+            Path(tmp).unlink()
         raise
 
 

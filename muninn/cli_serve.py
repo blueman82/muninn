@@ -80,9 +80,14 @@ class _Poller:
         self.idle_every = 1
         self.alive_at = _NEVER  # monotonic time of the last write
         self.beat_failed = False  # logged already in this pass
+        self.stop_requested = False  # a stop signal has arrived
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Stop now if idle, else after the open transaction ends."""
+        # Remembered on the poller too: the connection wrapper below is made
+        # anew each pass, so its flag is lost if no COMMIT or ROLLBACK ever
+        # goes through it (SQLite can roll back by itself).
+        self.stop_requested = True
         conn = self.conn
         try:
             busy = conn is not None and conn.in_transaction
@@ -217,17 +222,19 @@ class _Poller:
     def run(self) -> Result:
         """Loop until a stop signal arrives; exit 0 with no output."""
         try:
-            while True:
+            while not self.stop_requested:
                 began = time.monotonic()
                 self.step()
-                # Sleep the rest of the interval so a slow pass does not
-                # stretch the cadence.
-                time.sleep(
-                    max(0.0, self.interval - (time.monotonic() - began))
-                )
+                if not self.stop_requested:
+                    # Sleep the rest of the interval so a slow pass does not
+                    # stretch the cadence.
+                    time.sleep(
+                        max(0.0, self.interval - (time.monotonic() - began))
+                    )
         except _ServeStopError:
-            obs.log_poller(self.home, {"event": "stop", "passes": self.passes})
-            return 0, None
+            pass
+        obs.log_poller(self.home, {"event": "stop", "passes": self.passes})
+        return 0, None
 
 
 def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
