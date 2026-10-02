@@ -1,7 +1,7 @@
 """Secret redaction for text that is about to be stored or shown.
 
 The patterns here are the privacy boundary of the whole store: every event
-text, tool output and citation quote passes through ``redact`` before it is
+text and knowledge entry text passes through ``redact`` before it is
 written. Do not edit a pattern without re-running the hostile-input tests.
 """
 
@@ -15,9 +15,9 @@ REDACTED = "[redacted:secret]"
 # untrusted, and a catastrophic backtrack here would stall whichever caller
 # redacts, including ingest. Repeats are therefore bounded ({0,16384}),
 # tempered (the (?!-----BEGIN ) guard) or limited to horizontal whitespace.
-# The remaining unbounded repeats (\S+, \s*, the base64 run) each stop at a
-# distinct delimiter, so a failed match rescans a span only a small number
-# of times rather than exponentially. Re-check this when adding a pattern.
+# The remaining unbounded repeats (\S+, \s*, the base64 run) never nest or
+# overlap, so a failed match cannot backtrack exponentially. Re-check
+# this when adding a pattern.
 _URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
 _KEYS = (
     r"api[_-]?key|access[_-]?token|client[_-]?secret|token|"

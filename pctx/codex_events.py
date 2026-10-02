@@ -214,7 +214,8 @@ def codex_events(
     Args:
         record: The parsed rollout line.
         line: One-based line number of the record.
-        state: Per-source state; updated as a side effect (cwd, replay).
+        state: Per-source state; updated as a side effect (cwd, replay,
+            thread class, calls and cells).
 
     Returns:
         Zero or more events; empty for records that carry no stored text.
