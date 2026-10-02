@@ -97,6 +97,33 @@ def _other_scopes(other: Counter[str]) -> dict[str, int]:
     return dict(ranked[:OTHER_SCOPES])
 
 
+def _check_keywords(args: Mapping[str, object]) -> None:
+    """Reject unknown or missing keywords as a plain signature would.
+
+    ``search`` takes ``**args`` only because a signature with this many
+    parameters trips the argument-count limit; the type checker sees the
+    keywords through ``SearchArgs``, so the runtime check lives here.
+
+    Args:
+        args: The keyword arguments passed to ``search``.
+
+    Raises:
+        TypeError: A keyword is unknown, or ``cwd``/``env`` is missing.
+    """
+    for name in args:
+        if name not in SearchArgs.__annotations__:
+            raise TypeError(
+                f"search() got an unexpected keyword argument {name!r}"
+            )
+    # Spelled out: with postponed annotations TypedDict cannot see Required.
+    for name in ("cwd", "env"):
+        if name in args:
+            continue
+        raise TypeError(
+            f"search() missing required keyword-only argument: {name!r}"
+        )
+
+
 @guarded
 def search(
     conn: sqlite3.Connection, query: str, **args: Unpack[SearchArgs]
@@ -124,6 +151,7 @@ def search(
     Returns:
         The answer, or ``{"error": code}`` for bad input.
     """
+    _check_keywords(args)
     limit = min(max(args.get("limit", 10), 1), PAGE_MAX)
     page = max(args.get("page", 1), 1)
     status = args.get("status")

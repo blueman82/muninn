@@ -116,7 +116,8 @@ def _read_line(roots: Mapping[str, Path], row: sqlite3.Row) -> bytes | None:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
         handle.seek(row["byte_offset"])
-        # One byte over the cap so an over-long line is seen as such.
+        # The extra byte leaves room for the newline of a line exactly at the
+        # cap, so the cap bounds the line plus its terminator.
         return handle.readline(LINE_CAP + 1)
 
 

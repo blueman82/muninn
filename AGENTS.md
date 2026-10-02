@@ -7,7 +7,7 @@ Instructions for coding agents working in this repo. Any parent-directory
 
 - `pctx/`: runtime package (Python 3.13 standard library only).
   `cli.py` (commands), `store.py` (schema, locks), `ingest.py`, `classify.py`,
-  `query.py`, `knowledge.py`, `erase.py`, `hook.py`, `obs.py` (stats, doctor,
+  `query/` (package), `knowledge.py`, `erase.py`, `hook.py`, `obs.py` (stats, doctor,
   logs).
 - `bin/pctx`: launcher that finds the interpreter; do not hardcode a path.
 - `install/`: `installer.py` (`--fresh`, `--upgrade`),

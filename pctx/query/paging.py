@@ -94,7 +94,8 @@ def _truncate_snippet(current: Answer, hit: dict[str, Any]) -> Answer | None:
             "note": f"Hit {hit['id']} metadata exceeds 6 KiB; "
             f"use pctx open {hit['id']} to inspect the original.",
         }
-    # Binary search: the size grows monotonically with the prefix length.
+    # Binary search: assumes the size grows monotonically with the prefix
+    # length (redaction growth may break this when a cut splits a secret).
     low, high = 0, len(snippet)
     while low < high:
         middle = (low + high + 1) // 2
@@ -150,7 +151,8 @@ def paginate(hits: list[Answer], out: Answer, limit: int, page: int) -> Answer:
         hits: Every rendered hit in display order.
         out: The answer so far (knowledge, stages and metadata).
         limit: Most hits on a page.
-        page: The 1-based page wanted; past the end it returns the last.
+        page: The 1-based page wanted; a page past the end comes back
+            empty with ``has_more`` false.
 
     Returns:
         The page, or an ``output_too_large`` refusal when metadata alone

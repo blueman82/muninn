@@ -92,9 +92,9 @@ def build_fts_query(text: str) -> str | None:
     Terms are lower-case words (letters, digits, underscore) minus
     stopwords, 1-char words and blobs over MAX_TERM_LEN, deduped, at most
     MAX_TERMS. A "quoted phrase" stays a phrase (in place of its words); an
-    identifier such as
-    ``hook_core.py`` also adds a phrase of its parts. Every element is
-    double-quoted, so no FTS operator survives. Linear in the text length.
+    identifier such as ``hook_core.py`` also adds a phrase of its parts.
+    Every element is double-quoted, so no FTS operator survives. Linear in
+    the text length.
 
     Args:
         text: The user's search text.

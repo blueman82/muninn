@@ -53,7 +53,20 @@ def caller_root(
 
 
 def resolve_session(conn: sqlite3.Connection, given: str) -> str:
-    """Return a session root from a root or an unambiguous prefix of one."""
+    """Return a session root from a root or an unambiguous prefix of one.
+
+    Args:
+        conn: Read-only store connection.
+        given: A session root or a prefix of one.
+
+    Returns:
+        The matching session root.
+
+    Raises:
+        BadArgumentError: ``unknown_session`` when nothing matches or
+            ``given`` is empty, ``ambiguous_session`` when a prefix matches
+            several roots.
+    """
     if not given:
         raise BadArgumentError("unknown_session")
     # LIMIT 3 is enough to tell "one", "exact plus longer" and "ambiguous".
@@ -73,7 +86,18 @@ def resolve_session(conn: sqlite3.Connection, given: str) -> str:
 
 
 def _iso(value: str) -> str:
-    """Return the value if it is an ISO date or timestamp, else refuse."""
+    """Return the value if it is an ISO date or timestamp, else refuse.
+
+    Args:
+        value: Text to check.
+
+    Returns:
+        The value, unchanged.
+
+    Raises:
+        BadArgumentError: ``bad_date`` when it is not an ISO date or
+            timestamp.
+    """
     try:
         if _DATE.fullmatch(value):
             date.fromisoformat(value[:10])
@@ -84,7 +108,17 @@ def _iso(value: str) -> str:
 
 
 def times(since: str | None, until: str | None) -> Where:
-    """Return clauses for ts >= since and ts up to the end of ``until``."""
+    """Return clauses for ts >= since and ts up to the end of ``until``.
+
+    Args:
+        since: Earliest timestamp or date, or None.
+        until: Latest timestamp or date (a bare day includes that whole
+            day), or None.
+
+    Returns:
+        The SQL clauses and their parameters. A malformed bound raises
+        BadArgumentError (``bad_date``) through ``_iso``.
+    """
     clauses: list[str] = []
     params: list[Any] = []
     if since is not None:
@@ -102,7 +136,18 @@ def times(since: str | None, until: str | None) -> Where:
 
 
 def _kind_clause(kinds: set[str] | None, subagents: bool) -> Where:
-    """Return the event-kind predicate for the requested kinds."""
+    """Return the event-kind predicate for the requested kinds.
+
+    Args:
+        kinds: Requested kinds; empty or None means the defaults.
+        subagents: Add delegations and agent reports to the defaults.
+
+    Returns:
+        The SQL clause and its parameters.
+
+    Raises:
+        BadArgumentError: ``bad_kind`` when a kind is not recognised.
+    """
     if kinds:
         if not kinds <= set(ALL_KINDS):
             raise BadArgumentError("bad_kind")

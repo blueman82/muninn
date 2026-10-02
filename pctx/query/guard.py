@@ -26,8 +26,9 @@ def guarded[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     ``connect_ro`` checks only at open time; a store that is locked past
     busy_timeout, turns hot, is corrupt or vanishes later raises here
     instead of a bare sqlite3 error (a HotJournalError for a crashed writer's
-    journal). Messages carry the error name only, never values, so no stored
-    text can leak through an exception.
+    journal). Translated messages carry the error name only, never values, so
+    no stored text leaks through them; an unmatched sqlite3.Error is
+    re-raised unchanged.
 
     Args:
         func: A reader that talks to the store.
