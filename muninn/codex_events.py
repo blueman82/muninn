@@ -23,14 +23,17 @@ from muninn.event_model import (
 from muninn.tool_errors import WAIT_TOOLS, register_call, tool_error
 
 # A Codex desktop session that continues a ChatGPT conversation is still the
-# owner's own session; only the conversation pasted into it is not theirs.
+# owner's own session. Its opening message holds the pasted conversation and a
+# request ChatGPT composed from it; neither is the owner typing.
 CHATGPT_HANDOFF = "chatgpt_handoff"
 CHATGPT_REFERENCE_TAG = "## Referenced ChatGPT conversation"
+# The heading may follow a short wrapper rather than start the message, so
+# look this far in for it.
+CHATGPT_REFERENCE_WINDOW = 400
 
 # A Codex user text starting with one of these was written by the harness,
 # not typed by the person.
 HARNESS_TAGS = (
-    CHATGPT_REFERENCE_TAG,
     "<environment_context>",
     "# AGENTS.md instructions",
     "<user_instructions>",
@@ -126,6 +129,11 @@ def _message(
     if role == "user":
         text = _IMAGES.sub("", text, count=1)
         tag = starting_tag(text, HARNESS_TAGS)
+        if (
+            tag is None
+            and CHATGPT_REFERENCE_TAG in text[:CHATGPT_REFERENCE_WINDOW]
+        ):
+            tag = CHATGPT_REFERENCE_TAG
         kind = user_kind(tag, state.thread_class)
     elif role == "assistant":
         tag, kind = None, "reply"

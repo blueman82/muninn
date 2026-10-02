@@ -53,7 +53,8 @@ follows the usual subagent rule and is `delegation`.
 default search, never citable); `harness` provider-injected text; `delegation` a message from a parent into a subagent
 thread; `tool_error` redacted head and tail of an error-bearing tool output (never pushed, never citable).
 **Thread classes:** `primary` (searched by default; this includes a Codex desktop session that continues a ChatGPT
-conversation, `thread_source` `chatgpt_handoff`, whose pasted conversation block is stored as `harness`), `subagent`,
+conversation, `thread_source` `chatgpt_handoff`, whose opening message, the pasted conversation and the request ChatGPT
+composed, is stored as `harness`), `subagent`,
 `reviewer`, `other` (unrecognised format, never guessed primary). **Providers:** `claude`, `codex`. **Source roots:** `claude-projects`, `codex-sessions`, `codex-archived`.
 
 ## Knowledge ledger
