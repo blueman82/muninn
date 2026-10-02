@@ -4,7 +4,7 @@ Status: Accepted, 2026-10-02. Decided by: owner (answered yes when asked whether
 
 **Context.** A Codex desktop session that continues a ChatGPT conversation has `thread_source` `chatgpt_handoff`. Muninn
 classed every thread source it did not recognise as `other`, which keeps a source row but stores no events. Four of the
-owner's sessions fell in that class, one of them with 18 messages the owner typed. Nothing in them could be searched, cited or
+owner's sessions fell in that class, with many messages the owner typed. Nothing in them could be searched, cited or
 quote-checked, so a decision made there could not reach the knowledge ledger.
 
 **Decision.** `chatgpt_handoff` is classed `primary`, with the reason kept as `thread_source=chatgpt_handoff`. The first
