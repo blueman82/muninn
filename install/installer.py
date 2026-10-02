@@ -46,7 +46,9 @@ from install.constants import (
     PLIST,
     PLUGIN,
     PLUGIN_ID,
+    PRIVATE_UMASK,
     TRUST,
+    TS_FORMAT,
 )
 from install.context import (
     Ctx,
@@ -290,8 +292,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "--home is dry-run only: launchctl acts on the real gui domain"
         )
     # Files we create must not be readable by other users.
-    os.umask(0o077)
-    ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    os.umask(PRIVATE_UMASK)
+    ts = time.strftime(TS_FORMAT, time.gmtime())
     # A dry run writes nothing, not even the log.
     say, run = (
         (print, run_real)

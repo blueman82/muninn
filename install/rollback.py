@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
+from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real, wait
 from install.record import Record, load_record
 from install.steps_release import relink
@@ -72,7 +73,7 @@ def restore_toml(text: str, sections: Sequence[Mapping[str, Any]]) -> str:
 
 def aside(ctx: Ctx, path: Path, name: str) -> None:
     """Move a new-system artefact into the failed dir (never delete)."""
-    ctx.failed.mkdir(mode=0o700, exist_ok=True)
+    ctx.failed.mkdir(mode=PRIVATE_DIR_MODE, exist_ok=True)
     path.rename(ctx.failed / name)
 
 
@@ -83,10 +84,10 @@ def _act(ctx: Ctx, text: str, fn: Callable[[], object]) -> None:
         fn()
 
 
-def _bootout(ctx: Ctx) -> None:
-    """Unload the new job and wait until launchd confirms it is gone."""
+def bootout(ctx: Ctx) -> None:
+    """Unload the job and wait until launchd confirms it is gone."""
     ctx.run(["launchctl", "bootout", ctx.target])
-    wait(ctx, lambda: job(ctx) is None, 30, "new job still loaded")
+    wait(ctx, lambda: job(ctx) is None, 30, "job still loaded")
 
 
 def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
@@ -97,7 +98,7 @@ def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
         j: The launchd job as found at the start of the rollback.
     """
     if j:
-        _act(ctx, f"bootout new job pid {j['pid']}", lambda: _bootout(ctx))
+        _act(ctx, f"bootout new job pid {j['pid']}", lambda: bootout(ctx))
     # Only a fresh install made these, so only then are they ours to move.
     if ctx.data.exists():
         _act(
@@ -191,7 +192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     rec = load_record(args.record)
     if Path(rec["home"]).resolve() != Path.home().resolve():
         ap.error("the record belongs to another HOME")
-    os.umask(0o077)
+    os.umask(PRIVATE_UMASK)
     ctx = Ctx(Path(rec["home"]), run_real, rec["ts"], dry_run=args.dry_run)
     problems = rollback(ctx, rec)
     for problem in problems:

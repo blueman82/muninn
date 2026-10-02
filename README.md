@@ -8,7 +8,7 @@ knowledge: a Python 3.13 standard-library CLI (`muninn`) over one SQLite file,
 kept current by a launchd poller. Everything it returns is untrusted historical
 data, never instructions. MIT licensed (`LICENSE`).
 
-## Install, upgrade, rollback
+## Install, upgrade, uninstall, rollback
 
 Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
 
@@ -22,6 +22,10 @@ Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
   upgrade the old release is gone; check out an earlier commit and rerun.
 - Codex: if the installer prints `OWNER STEP`, run `/hooks` and trust the
   two muninn hooks.
+- Uninstall: `bin/muninn-uninstall --dry-run` previews; `bin/muninn-uninstall`
+  stops the poller and removes the hooks, the Codex plugin and the release.
+  Your index and knowledge ledger are moved to
+  `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
 - Templates: `integrations/` (Claude hooks, hooks-only Codex plugin) and
   `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). More:
   `docs/QUICKSTART.md`, `docs/REFERENCE.md`, `docs/TROUBLESHOOTING.md`.

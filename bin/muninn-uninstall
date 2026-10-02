@@ -1,0 +1,6 @@
+#!/bin/sh
+# Remove muninn: bin/muninn-uninstall [--dry-run] [--purge-data]
+# Finding Python 3.13 is bin/muninn-install's job (ADR 0003); this only names
+# the command.
+set -eu
+exec "$(dirname "$(realpath "$0")")/muninn-install" --uninstall "$@"

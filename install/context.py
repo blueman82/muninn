@@ -20,6 +20,7 @@ from install.constants import (
     LABEL,
     MKT_NAME,
     PLIST,
+    REMOVED_PREFIX,
 )
 
 
@@ -93,6 +94,7 @@ class Ctx:
         data: The muninn data directory.
         rdir: This run's rollback-record directory.
         failed: Where a rollback moves new artefacts instead of deleting.
+        removed: Where an uninstall moves the data dir instead of deleting.
         lib: Directory holding pinned releases and the links.
         muninn: The ``muninn`` command link.
         plist: The launchd plist path.
@@ -117,6 +119,7 @@ class Ctx:
     data: Path = dataclasses.field(init=False, repr=False, compare=False)
     rdir: Path = dataclasses.field(init=False, repr=False, compare=False)
     failed: Path = dataclasses.field(init=False, repr=False, compare=False)
+    removed: Path = dataclasses.field(init=False, repr=False, compare=False)
     lib: Path = dataclasses.field(init=False, repr=False, compare=False)
     muninn: Path = dataclasses.field(init=False, repr=False, compare=False)
     plist: Path = dataclasses.field(init=False, repr=False, compare=False)
@@ -132,6 +135,7 @@ class Ctx:
         self.data = share / "muninn"
         self.rdir = share / f"muninn-install-{self.ts}"
         self.failed = share / f"muninn-failed-{self.ts}"
+        self.removed = share / f"{REMOVED_PREFIX}{self.ts}"
         self.lib = h / ".local/lib/muninn"
         self.muninn = h / ".local/bin/muninn"
         self.plist = h / PLIST

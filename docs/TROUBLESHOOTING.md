@@ -19,6 +19,8 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 | hooks print nothing | `MUNINN_HOOK_DISABLE=1`, or `recall.off` exists in the data dir | unset it, or delete `recall.off` |
 | Codex shows no memory | plugin hooks not trusted | start Codex, run `/hooks`, trust the two hooks |
 | installer failed | see `install.log` and `install-record.json` (`outcome`, `failed`) | it already rolled back; fix the cause and re-run |
+| want muninn gone | not a fault | `bin/muninn-uninstall --dry-run`, then `bin/muninn-uninstall`; the data moves to `~/.local/share/muninn-removed-<ts>` (`--purge-data` deletes it) |
+| `bin/muninn-install` says half-installed after an uninstall | an uninstall that was interrupted left the data dir or the release link | run `bin/muninn-uninstall` again; it removes whatever is left |
 
 ## Logs
 

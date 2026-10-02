@@ -13,7 +13,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from install import configedit as ce
-from install.constants import CODEX_VERIFIED, OWNER_STEP, PLUGIN_ID
+from install.constants import (
+    CODEX_VERIFIED,
+    OWNER_STEP,
+    PLUGIN_ID,
+    PRIVATE_DIR_MODE,
+)
 from install.context import Ctx, StepFailedError, dry, link_text, must
 from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
@@ -59,7 +64,7 @@ def record(ctx: Ctx, rec: Record) -> None:
         version = ""
     # Only a Codex whose trust hash we have verified may be pre-trusted.
     rec["trust"] = "auto" if version in CODEX_VERIFIED else "owner"
-    ctx.rdir.mkdir(mode=0o700, parents=True)
+    ctx.rdir.mkdir(mode=PRIVATE_DIR_MODE, parents=True)
     save(ctx, rec)
 
 

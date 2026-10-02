@@ -15,7 +15,13 @@ import tarfile
 from pathlib import Path
 
 from install import configedit as ce
-from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
+from install.constants import (
+    GIT_ENV,
+    HEARTBEAT_S,
+    LABEL,
+    PRIVATE_DIR_MODE,
+    RECALL_OFF,
+)
 from install.context import (
     Ctx,
     StepFailedError,
@@ -142,7 +148,7 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
         "existing transcripts",
     ):
         return
-    ctx.data.mkdir(parents=True, mode=0o700)
+    ctx.data.mkdir(parents=True, mode=PRIVATE_DIR_MODE)
     flag = ctx.data / RECALL_OFF
     # Mode 0600 from creation: doctor fails file_modes on a looser file.
     os.close(os.open(flag, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
