@@ -93,8 +93,8 @@ These are the only automatic push, installed for Claude Code and Codex. Both
 redact secrets, escape the frame delimiter, stay silent for subagent and
 reviewer transcripts, and fail open: on any error they exit 0 with a bounded
 "store unavailable" notice (or `{}` when disabled). A stale poller (no finished pass
-or alive stamp within 3 intervals) is flagged in the hook block and in every CLI
-response.
+or alive stamp within 3 intervals), or a last pass that failed on sources, is
+flagged in the hook block; every CLI response carries the poller's state.
 
 - SessionStart (`muninn hook session-start --provider claude|codex`): at most
   4,000 characters framed

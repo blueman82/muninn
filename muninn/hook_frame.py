@@ -154,7 +154,7 @@ def render_block(
     Args:
         entries: Entries from ``knowledge.block_entries``, newest first.
         scope_label: Name of the repo or scope, shown in the heading.
-        notes: Extra lines, such as a stale-index warning.
+        notes: Extra lines, such as a stale-index or failed-sources warning.
         limit: Maximum characters.
 
     Returns:
@@ -218,7 +218,7 @@ def recall_text(
     Args:
         entries: Matched knowledge entries.
         hits: Matched events.
-        notes: Extra lines, such as a stale-index warning.
+        notes: Extra lines, such as a stale-index or failed-sources warning.
         limit: Maximum characters.
 
     Returns:

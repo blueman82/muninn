@@ -31,8 +31,9 @@ class RecallRequest:
 
     terms: list[str]  # the prompt's query terms, from prompt_terms
     cwd: str  # working directory that scopes the search
-    # Extra lines, such as a stale-index warning. Called only once something
-    # is recalled, so a prompt with no hit never reads the heartbeat file.
+    # Extra lines, such as a stale-index or failed-sources warning. Called
+    # only once something is recalled, so a prompt with no hit never reads
+    # the heartbeat file.
     notes: Callable[[], tuple[str, ...]]
     limit: int  # maximum characters of the block
 
