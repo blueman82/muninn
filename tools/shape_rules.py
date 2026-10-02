@@ -94,7 +94,7 @@ def check_imports(rel: str, tree: ast.Module) -> list[Violation]:
         tree: Parsed module.
 
     Returns:
-        Violations for star, lazy, ``TYPE_CHECKING`` or missing-future imports.
+        Violations for star, lazy, typing-guarded or missing-future imports.
     """
     out: list[Violation] = []
     for fn in functions(tree):

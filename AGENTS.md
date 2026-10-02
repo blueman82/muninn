@@ -10,8 +10,9 @@ Instructions for coding agents working in this repo. Any parent-directory
   `query/` (package), `knowledge.py`, `erase.py`, `hook.py`, `obs.py` (stats, doctor,
   logs).
 - `bin/pctx`: launcher that finds the interpreter; do not hardcode a path.
-- `install/`: `installer.py` (`--fresh`, `--upgrade`),
-  `rollback.py`, `configedit.py`.
+- `install/`: `installer.py` (`--fresh`, `--upgrade`; the runner),
+  `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`,
+  `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`.
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
 - `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 

@@ -11,7 +11,7 @@ Rules:
     S4: docstrings use the Google layout: a one-line summary ending in
         punctuation, a blank line, then only Google section names.
     S5: no comment or docstring cites a design, spec or work-unit label.
-    S6: imports are explicit, top-level and runtime; no ``TYPE_CHECKING``.
+    S6: imports are explicit, top-level and runtime; no typing-only guards.
     S7: every parameter and return value is annotated.
     S8: no mutable default arguments.
 """

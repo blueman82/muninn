@@ -40,9 +40,7 @@ SUMMARY_END = (".", "?", "!")
 Documentable = ast.Module | ast.ClassDef | FunctionNode
 
 
-def check_docstrings(
-    rel: str, tree: ast.Module
-) -> list[Violation]:
+def check_docstrings(rel: str, tree: ast.Module) -> list[Violation]:
     """Apply S3 and S4 to a module, its classes and its functions.
 
     Args:
@@ -61,7 +59,9 @@ def check_docstrings(
             if _needs_docstring(rel, node, nested):
                 out.append(Violation(rel, line, "S3", f"{name}: no docstring"))
             continue
-        out += [Violation(rel, line, "S4", f"{name}: {m}") for m in _layout(doc)]
+        out += [
+            Violation(rel, line, "S4", f"{name}: {m}") for m in _layout(doc)
+        ]
     return out
 
 
