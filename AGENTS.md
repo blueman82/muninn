@@ -13,10 +13,13 @@ Instructions for coding agents working in this repo. Any parent-directory
   `tombstones`, `hook*`, `obs*` (logs, stats, doctor, status), `scope`.
 - `bin/muninn`: launcher that finds the interpreter; do not hardcode a path.
 - `bin/muninn-install`: sh wrapper over `install/installer.py` (bare, `--check`,
-  `--status`); other arguments pass through.
+  `--status`, `--uninstall`); other arguments pass through.
+- `bin/muninn-uninstall`: names `bin/muninn-install --uninstall`
+  (`--dry-run`, `--purge-data`). Agents run only `--dry-run`.
 - `install/`: `installer.py` (`--fresh`, `--upgrade`; the runner),
   `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`,
-  `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`, `tomledit.py`.
+  `transforms.py`, `trust.py`, `rollback.py`, `uninstall.py`, `configedit.py`,
+  `tomledit.py`.
 - `tools/`: the standards gate (`python3.13 -m tools.check`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
 - `.claude/skills/muninn-*`: one Claude Code skill per user-facing command.
@@ -80,7 +83,8 @@ only `--fresh` and `--upgrade` (0002); `bin/muninn` finds its interpreter at run
 time (0003); logs hold no transcript text (0004); no hash-chained call log
 (0005); the standards are enforced by a gate (0006); per-prompt recall starts
 off on a fresh install (0007); `bin/muninn-install` picks the mode and `--check`
-writes nothing (0008).
+writes nothing (0008); `bin/muninn-uninstall` keeps the data unless told
+otherwise (0009).
 
 ## Definition of done (Codex Stop hook plus manual fallback)
 

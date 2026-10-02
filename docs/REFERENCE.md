@@ -73,6 +73,13 @@ Entries are superseded or retracted, never edited.
 | `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget content; without `--yes` it is a dry run. Writes tombstones so a rescan cannot restore it. Lists provider files and other derived copies it cannot reach (`not_covered`, `out_of_scope`) |
 | `muninn hook session-start\|prompt --provider claude\|codex` | provider hooks: payload on stdin, JSON on stdout (see the README) |
 
+## Installing and removing (from a checkout)
+
+| Command | What it does |
+|---|---|
+| `bin/muninn-install` | fresh install, or upgrade when installed; `--check` previews, `--status` compares the installed commit with `HEAD` |
+| `bin/muninn-uninstall [--dry-run] [--purge-data]` | the same as `bin/muninn-install --uninstall`. Stops the poller; removes the launchd plist, our hooks from Claude's `settings.json`, our sections from Codex's `config.toml`, the Codex plugin cache, the `muninn` link and `~/.local/lib/muninn`. Moves the data directory to `~/.local/share/muninn-removed-<ts>/data` (`--purge-data` deletes it instead). `--dry-run` writes nothing. Prints one line per action, then `uninstall done`, `dry run only: nothing was removed` or `muninn is not installed here`. Exit 0 in each case |
+
 ## `muninn stats`
 
 `sources` counts per `provider/root/thread_class/status` (status `active` or `missing`); `events` per kind;

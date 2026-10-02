@@ -32,13 +32,14 @@ class WrapperTest(unittest.TestCase):
         self.data = self.home / ".local/share/muninn"
 
     def run_wrapper(
-        self, *args: str, rc: int = 0
+        self, *args: str, rc: int = 0, script: Path = WRAPPER
     ) -> subprocess.CompletedProcess[str]:
-        """Run ``bin/muninn-install`` against the temp HOME.
+        """Run a ``bin`` script against the temp HOME.
 
         Args:
             *args: Command-line arguments.
             rc: Exit status the stub Python should return.
+            script: The script to run, ``bin/muninn-install`` by default.
 
         Returns:
             The finished process, with text output.
@@ -50,7 +51,7 @@ class WrapperTest(unittest.TestCase):
             STUB_RC=str(rc),
         )
         return subprocess.run(
-            [WRAPPER, *args], env=env, capture_output=True, text=True
+            [script, *args], env=env, capture_output=True, text=True
         )
 
     def installed(self, sha: str) -> None:
@@ -86,6 +87,25 @@ class WrapperTest(unittest.TestCase):
     def test_the_summary_line_survives_a_missing_status_file(self) -> None:
         r = self.run_wrapper()
         self.assertIn("poller pid unknown", r.stdout)
+
+    def test_uninstall_passes_its_flags_to_the_uninstaller(self) -> None:
+        r = self.run_wrapper("--uninstall", "--dry-run", "--purge-data")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            self.argv().split()[-4:],
+            ["-m", "install.uninstall", "--dry-run", "--purge-data"],
+        )
+
+    def test_uninstall_runs_on_a_half_installed_machine(self) -> None:
+        self.data.mkdir(parents=True)
+        r = self.run_wrapper("--uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("install.uninstall", self.argv())
+
+    def test_the_uninstall_command_is_the_uninstall_flag(self) -> None:
+        r = self.run_wrapper("--dry-run", script=ROOT / "bin/muninn-uninstall")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-m install.uninstall --dry-run", self.argv())
 
     def test_help_describes_the_wrapper_and_writes_nothing(self) -> None:
         for flag in ("--help", "-h"):

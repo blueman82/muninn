@@ -15,6 +15,7 @@ Line length is 79 (black and ruff, configured in `pyproject.toml`). Run the CLI 
 
     bin/muninn-install --check   # plain-sentence preview, writes nothing
     bin/muninn-install           # fresh or upgrade, installs HEAD
+    bin/muninn-uninstall --dry-run   # what removal would do; owner runs it for real
 
 ## Architecture (the parts that span files)
 

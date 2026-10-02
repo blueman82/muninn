@@ -34,7 +34,9 @@ flowchart LR
 - **Installer.** `install/installer.py` has two modes (`--fresh`,
   `--upgrade`) over one step pipeline: record, pin, build or restart, merge
   provider config, verify, prune. `install/rollback.py`
-  reverses it from the recorded values.
+  reverses it from the recorded values. `install/uninstall.py` takes an
+  installed machine back out by removing our own entries (no record survives an
+  upgrade) and moves the data dir aside instead of deleting it.
 - **Trust.** Everything stored is untrusted historical data. Secrets are
   redacted at ingest and on output; automatic injection is framed so pasted
   copies are flagged on ingest. See the README for the full list.

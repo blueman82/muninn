@@ -83,8 +83,8 @@ def _act(ctx: Ctx, text: str, fn: Callable[[], object]) -> None:
         fn()
 
 
-def _bootout(ctx: Ctx) -> None:
-    """Unload the new job and wait until launchd confirms it is gone."""
+def bootout(ctx: Ctx) -> None:
+    """Unload the job and wait until launchd confirms it is gone."""
     ctx.run(["launchctl", "bootout", ctx.target])
     wait(ctx, lambda: job(ctx) is None, 30, "new job still loaded")
 
@@ -97,7 +97,7 @@ def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
         j: The launchd job as found at the start of the rollback.
     """
     if j:
-        _act(ctx, f"bootout new job pid {j['pid']}", lambda: _bootout(ctx))
+        _act(ctx, f"bootout new job pid {j['pid']}", lambda: bootout(ctx))
     # Only a fresh install made these, so only then are they ours to move.
     if ctx.data.exists():
         _act(

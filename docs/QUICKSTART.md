@@ -40,6 +40,23 @@ release. Provider config is not touched. A failed upgrade returns to the old
 release; after a successful one the old release is gone (check out an earlier
 commit and run `bin/muninn-install` to go back).
 
+## Uninstall
+
+    bin/muninn-uninstall --dry-run    # says what it would do; writes nothing
+    bin/muninn-uninstall
+
+It stops the poller, removes the launchd plist, takes only muninn's hooks out
+of `~/.claude/settings.json` and only muninn's sections out of
+`~/.codex/config.toml`, deletes the Codex plugin cache, and removes
+`~/.local/bin/muninn` and `~/.local/lib/muninn`. Your transcripts and every
+other setting stay as they are.
+
+The data directory (the index and the knowledge ledger) is moved to
+`~/.local/share/muninn-removed-<timestamp>/data`, not deleted, because the
+ledger cannot be rebuilt from transcripts. Add `--purge-data` to delete it.
+Running it again, or on a machine without muninn, changes nothing and says so.
+After an uninstall `bin/muninn-install` does a fresh install.
+
 ## Per-prompt recall starts off
 
 A `--fresh` install creates `~/.local/share/muninn/recall.off`, so muninn does not add earlier prompts to each of

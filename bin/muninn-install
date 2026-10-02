@@ -3,6 +3,7 @@
 #   bin/muninn-install           fresh install, or upgrade when already installed
 #   bin/muninn-install --check   say what would happen; write nothing
 #   bin/muninn-install --status  installed commit against this checkout's HEAD
+#   bin/muninn-install --uninstall [--dry-run] [--purge-data]  remove muninn
 #   bin/muninn-install --help    describe the above
 # Any other arguments go straight to install.installer (--repo, --sha, ...).
 # Interpreter order is bin/muninn's (ADR 0003).
@@ -56,6 +57,8 @@ install or an upgrade by looking at what is on this machine.
   (no argument)  install or upgrade, restart the poller, run doctor
   --check        say what would happen; write nothing
   --status       show the installed commit against this checkout's HEAD
+  --uninstall    remove muninn (bin/muninn-uninstall); takes --dry-run and
+                 --purge-data
 
 Advanced: any other arguments go straight to install.installer
 (--repo, --sha, --fresh, --upgrade, --dry-run, --home). Details are in
@@ -73,6 +76,11 @@ HELP
         "checkout $short: upgrade needed"
     fi
     exit 0
+    ;;
+  --uninstall)
+    shift
+    cd "$root"
+    exec "$py" -E -s -B -m install.uninstall "$@"
     ;;
   --check | "") ;;
   *)
