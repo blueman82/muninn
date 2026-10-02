@@ -26,12 +26,28 @@ Instructions for coding agents working in this repo. Any parent-directory
   tests: use a temp `PCTX_HOME` and the fakes in `tests/test_installer.py`.
 - Never touch provider transcripts.
 
+## Standards: enforced by code, read `docs/STANDARDS.md`
+
+- Every `.py` file has at most 400 non-blank lines and every function at most
+  100; modules, classes and functions have Google-style docstrings; every
+  parameter and return is annotated (pyright strict); comments explain why and
+  never cite a design, spec or work-unit label; imports are explicit and at
+  the top; ruff and black are clean.
+- There is no `noqa`, no `# type: ignore` and no exemption list. If a rule is
+  wrong, change `tools/` or `pyproject.toml` with an ADR; do not work around it.
+- A skill or guideline that says otherwise (for example "public docstrings
+  only") does not override `docs/STANDARDS.md`.
+
 ## Check
 
     python3.13 -m unittest discover -s tests -t .
+    python3.13 -m tools.check --full       # the whole gate
 
-Style (from a venv with ruff, black, isort): `ruff check .`,
-`black --check .`, `isort --check-only .`.
+Set up the gate tools once:
+`python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`
+and `git config core.hooksPath .githooks`. The pre-commit hook, the test suite,
+Claude Code's Stop hook and the installer all run the gate; a missing tool
+fails it.
 
 ## Verify a change
 

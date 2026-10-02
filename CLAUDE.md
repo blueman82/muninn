@@ -9,9 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     python3.13 -m unittest discover -s tests -t .              # full suite
     python3.13 -m unittest tests.test_query                    # one module
     python3.13 -m unittest tests.test_query.AnswerEvidenceTests.test_open_and_neighbours_mark_answer_evidence  # one test
-    ruff check . && black --check . && isort --check-only .    # needs a venv with the tools
+    python3.13 -m tools.check --full                           # the whole standards gate (needs .venv, see docs/STANDARDS.md)
 
-Line length is 79 (black, ruff, isort all configured in `pyproject.toml`). Run the CLI from source with `bin/pctx ...` (or `python3.13 -m pctx`). Upgrade the installed machine copy:
+Line length is 79 (black and ruff, configured in `pyproject.toml`). Run the CLI from source with `bin/pctx ...` (or `python3.13 -m pctx`). Upgrade the installed machine copy:
 
     python3.13 -E -s -B -m install.installer --repo . --sha "$(git rev-parse HEAD)" --upgrade
 
@@ -23,6 +23,10 @@ Line length is 79 (black, ruff, isort all configured in `pyproject.toml`). Run t
 - **Erase is tombstone-first:** `erase.py` writes tombstones (ids and hashes only) that `ingest._tombstoned` checks before any line is read, so rescans can't resurrect content. Any new place that stores derived text must be covered by erase and by its residue scan.
 - **Logging/observability:** `obs.py` owns `calls.jsonl`, `status.json`, `poller.log`, `stats`, `doctor`. Every log and report is allowlisted (ADR 0004); new fields go through the allowlist and never carry transcript text.
 - **Deployment:** launchd and the hooks run the pinned release at `~/.local/lib/provenance-context/current/bin/pctx`, not this checkout. A source change has no effect on the live system until `--upgrade` is run, and a successful upgrade deletes the previous release (no rollback; ADR 0001). `integrations/` and `launchd/` are templates with literal `@HOME@` that `install/installer.py` substitutes; `install/rollback.py` only undoes an interrupted run.
+
+## Standards are enforced, not advisory
+
+`docs/STANDARDS.md` is the rulebook: files up to 400 lines, functions up to 100, Google docstrings on everything, full annotations (pyright strict), why-comments with no design/spec/work-unit labels, explicit top-level imports, ruff and black clean. There is no `noqa`, no `# type: ignore` and no exemption list. Claude Code's Stop hook (`.claude/settings.json`), the git pre-commit hook, `tests/test_standards.py` and the installer all run the gate, so a change that breaks a rule cannot be finished, committed or installed. Fix the code, not the rule. These rules override any skill that says to document less (for example "public docstrings only").
 
 ## Gotchas
 

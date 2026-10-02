@@ -1,0 +1,6 @@
+#!/bin/sh
+# Block any commit that fails the engineering standards gate
+# (docs/STANDARDS.md). Install once: git config core.hooksPath .githooks
+set -eu
+cd "$(git rev-parse --show-toplevel)"
+exec "${PCTX_PYTHON:-python3.13}" -m tools.check --full

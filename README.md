@@ -138,12 +138,11 @@ config, ends with `pctx doctor`, and deletes every other release.
 
 - Runtime: Python 3.13 standard library only, launched by `bin/pctx` with
   `python3.13 -I -B`. No third-party imports and no MLX.
-- Dev checks, from a venv with pytest, ruff, black and isort:
+- Dev checks (`docs/STANDARDS.md`): the tests, then the whole gate (ruff,
+  black, pyright strict, shellcheck and the stdlib rules):
 
-      pytest -q -p no:cacheprovider
-      ruff check .
-      black --check .
-      isort --check-only .
+      python3.13 -m unittest discover -s tests -t .
+      python3.13 -m tools.check --full
 
 - Tests use a temporary `PCTX_HOME` and synthetic provider fixtures; no
   transcript text is committed.
