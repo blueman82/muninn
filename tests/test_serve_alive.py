@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import signal
 import time
 import unittest
@@ -111,10 +112,12 @@ class ServeAliveTests(CliCase):
         self.serve_one_pass(fake)
         self.assertEqual(len(self.alive_writes), 2)  # first call, then 5.1
 
-    def test_a_failed_stamp_write_does_not_abort_the_pass(self) -> None:
+    def test_a_failed_stamp_write_is_logged_once_and_does_not_abort(
+        self,
+    ) -> None:
         def broken(home: Any, fields: dict[str, object]) -> None:
             if fields.get(ALIVE_AT) is not None:
-                raise OSError("disk full")
+                raise PermissionError("denied")
             REAL_WRITE_STATUS(home, fields)
 
         def fake(
@@ -124,10 +127,17 @@ class ServeAliveTests(CliCase):
             on_source: Callable[[], None],
             **_: Any,
         ) -> ingest.PassStats:
-            on_source()
+            for now in (0.0, 6.0, 12.0):  # three attempts past the throttle
+                self.clock[0] = now
+                on_source()
             return ingest.PassStats()
 
         self.serve_one_pass(fake, write_status=broken)
+        lines = (self.home / "poller.log").read_text().splitlines()
+        failures = [json.loads(x) for x in lines if "heartbeat_failed" in x]
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["exc"], "PermissionError")
+        self.assertNotIn("denied", "\n".join(lines))  # class name only
         self.assertEqual(self.status()["passes"], 1)
 
     def test_a_pass_that_keeps_failing_never_reads_ok(self) -> None:

@@ -79,6 +79,7 @@ class _Poller:
         self.passes = self.skipped = self.quiet = 0
         self.idle_every = 1
         self.alive_at = _NEVER  # monotonic time of the last write
+        self.beat_failed = False  # logged already in this pass
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Stop now if idle, else after the open transaction ends."""
@@ -123,11 +124,19 @@ class _Poller:
         # Stamped before the write: a failed write is not retried for a few
         # seconds, which is better than retrying on every source.
         self.alive_at = now
-        # A heartbeat that cannot be written must not abort the pass.
-        with contextlib.suppress(OSError):
+        # A heartbeat that cannot be written must not abort the pass, but the
+        # poller would then go stale with no word why: log it, once a pass.
+        try:
             obs.write_status(
                 self.home, {ALIVE_AT: time.time(), "pid": os.getpid()}
             )
+        except OSError as exc:
+            if not self.beat_failed:
+                self.beat_failed = True
+                obs.log_poller(
+                    self.home,
+                    {"event": "heartbeat_failed", "exc": type(exc).__name__},
+                )
 
     def _clear_alive(self) -> None:
         """Forget the alive stamp once a pass ends, however it ended.
@@ -135,6 +144,7 @@ class _Poller:
         Between passes only a finished pass shows the poller is healthy, as
         before; the stamp covers the time inside one.
         """
+        self.beat_failed = False
         if self.alive_at == _NEVER:
             return
         self.alive_at = _NEVER

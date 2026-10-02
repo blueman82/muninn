@@ -26,7 +26,9 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 ## Logs
 
 - `poller.log`: one JSON line per event (`start`, `pass` when files changed or
-  failed, hourly `idle`, `error` with an exception class, `stop`). Rotates at
-  1 MiB to `poller.log.1`.
+  failed, hourly `idle`, `error` with an exception class, `heartbeat_failed`
+  with the class of the error when the alive stamp could not be written (once
+  per pass; the poller will then go `stale`), `stop`). Rotates at 1 MiB to
+  `poller.log.1`.
 - `calls.jsonl`: one line per CLI call, IDs and counts only; rotates likewise.
 - `status.json`: the last pass and heartbeat.
