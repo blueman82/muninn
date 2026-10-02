@@ -244,7 +244,9 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
         ctx.say("dry run only: nothing was written")
     else:
         where = (
-            "install-record.json" if rec.get("record_removed") else ctx.rdir
+            ctx.lib / "install-record.json"
+            if rec.get("record_removed")
+            else ctx.rdir
         )
         ctx.say(f"install done; record in {where}")
     return rec

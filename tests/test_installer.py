@@ -234,6 +234,13 @@ class UpgradeTest(unittest.TestCase):
             shares,  # no leftover record dir
         )
 
+    def test_upgrade_says_where_the_install_record_is(self) -> None:
+        """The record path is absolute, like the log path the wrapper shows."""
+        w = self.w
+        co.install(self.ctx, w.repo, self.sha2)
+        record = self.lib / "install-record.json"
+        self.assertIn(f"record in {record}", "\n".join(w.out))
+
     def test_upgrade_leaves_the_recall_switch_as_the_owner_set_it(
         self,
     ) -> None:
