@@ -128,7 +128,7 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `launchd_job` | error | the launchd job is loaded with a live process | its pid |
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
-| `failed_sources` | warn | no file failed in the last pass | count failed; the hook block also says so |
+| `failed_sources` | warn | no file failed in the last pass | count failed; the SessionStart block, and a recall block that has a hit, also say so |
 | `db_size` | warn | the database is under 2 GB | its size; the threshold |
 | `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
 | `missing_sources` | info | always | count of indexed files no longer on disk |

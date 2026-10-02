@@ -12,8 +12,8 @@ def index_notes(home: Path) -> tuple[str, ...]:
 
     Returns:
         A line when the poller shows no sign of life for 3 intervals, and a
-        line when the last pass could not read some sources; none when both
-        are fine.
+        line when the last finished pass could not read some sources; none
+        when both are fine.
     """
     status = obs.read_status(home)
     fresh = obs.freshness(status)
@@ -29,7 +29,8 @@ def index_notes(home: Path) -> tuple[str, ...]:
     # Only a real count: status.json is read back from disk.
     if isinstance(failed, int) and not isinstance(failed, bool) and failed > 0:
         notes.append(
-            f"muninn: the last pass could not read {failed} source(s);"
-            " recent sessions may be missing."
+            f"muninn: the last finished pass could not read {failed}"
+            " source(s); recent sessions may be missing."
+            " run: muninn doctor"
         )
     return tuple(notes)
