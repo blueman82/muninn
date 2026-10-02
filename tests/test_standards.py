@@ -56,6 +56,34 @@ class GateCannotBeRemovedTest(unittest.TestCase):
             "run: git config core.hooksPath .githooks",
         )
 
+    def test_codex_stop_hook_registers_the_full_gate_wrapper(self) -> None:
+        settings = json.loads(
+            (ROOT / ".codex" / "hooks.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            settings,
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        'python3.13 "$(git rev-parse '
+                                        "--show-toplevel)/tools/"
+                                        'codex_stop_gate.py"'
+                                    ),
+                                    "timeout": 600,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+        )
+        self.assertTrue((ROOT / "tools" / "codex_stop_gate.py").is_file())
+
     def test_the_full_gate_runs_the_test_suite(self) -> None:
         text = (ROOT / "tools" / "check.py").read_text(encoding="utf-8")
         self.assertIn("run_tests", text)

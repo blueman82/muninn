@@ -3,6 +3,8 @@
 These rules are enforced by code, not by goodwill. `python3.13 -m tools.check --full` must pass before any commit, any
 upgrade and any claim that work is done. If a rule seems wrong, change it in `tools/` or `pyproject.toml` with an ADR; do
 not work around it. There is no `noqa`, no `# type: ignore` and no exemption list.
+The operator must run the full gate before an upgrade; the installer itself
+enforces only the stdlib rules S1 to S8.
 
 ## The gate
 
@@ -21,9 +23,47 @@ One-time setup per clone (the first two are checked by the gate and the tests):
     python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
     cp tools/claude-settings.json .claude/settings.json  # Claude Code: gate after every edit, no stopping on a failure
 
-Layers, each of which catches what the one before it can be made to skip: Claude Code's hooks, the git hooks,
-`tests/test_standards.py`, and the installer (it refuses to pin a commit that breaks the stdlib rules S1 to S8; it does
+If Codex cannot write Git metadata, the owner or Claude session configures the
+Git hooks. Codex project hooks are tracked in `.codex/hooks.json`; the owner
+must trust this checkout and approve the exact Stop definition in Codex CLI
+`/hooks`. Editing a definition requires approval again. Hooks are enabled by
+default (`features.hooks = true`); disabling them disables this enforcement.
+Do not write a user's global Codex configuration to enable project hooks.
+For owner setup, launch `codex -C <checkout>`, trust the project during
+onboarding or through `/permissions`, then use `/hooks` to inspect, enable
+and approve the project's Stop hook.
+
+Layers include Claude Code's hooks, Codex's approved project Stop hook, the git hooks,
+`tests/test_standards.py` (stdlib rules and enforcement-configuration checks),
+and the installer (it refuses to pin a commit that breaks the stdlib rules S1 to S8; it does
 not run ruff, pyright or the tests).
+
+## Codex Stop contract
+
+The Stop command invokes `tools/codex_stop_gate.py` directly with Python 3.13.
+Codex provides JSON on stdin, including `cwd`, `session_id`, `hook_event_name`,
+`turn_id`, `stop_hook_active` and `last_assistant_message`. The wrapper ignores
+that payload: it derives the worktree from its own file and always runs one
+`python -m tools.check --full` subprocess using the same Python interpreter.
+The gate receives closed stdin, so it cannot consume the hook payload.
+
+A passing gate returns compact `{}` on stdout and exit 0. A failed gate,
+launch error or timeout returns exit 2 with a blocking reason on stderr.
+The gate timeout is 540 seconds, below the hook's 600-second timeout.
+No transcript payload is logged or echoed. These are Codex hook responses;
+pctx provider hooks retain their separate compact-JSON, exit-0 contract.
+
+`stop_hook_active` means Codex already continued after a blocked Stop. It never
+permits completion without a passing gate. There are no recursive hook calls,
+internal retries or retry-count bypasses. A timeout bounds each invocation;
+it does not prevent repeated blocked turns. Fix a persistent failure or ask
+the owner for help before retrying unchanged work.
+
+If the host lacks hooks, or trust, approval or feature enablement is missing,
+run the full gate manually after the last edit and report its result verbatim.
+Another agent's later change to a checked file invalidates that result.
+Local wrapper tests do not establish that a real trusted Codex turn is blocked.
+The hook contract is documented at https://learn.chatgpt.com/docs/hooks.
 
 ## Limits
 

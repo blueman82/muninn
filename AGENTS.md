@@ -27,8 +27,8 @@ Instructions for coding agents working in this repo. Any parent-directory
 - No third-party imports in `pctx/` or `install/`.
 - Logs and `doctor`/`stats` output hold counts, codes and ids, never
   transcript text. New log fields go through the allowlist in `obs.py`.
-- Output is JSON on stdout; `--pretty` only changes indentation. Hooks must
-  keep returning compact JSON and exit 0.
+- Output is JSON on stdout; `--pretty` only changes indentation. pctx provider
+  hooks must keep returning compact JSON and exit 0.
 - Do not write to a user's real `HOME`, launchd domain or provider config in
   tests: use a temp `PCTX_HOME` and the fakes in `tests/test_installer.py`.
 - Never touch provider transcripts.
@@ -57,11 +57,19 @@ Instructions for coding agents working in this repo. Any parent-directory
     python3.13 -m unittest discover -s tests -t .   # the suite, serial (~35 s)
 
 Set up once: `python3.13 -m venv .venv && .venv/bin/pip install -r
-requirements-dev.txt` and `git config core.hooksPath .githooks`. The pre-commit
-and pre-merge-commit hooks and `tests/test_standards.py` run the whole gate;
+requirements-dev.txt` and `git config core.hooksPath .githooks`. If Codex cannot
+write Git metadata, the owner or Claude session configures the Git hooks.
+The pre-commit and pre-merge-commit hooks run the whole gate;
+`tests/test_standards.py` runs the stdlib rules and checks enforcement
+configuration;
 the installer runs only the standards rules (S1 to S8), not ruff, pyright or the
 tests; Claude Code's Stop hook (`.claude/settings.json`) blocks stopping on a
-failure. A missing tool or a failing test fails the gate; it never skips.
+failure. Codex's project Stop hook (`.codex/hooks.json`) runs the full gate
+through `tools/codex_stop_gate.py`. The owner must trust the project and approve
+that exact hook definition in Codex CLI `/hooks`; changed definitions need
+approval again. Codex hooks are enabled by default (`features.hooks = true`);
+if disabled, the Stop gate cannot run. See `docs/STANDARDS.md` for its contract.
+A missing tool or a failing test fails the gate; it never skips.
 
 ## Decisions you must not reverse without asking
 
@@ -71,13 +79,17 @@ time (0003); logs hold no transcript text (0004); no hash-chained call log
 (0005); the standards are enforced by a gate (0006); per-prompt recall starts
 off on a fresh install (0007).
 
-## Definition of done (Codex has no Stop hook, so this is on you)
+## Definition of done (Codex Stop hook plus manual fallback)
 
 - Work is not done until `python3.13 -m tools.check --full` passes on the final
   tree, run after your last edit. If another agent changes a checked file
   afterwards, your result is void: run it again.
 - Report a failing gate as unfinished work with the failing lines, never as
   done. State the gate's result verbatim in your final message.
+- The trusted, approved Codex Stop hook blocks completion on failure. If hooks
+  are disabled, unapproved or unavailable in the current host, run the full
+  gate manually: the same definition of done applies. A repeated Stop never
+  bypasses a failure; fix its cause or ask the owner for help before retrying.
 - Your sandbox may not allow writes under `.git`, so you may be unable to
   commit or set hooks. Then leave the changes uncommitted, say so, and let the
   owner or the Claude session commit them; the git hook is the enforcement
