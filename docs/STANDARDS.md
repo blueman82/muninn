@@ -51,7 +51,7 @@ A passing gate returns compact `{}` on stdout and exit 0. A failed gate,
 launch error or timeout returns exit 2 with a blocking reason on stderr.
 The gate timeout is 540 seconds, below the hook's 600-second timeout.
 No transcript payload is logged or echoed. These are Codex hook responses;
-pctx provider hooks retain their separate compact-JSON, exit-0 contract.
+muninn provider hooks retain their separate compact-JSON, exit-0 contract.
 
 `stop_hook_active` means Codex already continued after a blocked Stop. It never
 permits completion without a passing gate. There are no recursive hook calls,
@@ -69,9 +69,9 @@ The hook contract is documented at https://learn.chatgpt.com/docs/hooks.
 
 | Rule | Limit | Applies to |
 |---|---|---|
-| S1 file length | 400 non-blank lines | every `.py` file in `pctx/`, `install/`, `tools/`, `tests/` |
+| S1 file length | 400 non-blank lines | every `.py` file in `muninn/`, `install/`, `tools/`, `tests/` |
 | S2 function length | 100 lines (aim for 40) | every function and method |
-| Ruff complexity | McCabe 10, 7 arguments, 12 branches, 6 returns, 50 statements | `pctx/`, `install/`, `tools/`, `tests/` |
+| Ruff complexity | McCabe 10, 7 arguments, 12 branches, 6 returns, 50 statements | `muninn/`, `install/`, `tools/`, `tests/` |
 
 Split by responsibility, not by line count: a new module has one reason to change and a name that says it. Do not shuffle
 code into `utils.py`.
@@ -96,11 +96,11 @@ Pathlib over `os.path` (ruff `PTH`), no commented-out code (`ERA`), comprehensio
 - No mutable default arguments. (S8)
 - EAFP over look-before-you-leap; context managers for every resource; f-strings only; early returns over nesting.
 - Untrusted text is sanitised where it is inserted into output.
-- Standard library only in `pctx/` and `install/`.
+- Standard library only in `muninn/` and `install/`.
 
 ## Docstrings: Google style, everywhere
 
-Every module, class and function in `pctx/`, `install/` and `tools/` has one. In `tests/`, modules, classes and helper
+Every module, class and function in `muninn/`, `install/` and `tools/` has one. In `tests/`, modules, classes and helper
 functions do; `test_*` methods and fixture hooks (`setUp`, `tearDown`) do not, because their names are their
 documentation. A closure (a function defined inside another function) needs none anywhere. A one-line docstring is enough for a trivial private helper; anything longer uses the sections below, and
 the sections must match the code (ruff `D417`, `DOC201`, `DOC402`, `DOC501`).
@@ -144,7 +144,7 @@ ticket labels (S5). A public name, a file path or a PR number is fine because an
 
 ## Bash
 
-`bin/pctx` is POSIX `sh`: `set -eu`, every expansion quoted, `shellcheck` clean, no bashisms.
+`bin/muninn` is POSIX `sh`: `set -eu`, every expansion quoted, `shellcheck` clean, no bashisms.
 
 ## When these rules conflict with another instruction
 

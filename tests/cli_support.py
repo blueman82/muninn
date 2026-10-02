@@ -1,4 +1,4 @@
-"""Shared fixtures for the pctx CLI test modules."""
+"""Shared fixtures for the muninn CLI test modules."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from pctx import cli
+from muninn import cli
 from tests.test_classify import codex_meta, reply, user_msg
 from tests.test_ingest import TID, IngestCase, rollout
 
@@ -32,11 +32,11 @@ class CliCase(IngestCase):
         keep = {
             k: v
             for k, v in os.environ.items()
-            if not k.startswith(("PCTX_", "CLAUDE_CODE_SESSION", "CODEX_"))
+            if not k.startswith(("MUNINN_", "CLAUDE_CODE_SESSION", "CODEX_"))
         }
         self.env = keep | {
-            "PCTX_HOME": str(self.home),
-            "PCTX_ROOTS": json.dumps(roots),
+            "MUNINN_HOME": str(self.home),
+            "MUNINN_ROOTS": json.dumps(roots),
             "HOME": str(self.tmp / "userhome"),
         }
 
@@ -57,13 +57,13 @@ class CliCase(IngestCase):
         ]
         return self.write(rollout(tid), records)
 
-    def pctx(
+    def muninn(
         self, *argv: str, env: dict[str, str] | None = None
     ) -> tuple[int, Any, str]:
-        """Run one ``pctx`` call in-process from inside the test repo.
+        """Run one ``muninn`` call in-process from inside the test repo.
 
         Args:
-            *argv: Command line after ``pctx``.
+            *argv: Command line after ``muninn``.
             env: Variables layered over the isolated test environment.
 
         Returns:

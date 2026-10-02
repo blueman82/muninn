@@ -1,10 +1,10 @@
-"""pctx rebuild keeps knowledge, tombstones and missing events."""
+"""muninn rebuild keeps knowledge, tombstones and missing events."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from pctx import store
+from muninn import store
 from tests.cli_support import CANARY, CliCase
 from tests.test_ingest import TID
 
@@ -38,7 +38,7 @@ class RebuildTests(CliCase):
             (self.kid,),
         )
         self.assertEqual(
-            self.pctx("erase", "--session", "thr-erased", "--yes")[0], 0
+            self.muninn("erase", "--session", "thr-erased", "--yes")[0], 0
         )
         self.gone.unlink()
         self.run_ingest()  # thr-gone is now missing, its events kept
@@ -63,7 +63,7 @@ class RebuildTests(CliCase):
         self,
     ) -> None:
         before = store.db_path(self.home).stat().st_ino
-        code, out, _ = self.pctx("rebuild")
+        code, out, _ = self.muninn("rebuild")
         self.assertEqual(code, 0, out)
         self.assertIs(out["old_readable"], True)
         # A new inode proves the database was rebuilt, not repaired in place.
@@ -102,7 +102,7 @@ class RebuildTests(CliCase):
     def test_rebuild_from_an_unreadable_store_keeps_tombstones(self) -> None:
         db = store.db_path(self.home)
         db.write_bytes(b"not a database" * 100)
-        code, out, _ = self.pctx("rebuild")
+        code, out, _ = self.muninn("rebuild")
         self.assertEqual((code, out["old_readable"]), (0, False))
         self.assertGreaterEqual(out["reapplied_tombstones"], 1)
         texts = {r[0] for r in self.rows("SELECT text FROM event")}

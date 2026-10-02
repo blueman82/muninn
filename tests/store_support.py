@@ -14,7 +14,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from pctx import store
+from muninn import store
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -23,7 +23,7 @@ HOLD_LOCK = """
 import sys, time
 sys.path.insert(0, sys.argv[1])
 from pathlib import Path
-from pctx import store
+from muninn import store
 with store.writer_lock(Path(sys.argv[2]), wait_s=0):
     print("ready", flush=True)
     time.sleep(float(sys.argv[3]))
@@ -35,7 +35,7 @@ SPILLING_WRITER = """
 import sys, time
 sys.path.insert(0, sys.argv[1])
 from pathlib import Path
-from pctx import store
+from muninn import store
 conn = store.connect_rw(Path(sys.argv[2]))
 conn.execute("PRAGMA cache_size=8")
 conn.execute("BEGIN IMMEDIATE")

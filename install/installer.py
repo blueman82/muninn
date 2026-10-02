@@ -1,4 +1,4 @@
-r"""Install pctx on this machine: --fresh (new machine) or --upgrade (re-pin).
+r"""Install muninn on this machine: --fresh (new) or --upgrade (re-pin).
 
 Run from the repo root, at a clean commit:
 
@@ -6,7 +6,7 @@ Run from the repo root, at a clean commit:
       --repo DIR --sha SHA (--fresh | --upgrade) [--dry-run]
 
 Any failure after the record is written runs ``install.rollback``. Every
-external effect goes through ``ctx.run`` (launchctl, ps, git, pctx, codex),
+external effect goes through ``ctx.run`` (launchctl, ps, git, muninn, codex),
 so tests rehearse the whole sequence in a temp HOME. Each run ends with
 exactly one pinned release.
 
@@ -70,10 +70,16 @@ from install.record import (
 )
 from install.rollback import rollback
 from install.steps_config import claude, codex, record
+from install.steps_legacy import (
+    legacy_check,
+    legacy_copy,
+    legacy_remove,
+    resume_pending,
+)
 from install.steps_release import (
     fresh,
     ingest_fresh,
-    pctx_env,
+    muninn_env,
     pin,
     prune,
     relink,
@@ -84,6 +90,7 @@ from install.transforms import (
     claude_paths,
     codex_check,
     codex_scan,
+    drop_legacy,
     drop_trust,
     edit_settings,
     enable,
@@ -105,6 +112,7 @@ __all__ = [
     "HEARTBEAT_S",
     "LABEL",
     "LABELS",
+    "LEGACY_STEPS",
     "MARKERS",
     "MARKETPLACE",
     "MKT_NAME",
@@ -128,6 +136,7 @@ __all__ = [
     "codex_probe",
     "codex_record",
     "codex_scan",
+    "drop_legacy",
     "drop_trust",
     "edit_settings",
     "enable",
@@ -142,9 +151,9 @@ __all__ = [
     "json_entry",
     "load_record",
     "main",
+    "muninn_env",
     "must",
     "ours",
-    "pctx_env",
     "pin",
     "preflight",
     "prune",
@@ -174,10 +183,23 @@ FRESH_STEPS: tuple[Step, ...] = (
     prune,
 )
 UPGRADE_STEPS: tuple[Step, ...] = (pin, restart, verify, prune)
+# Moving a pre-rename install: copy its data, install the new names (job,
+# hooks, Codex), verify, and only then (after the run) delete the old one.
+LEGACY_STEPS: tuple[Step, ...] = (
+    legacy_copy,
+    pin,
+    start_new,
+    claude,
+    codex,
+    verify,
+    legacy_check,
+)
 
 
 def steps(ctx: Ctx) -> tuple[Step, ...]:
     """Choose the step sequence for this run's mode."""
+    if ctx.legacy:
+        return LEGACY_STEPS
     return UPGRADE_STEPS if ctx.upgrade else FRESH_STEPS
 
 
@@ -201,6 +223,27 @@ def _roll_back(ctx: Ctx, rec: Record, step: Step, exc: Exception) -> None:
     install_record(ctx, rec, "rolled_back")
 
 
+def _finish_removal(ctx: Ctx) -> Record:
+    """Finish deleting the old install after an earlier run stopped midway.
+
+    The earlier run verified the new install before it began deleting, so
+    only the removal is repeated.
+
+    Args:
+        ctx: The run context.
+
+    Returns:
+        A record saying the removal was resumed.
+    """
+    ctx.say("the muninn install is already good; finishing the old removal")
+    if ctx.dry_run:
+        ctx.say(f"would delete the old install, including {ctx.old_data}")
+        ctx.say("dry run only: nothing was written")
+    else:
+        legacy_remove(ctx)
+    return {"resumed": True}
+
+
 def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     """Run the whole install, rolling back if any step fails.
 
@@ -220,6 +263,8 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
         Exception: Any other step exception, re-raised after the rollback (in
             a dry run, re-raised without one).
     """
+    if ctx.legacy and resume_pending(ctx):
+        return _finish_removal(ctx)
     rec = preflight(ctx, Path(repo), sha)
     record(ctx, rec)
     step: Step = record
@@ -236,6 +281,8 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
             raise
         _roll_back(ctx, rec, step, exc)
         raise
+    if ctx.legacy and not ctx.dry_run:  # the last step that cannot be undone
+        legacy_remove(ctx)
     if ctx.upgrade and not ctx.dry_run:  # no rollback once the old is gone
         shutil.rmtree(ctx.rdir)
         rec["record_removed"] = True
@@ -260,7 +307,8 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--upgrade",
         action="store_true",
-        help="already on pctx: re-pin this commit, restart, keep one release",
+        help="already on muninn: re-pin this commit, restart, keep one"
+        " release; also moves a pre-rename install onto the muninn names",
     )
     mode.add_argument(
         "--fresh",
@@ -293,9 +341,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     say, run = (
         (print, run_real)
         if args.dry_run
-        else install_log(
-            args.home / ".local/lib/provenance-context/install.log"
-        )
+        else install_log(args.home / ".local/lib/muninn/install.log")
     )
     ctx = Ctx(
         args.home,

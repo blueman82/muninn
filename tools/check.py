@@ -21,12 +21,12 @@ from tools.run_tests import main as run_suite
 from tools.standards import check_repo
 
 ROOT = Path(__file__).resolve().parent.parent
-PY_PATHS = ("pctx", "install", "tools", "tests")
+PY_PATHS = ("muninn", "install", "tools", "tests")
 TOOL_STEPS: tuple[tuple[str, ...], ...] = (
     ("ruff", "check", *PY_PATHS),
     ("black", "--check", "--quiet", *PY_PATHS),
     ("pyright", *PY_PATHS),
-    ("shellcheck", "bin/pctx", "bin/pctx-install"),
+    ("shellcheck", "bin/muninn", "bin/muninn-install"),
 )
 INSTALL_HINT = (
     "install the dev tools: python3.13 -m venv .venv && "

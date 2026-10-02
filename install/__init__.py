@@ -1,3 +1,3 @@
-"""Installer and rollback for pctx."""
+"""Installer and rollback for muninn."""
 
 from __future__ import annotations

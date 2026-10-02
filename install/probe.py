@@ -80,7 +80,7 @@ def codex_probe(ctx: Ctx, timeout: float = 60) -> list[dict[str, Any]]:
         target=lambda: [lines.put(x) for x in stdout], daemon=True
     ).start()
     try:
-        client = {"clientInfo": {"name": "pctx-install", "version": "1"}}
+        client = {"clientInfo": {"name": "muninn-install", "version": "1"}}
         _call(stdin, lines, (1, "initialize", client), timeout)
         stdin.write(b'{"method": "initialized"}\n')
         listing = (2, "hooks/list", {"cwds": [str(ctx.home)]})

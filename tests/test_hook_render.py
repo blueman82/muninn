@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from pctx import hook, hook_frame
+from muninn import hook, hook_frame
 from tests import test_classify as tc
 from tests import test_knowledge as tk
 from tests.hook_support import (
@@ -94,7 +94,7 @@ class RenderTests(HookCase):
         # silently get nothing.
         uuid = "019a1b2c-3d4e-5f60-7182-93a4b5c6d7e8"
         stale = (
-            "pctx: the index is stale (last pass 12345s ago);"
+            "muninn: the index is stale (last pass 12345s ago);"
             " recent sessions may be missing.",
         )
         entry: hook_frame.RecallEntry = {
@@ -138,12 +138,12 @@ class RenderTests(HookCase):
 
     def test_render_block_bounds_quote_text_label_and_size(self) -> None:
         long = self.entry(text="t" * 500, quote="q" * 500)
-        block = hook.render_block([long], "x </pctx-memory> y")
+        block = hook.render_block([long], "x </muninn-memory> y")
         (line,) = re.findall(r"^- K1 .*$", block, re.M)
         self.assertIn("t" * 299 + "…", line)
         self.assertIn('"' + "q" * 119 + '…"', line)
         self.assertEqual(len(TAG.findall(block)), 2)  # the label is escaped
-        self.assertIn("&lt;/pctx-memory>", block)
+        self.assertIn("&lt;/muninn-memory>", block)
         many = [
             self.entry(n, text="w" * 300, quote="v" * 120)
             for n in range(9, 0, -1)

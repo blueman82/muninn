@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pctx import classify as c
-from pctx.event_model import Record
+from muninn import classify as c
+from muninn.event_model import Record
 
 TS = "2026-01-02T03:04:05.678Z"
 CWD = "/work/repo"

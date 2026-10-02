@@ -1,0 +1,126 @@
+#!/bin/sh
+# Install or upgrade muninn from this checkout at its HEAD.
+#   bin/muninn-install           fresh install, or upgrade when already installed
+#   bin/muninn-install --check   say what would happen; write nothing
+#   bin/muninn-install --status  installed commit against this checkout's HEAD
+#   bin/muninn-install --help    describe the above
+# Any other arguments go straight to install.installer (--repo, --sha, ...).
+# Interpreter order is bin/muninn's (ADR 0003).
+set -eu
+self=$(realpath "$0")
+root=$(dirname "$(dirname "$self")")
+lib=${HOME:-/nonexistent}/.local/lib/muninn
+data=${HOME:-/nonexistent}/.local/share/muninn
+oldlib=${HOME:-/nonexistent}/.local/lib/provenance-context
+olddata=${HOME:-/nonexistent}/.local/share/provenance-context
+py=${MUNINN_PYTHON:-}
+[ -x "$py" ] || py=$lib/python
+[ -x "$py" ] || py=$oldlib/python
+if [ ! -x "$py" ]; then
+  py=
+  for c in python3.13 python3.14 python3; do
+    found=$(command -v "$c" 2>/dev/null) || continue
+    "$found" -c 'import sys; sys.exit(sys.version_info < (3, 13))' \
+      2>/dev/null || continue
+    py=$found
+    break
+  done
+fi
+if [ -z "$py" ]; then
+  echo "muninn-install: no Python 3.13+ found;" \
+    "set MUNINN_PYTHON=/path/to/python3.13" >&2
+  exit 127
+fi
+
+# A commit hook exports these; git would then act on the wrong repository.
+head=$(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+  git -C "$root" rev-parse HEAD)
+short=$(printf %s "$head" | cut -c1-7)
+installed=
+if [ -L "$lib/current" ]; then
+  installed=$(readlink "$lib/current")
+fi
+legacy=
+if [ -z "$installed" ] && [ ! -e "$data" ] && [ -L "$oldlib/current" ] &&
+  [ -d "$olddata" ]; then
+  # An install from before the rename: --upgrade moves it to the new names.
+  legacy=1
+  installed=$(readlink "$oldlib/current")
+  mode=upgrade
+elif [ -n "$installed" ] && [ -d "$data" ]; then
+  mode=upgrade
+elif [ -z "$installed" ] && [ ! -e "$data" ]; then
+  mode=fresh
+else
+  mode=half
+fi
+
+case "${1:-}" in
+  -h | --help)
+    cat <<'HELP'
+usage: bin/muninn-install [--check | --status]
+
+Install or upgrade muninn from this checkout at its HEAD. It picks a fresh
+install or an upgrade by looking at what is on this machine.
+
+  (no argument)  install or upgrade, restart the poller, run doctor
+  --check        say what would happen; write nothing
+  --status       show the installed commit against this checkout's HEAD
+
+A machine still on the old pctx / provenance-context names is moved to muninn
+by the upgrade (data copied, job, hooks and Codex plugin replaced, old install
+deleted once the new one passes its checks).
+
+Advanced: any other arguments go straight to install.installer
+(--repo, --sha, --fresh, --upgrade, --dry-run, --home). Details are in
+docs/REFERENCE.md.
+HELP
+    exit 0
+    ;;
+  --status)
+    if [ "$mode" = fresh ]; then
+      echo "not installed; checkout is at $short"
+    elif [ "$installed" = "$head" ]; then
+      echo "installed $short, checkout $short: up to date"
+    else
+      tag=${legacy:+ (old pctx names, will move to muninn)}
+      echo "installed $(printf %s "$installed" | cut -c1-7)$tag," \
+        "checkout $short: upgrade needed"
+    fi
+    exit 0
+    ;;
+  --check | "") ;;
+  *)
+    cd "$root"
+    exec "$py" -E -s -B -m install.installer "$@"
+    ;;
+esac
+
+if [ "$mode" = half ]; then
+  echo "muninn-install: half-installed: the data dir and the current" \
+    "release link disagree; fix that by hand first" >&2
+  exit 1
+fi
+
+cd "$root"
+if [ "${1:-}" = --check ]; then
+  if [ "$mode" = upgrade ]; then
+    echo "Upgrade: $(printf %s "$installed" | cut -c1-7) -> $short"
+    if [ -n "$legacy" ]; then
+      echo "This machine still runs the old pctx names: the upgrade copies" \
+        "the data to ~/.local/share/muninn, moves the job, hooks and Codex" \
+        "plugin to muninn, then deletes the old install."
+    fi
+  else
+    echo "Fresh install of $short"
+  fi
+  "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" \
+    "--$mode" --dry-run
+  echo "OK to run: bin/muninn-install"
+else
+  "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "--$mode"
+  pid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' \
+    "$data/status.json" 2>/dev/null || true)
+  echo "installed $short ($mode); poller pid ${pid:-unknown}; doctor ok;" \
+    "log: $lib/install.log"
+fi

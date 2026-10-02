@@ -10,7 +10,7 @@ import sqlite3
 import unittest
 from pathlib import Path
 
-from pctx import scope
+from muninn import scope
 from tests.scope_support import ScopeCase
 
 
@@ -103,7 +103,7 @@ class MatrixTests(ScopeCase):
 
     @unittest.skipUnless(Path("/tmp").is_symlink(), "/tmp is not a symlink")
     def test_tmp_and_private_tmp_share_a_key(self) -> None:
-        a, b = "/tmp/pctx-scope-x", "/private/tmp/pctx-scope-x"
+        a, b = "/tmp/muninn-scope-x", "/private/tmp/muninn-scope-x"
         self.assertEqual(scope.resolve_key(a), scope.resolve_key(b))
         self.assertEqual(scope.resolve_key(a)[0], b)
         conn = self.rw()

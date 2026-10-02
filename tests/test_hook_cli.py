@@ -1,4 +1,4 @@
-"""Hook command line: bin/pctx hook as a subprocess and in-process main().
+"""Hook command line: bin/muninn hook as a subprocess and in-process main().
 
 Synthetic rows in temp dirs; the providers' payloads are built by hand.
 Nothing touches a live data dir or a provider root.
@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from unittest import mock
 
-from pctx import hook
+from muninn import hook
 from tests import test_classify as tc
 from tests import test_cli as tcli
 from tests.hook_support import (
@@ -40,8 +40,8 @@ class HookCommandTests(HookCliCase):
             for h in g["hooks"]
         ]
         self.assertEqual(len(commands), 2)
-        env = self.env | {"PCTX_HOOK_DISABLE": "1"}
-        env["PCTX_HOME"] = str(self.tmp / "no-such-dir")
+        env = self.env | {"MUNINN_HOOK_DISABLE": "1"}
+        env["MUNINN_HOME"] = str(self.tmp / "no-such-dir")
         for event, provider in (
             ("session-start", "claude"),
             ("session-start", "codex"),
@@ -112,7 +112,7 @@ class HookCommandTests(HookCliCase):
                 done = self.run_hook("session-start", "claude", {}, raw=raw)
                 out = self.parsed(done)
                 self.assertIn("hookSpecificOutput", out)
-        gone = {"PCTX_HOME": str(self.tmp / "gone")}
+        gone = {"MUNINN_HOME": str(self.tmp / "gone")}
         done = self.run_hook(
             "prompt",
             "codex",
@@ -120,7 +120,7 @@ class HookCommandTests(HookCliCase):
             env=gone,
         )
         body = self.parsed(done)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("pctx: store unavailable (store_unavailable)", body)
+        self.assertIn("muninn: store unavailable (store_unavailable)", body)
         self.assertFalse(
             (self.tmp / "gone").exists()
         )  # a hook creates nothing
@@ -156,7 +156,7 @@ class HookCliEdgeTests(HookCliCase):
                 self.assertEqual(json.loads(done.stdout), {})
 
     def test_hook_help_is_help_not_a_silent_hook(self) -> None:
-        code, out, err = self.pctx("hook", "--help")
+        code, out, err = self.muninn("hook", "--help")
         self.assertEqual((code, out), (2, ""))  # the skeleton help contract
         self.assertIn("session-start", err)
 

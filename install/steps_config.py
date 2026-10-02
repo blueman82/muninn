@@ -19,6 +19,7 @@ from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
     codex_check,
+    drop_legacy,
     drop_trust,
     edit_settings,
     enable,
@@ -41,16 +42,15 @@ def record(ctx: Ctx, rec: Record) -> None:
     rec["codex"] = (
         codex_record(ctx.config.read_text()) if rec["has_codex"] else []
     )
-    links = (ctx.lib / "current", ctx.lib / "python", ctx.pctx)
+    links = (ctx.lib / "current", ctx.lib / "python", ctx.muninn)
     rec["links"] = {
         str(p): link_text(p) if p.is_symlink() else None for p in links
     }
-    keys = [".".join(e["path"]) for e in rec["claude"]["settings"]]
-    keys += [e["header"] for e in rec["codex"]]
     plan = (
         "would not touch Claude or Codex settings"
-        if ctx.upgrade
-        else f"would record the links and config keys {keys}"
+        if ctx.upgrade and not ctx.legacy
+        else "would note the current links and the Claude and Codex "
+        "settings entries this install changes, so a failure can be undone"
     )
     if dry(ctx, plan):
         return
@@ -69,8 +69,15 @@ def claude(ctx: Ctx, rec: Record) -> None:
     if not rec["has_claude"]:
         ctx.say(f"{ctx.settings} not found: Claude Code left unconfigured")
         return
+    added = "add the muninn SessionStart and UserPromptSubmit hooks to"
     if dry(
-        ctx, f"would add SessionStart and UserPromptSubmit to {ctx.settings}"
+        ctx,
+        (
+            f"would remove the old pctx hook entries from {ctx.settings} and "
+            f"{added} it"
+            if ctx.legacy
+            else f"would {added} {ctx.settings}"
+        ),
     ):
         return
     frag = ctx.lib / "current/integrations/claude/settings-hooks.json"
@@ -136,12 +143,20 @@ def codex(ctx: Ctx, rec: Record) -> None:
     if not rec["has_codex"]:
         ctx.say(f"{ctx.config} not found: Codex left unconfigured")
         return
+    gone = (
+        "remove the old provenance-context marketplace, plugin and hook "
+        "trust entries, then "
+        if ctx.legacy
+        else ""
+    )
     if dry(
         ctx,
-        "would add the Codex plugin, enable it and trust its hooks "
-        f"in {ctx.config}",
+        f"would {gone}add the muninn Codex plugin, enable it and trust its "
+        f"hooks in {ctx.config}",
     ):
         return
+    if ctx.legacy:
+        _edit_config(ctx, drop_legacy)
     _edit_config(ctx, drop_trust)
     _edit_config(ctx, lambda text: repoint(text, source))
     pinned = _add_plugin(ctx, rec)

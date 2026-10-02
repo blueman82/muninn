@@ -1,4 +1,4 @@
-"""pctx writer commands, the bin/pctx launcher and the serve poller."""
+"""muninn writer commands, the bin/muninn launcher and the serve poller."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from pctx import cli_core, obs, store
+from muninn import cli_core, obs, store
 from tests.cli_support import CANARY, CliCase
 from tests.test_ingest import TID
 
@@ -22,7 +22,7 @@ class WriterTests(CliCase):
 
     def test_ingest_command_and_heartbeat(self) -> None:
         self.session(TID, "hello there", "hi")
-        code, out, _ = self.pctx("ingest")
+        code, out, _ = self.muninn("ingest")
         self.assertEqual(code, 0, out)
         self.assertEqual(out["ingest"]["events_added"], 2)
         status = json.loads((self.home / "status.json").read_text())
@@ -36,25 +36,25 @@ class WriterTests(CliCase):
             },
             set(status),
         )
-        _, found, _ = self.pctx("search", "hello")
+        _, found, _ = self.muninn("search", "hello")
         self.assertEqual(found["poller"], "ok")
-        code, out, _ = self.pctx("ingest", "--full")
+        code, out, _ = self.muninn("ingest", "--full")
         self.assertEqual(out["ingest"]["events_removed"], 2)
 
     def test_erase_command_needs_yes(self) -> None:
         self.session(TID, "hello there", "hi")
         self.run_ingest()
-        code, out, _ = self.pctx("erase", "--session", TID)
+        code, out, _ = self.muninn("erase", "--session", TID)
         self.assertEqual((code, out["dry_run"], out["events"]), (0, True, 2))
         self.assertIn("--yes", out["note"])
         self.assertEqual(len(self.events()), 2)
-        code, out, _ = self.pctx("erase", "--session", TID, "--yes")
+        code, out, _ = self.muninn("erase", "--session", TID, "--yes")
         self.assertEqual((code, out["dry_run"], out["residue"]), (0, False, 0))
         self.assertEqual(self.events(), [])
         self.assertEqual(
-            self.pctx("erase", "--session", "a", "--match", "bcdef")[0], 2
+            self.muninn("erase", "--session", "a", "--match", "bcdef")[0], 2
         )
-        code, out, _ = self.pctx("erase", "--match", "ab", "--yes")
+        code, out, _ = self.muninn("erase", "--match", "ab", "--yes")
         self.assertEqual((code, out["error"]), (2, "refused"))
 
     def test_busy_exit_3(self) -> None:
@@ -62,20 +62,20 @@ class WriterTests(CliCase):
             store.writer_lock(self.home, wait_s=0),
             mock.patch.object(cli_core, "WRITER_WAIT_S", 0),
         ):
-            code, out, _ = self.pctx("ingest")
+            code, out, _ = self.muninn("ingest")
         self.assertEqual((code, out["error"]), (3, "busy"))
 
 
-LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
+LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "muninn"
 
 
 class LauncherTests(unittest.TestCase):
-    """bin/pctx finds its interpreter without a hardcoded path."""
+    """bin/muninn finds its interpreter without a hardcoded path."""
 
     def launch(
         self, home: Path, **env: str
     ) -> subprocess.CompletedProcess[str]:
-        """Run ``bin/pctx --version`` with a minimal environment.
+        """Run ``bin/muninn --version`` with a minimal environment.
 
         Args:
             home: Directory used as ``HOME``.
@@ -108,15 +108,13 @@ class LauncherTests(unittest.TestCase):
     def test_resolution_order_and_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            lib = home / ".local/lib/provenance-context"
+            lib = home / ".local/lib/muninn"
             lib.mkdir(parents=True)
             linked = self.fake_python(home / "linked-python")
             (lib / "python").symlink_to(linked)
-            self.assertIn(
-                "provenance-context/python", self.launch(home).stdout
-            )
+            self.assertIn("muninn/python", self.launch(home).stdout)
             env_py = self.fake_python(home / "env-python")
-            r = self.launch(home, PCTX_PYTHON=str(env_py))
+            r = self.launch(home, MUNINN_PYTHON=str(env_py))
             self.assertIn("env-python", r.stdout)
             (lib / "python").unlink()
             stubs = home / "stubs"  # pythons older than 3.13
@@ -126,14 +124,14 @@ class LauncherTests(unittest.TestCase):
                 (stubs / name).chmod(0o755)
             r = self.launch(home, PATH=f"{stubs}:/usr/bin:/bin")
             self.assertEqual(r.returncode, 127)
-            self.assertIn("PCTX_PYTHON", r.stderr)
+            self.assertIn("MUNINN_PYTHON", r.stderr)
 
 
 class ServeTests(CliCase):
     """Run the poller as a real subprocess through the launcher."""
 
     def start_serve(self, interval: str = "0.2") -> subprocess.Popen[bytes]:
-        """Start ``pctx serve`` with its output in the poller log.
+        """Start ``muninn serve`` with its output in the poller log.
 
         Args:
             interval: Seconds between passes.
@@ -204,7 +202,7 @@ class ServeTests(CliCase):
         status = self.wait_status("passes")
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(timeout=30), 0)
-        self.assertFalse((self.home / "pctx.sqlite-journal").exists())
+        self.assertFalse((self.home / "muninn.sqlite-journal").exists())
         self.assertEqual(status["pid"], proc.pid)
         self.assertEqual(status["interval_s"], 0.2)
         self.assertLessEqual(
@@ -235,7 +233,7 @@ class ServeTests(CliCase):
         )
         (first,) = [e for e in events if e["event"] == "pass"][:1]
         self.assertEqual(first["events_added"], 2)
-        self.pctx("search", CANARY)
+        self.muninn("search", CANARY)
         for name in ("calls.jsonl", "status.json", "poller.log"):
             with self.subTest(file=name):
                 self.assertNotIn(CANARY, (self.home / name).read_text())
@@ -248,7 +246,7 @@ class ServeTests(CliCase):
         time.sleep(0.2)  # most likely inside the first pass
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(timeout=60), 0)
-        self.assertFalse((self.home / "pctx.sqlite-journal").exists())
+        self.assertFalse((self.home / "muninn.sqlite-journal").exists())
         conn = store.connect_ro(store.db_path(self.home))
         self.addCleanup(conn.close)
         self.assertEqual(
@@ -266,8 +264,8 @@ class ServeTests(CliCase):
         obs.write_status(
             self.home, {"last_pass_at": time.time() - 1, "interval_s": 60}
         )
-        self.assertEqual(self.pctx("search", "hello")[1]["poller"], "ok")
+        self.assertEqual(self.muninn("search", "hello")[1]["poller"], "ok")
         obs.write_status(self.home, {"last_pass_at": time.time() - 500})
-        _, out, _ = self.pctx("search", "hello")
+        _, out, _ = self.muninn("search", "hello")
         self.assertEqual(out["poller"], "stale")
         self.assertGreaterEqual(out["index_age_s"], 500)

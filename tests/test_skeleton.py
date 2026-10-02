@@ -1,4 +1,4 @@
-"""Skeleton contract: the pctx entry point and its bin/pctx launcher."""
+"""Skeleton contract: the muninn entry point and its bin/muninn launcher."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ import unittest
 from collections.abc import Sequence
 from pathlib import Path
 
-from pctx.cli import main
+from muninn.cli import main
 
 ROOT = Path(__file__).resolve().parent.parent
-LAUNCHER = ROOT / "bin" / "pctx"
-VERSION_LINE = "pctx 0.1.0\n"
+LAUNCHER = ROOT / "bin" / "muninn"
+VERSION_LINE = "muninn 0.1.0\n"
 
 
 def call_main(argv: Sequence[str]) -> tuple[int, str, str]:
-    """Run pctx.cli.main in-process.
+    """Run muninn.cli.main in-process.
 
     Args:
         argv: Command-line arguments after the program name.
@@ -51,7 +51,7 @@ def run(
 
 
 class MainTests(unittest.TestCase):
-    """pctx.cli.main answers --version and rejects anything else."""
+    """muninn.cli.main answers --version and rejects anything else."""
 
     def test_version_returns_zero_and_prints_version(self) -> None:
         code, out, err = call_main(["--version"])
@@ -77,7 +77,7 @@ class MainTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
-    """bin/pctx works from any cwd, through a symlink, and as a module."""
+    """bin/muninn works from any cwd, through a symlink, and as a module."""
 
     def test_version_from_foreign_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -87,7 +87,7 @@ class LauncherTests(unittest.TestCase):
 
     def test_version_via_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            link = Path(tmp) / "pctx-link"
+            link = Path(tmp) / "muninn-link"
             link.symlink_to(LAUNCHER)
             proc = run([str(link), "--version"], cwd=tmp)
         self.assertEqual(proc.returncode, 0, proc.stderr)
@@ -107,7 +107,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(proc.stdout, VERSION_LINE)
 
     def test_module_entry_point(self) -> None:
-        cmd = [sys.executable, "-B", "-m", "pctx", "--version"]
+        cmd = [sys.executable, "-B", "-m", "muninn", "--version"]
         proc = run(cmd, cwd=ROOT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)

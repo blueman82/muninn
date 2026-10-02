@@ -1,6 +1,6 @@
 """Erase contract: tombstone files, scope reporting and residue filters.
 
-Synthetic provider trees and a temp PCTX_HOME only (IngestCase); knowledge
+Synthetic provider trees and a temp MUNINN_HOME only (IngestCase); knowledge
 rows are inserted directly.  Canaries are synthetic.
 """
 
@@ -12,7 +12,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from pctx import erase, store
+from muninn import erase, store
 from tests.erase_support import CANARY, EraseCase, digest
 from tests.test_classify import codex_meta, user_msg
 from tests.test_ingest import HOLD_LOCK, ROOT, TID, primary, rollout
@@ -98,7 +98,7 @@ class ScopeOfEraseTests(EraseCase):
     def test_out_of_scope_listing(self) -> None:
         home = Path(self.env["HOME"])
         present = [
-            home / ".codex/plugins/cache/provenance-context-local",
+            home / ".codex/plugins/cache/muninn-local",
             home / ".codex/memories",
         ]
         for path in present:

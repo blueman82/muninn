@@ -8,7 +8,7 @@ import sqlite3
 from typing import Any
 from unittest import mock
 
-from pctx import knowledge, query, store
+from muninn import knowledge, query, store
 from tests import test_classify as tc
 from tests import test_ingest as ti
 from tests import test_store as tst

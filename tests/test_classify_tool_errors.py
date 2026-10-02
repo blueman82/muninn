@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from pctx import classify as c
+from muninn import classify as c
 from tests.classify_claude_support import (
     bash,
     claude_rec,
@@ -168,16 +168,16 @@ class ToolErrorLinkTests(unittest.TestCase):
         ok = claude_rec("user", [tool_result("toolu_9", "done", False)])
         self.assertEqual(run_claude([bash("ls"), ok])[1:], [])
 
-    def _skips_pctx_transcript_reads_and_nested_markers(self) -> None:
-        """Pin that errors echoing pctx's own inputs or noise are dropped.
+    def _skips_muninn_transcript_reads_and_nested_markers(self) -> None:
+        """Pin that errors echoing muninn's own inputs or noise are dropped.
 
-        Covers pctx calls, transcript reads, nested markers, orphan outputs
+        Covers muninn calls, transcript reads, nested markers, orphan outputs
         and the wait_agent family.  Re-ingesting such output would feed the
         store its own text back, so the error must not be stored.
         """
         fail = PROC.format(1) + "Output:\nTraceback (most recent call last):"
         calls = (
-            '{"cmd":"pctx search foo","workdir":"/w"}',
+            '{"cmd":"muninn search foo","workdir":"/w"}',
             '{"cmd":"rg foo ~/.codex/sessions","workdir":"/w"}',
             '{"cmd":"ls /t/corpus/.codex/archived_sessions"}',
             '{"cmd":"grep -r x ~/.claude/projects"}',
@@ -196,8 +196,8 @@ class ToolErrorLinkTests(unittest.TestCase):
             '{"timestamp":"t", "type": "response_item", "payload": {}}',
             '{"parentUuid": null, "sessionId": "s"}',
             *c.INJECTED_MARKERS,
-            "<pctx-memory x",
-            "<pctx-recall",
+            "<muninn-memory x",
+            "<muninn-recall",
             c.NOTICE,
         )
         for marker in nested:
@@ -230,8 +230,8 @@ class ToolErrorLinkTests(unittest.TestCase):
         self.assertEqual(run_claude(no_state, state=False)[1:], [])
 
     # Keeps the established test id, which is too long for a def line.
-    test_tool_error_skipped_for_pctx_call_transcript_read_or_nested_markers = (
-        _skips_pctx_transcript_reads_and_nested_markers
+    test_tool_error_skipped_for_muninn_call_transcript_or_nested_markers = (
+        _skips_muninn_transcript_reads_and_nested_markers
     )
 
     def test_long_running_exec_output_inherits_its_call(self) -> None:
@@ -288,23 +288,23 @@ class ToolErrorLinkTests(unittest.TestCase):
         )
         self.assertEqual([e.call_id for e in claude], ["toolu_5", "toolu_5"])
 
-    def test_pctx_tool_call_flag1(self) -> None:
+    def test_muninn_tool_call_flag1(self) -> None:
         flagged = (
-            "pctx search foo",
-            "cd /w && pctx open codex:t:1.1",
-            "PCTX_HOME=/tmp/h pctx know list",
-            "/Users/x/.local/bin/pctx --version",
-            "./bin/pctx stats",
-            "python3.13 -I -B -m pctx search q",
-            "echo `pctx search q`",
-            "x=$(pctx sessions)",
+            "muninn search foo",
+            "cd /w && muninn open codex:t:1.1",
+            "MUNINN_HOME=/tmp/h muninn know list",
+            "/Users/x/.local/bin/muninn --version",
+            "./bin/muninn stats",
+            "python3.13 -I -B -m muninn search q",
+            "echo `muninn search q`",
+            "x=$(muninn sessions)",
         )
         clean = (
-            "cat pctx/classify.py",
-            "pytest -q tests/test_pctx.py",
-            "ruff check pctx tests",
-            "git commit -m 'pctx: fix x'",
-            "ls ~/.local/share/provenance-context/pctx.sqlite",
+            "cat muninn/classify.py",
+            "pytest -q tests/test_muninn.py",
+            "ruff check muninn tests",
+            "git commit -m 'muninn: fix x'",
+            "ls ~/.local/share/muninn/muninn.sqlite",
         )
         for command in flagged + clean:
             with self.subTest(command=command):

@@ -1,6 +1,6 @@
 """Shared fixtures for the erase test modules.
 
-Synthetic provider trees and a temp PCTX_HOME only; knowledge rows are
+Synthetic provider trees and a temp MUNINN_HOME only; knowledge rows are
 inserted directly.  Canaries are synthetic.
 """
 
@@ -11,7 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from pctx import erase
+from muninn import erase
 from tests.test_ingest import IngestCase
 
 CANARY = "CANARY-ERASE-" + "q7" * 10  # 33 chars, one token
@@ -40,7 +40,7 @@ class EraseCase(IngestCase):
         super().setUp()
         self.env = {
             "HOME": str(self.tmp / "userhome"),
-            "PCTX_ROOTS": json.dumps(
+            "MUNINN_ROOTS": json.dumps(
                 {k: str(v) for k, v in self.roots.items()}
             ),
         }

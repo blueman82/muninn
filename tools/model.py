@@ -10,7 +10,7 @@ from pathlib import Path
 
 MAX_FILE_LINES = 400
 MAX_FUNCTION_LINES = 100
-SCOPES = ("pctx", "install", "tools", "tests")
+SCOPES = ("muninn", "install", "tools", "tests")
 
 
 @dataclass(frozen=True)

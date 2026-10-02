@@ -3,7 +3,7 @@
   python3.13 -E -s -B -m install.rollback --record RECORD [--dry-run]
 
 RECORD is rollback-record.json in
-~/.local/share/provenance-context-install-<ts> (the installer rolls back by
+~/.local/share/muninn-install-<ts> (the installer rolls back by
 itself on failure; this is for a run that was interrupted). Every action
 first looks at launchd and the filesystem, so it is safe after a failure at
 any step, a crash, or a second run. A successful --upgrade deletes its
@@ -109,6 +109,24 @@ def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
         )
 
 
+def _undo_legacy(ctx: Ctx) -> None:
+    """Bring the untouched pre-rename job back after a failed migration.
+
+    Args:
+        ctx: The run context.
+    """
+    tmp = ctx.data.with_name(f".muninn.tmp-{ctx.ts}")
+    if tmp.exists():
+        _act(
+            ctx,
+            "move the partial data copy aside",
+            lambda: aside(ctx, tmp, "data-tmp"),
+        )
+    if ctx.old_plist.exists() and job(ctx, ctx.old_target) is None:
+        boot = ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.old_plist]
+        _act(ctx, "restart the pre-rename job", lambda: must(ctx, boot))
+
+
 def _undo_config(ctx: Ctx, rec: Record) -> None:
     """Restore the provider config keys we changed."""
     claude = rec.get("claude", {}).get("settings")
@@ -165,10 +183,12 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
     """
     problems: list[str] = []
     j = job(ctx)
-    if rec.get("fresh"):
+    if rec.get("fresh") or rec.get("legacy"):
         _undo_fresh(ctx, j)
     _undo_config(ctx, rec)
     _undo_links(ctx, rec)
+    if rec.get("legacy"):
+        _undo_legacy(ctx)
     if rec.get("upgrade") and job(ctx):  # back onto the old release
         kick = ["launchctl", "kickstart", "-k", ctx.target]
         _act(ctx, "restart the job", lambda: must(ctx, kick))

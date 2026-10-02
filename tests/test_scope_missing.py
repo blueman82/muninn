@@ -9,7 +9,7 @@ import os
 import shutil
 from unittest import mock
 
-from pctx import scope
+from muninn import scope
 from tests.scope_support import NO_HASH, ScopeCase
 
 

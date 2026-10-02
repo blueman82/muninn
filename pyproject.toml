@@ -21,11 +21,11 @@ select = [
     "B", "SIM", "C4", "PIE", "PERF", "RET", "RUF",
     "PTH",       # pathlib over os.path
     "ERA",       # no commented-out code
-    "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",  # complexity limits
+    "complex-structure", "too-many-return-statements", "too-many-branches", "too-many-arguments", "too-many-statements",  # complexity limits
 ]
 # DOC502 would forbid `Raises:` for an exception that a callee raises and the
 # function deliberately lets propagate; that is exactly what a caller needs.
-ignore = ["D203", "D213", "ANN401", "DOC502"]
+ignore = ["incorrect-blank-line-before-class", "multi-line-summary-second-line", "any-type", "docstring-extraneous-exception"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -46,7 +46,7 @@ max-statements = 50
 [tool.ruff.lint.per-file-ignores]
 # Test method and helper docstrings are enforced by tools/standards.py, which
 # knows the test_* / fixture-hook exemptions ruff cannot express.
-"tests/*" = ["D102", "D103", "D105", "D107", "DOC"]
+"tests/*" = ["undocumented-public-method", "undocumented-public-function", "undocumented-magic-method", "undocumented-public-init", "DOC"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

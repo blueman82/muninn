@@ -29,7 +29,7 @@ def _main(*argv: str) -> tuple[int, str]:
 
 
 class UpgradePlanTest(unittest.TestCase):
-    """--upgrade --dry-run on a machine that already runs pctx."""
+    """--upgrade --dry-run on a machine that already runs muninn."""
 
     def setUp(self) -> None:
         self.w = w = World(self)
@@ -91,7 +91,7 @@ class DryRunWritesNothingTest(unittest.TestCase):
     def test_a_refused_dry_run_does_not_append_to_the_log(self) -> None:
         w = World(self)
         co.install(w.ctx(fresh=True), w.repo, w.sha)
-        log = w.home / ".local/lib/provenance-context/install.log"
+        log = w.home / ".local/lib/muninn/install.log"
         status, said = _main(
             *("--repo", str(w.repo), "--sha", w.sha, "--fresh"),
             *("--dry-run", "--home", str(w.home)),

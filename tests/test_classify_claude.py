@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from pctx import classify as c
+from muninn import classify as c
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -145,7 +145,7 @@ class ClaudeTests(unittest.TestCase):
     def test_claude_attachment_not_stored(self) -> None:
         attachment = {
             "type": "hook_additional_context",
-            "content": ['<pctx-memory source="pctx">x</pctx-memory>'],
+            "content": ['<muninn-memory source="muninn">x</muninn-memory>'],
             "hookEvent": "SessionStart",
             "hookName": "SessionStart:startup",
             "toolUseID": "t",
@@ -196,8 +196,8 @@ class ClaudeTests(unittest.TestCase):
             ],
         )
 
-    def test_claude_pasted_pctx_block_flag1(self) -> None:
-        pasted = 'look: <pctx-memory source="pctx" trust="untrusted-data">'
+    def test_claude_pasted_muninn_block_flag1(self) -> None:
+        pasted = 'look: <muninn-memory source="muninn" trust="untrusted-data">'
         events = c.claude_events(claude_rec("user", pasted + " D"), 7)
         self.assertEqual(events, [cev("prompt", pasted + " D", flags=1)])
         notice = claude_rec("user", f'{{"notice": "{c.NOTICE}"}}')

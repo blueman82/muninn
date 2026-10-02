@@ -1,6 +1,6 @@
 """The installer's run context and the process helpers built on it.
 
-Every external effect (launchctl, ps, git, pctx, codex) goes through
+Every external effect (launchctl, ps, git, muninn, codex) goes through
 ``Ctx.run``, so tests can rehearse a whole install in a temp HOME with a fake
 runner and a fake clock.
 """
@@ -16,7 +16,16 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
-from install.constants import LABEL, MKT_NAME, PLIST
+from install.constants import (
+    LABEL,
+    MKT_NAME,
+    OLD_CLI_NAME,
+    OLD_LABEL,
+    OLD_MKT_NAME,
+    OLD_NAME,
+    OLD_PLIST,
+    PLIST,
+)
 
 
 class StepFailedError(Exception):
@@ -85,18 +94,25 @@ class Ctx:
         say: Progress sink.
         probe: Asks Codex which hooks it resolves; None skips the check.
         fresh: A new machine: no data, plist or release yet.
-        upgrade: Already on pctx: re-pin, restart, prune.
-        data: The pctx data directory.
+        upgrade: Already on muninn: re-pin, restart, prune.
+        data: The muninn data directory.
         rdir: This run's rollback-record directory.
         failed: Where a rollback moves new artefacts instead of deleting.
         lib: Directory holding pinned releases and the links.
-        pctx: The ``pctx`` command link.
+        muninn: The ``muninn`` command link.
         plist: The launchd plist path.
         settings: Claude Code's settings.json.
         codex_home: Codex's home directory.
         config: Codex's config.toml.
         cache: Codex's plugin cache for our plugin.
         target: The launchd service target.
+        legacy: An upgrade that must first migrate a pre-rename install.
+        old_data: The pre-rename data directory.
+        old_lib: The pre-rename release directory.
+        old_cli: The pre-rename command link.
+        old_plist: The pre-rename launchd plist.
+        old_cache: The pre-rename Codex marketplace cache.
+        old_target: The pre-rename launchd service target.
     """
 
     home: Path
@@ -114,30 +130,48 @@ class Ctx:
     rdir: Path = dataclasses.field(init=False, repr=False, compare=False)
     failed: Path = dataclasses.field(init=False, repr=False, compare=False)
     lib: Path = dataclasses.field(init=False, repr=False, compare=False)
-    pctx: Path = dataclasses.field(init=False, repr=False, compare=False)
+    muninn: Path = dataclasses.field(init=False, repr=False, compare=False)
     plist: Path = dataclasses.field(init=False, repr=False, compare=False)
     settings: Path = dataclasses.field(init=False, repr=False, compare=False)
     codex_home: Path = dataclasses.field(init=False, repr=False, compare=False)
     config: Path = dataclasses.field(init=False, repr=False, compare=False)
     cache: Path = dataclasses.field(init=False, repr=False, compare=False)
     target: str = dataclasses.field(init=False, repr=False, compare=False)
+    legacy: bool = dataclasses.field(init=False, repr=False, compare=False)
+    old_data: Path = dataclasses.field(init=False, repr=False, compare=False)
+    old_lib: Path = dataclasses.field(init=False, repr=False, compare=False)
+    old_cli: Path = dataclasses.field(init=False, repr=False, compare=False)
+    old_plist: Path = dataclasses.field(init=False, repr=False, compare=False)
+    old_cache: Path = dataclasses.field(init=False, repr=False, compare=False)
+    old_target: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Derive every path from ``home`` and ``ts`` once."""
         h, share = self.home, self.home / ".local/share"
-        self.data = share / "provenance-context"
-        self.rdir = share / f"provenance-context-install-{self.ts}"
-        self.failed = share / f"provenance-context-failed-{self.ts}"
-        self.lib = h / ".local/lib/provenance-context"
-        self.pctx = h / ".local/bin/pctx"
+        self.data = share / "muninn"
+        self.rdir = share / f"muninn-install-{self.ts}"
+        self.failed = share / f"muninn-failed-{self.ts}"
+        self.lib = h / ".local/lib/muninn"
+        self.muninn = h / ".local/bin/muninn"
         self.plist = h / PLIST
         self.settings = h / ".claude/settings.json"
         self.codex_home = h / ".codex"
         self.config = h / ".codex/config.toml"
-        self.cache = (
-            h / ".codex/plugins/cache" / MKT_NAME / "provenance-context"
-        )
+        self.cache = h / ".codex/plugins/cache" / MKT_NAME / "muninn"
         self.target = f"gui/{self.uid}/{LABEL}"
+        self.old_data = share / OLD_NAME
+        self.old_lib = h / ".local/lib" / OLD_NAME
+        self.old_cli = h / ".local/bin" / OLD_CLI_NAME
+        self.old_plist = h / OLD_PLIST
+        self.old_cache = h / ".codex/plugins/cache" / OLD_MKT_NAME
+        self.old_target = f"gui/{self.uid}/{OLD_LABEL}"
+        self.legacy = self.upgrade and self.has_old_install()
+
+    def has_old_install(self) -> bool:
+        """Say whether a pre-rename data dir or release is on this HOME."""
+        return (
+            self.old_data.is_dir() or (self.old_lib / "current").is_symlink()
+        )
 
 
 def install_log(
@@ -236,16 +270,17 @@ def wait(
         ctx.sleep(1)
 
 
-def job(ctx: Ctx) -> Job | None:
-    """Describe the launchd job for our label.
+def job(ctx: Ctx, target: str | None = None) -> Job | None:
+    """Describe a launchd job, by default the one for our label.
 
     Args:
         ctx: The run context.
+        target: The service target; the pre-rename one when migrating.
 
     Returns:
         None when the label is not loaded, otherwise its pid and command.
     """
-    r = ctx.run(["launchctl", "print", ctx.target])
+    r = ctx.run(["launchctl", "print", target or ctx.target])
     if r.returncode:
         return None
     m = re.search(rb"^\s*pid = (\d+)\s*$", r.stdout, re.M)

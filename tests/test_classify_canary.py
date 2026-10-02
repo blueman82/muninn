@@ -8,7 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
-from pctx import classify as c
+from muninn import classify as c
 
 FIXTURES = Path(__file__).parent / "fixtures" / "classify"
 
@@ -116,6 +116,6 @@ class AdversarialInputTests(unittest.TestCase):
             with self.subTest(text=text[:12]):
                 start = time.perf_counter()
                 c.redact(text)
-                c.PCTX_CALL.search(text)
+                c.MUNINN_CALL.search(text)
                 c._is_error(text)
                 self.assertLess(time.perf_counter() - start, 5.0)

@@ -9,7 +9,7 @@ import os
 import sqlite3
 import unittest
 
-from pctx import store
+from muninn import store
 from tests.store_support import (
     StoreCase,
     insert_event,
@@ -110,7 +110,7 @@ class SchemaTests(StoreCase):
         )
         insert_scope(conn)
         self.assertEqual(
-            sorted(p.name for p in self.home.iterdir()), ["pctx.sqlite"]
+            sorted(p.name for p in self.home.iterdir()), ["muninn.sqlite"]
         )  # no -wal, -shm or leftover -journal after a write
 
     def test_connect_rw_refuses_wal_mode(self) -> None:
@@ -166,7 +166,7 @@ class SchemaTests(StoreCase):
         self.addCleanup(os.umask, old)
         with store.writer_lock(self.tmp / "via-lock", wait_s=0):
             pass
-        conn = store.connect_rw(self.tmp / "via-connect" / "pctx.sqlite")
+        conn = store.connect_rw(self.tmp / "via-connect" / "muninn.sqlite")
         self.addCleanup(conn.close)
         self.assertEqual(mode(self.tmp / "via-lock"), 0o700)
         self.assertEqual(mode(self.tmp / "via-connect"), 0o700)

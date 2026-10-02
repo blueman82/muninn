@@ -16,7 +16,7 @@ from install import configedit as ce
 from install.constants import CLAUDE_EVENTS, OWNER_STEP, PLUGIN_ID
 from install.context import Ctx, StepFailedError, dry, is_new, job
 from install.record import Record
-from install.steps_release import fresh, pctx_env
+from install.steps_release import fresh, muninn_env
 from install.transforms import ours
 from install.trust import TrustedHook, codex_hooks
 
@@ -155,9 +155,9 @@ def verify(ctx: Ctx, rec: Record) -> None:
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
     check("heartbeat_fresh", fresh(ctx, 0))
-    # PCTX_HOOK_DISABLE makes the hook echo ``{}`` without recording
+    # MUNINN_HOOK_DISABLE makes the hook echo ``{}`` without recording
     # anything, so running it here cannot pollute the new store.
-    env = pctx_env(ctx.data, PCTX_HOOK_DISABLE="1")
+    env = muninn_env(ctx.data, MUNINN_HOOK_DISABLE="1")
     for cmd in hook_commands(ctx):
         r = ctx.run(shlex.split(cmd), env=env, input=b"{}")
         check(
@@ -165,7 +165,7 @@ def verify(ctx: Ctx, rec: Record) -> None:
         )
     if ctx.probe and rec["has_codex"]:
         codex_checks(ctx, rec, check)
-    r = ctx.run([ctx.pctx, "doctor"], env=pctx_env(ctx.data))
+    r = ctx.run([ctx.muninn, "doctor"], env=muninn_env(ctx.data))
     check("doctor", r.returncode == 0)
     report = json.dumps({"checks": checks}, indent=1).encode()
     ce.atomic_write(ctx.rdir / "verify.json", report, 0o600)

@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pctx import classify, ingest, ingest_model, ingest_plan
+from muninn import classify, ingest, ingest_model, ingest_plan
 from tests.ingest_support import (
     BASE,
     HOLD_LOCK,
@@ -254,10 +254,10 @@ class RootsAndPassTests(unittest.TestCase):
             },
         )
         override = json.dumps({"claude-projects": "~/x"})
-        got = ingest.default_roots({"HOME": "/h", "PCTX_ROOTS": override})
+        got = ingest.default_roots({"HOME": "/h", "MUNINN_ROOTS": override})
         self.assertEqual(got, {"claude-projects": Path("/h/x")})
         for bad in ('{"nope": "/x"}', "not json", '["codex-sessions"]'):
-            env = {"HOME": "/h", "PCTX_ROOTS": bad}
+            env = {"HOME": "/h", "MUNINN_ROOTS": bad}
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 ingest.default_roots(env)
 

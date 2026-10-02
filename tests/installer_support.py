@@ -1,6 +1,6 @@
 """Fakes and fixtures shared by the installer test modules.
 
-launchctl, ps, pctx, codex and the Codex hooks/list probe are fakes; git and
+launchctl, ps, muninn, codex and the Codex hooks/list probe are fakes; git and
 cp run for real, but only on temp dirs. Config files are synthetic and carry
 a fake credential that must never be recorded.
 """
@@ -23,23 +23,25 @@ from install import configedit as ce
 from install import installer as co
 from install.context import Ctx
 
+OLD_LABEL = "com.provenance-context"
 ROOT = Path(__file__).resolve().parent.parent
 CRED = "sk-fake-" + "feedface" * 5
 PINNED = (
-    "bin/pctx",
+    "bin/muninn",
     "integrations/claude/settings-hooks.json",
     "integrations/codex/.agents/plugins/marketplace.json",
     "integrations/codex/.codex-plugin/plugin.json",
     "integrations/codex/hooks/hooks.json",
-    "launchd/com.provenance-context.plist",
+    "launchd/com.muninn.plist",
 )
-# Real Codex 0.159.2 `hooks/list` currentHash values for the shipped
-# hooks.json (literal @HOME@ commands), from an isolated CODEX_HOME probe.
+# Real Codex 0.160.0 `hooks/list` currentHash values for the shipped
+# hooks.json (literal @HOME@ commands), from an isolated CODEX_HOME probe
+# (app-server over stdio, temp HOME and CODEX_HOME).
 REAL_CODEX = {
-    "session_start:0:0": "sha256:6459866a30542db401b65bdccc80ab089242fa46"
-    "3dabbabef559874101d755ac",
-    "user_prompt_submit:0:0": "sha256:126cc326ec91499dba7a984b45602c9678c"
-    "0079b20e8eb84e0751fe93bf99ae0",
+    "session_start:0:0": "sha256:da17ae7f21bc6153ecf3d200a479af2c6d5253f6"
+    "ecbd0e151073971f998baaad",
+    "user_prompt_submit:0:0": "sha256:0f70ed084cf82ab3f801aca70bbf2a5bda6b6ec9"
+    "3d5b72bbcf264a74d7b3f80d",
 }
 CONFIG_FILES = (".claude/settings.json", ".codex/config.toml")
 
@@ -104,7 +106,7 @@ def snapshot(home: Path) -> dict[str, bytes]:
 
 
 class Fake:
-    """Stand-ins for launchctl, ps, pctx and codex over a temp HOME."""
+    """Stand-ins for launchctl, ps, muninn and codex over a temp HOME."""
 
     def __init__(self, home: Path) -> None:
         """Start with a healthy, not-yet-loaded service.
@@ -166,7 +168,7 @@ class Fake:
 
     def _heartbeat(self) -> None:
         """Write a fresh status file, as a healthy poller would."""
-        status = self.home / ".local/share/provenance-context/status.json"
+        status = self.home / ".local/share/muninn/status.json"
         status.write_text("{}")
         os.utime(status, (self.now(), self.now()))
 
@@ -174,8 +176,9 @@ class Fake:
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
         """Model print, kickstart, bootout and bootstrap."""
+        kind = "old" if args[-1].endswith(OLD_LABEL) else "new"
         if args[0] == "print":
-            if self.loaded:
+            if self.loaded == kind:
                 return done(b"\tpid = %d\n" % self.pid)
             return done(rc=113)
         if args[0] == "kickstart":
@@ -183,13 +186,14 @@ class Fake:
             if self.heartbeat:
                 self._heartbeat()
         elif args[0] == "bootout":
-            self.loaded = None
+            if self.loaded == kind:
+                self.loaded = None
         elif args[0] == "bootstrap":
             prog = plistlib.loads(Path(args[2]).read_bytes())[
                 "ProgramArguments"
             ]
-            new = "/.local/lib/provenance-context/" in prog[0]
-            self.loaded, self.pid = ("new" if new else None), self.pid + 1
+            new = "/.local/lib/muninn/" in prog[0]
+            self.loaded, self.pid = ("new" if new else "old"), self.pid + 1
             if new and self.heartbeat:
                 self._heartbeat()
         return done()
@@ -198,20 +202,23 @@ class Fake:
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
         """Report the pinned release as the running command line."""
-        lib = self.home / ".local/lib/provenance-context"
+        name = "provenance-context" if self.loaded == "old" else "muninn"
+        lib = self.home / ".local/lib" / name
         cmd = f"python3.13 -c x {lib}/0123abc serve" if self.loaded else ""
         return done(cmd.encode())
 
-    def _pctx(
+    def _muninn(
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
-        """Model hook, ingest and doctor, rejecting a leaked PCTX_ROOTS."""
-        assert "PCTX_ROOTS" not in env, "inherited PCTX_ROOTS reached pctx"
+        """Model hook, ingest and doctor, rejecting a leaked MUNINN_ROOTS."""
+        assert (
+            "MUNINN_ROOTS" not in env
+        ), "inherited MUNINN_ROOTS reached muninn"
         if args[0] == "hook":
-            assert env.get("PCTX_HOOK_DISABLE") == "1" and input == b"{}"
+            assert env.get("MUNINN_HOOK_DISABLE") == "1" and input == b"{}"
             return done(b"{}")
         if args[0] == "ingest":
-            (Path(env["PCTX_HOME"]) / "pctx.sqlite").write_bytes(b"store")
+            (Path(env["MUNINN_HOME"]) / "muninn.sqlite").write_bytes(b"store")
             return done()
         assert args == ["doctor"], args
         return done(rc=self.doctor)
@@ -277,7 +284,7 @@ class Fake:
         if self.probe_mode == "error":
             raise TimeoutError
         cache = self.home / ".codex/plugins/cache" / co.MKT_NAME
-        (hooks_file,) = cache.glob("provenance-context/*/hooks/hooks.json")
+        (hooks_file,) = cache.glob("muninn/*/hooks/hooks.json")
         text = (self.home / ".codex/config.toml").read_text()
         out: list[dict[str, Any]] = []
         for hook in co.codex_hooks(hooks_file.read_bytes()):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pctx import scope
+from muninn import scope
 from tests.query_support import NOTICE, QueryCase
 
 

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from pctx import classify, ingest, store
+from muninn import classify, ingest, store
 from tests.ingest_support import (
     BASE,
     HOLD_LOCK,

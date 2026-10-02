@@ -1,4 +1,4 @@
-"""pctx stats, doctor, compact and the shape every answer shares."""
+"""muninn stats, doctor, compact and the shape every answer shares."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from subprocess import CompletedProcess
 from typing import Any
 from unittest import mock
 
-from pctx import cli, obs, store
+from muninn import cli, obs, store
 from tests.cli_support import ALWAYS, CliCase, fake_run
 from tests.test_classify import codex_meta, function_call
 from tests.test_ingest import TID, fc_output, rollout
@@ -24,7 +24,7 @@ Runner = Callable[[Sequence[object]], CompletedProcess[bytes]]
 class StatsDoctorTests(CliCase):
     """Usage statistics and the doctor health checks."""
 
-    def pctx_call(
+    def muninn_call(
         self, n: int, cid: str, command: str, output: str
     ) -> list[dict[str, Any]]:
         """Build the rollout records of one shell call and its output.
@@ -52,12 +52,14 @@ class StatsDoctorTests(CliCase):
             rollout(),
             [
                 meta,
-                *self.pctx_call(1, "p1", "pctx search x", exited.format(3)),
-                *self.pctx_call(3, "p2", "pctx stats", exited.format(0)),
+                *self.muninn_call(
+                    1, "p1", "muninn search x", exited.format(3)
+                ),
+                *self.muninn_call(3, "p2", "muninn stats", exited.format(0)),
             ],
         )
         self.run_ingest()
-        code, out, _ = self.pctx("stats", "--usage")
+        code, out, _ = self.muninn("stats", "--usage")
         self.assertEqual(code, 0, out)
         self.assertEqual(
             out["usage"],
@@ -102,7 +104,7 @@ class StatsDoctorTests(CliCase):
     def doctor(
         self, *extra: str, run: Runner | None = None
     ) -> tuple[int, Any, str]:
-        """Run ``pctx doctor`` with launchctl and ps faked out.
+        """Run ``muninn doctor`` with launchctl and ps faked out.
 
         Args:
             *extra: Further command-line flags.
@@ -112,7 +114,7 @@ class StatsDoctorTests(CliCase):
             Exit code, parsed JSON and stderr of the call.
         """
         with mock.patch.object(cli.obs, "run", run or fake_run()):
-            return self.pctx("doctor", *extra)
+            return self.muninn("doctor", *extra)
 
     def checks(self, out: dict[str, Any]) -> dict[str, bool]:
         """Map each doctor check name to whether it passed.
@@ -128,7 +130,7 @@ class StatsDoctorTests(CliCase):
     def test_doctor_checks(self) -> None:
         path = self.session(TID, "hello there", "hi")
         self.session("thr-two", "second", "one")
-        self.assertEqual(self.pctx("ingest")[0], 0)
+        self.assertEqual(self.muninn("ingest")[0], 0)
         code, out, _ = self.doctor()
         self.assertEqual(code, 0, out)
         got = self.checks(out)
@@ -148,7 +150,7 @@ class StatsDoctorTests(CliCase):
             with self.subTest(check=name):
                 self.assertIs(got[name], True)
         path.unlink()
-        self.pctx("ingest")
+        self.muninn("ingest")
         code, out, _ = self.doctor()  # missing sources are not errors
         info = {c["check"]: c for c in out["checks"]}["missing_sources"]
         self.assertEqual(
@@ -173,7 +175,7 @@ class StatsDoctorTests(CliCase):
 
     def test_doctor_warns_on_bloat_and_compact_reclaims(self) -> None:
         self.session(TID, "hello there", "hi")
-        self.pctx("ingest")
+        self.muninn("ingest")
         conn = cli.store.connect_rw(cli.store.db_path(self.home))
         conn.execute("CREATE TABLE junk(x)")
         conn.execute("INSERT INTO junk VALUES (zeroblob(500000))")
@@ -187,9 +189,9 @@ class StatsDoctorTests(CliCase):
         warn = {c["check"]: c for c in out["checks"]}["db_free_space"]
         self.assertEqual((code, warn["ok"], warn["level"]), (0, False, "warn"))
         self.assertGreater(
-            self.pctx("stats")[1]["db_space"]["freelist_count"], 0
+            self.muninn("stats")[1]["db_space"]["freelist_count"], 0
         )
-        code, out, _ = self.pctx("compact")
+        code, out, _ = self.muninn("compact")
         self.assertEqual(code, 0, out)
         self.assertLess(
             out["compact"]["bytes_after"], out["compact"]["bytes_before"]
@@ -198,7 +200,7 @@ class StatsDoctorTests(CliCase):
 
     def test_pretty_is_indented_same_json(self) -> None:
         self.session(TID, "hello there", "hi")
-        self.pctx("ingest")
+        self.muninn("ingest")
 
         def raw(*argv: str) -> str:
             out = io.StringIO()
@@ -216,7 +218,7 @@ class StatsDoctorTests(CliCase):
 
     def test_doctor_reports_unowned_journal(self) -> None:
         self.session(TID, "hello", "hi")
-        self.pctx("ingest")
+        self.muninn("ingest")
         child = Child(self, SPILLING_WRITER, store.db_path(self.home))
         child.wait_ready()
         child.proc.kill()
@@ -225,7 +227,7 @@ class StatsDoctorTests(CliCase):
         self.assertEqual(
             (code, self.checks(out)["unowned_journal"]), (1, False)
         )
-        self.assertTrue((self.home / "pctx.sqlite-journal").exists())
+        self.assertTrue((self.home / "muninn.sqlite-journal").exists())
 
 
 class GoldenTests(CliCase):
@@ -251,10 +253,10 @@ class GoldenTests(CliCase):
         for argv in commands:
             with self.subTest(argv=argv):
                 with mock.patch.object(cli.obs, "run", fake_run()):
-                    _, out, _ = self.pctx(*argv)
+                    _, out, _ = self.muninn(*argv)
                 self.assertIsInstance(out, dict)
                 self.assertLessEqual(ALWAYS, set(out))
                 self.assertEqual(out["notice"], cli.NOTICE)
         with mock.patch.object(cli.obs, "run", fake_run()):
-            _, out, _ = self.pctx("doctor")
+            _, out, _ = self.muninn("doctor")
         self.assertLessEqual(ALWAYS | {"ok", "checks"}, set(out))

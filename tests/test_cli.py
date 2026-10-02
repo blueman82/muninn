@@ -6,7 +6,7 @@ fixtures in ``tests/cli_support.py``.
 
 from __future__ import annotations
 
-from pctx import cli
+from muninn import cli
 from tests.cli_support import CliCase
 from tests.test_ingest import TID
 

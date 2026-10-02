@@ -2,10 +2,10 @@
 
 Status: Accepted, 2026-10-01. Decided by: owner ("only have one pinned release, nothing else").
 
-**Context.** The launchd job and both hooks run `~/.local/lib/provenance-context/current/bin/pctx`. Superseded
+**Context.** The launchd job and both hooks run `~/.local/lib/muninn/current/bin/muninn`. Superseded
 release directories would otherwise accumulate.
 
-**Decision.** `~/.local/lib/provenance-context/` holds one release directory, the `current` and `python` links,
+**Decision.** `~/.local/lib/muninn/` holds one release directory, the `current` and `python` links,
 `install-record.json` and `install.log`. `install.installer --upgrade` re-pins a clean commit, restarts the job with
 `launchctl kickstart -k`, verifies, and deletes every other release as its last step.
 

@@ -8,7 +8,7 @@ import subprocess
 import sys
 from typing import Any
 
-from pctx import erase, knowledge
+from muninn import erase, knowledge
 from tests import test_classify as tc
 from tests import test_ingest as ti
 from tests.knowledge_support import PROMPT, ROOT, KnowCase, kid
@@ -120,7 +120,7 @@ class VerifyTests(KnowCase):
             "import json, sys\n"
             "sys.path.insert(0, sys.argv[1])\n"
             "from pathlib import Path\n"
-            "from pctx import knowledge, store\n"
+            "from muninn import knowledge, store\n"
             "conn = store.connect_ro(Path(sys.argv[2]))\n"
             "print(json.dumps(knowledge.list_entries(conn, cwd='/repo')))\n"
         )

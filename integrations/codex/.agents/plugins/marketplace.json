@@ -1,11 +1,11 @@
 {
-  "name": "provenance-context-local",
+  "name": "muninn-local",
   "interface": {
-    "displayName": "Provenance Context Local"
+    "displayName": "Muninn Local"
   },
   "plugins": [
     {
-      "name": "provenance-context",
+      "name": "muninn",
       "source": {
         "source": "local",
         "path": "./"

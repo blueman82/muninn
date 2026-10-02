@@ -228,9 +228,11 @@ class AmendmentTests(IngestCase):
         canary = "CANARY-OUTPUT-" + "7" * 12
         records = [
             codex_meta("user", TID),
-            function_call(1, "exec_command", '{"cmd":"pctx search x"}', "p1"),
+            function_call(
+                1, "exec_command", '{"cmd":"muninn search x"}', "p1"
+            ),
             fc_output(2, "p1", FAILED.format(3) + canary),
-            function_call(3, "exec_command", '{"cmd":"pctx stats"}', "p2"),
+            function_call(3, "exec_command", '{"cmd":"muninn stats"}', "p2"),
             fc_output(4, "p2", FAILED.format(0) + canary),
             function_call(5, "exec_command", '{"cmd":"ls"}', "p3"),
         ]
@@ -238,7 +240,7 @@ class AmendmentTests(IngestCase):
         claude = [
             claude_rec(
                 "assistant",
-                [tool_use("Bash", {"command": "pctx search y"}, "toolu_1")],
+                [tool_use("Bash", {"command": "muninn search y"}, "toolu_1")],
             )
         ]
         self.write("-w/sess-9.jsonl", claude, root="claude-projects")

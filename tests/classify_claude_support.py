@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from pctx import classify as c
-from pctx.event_model import Record
+from muninn import classify as c
+from muninn.event_model import Record
 from tests.classify_support import CWD, TS
 
 SESSION = "sess-1"

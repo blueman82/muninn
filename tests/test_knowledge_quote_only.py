@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from unittest import mock
 
-from pctx import ingest, knowledge, store
+from muninn import ingest, knowledge, store
 from tests import test_classify as tc
 from tests import test_ingest as ti
 

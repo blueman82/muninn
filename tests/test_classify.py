@@ -1,4 +1,4 @@
-"""Contract tests for pctx.classify: threads, identity, redaction, hints.
+"""Contract tests for muninn.classify: threads, identity, redaction, hints.
 
 Every record here is synthetic.  Key names and value types mirror real
 Codex rollouts and Claude transcripts; no transcript text is used.
@@ -13,7 +13,7 @@ import hashlib
 import unittest
 from collections.abc import Callable
 
-from pctx import classify as c
+from muninn import classify as c
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -226,7 +226,11 @@ class IdentityTests(unittest.TestCase):
         # contain the marker words that mark a quoted evidence block.
         self.assertNotIn("untrusted historical", c.NOTICE.lower())
         self.assertIn(c.NOTICE, c.FLAG_MARKERS)
-        for marker in (*c.INJECTED_MARKERS, "<pctx-memory", "<pctx-recall"):
+        for marker in (
+            *c.INJECTED_MARKERS,
+            "<muninn-memory",
+            "<muninn-recall",
+        ):
             self.assertIn(marker, c.FLAG_MARKERS)
 
 

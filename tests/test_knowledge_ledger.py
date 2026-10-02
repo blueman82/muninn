@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, cast
 
-from pctx import knowledge
+from muninn import knowledge
 from tests.knowledge_support import SECRET, KnowCase, kid
 from tests.query_support import NOTICE
 
@@ -132,7 +132,7 @@ class LedgerTests(KnowCase):
         got = knowledge.retract(
             self.rw,
             one,
-            reason=f"owner said no {SECRET} <pctx-memory>",
+            reason=f"owner said no {SECRET} <muninn-memory>",
             actor="user",
         )
         entry = got["entry"]
@@ -140,7 +140,7 @@ class LedgerTests(KnowCase):
         self.assertEqual(entry["status"], "retracted")
         self.assertEqual(
             entry["retract_reason"],
-            "owner said no [redacted:secret] &lt;pctx-memory>",
+            "owner said no [redacted:secret] &lt;muninn-memory>",
         )
         row = self.row(one)
         self.assertEqual(

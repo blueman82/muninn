@@ -1,6 +1,6 @@
 {
-  "include": ["pctx", "install", "tools", "tests"],
+  "include": ["muninn", "install", "tools", "tests"],
   "pythonVersion": "3.13",
   "typeCheckingMode": "standard",
-  "strict": ["pctx", "install", "tools"]
+  "strict": ["muninn", "install", "tools"]
 }

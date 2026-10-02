@@ -6,7 +6,7 @@ import time
 import unittest
 from typing import Any, cast
 
-from pctx import classify, query
+from muninn import classify, query
 from tests.query_support import QueryCase
 
 
@@ -91,9 +91,9 @@ class BuildQueryTests(unittest.TestCase):
             got,
             ['"fix"', '"hook_core"', '"py"', '"now"', '"hook core py"'],
         )
-        path = self.terms("see pctx/query.py:12")
+        path = self.terms("see muninn/query.py:12")
         assert path is not None
-        self.assertIn('"pctx query py 12"', path)
+        self.assertIn('"muninn query py 12"', path)
 
     def test_hostile_input_stays_linear(self) -> None:
         blobs = [

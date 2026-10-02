@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest import mock
 
-from pctx import hook_frame, hook_recall, knowledge
+from muninn import hook_frame, hook_recall, knowledge
 from tests import test_knowledge as tk
 from tests.hook_support import CLOSE, RecallCase
 
@@ -100,7 +100,7 @@ class RecallStressTests(RecallCase):
         self.assertNotIn("codex:thr:3.1", text)
         self.assertNotIn("«", text)
         self.assertTrue(
-            text.endswith("`pctx open <ref> --context 3`.\n" + CLOSE)
+            text.endswith("`muninn open <ref> --context 3`.\n" + CLOSE)
         )
         shrunk = hook_frame.recall_text(entries[:1], hits[:3], ("x" * 180,))
         self.assertLessEqual(len(shrunk), 1500)
@@ -120,7 +120,7 @@ class RecallStressTests(RecallCase):
 class UserCitedKnowledgeTests(RecallCase):
     """Only entries with a live user-prompt citation are pushed.
 
-    The others stay pull-only (``pctx search``, ``pctx know``).
+    The others stay pull-only (``muninn search``, ``muninn know``).
     """
 
     def via(self, event_id: int | None, quote: str, **kw: object) -> int:

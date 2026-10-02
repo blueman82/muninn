@@ -1,4 +1,4 @@
-"""bin/pctx-install picks the install mode and passes the right flags."""
+"""bin/muninn-install picks the install mode and passes the right flags."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tests.installer_support import ROOT, git
 
-WRAPPER = ROOT / "bin/pctx-install"
+WRAPPER = ROOT / "bin/muninn-install"
 
 
 class WrapperTest(unittest.TestCase):
@@ -28,13 +28,13 @@ class WrapperTest(unittest.TestCase):
         )
         self.stub.chmod(0o755)
         self.sha = git(ROOT, "rev-parse", "HEAD").decode().strip()
-        self.lib = self.home / ".local/lib/provenance-context"
-        self.data = self.home / ".local/share/provenance-context"
+        self.lib = self.home / ".local/lib/muninn"
+        self.data = self.home / ".local/share/muninn"
 
     def run_wrapper(
         self, *args: str, rc: int = 0
     ) -> subprocess.CompletedProcess[str]:
-        """Run ``bin/pctx-install`` against the temp HOME.
+        """Run ``bin/muninn-install`` against the temp HOME.
 
         Args:
             *args: Command-line arguments.
@@ -46,7 +46,7 @@ class WrapperTest(unittest.TestCase):
         env = dict(
             os.environ,
             HOME=str(self.home),
-            PCTX_PYTHON=str(self.stub),
+            MUNINN_PYTHON=str(self.stub),
             STUB_RC=str(rc),
         )
         return subprocess.run(
@@ -58,6 +58,13 @@ class WrapperTest(unittest.TestCase):
         (self.lib / sha).mkdir(parents=True)
         (self.lib / "current").symlink_to(sha)
         self.data.mkdir(parents=True)
+
+    def installed_old(self) -> None:
+        """Make the temp HOME look like a machine on the pre-rename names."""
+        old = self.home / ".local/lib/provenance-context"
+        (old / ("b" * 40)).mkdir(parents=True)
+        (old / "current").symlink_to("b" * 40)
+        (self.home / ".local/share/provenance-context").mkdir(parents=True)
 
     def argv(self) -> str:
         """Return what the stub Python was run with, or empty if never."""
@@ -115,7 +122,21 @@ class WrapperTest(unittest.TestCase):
         r = self.run_wrapper("--check")
         self.assertIn("--dry-run", self.argv())
         self.assertIn("Upgrade: aaaaaaa", r.stdout)
-        self.assertTrue(r.stdout.endswith("OK to run: bin/pctx-install\n"))
+        self.assertTrue(r.stdout.endswith("OK to run: bin/muninn-install\n"))
+
+    def test_an_old_name_install_is_upgraded_and_the_preview_says_so(
+        self,
+    ) -> None:
+        self.installed_old()
+        r = self.run_wrapper("--check")
+        self.assertIn("--upgrade --dry-run", self.argv())
+        self.assertIn("Upgrade: bbbbbbb", r.stdout)
+        self.assertIn("still runs the old pctx names", r.stdout)
+        s = self.run_wrapper("--status")
+        self.assertIn("old pctx names, will move to muninn", s.stdout)
+        self.run_wrapper()
+        self.assertIn("--upgrade", self.argv().splitlines()[-1])
+        self.assertNotIn("--fresh", self.argv())
 
     def test_check_writes_nothing_to_the_home(self) -> None:
         self.run_wrapper("--check")

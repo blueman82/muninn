@@ -15,7 +15,9 @@ from typing import Any
 from install.constants import CLAUDE_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.record import Record
+from install.steps_legacy import check_old_store
 from install.transforms import (
+    drop_legacy,
     drop_trust,
     edit_settings,
     enable,
@@ -54,7 +56,7 @@ def _check_repo(
     Raises:
         StepFailedError: If HEAD is not ``sha``, the worktree is dirty, the
             code breaks a standards rule (``tools.standards``),
-            ``bin/pctx`` is not executable, or the Claude hook fragment has
+            ``bin/muninn`` is not executable, or the Claude hook fragment has
             the wrong events.
     """
     if _git(ctx, repo, "rev-parse", "HEAD").decode().strip() != sha:
@@ -70,8 +72,10 @@ def _check_repo(
             f"{len(broken)} standards violation(s) at --sha ({first}); "
             "run: python3.13 -m tools.check"
         )
-    if not _git(ctx, repo, "ls-tree", sha, "bin/pctx").startswith(b"100755 "):
-        raise StepFailedError("bin/pctx is not an executable file at --sha")
+    if not _git(ctx, repo, "ls-tree", sha, "bin/muninn").startswith(
+        b"100755 "
+    ):
+        raise StepFailedError("bin/muninn is not an executable file at --sha")
     home = str(ctx.home).encode()
     files = {
         r: _git(ctx, repo, "show", f"{sha}:{r}").replace(b"@HOME@", home)
@@ -99,6 +103,9 @@ def _check_upgradable(ctx: Ctx) -> None:
     Raises:
         StepFailedError: If the data dir, plist or current release is gone.
     """
+    if ctx.legacy:
+        check_old_store(ctx)
+        return
     if not (ctx.data.is_dir() and ctx.plist.exists()):
         raise StepFailedError("nothing to upgrade: no data dir or plist")
     if not (ctx.lib / "current").is_symlink():
@@ -112,11 +119,13 @@ def _check_installable(ctx: Ctx) -> None:
         ctx: The run context.
 
     Raises:
-        StepFailedError: If Python is too old or pctx data or a plist exist.
+        StepFailedError: If Python is too old or muninn data or a plist exist.
     """
     # Guards a mistaken invocation; the documented one is python3.13.
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         raise StepFailedError("the installer needs Python 3.13+")
+    if ctx.has_old_install():
+        raise StepFailedError("a pre-rename install exists: run --upgrade")
     for path in (ctx.data, ctx.plist):
         if _exists(path):
             raise StepFailedError(f"{path} exists: already installed")
@@ -131,7 +140,7 @@ def _check_machine(ctx: Ctx) -> None:
     Raises:
         StepFailedError: If an upgrade has nothing to upgrade, a fresh
             install finds an existing one, a rollback directory already
-            exists, or the ``pctx`` link is not a symlink.
+            exists, or the ``muninn`` link is not a symlink.
     """
     if ctx.upgrade:
         _check_upgradable(ctx)
@@ -140,8 +149,8 @@ def _check_machine(ctx: Ctx) -> None:
     for path in (ctx.rdir, ctx.failed):
         if _exists(path):
             raise StepFailedError(f"{path} already exists")
-    if ctx.pctx.exists() and not ctx.pctx.is_symlink():
-        raise StepFailedError(f"{ctx.pctx} is not a symlink")
+    if ctx.muninn.exists() and not ctx.muninn.is_symlink():
+        raise StepFailedError(f"{ctx.muninn} is not a symlink")
 
 
 def _dry_apply(
@@ -166,7 +175,7 @@ def _dry_apply(
     if ctx.config.exists():
         text = ctx.config.read_text()
         hooks = codex_hooks(files[CODEX_HOOKS_FILE])
-        text = drop_trust(text)
+        text = drop_trust(drop_legacy(text) if ctx.legacy else text)
         text = enable(repoint(text, f"{ctx.lib}/current/integrations/codex"))
         write_trust(text, hooks)
 
@@ -193,12 +202,14 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     files, fragment = _check_repo(ctx, repo, sha)
     _check_machine(ctx)
     # An upgrade re-pins only; provider config was set up by the fresh run.
-    touch = not ctx.upgrade
+    # Migrating a pre-rename install is the exception: its entries must move.
+    touch = ctx.legacy or not ctx.upgrade
     if touch:
         _dry_apply(ctx, files, fragment)
     return {
         "fresh": ctx.fresh,
         "upgrade": ctx.upgrade,
+        "legacy": ctx.legacy,
         "has_claude": touch and ctx.settings.exists(),
         "has_codex": touch and ctx.config.exists(),
         "schema": 1,

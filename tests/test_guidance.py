@@ -11,7 +11,7 @@ class GuidanceTests(CliCase):
     """CLI help and result notices carry the evidence guidance."""
 
     def test_help_explains_evidence_and_actual_paging_actions(self) -> None:
-        code, out, help_text = self.pctx("--help")
+        code, out, help_text = self.muninn("--help")
         self.assertEqual((code, out), (2, ""))
         for phrase in (
             "navigation only",
@@ -21,8 +21,8 @@ class GuidanceTests(CliCase):
             "cited",
             "unknown",
             "not a truth guarantee",
-            "pctx open REF",
-            "pctx know show K",
+            "muninn open REF",
+            "muninn know show K",
             "has_more",
             "--page N+1",
             "next_from",
@@ -35,7 +35,7 @@ class GuidanceTests(CliCase):
             ("session", ("next_from",)),
             ("open", ("next_offset",)),
         ):
-            _, _, text = self.pctx(command, "--help")
+            _, _, text = self.muninn(command, "--help")
             for phrase in phrases:
                 with self.subTest(command=command, phrase=phrase):
                     self.assertIn(phrase, text)
@@ -51,7 +51,7 @@ class GuidanceTests(CliCase):
             ("session", TID),
             ("open", f"codex:{TID}:2.1"),
         ):
-            code, out, _ = self.pctx(*args)
+            code, out, _ = self.muninn(*args)
             self.assertEqual(code, 0, out)
             assert isinstance(out, dict)
             notice = out["preview_notice"]

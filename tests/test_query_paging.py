@@ -264,13 +264,13 @@ class SearchBytePagingTests(QueryCase):
         source = self.add_source("edge")
         self.add_event(source, self.repo, "zebra " + "x" * 9000)
         env = os.environ | {
-            "PCTX_HOME": str(self.home),
+            "MUNINN_HOME": str(self.home),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
         command = [
             sys.executable,
             "-m",
-            "pctx",
+            "muninn",
             "search",
             "zebra",
             "--all-projects",
@@ -312,7 +312,7 @@ class SearchBytePagingTests(QueryCase):
         self.assertLessEqual(len(done.stdout), 6144)
         result = json.loads(done.stdout)
         self.assertEqual(result["error"], "output_too_large")
-        self.assertIn("pctx open", result["note"])
+        self.assertIn("muninn open", result["note"])
 
     def test_actual_cli_output_stays_bounded_after_redaction(self) -> None:
         for i in range(23):
@@ -324,7 +324,7 @@ class SearchBytePagingTests(QueryCase):
         self.rw.commit()
         refs = []
         env = os.environ | {
-            "PCTX_HOME": str(self.home),
+            "MUNINN_HOME": str(self.home),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
         for number in range(1, 30):
@@ -332,7 +332,7 @@ class SearchBytePagingTests(QueryCase):
                 [
                     sys.executable,
                     "-m",
-                    "pctx",
+                    "muninn",
                     "search",
                     "zebra",
                     "--all-projects",

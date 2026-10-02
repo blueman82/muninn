@@ -17,6 +17,9 @@ from install.constants import (
     CODEX_KEYS,
     MARKERS,
     MARKETPLACE,
+    OLD_CLI_NAME,
+    OLD_NAME,
+    OLD_SECTIONS,
     PLUGIN,
     TRUST,
 )
@@ -24,9 +27,14 @@ from install.trust import TrustedHook
 
 
 def ours(group: Mapping[str, Any]) -> bool:
-    """Say whether a settings hook group runs pctx."""
+    """Say whether a settings hook group runs muninn."""
     cmds = " ".join(h.get("command", "") for h in group.get("hooks", []))
-    return "/.local/bin/pctx hook" in cmds
+    # The pre-rename command is ours too, so an upgrade replaces it.
+    # It may also call the old release path directly instead of the link.
+    old_release = f"/{OLD_NAME}/current/bin/{OLD_CLI_NAME} hook"
+    return old_release in cmds or any(
+        f"/.local/bin/{name} hook" in cmds for name in ("muninn", OLD_CLI_NAME)
+    )
 
 
 def claude_paths(obj: Mapping[str, Any]) -> list[ce.JsonPath]:
@@ -138,6 +146,24 @@ def drop_trust(text: str) -> str:
     """
     codex_scan(text)
     for header in TRUST.values():
+        text = ce.put_section(text, header, None)
+    return text
+
+
+def drop_legacy(text: str) -> str:
+    """Remove the pre-rename marketplace, plugin and trust sections.
+
+    Args:
+        text: The whole config.toml.
+
+    Returns:
+        The text without them.
+
+    Raises:
+        RefusedError: For a stray marker or unrecognised layout.
+    """
+    codex_scan(text)
+    for header in OLD_SECTIONS:
         text = ce.put_section(text, header, None)
     return text
 

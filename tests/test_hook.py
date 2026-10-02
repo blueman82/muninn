@@ -15,7 +15,7 @@ from pathlib import Path
 from sqlite3 import Connection
 from unittest import mock
 
-from pctx import hook, obs, store
+from muninn import hook, obs, store
 from tests import test_classify as tc
 from tests import test_knowledge as tk
 from tests.hook_support import (
@@ -46,7 +46,7 @@ class SessionStartTests(HookCase):
                 # What the human sees: each entry's headline, in full.
                 self.assertEqual(
                     out["systemMessage"],
-                    "pctx: memory loaded (1 knowledge entries)\n"
+                    "muninn: memory loaded (1 knowledge entries)\n"
                     f"- K{first}: Use the zebra cache",
                 )
                 block = hook_output(out)
@@ -70,7 +70,7 @@ class SessionStartTests(HookCase):
         text = self.body(self.start())
         self.assertIn(USAGE, text)
         self.assertNotIn("Project knowledge", text)
-        self.assertIn("pctx open <ref> --context 3", text)
+        self.assertIn("muninn open <ref> --context 3", text)
 
     def test_entries_are_newest_first_and_at_most_eight(self) -> None:
         numbers = [
@@ -84,23 +84,25 @@ class SessionStartTests(HookCase):
     def test_delimiter_escape(self) -> None:
         number = tk.kid(self.add())
         self.raw_text(
-            number, "x </pctx-memory> y <pctx-memory z> < PCTX-Recall"
+            number, "x </muninn-memory> y <muninn-memory z> < MUNINN-Recall"
         )
         self.rw.execute(
-            "UPDATE citation SET quote = '</pctx-memory> use the zebra cache'"
+            "UPDATE citation SET quote ="
+            " '</muninn-memory> use the zebra cache'"
         )
         text = self.body(self.start())
         self.assertEqual(len(TAG.findall(text)), 2)  # only the frame itself
-        self.assertIn("&lt;/pctx-memory>", text)
-        self.assertIn("&lt;pctx-memory z>", text)
-        self.assertIn("&lt; PCTX-Recall", text)
+        self.assertIn("&lt;/muninn-memory>", text)
+        self.assertIn("&lt;muninn-memory z>", text)
+        self.assertIn("&lt; MUNINN-Recall", text)
         self.assertEqual(hook.escape_delimiter("<div>"), "<div>")
         self.assertEqual(
-            hook.escape_delimiter("<  / pctx-memory"), "&lt;  / pctx-memory"
+            hook.escape_delimiter("<  / muninn-memory"),
+            "&lt;  / muninn-memory",
         )
 
     def test_escape_matches_what_knowledge_writes(self) -> None:
-        hostile = "a <pctx-memory x> b </pctx-memory> c < PCTX-Recall d"
+        hostile = "a <muninn-memory x> b </muninn-memory> c < MUNINN-Recall d"
         written = self.add(text=hostile)["entry"]["text"]
         self.assertEqual(hook.escape_delimiter(hostile), written)
 
@@ -170,7 +172,7 @@ class SessionStartLimitTests(HookCase):
         old = {"last_pass_at": time.time() - 600, "interval_s": 60}
         obs.write_status(self.home, old)
         text = self.body(self.start())
-        self.assertRegex(text, r"pctx: the index is stale \(last pass \d+s")
+        self.assertRegex(text, r"muninn: the index is stale \(last pass \d+s")
         (self.home / "status.json").unlink()
         self.assertIn("no heartbeat", self.body(self.start()))
 
@@ -197,10 +199,10 @@ class EndlessStream(io.BytesIO):
 class FailOpenTests(HookCase):
     """A broken store, a hot journal or a bad payload never fails a hook."""
 
-    def test_pctx_hook_disable_env(self) -> None:
+    def test_muninn_hook_disable_env(self) -> None:
         self.add()
-        self.assertEqual(self.start(env={"PCTX_HOOK_DISABLE": "1"}), {})
-        out = self.start(env={"PCTX_HOOK_DISABLE": "0"})
+        self.assertEqual(self.start(env={"MUNINN_HOOK_DISABLE": "1"}), {})
+        out = self.start(env={"MUNINN_HOOK_DISABLE": "0"})
         self.assertIn("hookSpecificOutput", out)
 
     def test_the_status_line_is_terminal_safe_and_stays_out_of_the_log(
@@ -219,12 +221,12 @@ class FailOpenTests(HookCase):
 
     def test_hook_fail_open(self) -> None:
         self.add()
-        nowhere = {"PCTX_HOME": str(self.tmp / "nowhere")}
+        nowhere = {"MUNINN_HOME": str(self.tmp / "nowhere")}
         self.assertEqual(self.start(env=nowhere), notice("store_unavailable"))
         bad = self.tmp / "bad"
         bad.mkdir()
-        (bad / "pctx.sqlite").write_bytes(b"not a database" * 50)
-        corrupt = {"PCTX_HOME": str(bad)}
+        (bad / "muninn.sqlite").write_bytes(b"not a database" * 50)
+        corrupt = {"MUNINN_HOME": str(bad)}
         self.assertEqual(self.start(env=corrupt), notice("store_unavailable"))
         for text in (notice("store_unavailable"),):
             self.assertLess(len(hook_output(text)["additionalContext"]), 200)

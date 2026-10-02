@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from pctx import store
+from muninn import store
 
 NO_HASH = "0" * 40
 
@@ -31,7 +31,7 @@ class ScopeCase(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         env.start()
         self.addCleanup(env.stop)
-        self.db = self.tmp / "db" / "pctx.sqlite"
+        self.db = self.tmp / "db" / "muninn.sqlite"
 
     def rw(self) -> sqlite3.Connection:
         """Open the temp store for writing; closed on cleanup.

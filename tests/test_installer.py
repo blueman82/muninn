@@ -27,7 +27,7 @@ class FreshInstallTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.w = World(self)
-        self.lib = self.w.home / ".local/lib/provenance-context"
+        self.lib = self.w.home / ".local/lib/muninn"
 
     def install(self, **kw: Any) -> Any:
         """Run a fresh install of the world's repo.
@@ -64,7 +64,7 @@ class FreshInstallTest(unittest.TestCase):
         (group,) = s["hooks"]["SessionStart"]
         self.assertEqual(
             group["hooks"][0]["command"],
-            f"{h}/.local/bin/pctx hook session-start --provider claude",
+            f"{h}/.local/bin/muninn hook session-start --provider claude",
         )
         text = (h / ".codex/config.toml").read_text()
         self.assertEqual(
@@ -76,15 +76,15 @@ class FreshInstallTest(unittest.TestCase):
         rb.rollback(w.ctx(), co.load_record(record))
         for rel, data in before.items():
             self.assertEqual((h / rel).read_bytes(), data, rel)
-        self.assertFalse((h / ".local/share/provenance-context").exists())
+        self.assertFalse((h / ".local/share/muninn").exists())
         self.assertFalse((h / co.PLIST).exists())
         self.assertFalse(os.path.lexists(self.lib / "python"))
-        self.assertFalse(os.path.lexists(h / ".local/bin/pctx"))
+        self.assertFalse(os.path.lexists(h / ".local/bin/muninn"))
 
     def test_fresh_install_starts_with_recall_off_and_says_how_to_enable(
         self,
     ) -> None:
-        flag = self.w.home / ".local/share/provenance-context/recall.off"
+        flag = self.w.home / ".local/share/muninn/recall.off"
         self.install()
         self.assertEqual(flag.stat().st_mode & 0o777, 0o600)
         self.assertEqual(flag.read_bytes(), b"")
@@ -114,15 +114,15 @@ class FreshInstallTest(unittest.TestCase):
 
     def test_refuses_when_already_installed(self) -> None:
         h = self.w.home
-        (h / ".local/share/provenance-context").mkdir(parents=True)
+        (h / ".local/share/muninn").mkdir(parents=True)
         with self.assertRaises(co.StepFailedError):
             self.install()
         self.assertFalse(self.lib.exists())
 
     def test_refuses_a_commit_that_breaks_the_standards(self) -> None:
         w = self.w
-        (w.repo / "pctx").mkdir()
-        (w.repo / "pctx/sloppy.py").write_text("x = 1\n")
+        (w.repo / "muninn").mkdir()
+        (w.repo / "muninn/sloppy.py").write_text("x = 1\n")
         git(w.repo, "add", "-A")
         git(w.repo, "commit", "-qm", "sloppy")
         sha = git(w.repo, "rev-parse", "HEAD").decode().strip()
@@ -137,7 +137,7 @@ class FreshInstallTest(unittest.TestCase):
         self.install(dry_run=True)
         for rel, data in before.items():
             self.assertEqual((h / rel).read_bytes(), data, rel)
-        self.assertFalse((h / ".local/share/provenance-context").exists())
+        self.assertFalse((h / ".local/share/muninn").exists())
         # `launchctl print` only reads state; every other verb mutates it.
         self.assertFalse(
             any(
@@ -154,16 +154,14 @@ class FreshInstallTest(unittest.TestCase):
         out = json.loads((self.lib / "install-record.json").read_text())
         self.assertEqual(out["outcome"], "rolled_back")
         self.assertEqual(out["failed"]["step"], "start_new")
-        self.assertFalse((h / ".local/share/provenance-context").exists())
+        self.assertFalse((h / ".local/share/muninn").exists())
         self.assertEqual(w.fake.loaded, None)
 
     def test_failed_doctor_rolls_back(self) -> None:
         self.w.fake.doctor = 1
         with self.assertRaises(co.StepFailedError):
             self.install()
-        self.assertFalse(
-            (self.w.home / ".local/share/provenance-context").exists()
-        )
+        self.assertFalse((self.w.home / ".local/share/muninn").exists())
 
     def test_wrong_codex_answer_rolls_back(self) -> None:
         self.w.fake.probe_mode = "wrong"
@@ -181,9 +179,9 @@ class FreshInstallTest(unittest.TestCase):
         repo = self.w.repo / "integrations/claude/settings-hooks.json"
         self.assertIn(b"@HOME@", repo.read_bytes())
 
-    def test_inherited_pctx_env_never_reaches_pctx(self) -> None:
-        with mock.patch.dict(os.environ, {"PCTX_ROOTS": "{}"}):
-            # Fake._pctx asserts PCTX_ROOTS is absent from the child env.
+    def test_inherited_muninn_env_never_reaches_muninn(self) -> None:
+        with mock.patch.dict(os.environ, {"MUNINN_ROOTS": "{}"}):
+            # Fake._muninn asserts MUNINN_ROOTS is absent from the child env.
             self.install()
 
 
@@ -197,7 +195,7 @@ class UpgradeTest(unittest.TestCase):
         git(w.repo, "add", "-A")
         git(w.repo, "commit", "-qm", "v2")
         self.sha2 = git(w.repo, "rev-parse", "HEAD").decode().strip()
-        self.lib = w.home / ".local/lib/provenance-context"
+        self.lib = w.home / ".local/lib/muninn"
         self.ctx = dataclasses.replace(
             w.ctx(upgrade=True), ts="20261002T000000Z"
         )
@@ -240,7 +238,7 @@ class UpgradeTest(unittest.TestCase):
         self,
     ) -> None:
         w = self.w
-        flag = w.home / ".local/share/provenance-context/recall.off"
+        flag = w.home / ".local/share/muninn/recall.off"
         flag.unlink()  # the owner turned recall on
         co.install(self.ctx, w.repo, self.sha2)
         self.assertFalse(flag.exists())

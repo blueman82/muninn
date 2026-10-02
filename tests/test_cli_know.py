@@ -1,4 +1,4 @@
-"""pctx know add, retract, list, show and check through main()."""
+"""muninn know add, retract, list, show and check through main()."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import json
 from typing import Any
 from unittest import mock
 
-from pctx import cli_core, ingest, knowledge, store
+from muninn import cli_core, ingest, knowledge, store
 from tests.cli_support import ALWAYS, CliCase
 from tests.test_classify import user_msg
 from tests.test_ingest import TID, rollout
 
 
 class KnowTests(CliCase):
-    """pctx know add|retract|list|show|check through main()."""
+    """muninn know add|retract|list|show|check through main()."""
 
     QUOTE = "the zebra cache stays in place"
 
@@ -30,7 +30,7 @@ class KnowTests(CliCase):
         kind: str = "decision",
         env: dict[str, str] | None = None,
     ) -> tuple[int, Any, str]:
-        """Run ``pctx know add`` with the given text and kind.
+        """Run ``muninn know add`` with the given text and kind.
 
         Args:
             *extra: Further flags, such as ``--cite`` and ``--quote``.
@@ -41,7 +41,7 @@ class KnowTests(CliCase):
         Returns:
             Exit code, parsed JSON and stderr of the call.
         """
-        return self.pctx(
+        return self.muninn(
             "know", "add", "--kind", kind, "--text", text, *extra, env=env
         )
 
@@ -58,26 +58,26 @@ class KnowTests(CliCase):
             [(c["ref"], c["quote"], c["verify"]) for c in entry["cites"]],
             [(self.ref, self.QUOTE, "ok")],
         )
-        code, listed, _ = self.pctx("know", "list")
+        code, listed, _ = self.muninn("know", "list")
         self.assertEqual((code, listed["count"]), (0, 1))
         self.assertLessEqual(ALWAYS | {"entries", "count"}, set(listed))
-        code, shown, _ = self.pctx("know", "show", "K1")
+        code, shown, _ = self.muninn("know", "show", "K1")
         self.assertEqual(code, 0)
         self.assertLessEqual(ALWAYS | {"entry", "chain", "log"}, set(shown))
         self.assertEqual([x["action"] for x in shown["log"]], ["add"])
-        code, checked, _ = self.pctx("know", "check")
+        code, checked, _ = self.muninn("know", "check")
         self.assertEqual(
             (code, checked["ok"], checked["problems"]), (0, 1, [])
         )
-        code, gone, _ = self.pctx(
+        code, gone, _ = self.muninn(
             "know", "retract", "K1", "--reason", "changed"
         )
         self.assertEqual((code, gone["entry"]["status"]), (0, "retracted"))
-        _, after, _ = self.pctx("know", "list")
+        _, after, _ = self.muninn("know", "list")
         self.assertEqual(after["count"], 0)
-        _, every, _ = self.pctx("know", "list", "--status", "all")
+        _, every, _ = self.muninn("know", "list", "--status", "all")
         self.assertEqual(every["count"], 1)
-        self.assertEqual(self.pctx("know", "list", "--status", "old")[0], 2)
+        self.assertEqual(self.muninn("know", "list", "--status", "old")[0], 2)
 
     def test_know_add_refusals_exit_2(self) -> None:
         cases = (
@@ -108,7 +108,7 @@ class KnowTests(CliCase):
         )
         self.assertEqual((code, out["error"]), (2, "text_length"))
         self.assertEqual(
-            self.pctx("know", "list")[1]["count"], 0
+            self.muninn("know", "list")[1]["count"], 0
         )  # nothing written
         self.assertEqual(self.add(kind="rumor")[0], 2)  # argparse: bad choice
 
@@ -126,7 +126,7 @@ class KnowTests(CliCase):
             with self.subTest(extra):
                 code, out, _ = self.add(*extra)
                 self.assertEqual((code, out["error"]), (2, "refused"))
-        self.assertEqual(self.pctx("know", "list")[1]["count"], 0)
+        self.assertEqual(self.muninn("know", "list")[1]["count"], 0)
         good = ("--cite", self.ref, "--quote", "we decided the zebra")
         good += ("--cite", self.ref, "--quote", "cache stays in place for")
         code, out, _ = self.add(*good)
@@ -162,7 +162,7 @@ class KnowTests(CliCase):
             text="Keep it, revised",
         )
         self.assertEqual((code, out["entry"]["supersedes"]), (0, "K1"))
-        _, shown, _ = self.pctx("know", "show", "1")
+        _, shown, _ = self.muninn("know", "show", "1")
         self.assertEqual(shown["entry"]["status"], "superseded")
         self.assertEqual(
             [c["id"] for c in shown["chain"]["superseded_by"]], ["K2"]
@@ -175,8 +175,8 @@ class KnowTests(CliCase):
             "--cite", self.ref, "--quote", self.QUOTE, "--global"
         )
         self.assertEqual((code, out["entry"]["scope"]), (0, "global"))
-        _, here, _ = self.pctx("know", "list")
-        _, wide, _ = self.pctx("know", "list", "--all-projects")
+        _, here, _ = self.muninn("know", "list")
+        _, wide, _ = self.muninn("know", "list", "--all-projects")
         self.assertEqual((here["count"], wide["count"]), (2, 2))
 
     def test_know_list_all_projects_reaches_other_scopes(self) -> None:
@@ -193,8 +193,8 @@ class KnowTests(CliCase):
             roots=ingest.default_roots(self.env),
             env=self.env,
         )
-        _, here, _ = self.pctx("know", "list")
-        _, wide, _ = self.pctx("know", "list", "--all-projects")
+        _, here, _ = self.muninn("know", "list")
+        _, wide, _ = self.muninn("know", "list", "--all-projects")
         self.assertEqual([e["id"] for e in here["entries"]], ["K1"])
         self.assertEqual(
             sorted(e["id"] for e in wide["entries"]), ["K1", "K2"]
@@ -202,13 +202,13 @@ class KnowTests(CliCase):
 
     def test_show_unknown_and_reader_failures(self) -> None:
         self.assertEqual(
-            self.pctx("know", "show", "K9")[1]["error"], "not_found"
+            self.muninn("know", "show", "K9")[1]["error"], "not_found"
         )
-        self.assertEqual(self.pctx("know", "show", "K9")[0], 2)
-        empty = {"PCTX_HOME": str(self.tmp / "empty")}
+        self.assertEqual(self.muninn("know", "show", "K9")[0], 2)
+        empty = {"MUNINN_HOME": str(self.tmp / "empty")}
         for argv in (("list",), ("show", "K1"), ("check",)):
             with self.subTest(argv):
-                code, out, _ = self.pctx("know", *argv, env=empty)
+                code, out, _ = self.muninn("know", *argv, env=empty)
                 self.assertEqual(
                     (code, out["error"]), (4, "store_unavailable")
                 )
@@ -220,12 +220,14 @@ class KnowTests(CliCase):
         ):
             code, out, _ = self.add("--cite", self.ref, "--quote", self.QUOTE)
             self.assertEqual((code, out["error"]), (3, "busy"))
-            code, out, _ = self.pctx("know", "retract", "K1", "--reason", "x")
+            code, out, _ = self.muninn(
+                "know", "retract", "K1", "--reason", "x"
+            )
             self.assertEqual((code, out["error"]), (3, "busy"))
 
     def test_know_calls_log_ids_not_text(self) -> None:
         self.add("--cite", self.ref, "--quote", self.QUOTE)
-        self.pctx("know", "list")
+        self.muninn("know", "list")
         self.add()  # refused
         lines = [
             json.loads(x)

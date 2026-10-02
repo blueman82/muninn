@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "@HOME@/.local/bin/pctx hook session-start --provider claude",
+            "command": "@HOME@/.local/bin/muninn hook session-start --provider claude",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "@HOME@/.local/bin/pctx hook prompt --provider claude",
+            "command": "@HOME@/.local/bin/muninn hook prompt --provider claude",
             "timeout": 5
           }
         ]

@@ -11,7 +11,7 @@ import time
 import unittest
 from pathlib import Path
 
-from pctx import store
+from muninn import store
 from tests.store_support import (
     HOLD_LOCK,
     SPILLING_WRITER,
@@ -30,16 +30,18 @@ class PathTests(StoreCase):
     """Data dir resolution and atomic private file writes."""
 
     def test_data_home_env_default_and_expansion(self) -> None:
-        default = Path.home() / ".local" / "share" / "provenance-context"
-        self.assertEqual(store.data_home({"PCTX_HOME": "/x/y"}), Path("/x/y"))
-        self.assertEqual(store.data_home({}), default)
-        self.assertEqual(store.data_home({"PCTX_HOME": ""}), default)
+        default = Path.home() / ".local" / "share" / "muninn"
         self.assertEqual(
-            store.data_home({"PCTX_HOME": "~/pc"}), Path.home() / "pc"
+            store.data_home({"MUNINN_HOME": "/x/y"}), Path("/x/y")
+        )
+        self.assertEqual(store.data_home({}), default)
+        self.assertEqual(store.data_home({"MUNINN_HOME": ""}), default)
+        self.assertEqual(
+            store.data_home({"MUNINN_HOME": "~/pc"}), Path.home() / "pc"
         )
 
     def test_db_path(self) -> None:
-        self.assertEqual(store.db_path(Path("/h")), Path("/h/pctx.sqlite"))
+        self.assertEqual(store.db_path(Path("/h")), Path("/h/muninn.sqlite"))
 
     def test_ensure_private_dir_creates_and_tightens(self) -> None:
         target = self.tmp / "a" / "b"
@@ -98,7 +100,7 @@ class ReaderTests(StoreCase):
         self.db.touch()  # zero bytes: no writer has created the schema yet
         self.assert_plain_unavailable()
         raw = sqlite3.connect(self.db)
-        raw.execute("PRAGMA user_version=2")  # written by a newer pctx
+        raw.execute("PRAGMA user_version=2")  # written by a newer muninn
         raw.close()
         self.assert_plain_unavailable()
 

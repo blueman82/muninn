@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pctx import knowledge
+from muninn import knowledge
 from tests.query_support import QueryCase
 
 __all__ = ["CALL", "PROMPT", "REPLY", "ROOT", "SECRET", "KnowCase", "kid"]

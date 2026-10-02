@@ -14,27 +14,28 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from pctx import hook, obs
+from muninn import hook, obs
 from tests import test_cli as tcli
 from tests import test_knowledge as tk
 
-OPEN = '<pctx-memory source="pctx" trust="untrusted-data">'
-CLOSE = "</pctx-memory>"
+OPEN = '<muninn-memory source="muninn" trust="untrusted-data">'
+CLOSE = "</muninn-memory>"
 USAGE = (
     "Before answering about earlier work or re-deciding a recorded choice, run"
-    ' `pctx search "<words>"` and open what you cite. Record an owner decision'
-    " only if the owner said it: `pctx know add --kind decision --text …"
-    ' --cite REF --quote "<verbatim>"` (REF from `pctx search`; check the'
-    " quote with `pctx quote-check`; see `pctx know add --help`)."
+    ' `muninn search "<words>"` and open what you cite. Record an owner'
+    " decision"
+    " only if the owner said it: `muninn know add --kind decision --text …"
+    ' --cite REF --quote "<verbatim>"` (REF from `muninn search`; check the'
+    " quote with `muninn quote-check`; see `muninn know add --help`)."
 )
-TAG = re.compile(r"(?i)<\s*/?\s*pctx-(?:memory|recall)")
+TAG = re.compile(r"(?i)<\s*/?\s*muninn-(?:memory|recall)")
 AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
 RECALL_OPEN = (
-    '<pctx-memory source="pctx" trust="untrusted-data" kind="recall">'
+    '<muninn-memory source="muninn" trust="untrusted-data" kind="recall">'
 )
-HINT = "`pctx open <ref> --context 3`"
+HINT = "`muninn open <ref> --context 3`"
 Q = "alphaterm betaterm gammaterm deltaterm"
-LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
+LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "muninn"
 HOOKS_JSON = LAUNCHER.parent.parent / "integrations/codex/hooks/hooks.json"
 
 
@@ -52,11 +53,12 @@ def notice(code: str, event: str = "SessionStart") -> dict[str, object]:
         "hookSpecificOutput": {
             "hookEventName": event,
             "additionalContext": (
-                '<pctx-memory source="pctx" trust="untrusted-data"'
-                f' kind="notice">\npctx: store unavailable ({code})\n' + CLOSE
+                '<muninn-memory source="muninn" trust="untrusted-data"'
+                f' kind="notice">\nmuninn: store unavailable ({code})\n'
+                + CLOSE
             ),
         },
-        "systemMessage": f"pctx: memory unavailable ({code})",
+        "systemMessage": f"muninn: memory unavailable ({code})",
     }
 
 
@@ -80,7 +82,7 @@ class HookCase(tk.KnowCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.env = {"PCTX_HOME": str(self.home)}
+        self.env = {"MUNINN_HOME": str(self.home)}
         obs.write_status(
             self.home, {"last_pass_at": time.time(), "interval_s": 60}
         )
@@ -215,7 +217,7 @@ class RecallCase(HookCase):
 
 
 class HookCliCase(tcli.CliCase):
-    """The installed-command form: bin/pctx in a subprocess.
+    """The installed-command form: bin/muninn in a subprocess.
 
     The payload goes on stdin and only the provider JSON is read from
     stdout.
@@ -229,7 +231,7 @@ class HookCliCase(tcli.CliCase):
         env: dict[str, str] | None = None,
         raw: bytes | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
-        """Run ``pctx hook`` as the provider would.
+        """Run ``muninn hook`` as the provider would.
 
         Args:
             event: Hook command name, such as ``prompt``.

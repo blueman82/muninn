@@ -1,4 +1,4 @@
-"""Static provider-integration, service and config files for pctx."""
+"""Static provider-integration, service and config files for muninn."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CODEX_PLUGIN = ROOT / "integrations/codex/.codex-plugin/plugin.json"
 CODEX_HOOKS = ROOT / "integrations/codex/hooks/hooks.json"
 CLAUDE_HOOKS = ROOT / "integrations/claude/settings-hooks.json"
-PLIST = ROOT / "launchd/com.provenance-context.plist"
+PLIST = ROOT / "launchd/com.muninn.plist"
 README = ROOT / "README.md"
 PYPROJECT = ROOT / "pyproject.toml"
 PYRIGHT = ROOT / "pyrightconfig.json"
@@ -41,7 +41,7 @@ def hook_command(event: str, provider: str) -> str:
         The command line with the literal home placeholder.
     """
     verb = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
-    return f"{HOME}/.local/bin/pctx hook {verb[event]} --provider {provider}"
+    return f"{HOME}/.local/bin/muninn hook {verb[event]} --provider {provider}"
 
 
 def load(path: Path) -> Any:
@@ -97,7 +97,7 @@ class CodexPluginTest(unittest.TestCase):
 
     def test_manifest_is_new_version_without_mcp_or_skills(self) -> None:
         manifest = load(CODEX_PLUGIN)
-        self.assertEqual(manifest["name"], "provenance-context")
+        self.assertEqual(manifest["name"], "muninn")
         self.assertEqual(manifest["version"], "0.2.0")
         allowed = {"name", "version", "description", "author", "interface"}
         self.assertLessEqual(set(manifest), allowed)
@@ -170,11 +170,11 @@ class PlistTest(unittest.TestCase):
 
     def test_required_keys_and_values(self) -> None:
         plist = load_plist()
-        self.assertEqual(plist["Label"], "com.provenance-context")
+        self.assertEqual(plist["Label"], "com.muninn")
         self.assertEqual(
             plist["ProgramArguments"],
             [
-                f"{HOME}/.local/lib/provenance-context/current/bin/pctx",
+                f"{HOME}/.local/lib/muninn/current/bin/muninn",
                 "serve",
                 "--interval",
                 "60",
@@ -184,7 +184,7 @@ class PlistTest(unittest.TestCase):
         self.assertIs(plist["RunAtLoad"], True)
         self.assertEqual(plist["ProcessType"], "Background")
         self.assertIs(plist["LowPriorityIO"], True)
-        log = f"{HOME}/.local/share/provenance-context/poller.log"
+        log = f"{HOME}/.local/share/muninn/poller.log"
         self.assertEqual(plist["StandardOutPath"], log)
         self.assertEqual(plist["StandardErrorPath"], log)
 
@@ -273,7 +273,7 @@ class HomeSubstitutionTest(unittest.TestCase):
     def test_hook_commands_run_from_a_temp_home(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = os.path.realpath(tmp)
-            stub = Path(home, ".local/bin/pctx")
+            stub = Path(home, ".local/bin/muninn")
             stub.parent.mkdir(parents=True)
             stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
             stub.chmod(0o755)
@@ -295,16 +295,16 @@ class HomeSubstitutionTest(unittest.TestCase):
                         self.assertEqual(proc.stdout.split(), words)
 
     def test_plist_program_runs_through_the_current_symlink(self) -> None:
-        # `python -I` puts nothing on sys.path, so pctx/__main__.py cannot be
-        # run as a file; the plist must call the bin/pctx launcher instead.
+        # `python -I` puts nothing on sys.path, so muninn/__main__.py cannot be
+        # run as a file; the plist must call the bin/muninn launcher instead.
         plist = load_plist()
         with tempfile.TemporaryDirectory() as tmp:
             home = os.path.realpath(tmp)
-            release = Path(home, ".local/lib/provenance-context/abc1234")
+            release = Path(home, ".local/lib/muninn/abc1234")
             shutil.copytree(ROOT / "bin", release / "bin")
             shutil.copytree(
-                ROOT / "pctx",
-                release / "pctx",
+                ROOT / "muninn",
+                release / "muninn",
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
             (release.parent / "current").symlink_to(release)
@@ -312,7 +312,7 @@ class HomeSubstitutionTest(unittest.TestCase):
             (release.parent / "python").symlink_to(PYTHON)
             program = plist["ProgramArguments"][0].replace(HOME, home)
             self.assertEqual(
-                os.path.realpath(program), str(release / "bin" / "pctx")
+                os.path.realpath(program), str(release / "bin" / "muninn")
             )
             self.assertTrue(os.access(program, os.X_OK), program)
             proc = subprocess.run(
@@ -341,9 +341,9 @@ class ConfigCleanupTest(unittest.TestCase):
     def test_pyright_is_strict_for_runtime_code(self) -> None:
         config = load(PYRIGHT)
         self.assertEqual(
-            config["include"], ["pctx", "install", "tools", "tests"]
+            config["include"], ["muninn", "install", "tools", "tests"]
         )
-        self.assertEqual(config["strict"], ["pctx", "install", "tools"])
+        self.assertEqual(config["strict"], ["muninn", "install", "tools"])
         self.assertNotIn("extraPaths", config)
 
 

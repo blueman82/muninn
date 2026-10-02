@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from pctx import query, store
+from muninn import query, store
 from tests.query_support import OpenCase, QueryCase, open_specs
 from tests.test_store import SPILLING_WRITER, Child
 

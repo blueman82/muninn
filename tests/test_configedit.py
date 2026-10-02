@@ -11,14 +11,13 @@ from unittest import mock
 from install import configedit as ce
 
 CRED = "sk-fake-" + "0123456789abcdef" * 2
-MKT = "[marketplaces.provenance-context-local]"
-PLUGIN = '[plugins."provenance-context@provenance-context-local"]'
+MKT = "[marketplaces.muninn-local]"
+PLUGIN = '[plugins."muninn@muninn-local"]'
 TRUST = (
-    '[hooks.state."provenance-context@provenance-context-local:'
-    'hooks/hooks.json:session_start:0:0"]'
+    '[hooks.state."muninn@muninn-local:' 'hooks/hooks.json:session_start:0:0"]'
 )
 NAMED = (MKT, PLUGIN, TRUST)
-MARKERS = ("provenance-context-local", "provenance-context@")
+MARKERS = ("muninn-local", "muninn@")
 TOML = f"""model = "gpt-test"
 
 [model_providers.fake]
@@ -48,7 +47,7 @@ SETTINGS = {
     "model": "opus",
     "env": {"TOKEN": CRED},
     "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]},
-    "enabledPlugins": {"a@b": True, "provenance-context@p": False},
+    "enabledPlugins": {"a@b": True, "muninn@p": False},
 }
 
 
@@ -114,7 +113,7 @@ class TomlSectionTest(unittest.TestCase):
             ),
             "unknown key": TOML.replace("enabled = false", "colour = true"),
             "dotted key elsewhere": TOML
-            + '\n[plugins]\n"provenance-context@x".enabled = true\n',
+            + '\n[plugins]\n"muninn@x".enabled = true\n',
             "identifier in a string": TOML.replace(
                 '[plugins."looks-like-a-header"]', MKT
             ),
@@ -144,7 +143,7 @@ class JsonTest(unittest.TestCase):
     def test_delete_then_restore_at_index_is_byte_identical(self) -> None:
         before = dump(SETTINGS)
         obj = json.loads(before)
-        path = ("enabledPlugins", "provenance-context@p")
+        path = ("enabledPlugins", "muninn@p")
         present, value, index = ce.jget(obj, path)
         self.assertEqual((present, value, index), (True, False, 1))
         ce.jdel(obj, path)

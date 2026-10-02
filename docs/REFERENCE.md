@@ -1,6 +1,6 @@
-# pctx reference
+# muninn reference
 
-Every command prints one JSON object on stdout (`--pretty` or `PCTX_PRETTY=1` indents it; hooks always print
+Every command prints one JSON object on stdout (`--pretty` or `MUNINN_PRETTY=1` indents it; hooks always print
 compact JSON). Apart from `serve` and the hooks, every answer also carries these fields:
 
 | Field | Meaning |
@@ -14,20 +14,22 @@ compact JSON). Apart from `serve` and the hooks, every answer also carries these
 **Exit codes:** 0 ok; 1 `doctor` found an error-level problem; 2 refused or bad usage; 3 busy (another
 writer holds the lock, retry); 4 store unavailable or a crashed writer's hot journal.
 
-**Environment:** `PCTX_HOME` data dir (default `~/.local/share/provenance-context`); `PCTX_ROOTS` JSON map of
-provider root name to path (tests); `PCTX_PYTHON` interpreter for `bin/pctx`; `PCTX_PRETTY=1` indent;
-`PCTX_NO_CALLLOG=1` no `calls.jsonl` line; `PCTX_HOOK_DISABLE=1` hooks print `{}`; `CLAUDE_CODE_SESSION_ID`,
+**Environment:** `MUNINN_HOME` data dir (default `~/.local/share/muninn`); `MUNINN_ROOTS` JSON map of
+provider root name to path (tests); `MUNINN_PYTHON` interpreter for `bin/muninn`; `MUNINN_PRETTY=1` indent;
+`MUNINN_NO_CALLLOG=1` no `calls.jsonl` line; `MUNINN_HOOK_DISABLE=1` hooks print `{}`; `CLAUDE_CODE_SESSION_ID`,
 `CODEX_SESSION_ID`, `CODEX_THREAD_ID` identify the calling session, which search leaves out unless told not to.
+
+Old `PCTX_*` variables are ignored; the CLI (not hooks) prints one stderr line naming the `MUNINN_*` replacement.
 
 ## Reading memory
 
 | Command | What it does | Main fields in the answer |
 |---|---|---|
-| `pctx search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]`, `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
-| `pctx open REF` | one event in full with neighbours; REF is an event id or `provider:thread_id:line.part` | `text`, `neighbours[]`, `provenance`, `hash_ok`, `redacted`, `truncated`, `next_offset` |
-| `pctx sessions` | sessions in scope, newest first | `sessions[]` (`session`, `provider`, `events`, `threads`, `forks`, `first_ts`, `last_ts`, `kinds`, `preview`) |
-| `pctx session ROOT` | one session's events across its threads, in order; ROOT is the `session` value from `sessions` | `events[]` (`id`, `ref`, `kind`, `role`, `ts`, `preview`, `answer_citable`, `tag`), `total`, `provider`, `next_from` (pass as `--from` for the next page) |
-| `pctx quote-check REF QUOTE` | is QUOTE verbatim in that event? | match result |
+| `muninn search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]`, `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
+| `muninn open REF` | one event in full with neighbours; REF is an event id or `provider:thread_id:line.part` | `text`, `neighbours[]`, `provenance`, `hash_ok`, `redacted`, `truncated`, `next_offset` |
+| `muninn sessions` | sessions in scope, newest first | `sessions[]` (`session`, `provider`, `events`, `threads`, `forks`, `first_ts`, `last_ts`, `kinds`, `preview`) |
+| `muninn session ROOT` | one session's events across its threads, in order; ROOT is the `session` value from `sessions` | `events[]` (`id`, `ref`, `kind`, `role`, `ts`, `preview`, `answer_citable`, `tag`), `total`, `provider`, `next_from` (pass as `--from` for the next page) |
+| `muninn quote-check REF QUOTE` | is QUOTE verbatim in that event? | match result |
 
 **search flags:** `--all-projects` widen beyond this repo; `--include-subagents`; `--include-current` also search the
 caller's own session; `--current-session ID` name it; `--kind a,b` event kinds; `--provider codex|claude`;
@@ -53,7 +55,7 @@ primary). **Providers:** `claude`, `codex`. **Source roots:** `claude-projects`,
 
 ## Knowledge ledger
 
-`pctx know add --kind decision|fact|preference|procedure --text T --cite REF --quote Q [--supersedes K] [--global]`
+`muninn know add --kind decision|fact|preference|procedure --text T --cite REF --quote Q [--supersedes K] [--global]`
 records an entry; every entry needs a quote that is verbatim in a primary prompt, reply or tool call (a preference needs
 a user prompt). `--quote Q` alone searches the caller's session prompts. `know retract K [--reason R]`;
 `know list [--status current|superseded|retracted|erased|all] [--kind K] [--all-projects]`; `know show K` the entry with
@@ -64,16 +66,16 @@ Entries are superseded or retracted, never edited.
 
 | Command | What it does |
 |---|---|
-| `pctx ingest [--full]` | catch up with provider transcripts now; `--full` rescans everything. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
-| `pctx serve [--interval S]` | the launchd poller loop (default 60 s); prints nothing |
-| `pctx stats [--usage]` | counts, see below |
-| `pctx doctor` | health checks, see below; exit 1 if any error-level check is `false` |
-| `pctx compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
-| `pctx rebuild` | build a new store from the transcripts, then copy over what cannot be re-derived: scopes, tombstones, the knowledge ledger (entries, citations, log) and the events of sources that have gone missing |
-| `pctx erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget content; without `--yes` it is a dry run. Writes tombstones so a rescan cannot restore it. Lists provider files and other derived copies it cannot reach (`not_covered`, `out_of_scope`) |
-| `pctx hook session-start\|prompt --provider claude\|codex` | provider hooks: payload on stdin, JSON on stdout (see the README) |
+| `muninn ingest [--full]` | catch up with provider transcripts now; `--full` rescans everything. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
+| `muninn serve [--interval S]` | the launchd poller loop (default 60 s); prints nothing |
+| `muninn stats [--usage]` | counts, see below |
+| `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
+| `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
+| `muninn rebuild` | build a new store from the transcripts, then copy over what cannot be re-derived: scopes, tombstones, the knowledge ledger (entries, citations, log) and the events of sources that have gone missing |
+| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget content; without `--yes` it is a dry run. Writes tombstones so a rescan cannot restore it. Lists provider files and other derived copies it cannot reach (`not_covered`, `out_of_scope`) |
+| `muninn hook session-start\|prompt --provider claude\|codex` | provider hooks: payload on stdin, JSON on stdout (see the README) |
 
-## `pctx stats`
+## `muninn stats`
 
 `sources` counts per `provider/root/thread_class/status` (status `active` or `missing`); `events` per kind;
 `events_by_provider`; `flags` `marker` (text that looked like an injected block), `redacted` (secret removed), `truncated`
@@ -82,10 +84,10 @@ Entries are superseded or retracted, never edited.
 `tombstones` by level (`session`, `thread`, `line`); `db_bytes` file size; `db_space` `page_count`, `freelist_count`,
 `page_size`, `free_ratio`; `last_pass` (`last_pass_at`, `duration_s`, `files_changed`, `events_added`, `skipped_files`,
 `failed`, `errors`, `busy_skips`, `index_age_s`, `poller`); `install_sha`; `classifier_version`; `hash_mismatches` (open-time
-line hash failures seen in the call log). `--usage` adds `usage` (per session `calls`, `errors`, `last_ts` of pctx calls seen
+line hash failures seen in the call log). `--usage` adds `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen
 in transcripts) and `usage_totals` per provider.
 
-## `pctx doctor`
+## `muninn doctor`
 
 Answer: `ok` (true when no error-level check is false) and `checks[]`. Each check has four fields:
 
@@ -112,46 +114,46 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
 | `failed_sources` | warn | no file failed in the last pass | count failed |
 | `db_size` | warn | the database is under 2 GB | its size; the threshold |
-| `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: pctx compact` |
+| `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
 | `missing_sources` | info | always | count of indexed files no longer on disk |
 | `other_threads` | info | always | count of unrecognised thread types |
 | `roots_present` | info | always | names of provider roots that do not exist |
 
 ## Per-prompt recall switch (`recall.off`)
 
-**Function.** Before each prompt, the UserPromptSubmit hook (`pctx hook prompt`) can add a short block of up to 1,500
+**Function.** Before each prompt, the UserPromptSubmit hook (`muninn hook prompt`) can add a short block of up to 1,500
 characters: matching knowledge entries first, then up to 3 earlier prompts or replies from this repo. If a file named
 `recall.off` exists in the data directory, that hook prints `{}` and never opens the database, so no recall is added.
-SessionStart (`pctx hook session-start`) is not affected; `PCTX_HOOK_DISABLE=1` silences both hooks. Its block opens with
+SessionStart (`muninn hook session-start`) is not affected; `MUNINN_HOOK_DISABLE=1` silences both hooks. Its block opens with
 a usage line, identical for Claude Code and Codex, that tells an agent how to search, open a hit and record an owner
-decision with `pctx know add --kind decision --text … --cite REF --quote "<verbatim>"`.
+decision with `muninn know add --kind decision --text … --cite REF --quote "<verbatim>"`.
 
 The hook output also carries a top-level `systemMessage` for the person at the keyboard (Claude Code shows it in the
 transcript; Codex records it as a `warning` hook entry). At SessionStart it lists every pushed knowledge entry's headline
-(its `text`, in full, control characters replaced by spaces), one per line under `pctx: memory loaded (N knowledge
-entries)`; when the store cannot be read it is `pctx: memory unavailable (<code>)`. The entry text is never written to the
+(its `text`, in full, control characters replaced by spaces), one per line under `muninn: memory loaded (N knowledge
+entries)`; when the store cannot be read it is `muninn: memory unavailable (<code>)`. The entry text is never written to the
 call log. Per-prompt recall adds no line.
 
 **Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints how to turn recall on. `--upgrade`
 never creates or removes it, so an existing machine keeps whatever it had: a machine installed before this default has no
 file and stays on.
 
-**Why off.** Recall is the one memory pctx pushes without being asked, and a block about the wrong project costs the most
+**Why off.** Recall is the one memory muninn pushes without being asked, and a block about the wrong project costs the most
 there. Its relevance has not been re-checked, so a new install starts with it off until the retrieval re-check passes.
 Full reasoning is in `docs/adr/0007-recall-off-by-default.md`.
 
 | To | Run |
 |---|---|
-| turn recall on | `unlink ~/.local/share/provenance-context/recall.off` |
-| turn recall off | `install -m 600 /dev/null ~/.local/share/provenance-context/recall.off` |
-| check | `ls ~/.local/share/provenance-context/recall.off` (present = off) |
+| turn recall on | `unlink ~/.local/share/muninn/recall.off` |
+| turn recall off | `install -m 600 /dev/null ~/.local/share/muninn/recall.off` |
+| check | `ls ~/.local/share/muninn/recall.off` (present = off) |
 
-The file must be mode 0600, otherwise `pctx doctor` fails `file_modes`. Its contents are ignored. The change takes effect on
+The file must be mode 0600, otherwise `muninn doctor` fails `file_modes`. Its contents are ignored. The change takes effect on
 the next prompt; no restart is needed.
 
 ## Files in the data directory
 
-`pctx.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only);
+`muninn.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only);
 `calls.jsonl` and `calls.jsonl.1` one allowlisted line per CLI call (ids and counts, no text; rotated at 1 MiB);
 `poller.log` and `poller.log.1` poller events (rotated likewise); `tombstones.jsonl` erase records;
 `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). Anything else fails `unexpected_files`.

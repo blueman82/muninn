@@ -1,5 +1,5 @@
 {
-  "description": "Inject bounded pctx memory blocks as untrusted data.",
+  "description": "Inject bounded muninn memory blocks as untrusted data.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "@HOME@/.local/bin/pctx hook session-start --provider codex",
+            "command": "@HOME@/.local/bin/muninn hook session-start --provider codex",
             "timeout": 5,
             "additionalContextLimit": 1500
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "@HOME@/.local/bin/pctx hook prompt --provider codex",
+            "command": "@HOME@/.local/bin/muninn hook prompt --provider codex",
             "timeout": 5,
             "additionalContextLimit": 500
           }

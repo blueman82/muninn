@@ -1,38 +1,38 @@
-# AGENTS.md: pctx
+# AGENTS.md: muninn
 
 Instructions for coding agents working in this repo. Any parent-directory
 `AGENTS.md` defaults also apply.
 
 ## Layout
 
-- `pctx/`: runtime package (Python 3.13 standard library only), one
+- `muninn/`: runtime package (Python 3.13 standard library only), one
   responsibility per module; a feature's modules share its prefix:
   `cli*` (parser, handlers, output, poller), `store`, `ingest*` (plan, parse),
   `classify` with `claude_events`, `codex_events`, `event_model`,
   `tool_errors`, `redaction`; `query/` (package), `knowledge*`, `erase*`,
   `tombstones`, `hook*`, `obs*` (logs, stats, doctor, status), `scope`.
-- `bin/pctx`: launcher that finds the interpreter; do not hardcode a path.
-- `bin/pctx-install`: sh wrapper over `install/installer.py` (bare, `--check`,
+- `bin/muninn`: launcher that finds the interpreter; do not hardcode a path.
+- `bin/muninn-install`: sh wrapper over `install/installer.py` (bare, `--check`,
   `--status`); other arguments pass through.
 - `install/`: `installer.py` (`--fresh`, `--upgrade`; the runner),
   `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`,
   `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`, `tomledit.py`.
 - `tools/`: the standards gate (`python3.13 -m tools.check`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
-- `.claude/skills/pctx-*`: one Claude Code skill per user-facing command.
+- `.claude/skills/muninn-*`: one Claude Code skill per user-facing command.
   When a command, flag or answer field changes, update the matching skill and
   `docs/REFERENCE.md` together.
 - `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 
 ## Rules
 
-- No third-party imports in `pctx/` or `install/`.
+- No third-party imports in `muninn/` or `install/`.
 - Logs and `doctor`/`stats` output hold counts, codes and ids, never
   transcript text. New log fields go through the allowlist in `obs.py`.
-- Output is JSON on stdout; `--pretty` only changes indentation. pctx provider
+- Output is JSON on stdout; `--pretty` only changes indentation. muninn provider
   hooks must keep returning compact JSON and exit 0.
 - Do not write to a user's real `HOME`, launchd domain or provider config in
-  tests: use a temp `PCTX_HOME` and the fakes in `tests/test_installer.py`.
+  tests: use a temp `MUNINN_HOME` and the fakes in `tests/test_installer.py`.
 - Never touch provider transcripts.
 
 ## Standards: enforced by code, read `docs/STANDARDS.md`
@@ -76,10 +76,10 @@ A missing tool or a failing test fails the gate; it never skips.
 ## Decisions you must not reverse without asking
 
 `docs/adr/`: one pinned release and in-place upgrade (0001); the installer has
-only `--fresh` and `--upgrade` (0002); `bin/pctx` finds its interpreter at run
+only `--fresh` and `--upgrade` (0002); `bin/muninn` finds its interpreter at run
 time (0003); logs hold no transcript text (0004); no hash-chained call log
 (0005); the standards are enforced by a gate (0006); per-prompt recall starts
-off on a fresh install (0007); `bin/pctx-install` picks the mode and `--check`
+off on a fresh install (0007); `bin/muninn-install` picks the mode and `--check`
 writes nothing (0008).
 
 ## Definition of done (Codex Stop hook plus manual fallback)

@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from pctx import ingest, query, store
+from muninn import ingest, query, store
 from tests.test_classify import (
     CWD,
     SESSION,
@@ -95,11 +95,13 @@ class IngestedTests(unittest.TestCase):
                 reply(4, "done CANARYC"),
             ],
         )
-        pasted = '<pctx-memory source="pctx" trust="untrusted-data">CANARYD'
+        pasted = (
+            '<muninn-memory source="muninn" trust="untrusted-data">CANARYD'
+        )
         self.write(
             f"-work-repo/{SESSION}.jsonl",
             [
-                claude_rec("user", f"see this {pasted}</pctx-memory>"),
+                claude_rec("user", f"see this {pasted}</muninn-memory>"),
                 claude_rec("user", "CANARYE from the claude session"),
             ],
             root="claude-projects",

@@ -6,7 +6,7 @@ through the query test builders and are read back with plain SQL.
 
 from __future__ import annotations
 
-from pctx import knowledge
+from muninn import knowledge
 from tests.knowledge_support import PROMPT, SECRET, KnowCase, kid
 from tests.query_support import NOTICE
 
@@ -187,11 +187,13 @@ class AddEntryTests(KnowCase):
         self.assertEqual(hits, [])  # the index never saw the key
 
     def test_escape_frame_markers_in_text(self) -> None:
-        text = "a <pctx-memory x> b </pctx-memory> c < PCTX-Recall d <div>"
-        want = "a &lt;pctx-memory x> b &lt;/pctx-memory> c "
-        want += "&lt; PCTX-Recall d <div>"
+        text = (
+            "a <muninn-memory x> b </muninn-memory> c < MUNINN-Recall d <div>"
+        )
+        want = "a &lt;muninn-memory x> b &lt;/muninn-memory> c "
+        want += "&lt; MUNINN-Recall d <div>"
         self.assertEqual(self.add(text=text)["entry"]["text"], want)
-        long = "<pctx-memory>" * 35  # 455 chars; escaping pushes it past 500
+        long = "<muninn-memory>" * 35  # 455 chars; escaping pushes it past 500
         self.refused("text_length", text=long)
 
     def test_global_scope_entry_ignores_cwd(self) -> None:

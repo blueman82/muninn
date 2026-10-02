@@ -1,11 +1,11 @@
-"""pctx read commands: shapes, exit codes, redaction and call log."""
+"""muninn read commands: shapes, exit codes, redaction and call log."""
 
 from __future__ import annotations
 
 import json
 from unittest import mock
 
-from pctx import cli, store
+from muninn import cli, store
 from tests.cli_support import ALWAYS, CANARY, CliCase
 from tests.test_classify import SK
 from tests.test_ingest import TID, rollout
@@ -21,7 +21,7 @@ class ReaderTests(CliCase):
         self.run_ingest()
 
     def test_search_shape_and_freshness(self) -> None:
-        code, out, _ = self.pctx("search", CANARY)
+        code, out, _ = self.muninn("search", CANARY)
         self.assertEqual(code, 0)
         self.assertLessEqual(
             ALWAYS | {"hits", "knowledge", "stages"}, set(out)
@@ -42,17 +42,17 @@ class ReaderTests(CliCase):
         )
         for argv, keys in cases:
             with self.subTest(argv=argv[0]):
-                code, out, _ = self.pctx(*argv)
+                code, out, _ = self.muninn(*argv)
                 self.assertEqual(code, 0, out)
                 self.assertLessEqual(ALWAYS | keys, set(out))
-        _, out, _ = self.pctx("quote-check", ref, f"the {CANARY}")
+        _, out, _ = self.muninn("quote-check", ref, f"the {CANARY}")
         self.assertIs(out["match"], True)
 
     def test_exit_codes(self) -> None:
-        self.assertEqual(self.pctx("open", "codex:nope:1.1")[0], 2)
-        self.assertEqual(self.pctx("search")[0], 2)  # usage
-        code, out, _ = self.pctx(
-            "search", "x", env={"PCTX_HOME": str(self.tmp / "empty")}
+        self.assertEqual(self.muninn("open", "codex:nope:1.1")[0], 2)
+        self.assertEqual(self.muninn("search")[0], 2)  # usage
+        code, out, _ = self.muninn(
+            "search", "x", env={"MUNINN_HOME": str(self.tmp / "empty")}
         )
         self.assertEqual((code, out["error"]), (4, "store_unavailable"))
         self.assertIn("notice", out)
@@ -66,7 +66,7 @@ class ReaderTests(CliCase):
                 cli.store, "heal_hot_journal", return_value=False
             ),
         ):  # sandboxed
-            code, out, _ = self.pctx("search", CANARY)
+            code, out, _ = self.muninn("search", CANARY)
         self.assertEqual((code, out["error"]), (4, "hot_journal"))
 
     def test_reader_heals_hot_journal_unsandboxed(self) -> None:
@@ -74,9 +74,9 @@ class ReaderTests(CliCase):
         child.wait_ready()
         child.proc.kill()  # a crashed writer leaves a hot journal
         child.proc.wait()
-        journal = self.home / "pctx.sqlite-journal"
+        journal = self.home / "muninn.sqlite-journal"
         self.assertTrue(journal.exists())
-        code, out, _ = self.pctx("search", CANARY)
+        code, out, _ = self.muninn("search", CANARY)
         self.assertEqual(code, 0, out)
         self.assertFalse(journal.exists())
 
@@ -89,10 +89,12 @@ class ReaderTests(CliCase):
             " FROM event LIMIT 1",
             (f"{CANARY} {secret}",),  # as if ingest had missed it
         ).lastrowid
-        _, opened, _ = self.pctx("open", str(eid))
-        _, found, _ = self.pctx("search", CANARY, "--limit", "30")
+        _, opened, _ = self.muninn("open", str(eid))
+        _, found, _ = self.muninn("search", CANARY, "--limit", "30")
         # a highlight inside the secret must not defeat redaction
-        _, marked, _ = self.pctx("search", f"token {CANARY}", "--limit", "30")
+        _, marked, _ = self.muninn(
+            "search", f"token {CANARY}", "--limit", "30"
+        )
         dumped = json.dumps([opened, found, marked])
         self.assertNotIn(SK, dumped)
         self.assertIn("[redacted:secret]", opened["text"])
@@ -117,25 +119,27 @@ class ReaderTests(CliCase):
             )
         self.bump(path)
         self.run_ingest()
-        code, raw, _ = self.pctx("open", f"codex:{TID}:4.1", "--raw")
+        code, raw, _ = self.muninn("open", f"codex:{TID}:4.1", "--raw")
         self.assertEqual(code, 0, raw)
         self.assertNotIn("hunter2x", json.dumps(raw))
         self.assertIs(raw.get("raw_redacted"), True)
 
     def test_logged_flag_denied_and_disabled(self) -> None:
-        _, out, _ = self.pctx("search", CANARY)
+        _, out, _ = self.muninn("search", CANARY)
         self.assertIs(out["logged"], True)
-        _, out, _ = self.pctx("search", CANARY, env={"PCTX_NO_CALLLOG": "1"})
+        _, out, _ = self.muninn(
+            "search", CANARY, env={"MUNINN_NO_CALLLOG": "1"}
+        )
         self.assertIs(out["logged"], False)
         self.home.chmod(0o500)
         self.addCleanup(self.home.chmod, 0o700)
         (self.home / "calls.jsonl").chmod(0o400)
-        _, out, _ = self.pctx("search", CANARY)
+        _, out, _ = self.muninn("search", CANARY)
         self.assertIs(out["logged"], False)
 
     def test_calls_log_has_no_text(self) -> None:
-        self.pctx("search", CANARY)
-        self.pctx("open", f"codex:{TID}:2.1")
+        self.muninn("search", CANARY)
+        self.muninn("open", f"codex:{TID}:2.1")
         blob = (self.home / "calls.jsonl").read_text()
         self.assertNotIn(CANARY, blob)
         self.assertNotIn("CANARY", blob.upper())

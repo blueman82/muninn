@@ -74,7 +74,7 @@ class CliTest(unittest.TestCase):
 class CodexContractTest(unittest.TestCase):
     """The shipped Codex files match what the real Codex computes."""
 
-    def test_hash_matches_real_codex_0_159_2(self) -> None:
+    def test_hash_matches_real_codex_0_160_0(self) -> None:
         data = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
         got = {h["suffix"]: h["hash"] for h in co.codex_hooks(data)}
         self.assertEqual(got, REAL_CODEX)
@@ -86,13 +86,11 @@ class CodexContractTest(unittest.TestCase):
         )
         self.assertEqual(cat["name"], co.MKT_NAME)
         (entry,) = cat["plugins"]
-        self.assertEqual(entry["name"], "provenance-context")
+        self.assertEqual(entry["name"], "muninn")
         self.assertEqual(entry["source"], {"source": "local", "path": "./"})
         manifest = root / entry["source"]["path"] / ".codex-plugin/plugin.json"
         got = json.loads(manifest.read_text())
-        self.assertEqual(
-            (got["name"], got["version"]), ("provenance-context", "0.2.0")
-        )
+        self.assertEqual((got["name"], got["version"]), ("muninn", "0.2.0"))
 
 
 class GitEnvTest(unittest.TestCase):

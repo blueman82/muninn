@@ -1,6 +1,6 @@
 """Erase contract: sessions, event lines, text matches and verification.
 
-Synthetic provider trees and a temp PCTX_HOME only (IngestCase); knowledge
+Synthetic provider trees and a temp MUNINN_HOME only (IngestCase); knowledge
 rows are inserted directly.  Canaries are synthetic.
 """
 
@@ -10,7 +10,7 @@ import pathlib
 import unittest
 from typing import Any
 
-from pctx import erase, erase_residue, store
+from muninn import erase, erase_residue, store
 from tests.erase_support import CANARY, EraseCase, digest
 from tests.test_classify import codex_meta, reply, subagent_meta, user_msg
 from tests.test_ingest import BASE, SEG, TID, primary, rollout
@@ -194,11 +194,11 @@ class VerificationTests(EraseCase):
         for path in self.home.rglob("*"):
             if path.is_file():
                 self.assertNotIn(CANARY.encode(), path.read_bytes(), path)
-        journal = self.home / "pctx.sqlite-journal"  # a journal is scanned
+        journal = self.home / "muninn.sqlite-journal"  # a journal is scanned
         journal.write_bytes(b"page..." + CANARY.encode())
         self.assertEqual(
             erase.residue_scan(self.home, [CANARY.encode()]),
-            ["pctx.sqlite-journal"],
+            ["muninn.sqlite-journal"],
         )
 
     def test_vocab_check_passes_after_erase_and_fails_on_unsecured_delete(

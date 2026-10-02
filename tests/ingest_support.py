@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from pctx import ingest, store
+from muninn import ingest, store
 from tests.test_classify import codex_meta, reply, user_msg
 
 Record = dict[str, Any]
@@ -30,7 +30,7 @@ HOLD_LOCK = """
 import sys, time
 sys.path.insert(0, sys.argv[1])
 from pathlib import Path
-from pctx import store
+from muninn import store
 with store.writer_lock(Path(sys.argv[2]), wait_s=0):
     print("ready", flush=True)
     time.sleep(30)

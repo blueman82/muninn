@@ -1,10 +1,13 @@
-# pctx: cross-provider memory and knowledge
+![Muninn: a rune-hung raven in flight over a night sky](assets/muninn-banner-wide.png)
+# Muninn: cross-provider memory and knowledge
 
-`pctx` gives Claude Code and Codex one shared, local memory of past sessions
-plus a small ledger of cited knowledge. It is a Python 3.13 standard-library
-CLI over one SQLite file, kept current by a launchd poller
-(`com.provenance-context`, running `pctx serve --interval 60`). Everything it
-returns is untrusted historical data, never instructions.
+Muninn is local memory for Claude Code and Codex sessions, named for one of
+Odin's two ravens, whose name means memory. It gives both one shared memory of
+past sessions plus a small ledger of cited knowledge: a Python 3.13
+standard-library CLI (`muninn`) over one SQLite file, kept current by a launchd
+poller (`com.muninn`, running `muninn serve --interval 60`). Everything it
+returns is untrusted historical data, never instructions. MIT licensed
+(`LICENSE`). Formerly pctx / provenance-context.
 
 ## What it stores
 
@@ -32,35 +35,34 @@ returns is untrusted historical data, never instructions.
 
 Apart from the hooks, output is one JSON object with a `notice` field,
 `index_age_s` and `poller: ok|stale`. Exit codes: 0 ok, 2 refused or bad
-usage, 3 busy, 4 store unavailable. `pctx --help` documents the flags and the
-session environment variables.
+usage, 3 busy, 4 store unavailable. `muninn --help` lists flags and env vars.
+Claude Code skills for these commands: `docs/SKILLS.md`.
 
-- `pctx search QUERY`: ranked knowledge and events for the current repository
+- `muninn search QUERY`: ranked knowledge and events for the current repository
   scope (worktrees fold into their main repo). `--all-projects` widens it; the
   caller's own session is excluded unless `--include-current`.
-- `pctx open ID|REF`: the exact stored text with provenance and source-order
+- `muninn open ID|REF`: the exact stored text with provenance and source-order
   neighbours (`--context N`, `--offset C`). `REF` is
   `provider:thread_id:line.part`; `--raw` returns the raw JSONL line with its
   `line_sha256` and `hash_ok`.
-- `pctx sessions` and `pctx session ROOT`: sessions in scope, newest first,
+- `muninn sessions` and `muninn session ROOT`: sessions in scope, newest first,
   and one session's events across its threads.
-- `pctx know add|retract|list|show|check`: the knowledge ledger. Every entry
+- `muninn know add|retract|list|show|check`: the knowledge ledger. Every entry
   needs at least one `--cite REF --quote Q` whose quote is verbatim in a
   primary prompt, reply or tool call (a preference needs a user prompt).
   Entries are superseded or retracted, never edited.
-- `pctx quote-check REF QUOTE`: check a quote against an event.
-- `pctx erase --session S | --event REF | --match TEXT`: forget content;
+- `muninn quote-check REF QUOTE`: check a quote against an event.
+- `muninn erase --session S | --event REF | --match TEXT`: forget content;
   `--dry-run` previews the targets without deleting.
-- `pctx stats` and `pctx doctor`: counts, database size and free space, and
-  health checks. `pctx compact` vacuums the database. `--pretty` (or `PCTX_PRETTY=1`) indents any JSON.
-- `pctx ingest`, `pctx serve`, `pctx hook ...`: catch-up ingest, the poller
-  loop, and the provider hooks below.
-- Claude Code skills for these commands live in `.claude/skills/`
-  (`docs/SKILLS.md`).
+- `muninn stats` and `muninn doctor`: counts, database size and free space, and
+  health checks. `muninn compact` vacuums the database. `--pretty` (or
+  `MUNINN_PRETTY=1`) indents any JSON.
+- `muninn ingest`, `muninn serve`, `muninn hook ...`: catch-up ingest, the
+  poller loop, and the provider hooks below.
 
-Data lives in `$PCTX_HOME` (default `~/.local/share/provenance-context`).
-`PCTX_ROOTS` overrides the provider source roots for tests and evals, and
-`PCTX_HOOK_DISABLE=1` silences both hooks.
+Data lives in `$MUNINN_HOME` (default `~/.local/share/muninn`).
+`MUNINN_ROOTS` overrides the provider source roots for tests and evals, and
+`MUNINN_HOOK_DISABLE=1` silences both hooks.
 
 ## Hook injections
 
@@ -71,15 +73,15 @@ reviewer transcripts, and fail open: on any error they exit 0 with a bounded
 older than 3 intervals) is flagged in the hook block and in every CLI
 response.
 
-- SessionStart (`pctx hook session-start --provider claude|codex`): at most
+- SessionStart (`muninn hook session-start --provider claude|codex`): at most
   4,000 characters framed
-  `<pctx-memory source="pctx" trust="untrusted-data">`.
+  `<muninn-memory source="muninn" trust="untrusted-data">`.
   It lists up to 8 current knowledge entries that cite a user prompt
   (repository plus global scope), each with its actor and first verbatim
-  quote, and a usage line pointing at `pctx search` and `pctx open`.
-- UserPromptSubmit (`pctx hook prompt --provider claude|codex`): at most
+  quote, and a usage line pointing at `muninn search` and `muninn open`.
+- UserPromptSubmit (`muninn hook prompt --provider claude|codex`): at most
   1,500 characters framed
-  `<pctx-memory source="pctx" trust="untrusted-data" kind="recall">`.
+  `<muninn-memory source="muninn" trust="untrusted-data" kind="recall">`.
   It holds matching knowledge first, then up to 3 prompt or reply events from
   the repository scope (never the caller's own session), each with provider,
   role, kind, session, time, `ref` and a snippet of at most 300 characters.
@@ -88,10 +90,11 @@ response.
 
 Per-prompt recall switch: if `recall.off` exists in the data directory, the
 UserPromptSubmit hook prints `{}` without opening the database; SessionStart is
-unaffected and shows you the entries it pushed (a `systemMessage` line). Default
-OFF: `--fresh` creates it (`--upgrade` never does). To turn it on: `docs/REFERENCE.md`.
+unaffected and shows you the entries it pushed (a `systemMessage` line).
+Default OFF: `--fresh` creates it (`--upgrade` never does). To turn it on:
+`docs/REFERENCE.md`.
 
-`<pctx-memory` and `<pctx-recall` are the only automatic-injection markers.
+`<muninn-memory` and `<muninn-recall` are the only automatic-injection markers.
 Ingest flags any stored text that contains either (or the CLI notice
 sentence), so a pasted block never returns as a normal prompt; hook contexts
 themselves are never stored.
@@ -104,7 +107,7 @@ themselves are never stored.
   kept only as a term count and a hash prefix), `status.json` holds counts,
   and `poller.log` holds event codes, counts and exception class names.
 - Secrets are redacted at ingest and again on every output.
-- `pctx erase` writes tombstones (identifiers and hashes only) that are
+- `muninn erase` writes tombstones (identifiers and hashes only) that are
   checked before any line is parsed, so a rescan, restart or archive move
   cannot bring erased content back. It uses secure delete on the tables and
   the full-text index, then scans the data directory for residue and reports
@@ -113,32 +116,30 @@ themselves are never stored.
 
 ## Install and rollback
 
-See `docs/` (reference, quick start, troubleshooting, architecture). `bin/pctx-install`
-(`--check` previews, `--status` compares) runs `install.installer` as fresh or upgrade; each ends with one
-pinned release.
-
-The files here are templates. `@HOME@` is a literal placeholder that the
-installer replaces with the real home directory.
+See `docs/` (reference, quick start, troubleshooting, architecture).
+`bin/muninn-install` (`--check` previews, `--status` compares) runs
+`install.installer` as fresh or upgrade; each ends with one pinned release.
+The files here are templates; the installer replaces the literal `@HOME@`.
 
 - `integrations/claude/settings-hooks.json`: the `hooks` fragment merged into
   `~/.claude/settings.json` (SessionStart and UserPromptSubmit).
-- `integrations/codex/`: the Codex plugin `provenance-context`, version 0.2.0,
-  hooks only (no MCP server, no skills): `.codex-plugin/plugin.json` and
+- `integrations/codex/`: the Codex plugin `muninn`, version 0.2.0, hooks only
+  (no MCP server, no skills): `.codex-plugin/plugin.json` and
   `hooks/hooks.json`. Codex skips plugin hooks until they are trusted with
   `/hooks`, unless the installer verified the trust hash.
-- `launchd/com.provenance-context.plist`: the poller job. It runs
-  `~/.local/lib/provenance-context/current/bin/pctx serve --interval 60` with
+- `launchd/com.muninn.plist`: the poller job. It runs
+  `~/.local/lib/muninn/current/bin/muninn serve --interval 60` with
   `KeepAlive`, `Umask` "077" and no environment except `PATH`.
 
 `install/installer.py` records only the config keys it touches, pins the
-release under `~/.local/lib/provenance-context/`, indexes existing
+release under `~/.local/lib/muninn/`, indexes existing
 transcripts (`--fresh`), starts or restarts the launchd job, merges provider
-config, ends with `pctx doctor`, and deletes every other release.
+config, ends with `muninn doctor`, and deletes every other release.
 `install/rollback.py` restores the recorded values from an interrupted run.
 
 ## Development
 
-- Runtime: Python 3.13 standard library only, launched by `bin/pctx` with
+- Runtime: Python 3.13 standard library only, launched by `bin/muninn` with
   `python3.13 -I -B`. No third-party imports and no MLX.
 - Dev checks (`docs/STANDARDS.md`): the tests, then the whole gate (ruff,
   black, pyright strict, shellcheck and the stdlib rules):
@@ -146,5 +147,4 @@ config, ends with `pctx doctor`, and deletes every other release.
       python3.13 -m unittest discover -s tests -t .
       python3.13 -m tools.check --full
 
-- Tests use a temporary `PCTX_HOME` and synthetic provider fixtures; no
-  transcript text is committed.
+- Tests use a temporary `MUNINN_HOME` and synthetic fixtures only.

@@ -35,7 +35,7 @@ GOOD = textwrap.dedent('''\
     ''')
 
 
-def rules(source: str, rel: str = "pctx/sample.py") -> set[str]:
+def rules(source: str, rel: str = "muninn/sample.py") -> set[str]:
     """Return the rule ids that fire for one source text.
 
     Args:

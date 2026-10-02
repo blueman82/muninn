@@ -6,9 +6,9 @@ flowchart LR
     CC["Claude Code<br/>~/.claude/projects"]
     CX["Codex<br/>sessions + archived"]
   end
-  P["poller<br/>pctx serve (launchd, 60 s)"]
-  DB[("pctx.sqlite<br/>events, knowledge,<br/>tombstones, FTS5")]
-  CLI["pctx CLI<br/>search, open, know,<br/>stats, doctor, compact"]
+  P["poller<br/>muninn serve (launchd, 60 s)"]
+  DB[("muninn.sqlite<br/>events, knowledge,<br/>tombstones, FTS5")]
+  CLI["muninn CLI<br/>search, open, know,<br/>stats, doctor, compact"]
   H["hooks<br/>SessionStart,<br/>UserPromptSubmit"]
   A["Claude Code / Codex<br/>session"]
   L["status.json, poller.log,<br/>calls.jsonl"]
@@ -28,8 +28,8 @@ flowchart LR
   read-only. The journal mode is DELETE, so a crash leaves a journal that the
   next writer rolls back.
 - **Pinned release.** launchd and the hooks run
-  `~/.local/lib/provenance-context/current/bin/pctx`; `bin/pctx` picks the
-  interpreter from `$PCTX_PYTHON`, then the installer's `python` link, then
+  `~/.local/lib/muninn/current/bin/muninn`; `bin/muninn` picks the
+  interpreter from `$MUNINN_PYTHON`, then the installer's `python` link, then
   Python 3.13+ on PATH.
 - **Installer.** `install/installer.py` has two modes (`--fresh`,
   `--upgrade`) over one step pipeline: record, pin, build or restart, merge

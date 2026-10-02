@@ -27,7 +27,7 @@ from install.context import (
 )
 from install.record import Record
 
-PLIST_SOURCE = "current/launchd/com.provenance-context.plist"
+PLIST_SOURCE = "current/launchd/com.muninn.plist"
 
 
 def relink(link: Path, target: str | Path, ts: str) -> None:
@@ -87,25 +87,25 @@ def pin(ctx: Ctx, rec: Record) -> None:
         dest.rename(ctx.lib / f"{sha}.superseded-{ctx.ts}")
     tmp.rename(dest)
     relink(ctx.lib / "current", sha, ctx.ts)
-    relink(ctx.pctx, ctx.lib / "current/bin/pctx", ctx.ts)
-    # bin/pctx reads this link to find the interpreter that ran the install.
+    relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
+    # bin/muninn reads this link to find the interpreter that ran the install.
     relink(ctx.lib / "python", sys.executable, ctx.ts)
 
 
-def pctx_env(home: Path, **extra: str) -> dict[str, str]:
-    """Build the environment for running pctx.
+def muninn_env(home: Path, **extra: str) -> dict[str, str]:
+    """Build the environment for running muninn.
 
     Args:
-        home: The data directory, passed as ``PCTX_HOME``.
+        home: The data directory, passed as ``MUNINN_HOME``.
         **extra: Further variables to set.
 
     Returns:
-        The current environment without any inherited ``PCTX_*`` value (a
-        stray ``PCTX_ROOTS`` override would point pctx at the wrong data),
-        plus ``PCTX_HOME`` and ``extra``.
+        The current environment without any inherited ``MUNINN_*`` value (a
+        stray ``MUNINN_ROOTS`` override would point muninn at the wrong data),
+        plus ``MUNINN_HOME`` and ``extra``.
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("PCTX_")}
-    return dict(env, PCTX_HOME=str(home), **extra)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MUNINN_")}
+    return dict(env, MUNINN_HOME=str(home), **extra)
 
 
 def fresh(ctx: Ctx, since: float) -> bool:
@@ -147,13 +147,13 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
     # Mode 0600 from creation: doctor fails file_modes on a looser file.
     os.close(os.open(flag, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     ctx.say(
-        "Per-prompt recall starts OFF: pctx will not add earlier prompts to "
+        "Per-prompt recall starts OFF: muninn will not add earlier prompts to "
         "your prompts until you turn it on. SessionStart memory is "
         "unaffected. Why off: a pre-release trial answered for the wrong "
         "project, so recall waits for a re-check (docs/adr/0007). "
         f"To turn recall on: unlink {flag}"
     )
-    must(ctx, [ctx.pctx, "ingest", "--full"], env=pctx_env(ctx.data))
+    must(ctx, [ctx.muninn, "ingest", "--full"], env=muninn_env(ctx.data))
 
 
 def restart(ctx: Ctx, rec: Record) -> None:
@@ -199,16 +199,16 @@ def _check_plist(ctx: Ctx, data: bytes) -> None:
 
     Raises:
         StepFailedError: If a placeholder is left, the label is wrong, or it
-            does not run the pinned ``bin/pctx``.
+            does not run the pinned ``bin/muninn``.
     """
-    prog = f"{ctx.lib}/current/bin/pctx"
+    prog = f"{ctx.lib}/current/bin/muninn"
     plist = plistlib.loads(data)
     if b"@HOME@" in data or plist.get("Label") != LABEL:
         raise StepFailedError(
             "pinned plist is not substituted or has another label"
         )
     if plist["ProgramArguments"][0] != prog or not os.access(prog, os.X_OK):
-        raise StepFailedError("pinned plist does not run current/bin/pctx")
+        raise StepFailedError("pinned plist does not run current/bin/muninn")
 
 
 def start_new(ctx: Ctx, rec: Record) -> None:

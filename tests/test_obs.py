@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from pctx import obs
+from muninn import obs
 
 CANARY = "CANARY-OBS-" + "z9" * 8
 
@@ -109,7 +109,7 @@ class CallLogTests(ObsCase):
         self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
 
     def test_no_calllog_env(self) -> None:
-        env = {"PCTX_NO_CALLLOG": "1"}
+        env = {"MUNINN_NO_CALLLOG": "1"}
         self.assertFalse(obs.log_call(self.home, {"cmd": "search"}, env))
         self.assertFalse(self.log.exists())
 
@@ -186,11 +186,11 @@ class StatusTests(ObsCase):
     def test_install_sha(self) -> None:
         home = Path(tempfile.mkdtemp(dir=self.home))
         self.assertIsNone(obs.install_sha({"HOME": str(home)}))
-        lib = home / ".local/lib/provenance-context"
+        lib = home / ".local/lib/muninn"
         (lib / "abc1234").mkdir(parents=True)
         (lib / "current").symlink_to(lib / "abc1234")
         self.assertEqual(obs.install_sha({"HOME": str(home)}), "abc1234")
-        env = {"HOME": str(home), "PCTX_INSTALL_SHA": "fff0000"}
+        env = {"HOME": str(home), "MUNINN_INSTALL_SHA": "fff0000"}
         self.assertEqual(obs.install_sha(env), "fff0000")
 
     def test_poller_freshness(self) -> None:
