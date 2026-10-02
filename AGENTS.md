@@ -5,14 +5,17 @@ Instructions for coding agents working in this repo. Any parent-directory
 
 ## Layout
 
-- `pctx/`: runtime package (Python 3.13 standard library only).
-  `cli.py` (commands), `store.py` (schema, locks), `ingest.py`, `classify.py`,
-  `query/` (package), `knowledge.py`, `erase.py`, `hook.py`, `obs.py` (stats, doctor,
-  logs).
+- `pctx/`: runtime package (Python 3.13 standard library only), one
+  responsibility per module; a feature's modules share its prefix:
+  `cli*` (parser, handlers, output, poller), `store`, `ingest*` (plan, parse),
+  `classify` with `claude_events`, `codex_events`, `event_model`,
+  `tool_errors`, `redaction`; `query/` (package), `knowledge*`, `erase*`,
+  `tombstones`, `hook*`, `obs*` (logs, stats, doctor, status), `scope`.
 - `bin/pctx`: launcher that finds the interpreter; do not hardcode a path.
 - `install/`: `installer.py` (`--fresh`, `--upgrade`; the runner),
   `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`,
-  `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`.
+  `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`, `tomledit.py`.
+- `tools/`: the standards gate (`python3.13 -m tools.check`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
 - `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 
