@@ -1,316 +1,53 @@
-"""pctx observability (design 7; spec O8d, O9, A5, A14).
+"""pctx observability: the call log, the heartbeat, stats and doctor.
 
-calls.jsonl gets one allowlisted line per CLI call (no text, no query
-string), rotated at 1 MiB x 2.  status.json is the poller heartbeat
-(counts only), written atomically.  stats and doctor read the store.
+The logging, heartbeat and stats code lives in ``obs_log``, ``obs_status``
+and ``obs_stats``; this module re-exports it and owns ``doctor``, whose
+health checks read the data directory, the store and the launchd job.
+``run`` and the doctor thresholds stay here because tests replace them on
+this module.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sqlite3
 import subprocess
-import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import TypedDict
 
-from pctx import classify, ingest, query, store
+from pctx import ingest, store
+from pctx.obs_log import ROTATE_BYTES, actor, log_call, log_poller
+from pctx.obs_stats import db_space, human_bytes, stats
+from pctx.obs_status import freshness, install_sha, read_status, write_status
 
-ROTATE_BYTES = 1024 * 1024
-LINE_BYTES = 1024
-_NUMBERS = (
-    "at",
-    "scope_id",
-    "n_terms",
-    "bytes_out",
-    "ms",
-    "exit",
-    "target_id",
-    "n_context",
-    "pid",
-    "passes",
-    "busy_skips",
-    "interval_s",
-    "files_changed",
-    "events_added",
-    "failed",
-    "duration_s",
-)
-_FLAGS = ("hash_ok", "logged")
-_ID_LISTS = ("returned_ids", "knowledge_ids", "ids")
-_COUNTS = ("stages", "counts")
-_CODES = {  # string fields: fixed shapes that cannot carry text
-    "cmd": re.compile(r"[a-z][a-z-]{0,30}(?: [a-z-]{1,20})?"),
-    "actor": re.compile(r"user|(?:claude|codex):[\w-]{1,12}"),
-    "query_sha12": re.compile(r"[0-9a-f]{12}"),
-    "error": re.compile(r"[a-z_]{1,40}"),
-    "event": re.compile(r"[a-z_]{1,20}"),
-    "exc": re.compile(r"[A-Za-z_]{1,60}"),  # an exception class name
-}
-_KEY = re.compile(r"[a-z_]{1,30}")
-
-
-def _int(value) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _clean(record: Mapping) -> dict:
-    """Only allowlisted fields of allowlisted shapes survive."""
-    out = {}
-    for key, value in record.items():
-        if key in _NUMBERS and (_int(value) or isinstance(value, float)):
-            out[key] = value
-        elif key in _FLAGS and (value is None or isinstance(value, bool)):
-            out[key] = value
-        elif key in _CODES and isinstance(value, str):
-            if _CODES[key].fullmatch(value):
-                out[key] = value
-        elif key in _ID_LISTS and isinstance(value, list):
-            out[key] = [v for v in value if _int(v)]
-        elif key in _COUNTS and isinstance(value, Mapping):
-            out[key] = {
-                k: v
-                for k, v in value.items()
-                if isinstance(k, str) and _KEY.fullmatch(k) and _int(v)
-            }
-    return out
-
-
-def log_call(
-    home: Path, record: Mapping, env: Mapping[str, str] = os.environ
-) -> bool:
-    """Append one line to calls.jsonl; False when disabled or denied (the
-    response then says logged:false).  PCTX_NO_CALLLOG=1 disables it."""
-    if env.get("PCTX_NO_CALLLOG") == "1":
-        return False
-    line = _clean({**record, "at": round(time.time(), 3)})
-
-    def encoded():
-        text = json.dumps(line, sort_keys=True, separators=(",", ":"))
-        return text.encode() + b"\n"
-
-    data = encoded()
-    for key in _ID_LISTS:  # keep the line within LINE_BYTES
-        while len(data) > LINE_BYTES and line.get(key):
-            line[key] = line[key][: len(line[key]) // 2]
-            data = encoded()
-    return _append(home, "calls.jsonl", data)
-
-
-def _append(home: Path, name: str, data: bytes) -> bool:
-    """Append to home/name, rotating to name.1 at ROTATE_BYTES (two files
-    at most); False when the append is denied."""
-    path = home / name
-    try:
-        if path.exists() and path.stat().st_size + len(data) > ROTATE_BYTES:
-            os.replace(path, home / f"{name}.1")
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        try:
-            os.write(fd, data)
-        finally:
-            os.close(fd)
-    except OSError:  # e.g. the Codex sandbox denies the append
-        return False
-    return True
-
-
-def log_poller(home: Path, record: Mapping) -> bool:
-    """One allowlisted JSON line in poller.log: an event code, counts and an
-    exception class name; never transcript text.  Rotated like calls.jsonl."""
-    line = _clean({**record, "at": round(time.time(), 3)})
-    data = json.dumps(line, sort_keys=True, separators=(",", ":")).encode()
-    return _append(home, "poller.log", data + b"\n")
-
-
-def actor(env: Mapping[str, str]) -> str:
-    """claude:<12> or codex:<12> of the calling session, else user."""
-    for name, provider in (
-        ("CLAUDE_CODE_SESSION_ID", "claude"),
-        ("CODEX_SESSION_ID", "codex"),
-        ("CODEX_THREAD_ID", "codex"),
-    ):
-        if env.get(name):
-            ident = re.sub(r"[^\w-]", "", env[name])[:12]
-            return f"{provider}:{ident or 'unknown'}"
-    return "user"
-
-
-def read_status(home: Path) -> dict:
-    """The parsed status.json, or {} when absent or unreadable."""
-    try:
-        data = json.loads((home / "status.json").read_text())
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def write_status(home: Path, fields: Mapping) -> None:
-    """Merge fields into status.json atomically (0600)."""
-    store.write_json_atomic(home / "status.json", read_status(home) | fields)
-
-
-def freshness(status: Mapping) -> dict:
-    """index_age_s and poller ok|stale (O8d); {} counts as stale."""
-    return query._freshness(status or {})
-
-
-def install_sha(env: Mapping[str, str]) -> str | None:
-    """PCTX_INSTALL_SHA, else the pinned code dir that
-    ~/.local/lib/provenance-context/current points at."""
-    if env.get("PCTX_INSTALL_SHA"):
-        return env["PCTX_INSTALL_SHA"]
-    home = Path(env.get("HOME") or Path.home())
-    current = home / ".local/lib/provenance-context/current"
-    return Path(os.readlink(current)).name if current.is_symlink() else None
-
-
-def run(argv):
-    """launchctl and ps for doctor; tests replace it (never the real
-    launchd domain)."""
-    return subprocess.run(
-        [str(a) for a in argv], capture_output=True, timeout=10
-    )
-
-
-def _hash_mismatches(home: Path) -> int:
-    """open-time line hash failures, counted from the stage log."""
-    bad = 0
-    for name in ("calls.jsonl.1", "calls.jsonl"):
-        try:
-            lines = (home / name).read_text().splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            try:
-                bad += json.loads(line).get("hash_ok") is False
-            except (ValueError, AttributeError):
-                continue
-    return bad
-
+__all__ = [
+    "ROTATE_BYTES",
+    "CheckResult",
+    "DoctorReport",
+    "actor",
+    "db_space",
+    "doctor",
+    "freshness",
+    "human_bytes",
+    "install_sha",
+    "log_call",
+    "log_poller",
+    "read_status",
+    "run",
+    "stats",
+    "write_status",
+]
 
 # ponytail: untuned guesses; retune from real colleague databases.
 DB_WARN_BYTES = 2 * 1024**3
 FREE_WARN_RATIO = 0.25
 FREE_WARN_BYTES = 64 * 1024**2
 
-
-def human_bytes(n: float) -> str:
-    """188.5 MB, 2.0 GB: 1024-based, units B KB MB GB TB."""
-    for unit in ("B", "KB", "MB", "GB"):
-        if abs(n) < 1024:
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} TB"
-
-
-def db_space(conn) -> dict:
-    """page_count, freelist_count, page_size and the free-space ratio."""
-    pages, free, size = (
-        conn.execute(f"PRAGMA {p}").fetchone()[0]
-        for p in ("page_count", "freelist_count", "page_size")
-    )
-    return {
-        "page_count": pages,
-        "freelist_count": free,
-        "page_size": size,
-        "free_ratio": round(free / pages, 4) if pages else 0.0,
-    }
-
-
-def stats(conn, home: Path, env: Mapping[str, str], *, usage=False) -> dict:
-    """Counts only (design 7): sources, events, flags, issues, knowledge,
-    tombstones, the last pass; usage adds O9's per-session pctx calls."""
-
-    def pairs(sql):
-        return {r[0]: r[1] for r in conn.execute(sql)}
-
-    flags = conn.execute(
-        "SELECT total(flags & 1 > 0), total(flags & 2 > 0),"
-        " total(flags & 4 > 0) FROM event"
-    ).fetchone()
-    status = read_status(home)
-    db = store.db_path(home)
-    out = {
-        "sources": {
-            "/".join(r[:4]): r[4]
-            for r in conn.execute(
-                "SELECT provider, root, thread_class, status, count(*)"
-                " FROM source GROUP BY 1, 2, 3, 4"
-            )
-        },
-        "events": pairs("SELECT kind, count(*) FROM event GROUP BY 1"),
-        "events_by_provider": pairs(
-            "SELECT s.provider, count(*) FROM event e"
-            " JOIN source s ON s.id = e.source_id GROUP BY 1"
-        ),
-        "flags": dict(
-            zip(("marker", "redacted", "truncated"), (int(n) for n in flags))
-        ),
-        "skipped_lines": conn.execute(
-            "SELECT total(skipped_lines) FROM source"
-        ).fetchone()[0],
-        "issues": pairs("SELECT code, count(*) FROM source_issue GROUP BY 1"),
-        "other_threads": pairs(  # format drift: never guessed primary
-            "SELECT class_reason, count(*) FROM source"
-            " WHERE thread_class = 'other' GROUP BY 1"
-        ),
-        "knowledge": pairs(
-            "SELECT status, count(*) FROM knowledge GROUP BY 1"
-        ),
-        "citations": pairs("SELECT state, count(*) FROM citation GROUP BY 1"),
-        "tombstones": pairs(
-            "SELECT level, count(*) FROM tombstone GROUP BY 1"
-        ),
-        "db_bytes": db.stat().st_size if db.exists() else 0,
-        "db_space": db_space(conn),
-        "last_pass": {
-            k: status.get(k)
-            for k in (
-                "last_pass_at",
-                "duration_s",
-                "files_changed",
-                "events_added",
-                "skipped_files",
-                "failed",
-                "errors",
-                "busy_skips",
-            )
-        }
-        | freshness(status),
-        "install_sha": install_sha(env) or status.get("install_sha"),
-        "classifier_version": classify.CLASSIFIER_VERSION,
-        "hash_mismatches": _hash_mismatches(home),
-    }
-    out["skipped_lines"] = int(out["skipped_lines"])
-    if usage:
-        rows = conn.execute(
-            "SELECT provider, session_root, sum(calls), sum(errors),"
-            " max(last_ts) FROM usage GROUP BY 1, 2 ORDER BY 1, 2"
-        ).fetchall()
-        out["usage"] = [
-            dict(
-                zip(
-                    ("provider", "session_root", "calls", "errors", "last_ts"),
-                    r,
-                )
-            )
-            for r in rows
-        ]
-        totals: dict[str, dict] = {}
-        for provider, _, calls, errors, _ in rows:
-            t = totals.setdefault(
-                provider, {"calls": 0, "errors": 0, "sessions": 0}
-            )
-            t["calls"] += calls
-            t["errors"] += errors
-            t["sessions"] += 1
-        out["usage_totals"] = totals
-    return out
-
-
 LABEL = "com.provenance-context"
+# Everything pctx itself puts in the data directory; anything else is
+# reported by ``unexpected_files``.
 DATA_FILES = frozenset(
     {
         "pctx.sqlite",
@@ -324,16 +61,88 @@ DATA_FILES = frozenset(
         "recall.off",
     }
 )
+
+
+class CheckResult(TypedDict):
+    """One doctor check as it appears in the JSON output."""
+
+    check: str
+    ok: bool | None
+    level: str
+    detail: str
+
+
+class DoctorReport(TypedDict):
+    """The doctor output: overall verdict and every check."""
+
+    ok: bool
+    checks: list[CheckResult]
+
+
+class JobInfo(TypedDict):
+    """The launchd job: its process id (if running) and command line."""
+
+    pid: int | None
+    cmd: str
+
+
+def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
+    """Run launchctl or ps for doctor.
+
+    Tests replace this function so they never touch the real launchd
+    domain.
+
+    Args:
+        argv: Command and arguments; each is converted with ``str``.
+
+    Returns:
+        The completed process; output is captured, never decoded.
+    """
+    return subprocess.run(
+        [str(a) for a in argv], capture_output=True, timeout=10, check=False
+    )
+
+
+def _result(
+    name: str,
+    ok: object,
+    detail: object = "",
+    level: str = "error",
+) -> CheckResult:
+    """Build a check result; ``ok=None`` means "could not tell"."""
+    return {
+        "check": name,
+        "ok": None if ok is None else bool(ok),
+        "level": level,
+        "detail": str(detail),
+    }
+
+
 def _mode(path: Path) -> int:
+    """Return the permission bits of a path."""
     return path.stat().st_mode & 0o777
 
 
-def _job(env: Mapping[str, str]) -> dict | None:
-    """The launchd job as {'pid', 'cmd'}; None when not loaded."""
+def _names(home: Path) -> list[str]:
+    """Sorted names in the data directory; empty if it is absent."""
+    return sorted(p.name for p in home.iterdir()) if home.is_dir() else []
+
+
+def _lock_free(home: Path) -> bool:
+    """Whether the writer lock is free right now (never waits)."""
+    try:
+        with store.writer_lock(home, wait_s=0):
+            return True
+    except (store.BusyError, OSError):
+        return False
+
+
+def _job() -> JobInfo | None:
+    """Return the launchd job's pid and command, or None if not loaded."""
     r = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
     if r.returncode:
         return None
-    found = re.search(rb"^\s*pid = (\d+)\s*$", r.stdout, re.M)
+    found = re.search(rb"^\s*pid = (\d+)\s*$", r.stdout, re.MULTILINE)
     if not found:
         return {"pid": None, "cmd": ""}
     ps = run(["ps", "-ww", "-o", "command=", "-p", found[1].decode()])
@@ -344,138 +153,260 @@ def _job(env: Mapping[str, str]) -> dict | None:
 
 
 def _writer_secure_delete() -> bool:
-    """Writers turn secure_delete on (a per-connection setting, not stored
-    in the file): apply the writer pragmas to an in-memory connection.
-    Opening the real store would roll back a hot journal doctor reports."""
+    """Whether writers turn ``secure_delete`` on.
+
+    It is a per-connection setting, not stored in the file, so the writer
+    pragmas are applied to an in-memory connection. Opening the real store
+    would roll back a hot journal that doctor is meant to report.
+
+    Returns:
+        True when ``secure_delete`` reads back as on.
+    """
     conn = sqlite3.connect(":memory:")
     try:
-        for pragma in store._WRITER_PRAGMAS:
+        for pragma in store.WRITER_PRAGMAS:
             conn.execute(pragma)
         return conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
     finally:
         conn.close()
 
 
-def _lock_free(home: Path) -> bool:
-    try:
-        with store.writer_lock(home, wait_s=0):
-            return True
-    except (store.BusyError, OSError):
-        return False
-
-
-
-
-def doctor(home: Path, env: Mapping[str, str]) -> dict:
-    """Health checks (design 7): errors decide ok; warn and info do not.
-    Missing sources are information, never an error (D15)."""
-    checks: list[dict] = []
-
-    def check(name, ok, detail="", level="error"):
-        ok = None if ok is None else bool(ok)
-        checks.append(
-            {"check": name, "ok": ok, "level": level, "detail": str(detail)}
-        )
-
+def _data_dir_mode(home: Path) -> CheckResult:
+    """The data directory exists and is private (0700)."""
     present = home.is_dir()
-    check(
+    return _result(
         "data_dir_mode",
         present and _mode(home) == 0o700,
         oct(_mode(home)) if present else "absent",
     )
-    names = sorted(p.name for p in home.iterdir()) if present else []
+
+
+def _file_modes(home: Path) -> CheckResult:
+    """No data file is readable by group or others."""
     loose = [
-        n for n in names if (home / n).is_file() and _mode(home / n) & 0o077
+        n
+        for n in _names(home)
+        if (home / n).is_file() and _mode(home / n) & 0o077
     ]
-    check("file_modes", not loose, ",".join(loose))
+    return _result("file_modes", not loose, ",".join(loose))
+
+
+def _unexpected_files(home: Path) -> CheckResult:
+    """The data directory holds only files pctx writes."""
     stray = [
         n
-        for n in names
+        for n in _names(home)
         if n not in DATA_FILES
         and n != "pctx.sqlite-journal"
-        and not n.startswith(".status.json.")
+        and not n.startswith(".status.json.")  # an atomic write in flight
     ]
-    check("unexpected_files", not stray, ",".join(stray))
+    return _result("unexpected_files", not stray, ",".join(stray))
+
+
+def _unowned_journal(home: Path) -> CheckResult:
+    """No rollback journal is left behind by a crashed writer."""
     journal = (home / "pctx.sqlite-journal").exists()
-    check(
+    return _result(
         "unowned_journal",
         not (journal and _lock_free(home)),
         "a crashed writer's journal: the next writer rolls it back",
     )
-    db = store.db_path(home)
+
+
+def _journal_mode(conn: sqlite3.Connection) -> CheckResult:
+    """The store uses the rollback journal, not WAL."""
+    # Not WAL: a WAL file would keep erased text readable after delete.
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    return _result("journal_mode", mode == "delete", mode)
+
+
+def _fts_secure_delete(conn: sqlite3.Connection) -> CheckResult:
+    """Both FTS indexes zero deleted content."""
+    rows = [
+        conn.execute(
+            f"SELECT v FROM {t}_config WHERE k = 'secure-delete'"
+        ).fetchone()
+        for t in ("event_fts", "knowledge_fts")
+    ]
+    return _result("fts_secure_delete", all(r and r[0] == 1 for r in rows))
+
+
+def _quick_check(conn: sqlite3.Connection) -> CheckResult:
+    """SQLite's quick integrity check passes."""
+    quick = conn.execute("PRAGMA quick_check").fetchone()[0]
+    return _result("quick_check", quick == "ok", quick[:80])
+
+
+def _count(conn: sqlite3.Connection, sql: str) -> int:
+    """Run a single-count query."""
+    return conn.execute(sql).fetchone()[0]
+
+
+def _missing_sources(conn: sqlite3.Connection) -> CheckResult:
+    """Report transcripts that vanished (informational)."""
+    missing = _count(
+        conn, "SELECT count(*) FROM source WHERE status = 'missing'"
+    )
+    return _result("missing_sources", True, missing, level="info")
+
+
+def _other_threads(conn: sqlite3.Connection) -> CheckResult:
+    """Report threads of an unrecognised format (informational)."""
+    drift = _count(
+        conn, "SELECT count(*) FROM source WHERE thread_class = 'other'"
+    )
+    return _result("other_threads", True, drift, level="info")
+
+
+def _citations_resolve(conn: sqlite3.Connection) -> CheckResult:
+    """Every live citation still points at an event with the same hash."""
+    broken = _count(
+        conn,
+        "SELECT count(*) FROM citation c WHERE c.state = 'live'"
+        " AND NOT EXISTS (SELECT 1 FROM event e JOIN source s"
+        " ON s.id = e.source_id WHERE s.provider = c.provider AND"
+        " s.thread_id = c.thread_id AND e.line = c.line AND"
+        " e.part = c.part AND e.line_sha256 = c.line_sha256)",
+    )
+    return _result("citations_resolve", not broken, broken, level="warn")
+
+
+def _db_size(conn: sqlite3.Connection) -> CheckResult:
+    """The database is below the size warning threshold."""
+    space = db_space(conn)
+    size = space["page_count"] * space["page_size"]
+    return _result(
+        "db_size",
+        size < DB_WARN_BYTES,
+        f"{human_bytes(size)}; threshold {human_bytes(DB_WARN_BYTES)}",
+        level="warn",
+    )
+
+
+def _db_free_space(conn: sqlite3.Connection) -> CheckResult:
+    """Free pages are not a large share of the file."""
+    space = db_space(conn)
+    free = space["freelist_count"] * space["page_size"]
+    # Both a ratio and an absolute floor: a small file is mostly "free"
+    # after a few deletes, and compacting it would gain nothing.
+    wasteful = space["free_ratio"] > FREE_WARN_RATIO and free > FREE_WARN_BYTES
+    return _result(
+        "db_free_space",
+        not wasteful,
+        f"{human_bytes(free)} free ({space['free_ratio']:.0%});"
+        " run: pctx compact",
+        level="warn",
+    )
+
+
+# Order is the order of the checks in the doctor output.
+_STORE_CHECKS: tuple[Callable[[sqlite3.Connection], CheckResult], ...] = (
+    _journal_mode,
+    _fts_secure_delete,
+    _quick_check,
+    _missing_sources,
+    _other_threads,
+    _citations_resolve,
+    _db_size,
+    _db_free_space,
+)
+
+
+def _store_checks(home: Path) -> list[CheckResult]:
+    """Open the store read-only and run every store check."""
     try:
-        conn = store.connect_ro(db)
+        conn = store.connect_ro(store.db_path(home))
     except store.StoreUnavailableError as exc:
-        check("store_readable", False, type(exc).__name__)
-    else:
-        try:
-            check("store_readable", True)
-            mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
-            check("journal_mode", mode == "delete", mode)
-            fts = [
-                conn.execute(
-                    f"SELECT v FROM {t}_config WHERE k = 'secure-delete'"
-                ).fetchone()
-                for t in ("event_fts", "knowledge_fts")
-            ]
-            check("fts_secure_delete", all(r and r[0] == 1 for r in fts))
-            quick = conn.execute("PRAGMA quick_check").fetchone()[0]
-            check("quick_check", quick == "ok", quick[:80])
-            missing = conn.execute(
-                "SELECT count(*) FROM source WHERE status = 'missing'"
-            ).fetchone()[0]
-            check("missing_sources", True, missing, level="info")
-            drift = conn.execute(
-                "SELECT count(*) FROM source WHERE thread_class = 'other'"
-            ).fetchone()[0]
-            check("other_threads", True, drift, level="info")
-            broken = conn.execute(
-                "SELECT count(*) FROM citation c WHERE c.state = 'live'"
-                " AND NOT EXISTS (SELECT 1 FROM event e JOIN source s"
-                " ON s.id = e.source_id WHERE s.provider = c.provider AND"
-                " s.thread_id = c.thread_id AND e.line = c.line AND"
-                " e.part = c.part AND e.line_sha256 = c.line_sha256)"
-            ).fetchone()[0]
-            check("citations_resolve", not broken, broken, level="warn")
-            space = db_space(conn)
-            size = space["page_count"] * space["page_size"]
-            check(
-                "db_size",
-                size < DB_WARN_BYTES,
-                f"{human_bytes(size)}; threshold {human_bytes(DB_WARN_BYTES)}",
-                level="warn",
-            )
-            free = space["freelist_count"] * space["page_size"]
-            check(
-                "db_free_space",
-                not (
-                    space["free_ratio"] > FREE_WARN_RATIO
-                    and free > FREE_WARN_BYTES
-                ),
-                f"{human_bytes(free)} free ({space['free_ratio']:.0%});"
-                " run: pctx compact",
-                level="warn",
-            )
-        except sqlite3.Error as exc:
-            check("store_readable", False, type(exc).__name__)
-        finally:
-            conn.close()
-    check("writer_secure_delete", _writer_secure_delete())
-    status = read_status(home)
-    fresh = freshness(status)
-    check("heartbeat", fresh["poller"] == "ok", fresh["index_age_s"])
-    failed = status.get("failed") or 0
-    check("failed_sources", not failed, failed, level="warn")
-    job = _job(env)
-    check("launchd_job", job is not None and job["pid"], job and job["pid"])
-    roots = ingest.default_roots(env)
+        return [_result("store_readable", False, type(exc).__name__)]
+    results = [_result("store_readable", True)]
+    try:
+        # extend() appends as the generator yields, so the checks that ran
+        # before an SQLite error are kept.
+        results.extend(check(conn) for check in _STORE_CHECKS)
+    except sqlite3.Error as exc:
+        results.append(_result("store_readable", False, type(exc).__name__))
+    finally:
+        conn.close()
+    return results
+
+
+def _writer_pragmas() -> CheckResult:
+    """Writers will delete securely."""
+    return _result("writer_secure_delete", _writer_secure_delete())
+
+
+def _heartbeat(home: Path) -> CheckResult:
+    """The poller reported recently."""
+    fresh = freshness(read_status(home))
+    return _result("heartbeat", fresh["poller"] == "ok", fresh["index_age_s"])
+
+
+def _failed_sources(home: Path) -> CheckResult:
+    """The last poller pass failed on no source."""
+    failed = read_status(home).get("failed") or 0
+    return _result("failed_sources", not failed, failed, level="warn")
+
+
+def _launchd_job() -> CheckResult:
+    """The launchd job is loaded and running."""
+    job = _job()
+    if job is None:
+        return _result("launchd_job", False, None)
+    # Loaded but with no pid yet is "unknown" (ok=None), not a failure.
+    pid = job["pid"]
+    return _result("launchd_job", None if pid is None else bool(pid), pid)
+
+
+def _roots_readable(env: Mapping[str, str]) -> CheckResult:
+    """Every provider transcript root that exists can be read."""
     blocked = [
         n
-        for n, p in roots.items()
+        for n, p in ingest.default_roots(env).items()
         if p.exists() and not os.access(p, os.R_OK | os.X_OK)
     ]
-    check("roots_readable", not blocked, ",".join(blocked))
-    absent = [n for n, p in roots.items() if not p.exists()]
-    check("roots_present", True, ",".join(absent), level="info")
+    return _result("roots_readable", not blocked, ",".join(blocked))
+
+
+def _roots_present(env: Mapping[str, str]) -> CheckResult:
+    """Report provider roots that do not exist (informational)."""
+    absent = [
+        n for n, p in ingest.default_roots(env).items() if not p.exists()
+    ]
+    return _result("roots_present", True, ",".join(absent), level="info")
+
+
+# Order is the order of the checks in the doctor output.
+_DIRECTORY_CHECKS: tuple[Callable[[Path], CheckResult], ...] = (
+    _data_dir_mode,
+    _file_modes,
+    _unexpected_files,
+    _unowned_journal,
+)
+
+
+def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
+    """Run the health checks.
+
+    Only ``error`` level checks decide ``ok``; ``warn`` and ``info`` never
+    do. A missing provider source is information, not an error, because a
+    machine may use only one provider.
+
+    Args:
+        home: Data directory.
+        env: Environment, for provider roots and ``HOME``.
+
+    Returns:
+        ``ok`` and the ordered list of check results.
+    """
+    checks = [check(home) for check in _DIRECTORY_CHECKS]
+    checks += _store_checks(home)
+    checks += [
+        _writer_pragmas(),
+        _heartbeat(home),
+        _failed_sources(home),
+        _launchd_job(),
+        _roots_readable(env),
+        _roots_present(env),
+    ]
     ok = all(c["ok"] is not False for c in checks if c["level"] == "error")
     return {"ok": ok, "checks": checks}

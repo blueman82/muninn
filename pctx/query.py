@@ -484,6 +484,19 @@ def _freshness(status: Mapping | None) -> dict:
     }
 
 
+def freshness(status: Mapping[str, object] | None) -> dict[str, object]:
+    """Report index age and poller state for the observability layer.
+
+    Args:
+        status: Parsed ``status.json``, or None for no heartbeat file.
+
+    Returns:
+        The same fields the search results carry: ``index_age_s`` and
+        ``poller``; empty when ``status`` is None.
+    """
+    return _freshness(status)
+
+
 def _output_size(out: dict) -> int:
     # Reserve stable freshness so heartbeat changes cannot shift pages.
     # CLI adds logged and a newline, then redacts text again.

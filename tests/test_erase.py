@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pctx import erase, store
+from pctx import erase, erase_residue, store
 from tests.test_classify import codex_meta, reply, subagent_meta, user_msg
 from tests.test_ingest import (
     BASE,
@@ -252,12 +252,12 @@ class VerificationTests(EraseCase):
         self.assertEqual(out["vocab"], 0)
         # negative control: a delete that bypasses the FTS triggers
         ids = [r[0] for r in self.conn.execute("SELECT id FROM event")]
-        rare = erase._rare_terms(self.conn, ids, [])
+        rare = erase_residue.rare_terms(self.conn, ids, [])
         self.assertTrue(rare["event_fts"])
         self.conn.execute("DROP TRIGGER event_ad")
         self.conn.execute("DELETE FROM event")
         self.assertEqual(
-            erase._vocab_left(self.conn, rare), len(rare["event_fts"])
+            erase_residue.vocab_left(self.conn, rare), len(rare["event_fts"])
         )
 
     def test_dry_run_changes_nothing(self):

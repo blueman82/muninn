@@ -15,7 +15,15 @@ import time
 from pathlib import Path
 from unittest import mock
 
-from pctx import classify, hook, knowledge, obs, store
+from pctx import (
+    classify,
+    hook,
+    hook_frame,
+    hook_recall,
+    knowledge,
+    obs,
+    store,
+)
 from tests import test_classify as tc
 from tests import test_cli as tcli
 from tests import test_ingest as ti
@@ -647,7 +655,7 @@ class PromptFrameTests(RecallCase):
             notice("store_unavailable", "UserPromptSubmit"),
         )
         with mock.patch.object(
-            hook.query, "search", side_effect=RuntimeError("boom")
+            hook_recall.query, "search", side_effect=RuntimeError("boom")
         ):
             out = self.ask()
         self.assertEqual(out, notice("error", "UserPromptSubmit"))
@@ -1038,7 +1046,9 @@ class RenderTests(HookCase):
             "ref": f"codex:{uuid}:12345.12", "snippet": "s" * 400,
         }  # fmt: skip
         for items in (([entry], []), ([], [hit]), ([entry], [hit])):
-            text = hook._recall_text(*items, stale, hook.CODEX_RECALL_LIMIT)
+            text = hook_frame.recall_text(
+                *items, stale, hook.CODEX_RECALL_LIMIT
+            )
             with self.subTest(len(text)):
                 self.assertTrue(text)
                 self.assertLessEqual(len(text), hook.CODEX_RECALL_LIMIT)
@@ -1054,11 +1064,11 @@ class RenderTests(HookCase):
         self.assertGreaterEqual(block.count("\n- K"), 3)
 
     def test_clean_cuts_to_the_limit_and_keeps_shorter_text(self):
-        self.assertEqual(hook._clean("x" * 300, 300), "x" * 300)
-        cut = hook._clean("x" * 301, 300)
+        self.assertEqual(hook_frame.clean("x" * 300, 300), "x" * 300)
+        cut = hook_frame.clean("x" * 301, 300)
         self.assertEqual((len(cut), cut[-1]), (300, "…"))
-        self.assertEqual(hook._clean("a \n b\t c", 50), "a b c")
-        self.assertEqual(hook._clean(AKIA, 50), "[redacted:secret]")
+        self.assertEqual(hook_frame.clean("a \n b\t c", 50), "a b c")
+        self.assertEqual(hook_frame.clean(AKIA, 50), "[redacted:secret]")
 
     def test_render_block_bounds_quote_text_label_and_size(self):
         long = self.entry(text="t" * 500, quote="q" * 500)
@@ -1170,7 +1180,7 @@ class RecallStressTests(RecallCase):
         self.talk("a", "alphaterm betaterm gammaterm deltaterm all here")
         self.noise(self.repo)
         with mock.patch.object(
-            hook.query, "search", wraps=hook.query.search
+            hook_recall.query, "search", wraps=hook_recall.query.search
         ) as spy:
             self.assertIn("hookSpecificOutput", self.ask())
         self.assertEqual(spy.call_count, 1)
@@ -1180,7 +1190,7 @@ class RecallStressTests(RecallCase):
             self.talk(f"two{i}", "rareone raretwo filler")
         prompt = "rareone raretwo commonone commontwo commonthree"
         with mock.patch.object(
-            hook.query, "search", wraps=hook.query.search
+            hook_recall.query, "search", wraps=hook_recall.query.search
         ) as spy:
             self.assertEqual(self.ask(prompt), {})
         calls = [c.kwargs for c in spy.call_args_list]
@@ -1215,10 +1225,10 @@ class RecallStressTests(RecallCase):
                 x.split(" ")[1] for x in text.split("\n") if x.startswith("- ")
             ]
 
-        full = hook._recall_text(entries, hits, ())
+        full = hook_frame.recall_text(entries, hits, ())
         self.assertLessEqual(len(full), 1500)
         self.assertEqual(rows(full), ["K3", "K2", "K1"])  # hits went first
-        text = hook._recall_text(entries[:1], hits, ())
+        text = hook_frame.recall_text(entries[:1], hits, ())
         self.assertLessEqual(len(text), 1500)
         self.assertEqual(len(rows(text)), 3)  # K3 and the two best hits
         self.assertNotIn("codex:thr:3.1", text)
@@ -1226,7 +1236,7 @@ class RecallStressTests(RecallCase):
         self.assertTrue(
             text.endswith("`pctx open <ref> --context 3`.\n" + CLOSE)
         )
-        shrunk = hook._recall_text(entries[:1], hits[:3], ("x" * 180,))
+        shrunk = hook_frame.recall_text(entries[:1], hits[:3], ("x" * 180,))
         self.assertLessEqual(len(shrunk), 1500)
         self.assertIn("x" * 180, shrunk)
 
