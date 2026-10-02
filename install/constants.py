@@ -15,39 +15,14 @@ EVENTS = ("pre_tool_use", "session_start", "user_prompt_submit")
 TRUST = {
     e: f'[hooks.state."{PLUGIN_ID}:hooks/hooks.json:{e}:0:0"]' for e in EVENTS
 }
-# Names from before the rename. An old install is migrated to the new names
-# by the upgrade, so its launchd job, plist, release, CLI link, Codex
-# sections and hook entries must still be recognised as ours.
-OLD_LABEL = "com.provenance-context"
-OLD_MKT_NAME = "provenance-context-local"
-OLD_PLUGIN_ID = f"provenance-context@{OLD_MKT_NAME}"
-OLD_MARKETPLACE = f"[marketplaces.{OLD_MKT_NAME}]"
-OLD_PLUGIN = f'[plugins."{OLD_PLUGIN_ID}"]'
-OLD_TRUST = {
-    e: f'[hooks.state."{OLD_PLUGIN_ID}:hooks/hooks.json:{e}:0:0"]'
-    for e in EVENTS
-}
-OLD_SECTIONS = (OLD_MARKETPLACE, OLD_PLUGIN, *OLD_TRUST.values())
-OLD_PLIST = "Library/LaunchAgents/com.provenance-context.plist"
-OLD_CLI_NAME = "pctx"
-# What the old store, data dir and release dir were called.
-OLD_NAME = "provenance-context"
 # The only keys we may read or write in each of our config.toml sections.
 CODEX_KEYS = {
     MARKETPLACE: {"source_type", "source", "last_updated", "last_revision"},
     PLUGIN: {"enabled"},
     **{h: {"enabled", "trusted_hash"} for h in TRUST.values()},
-    OLD_MARKETPLACE: {
-        "source_type",
-        "source",
-        "last_updated",
-        "last_revision",
-    },
-    OLD_PLUGIN: {"enabled"},
-    **{h: {"enabled", "trusted_hash"} for h in OLD_TRUST.values()},
 }
 # Substrings that mark a line as ours; none may appear outside our sections.
-MARKERS = (MKT_NAME, "muninn@", OLD_MKT_NAME, "provenance-context@")
+MARKERS = (MKT_NAME, "muninn@")
 CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit")
 # Codex versions whose trust-hash algorithm we have checked: 0.159.2 against
 # the Codex source and binary, 0.159.3 only against a live ``hooks/list``

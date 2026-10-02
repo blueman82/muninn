@@ -30,7 +30,6 @@ from muninn import (
     cli_read,
     cli_rebuild,
     cli_serve,
-    legacy,
     obs,
     store,
 )
@@ -138,9 +137,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Handled before argparse: a usage error here would exit 2, and exit
         # 2 from a hook can block the user's prompt.
         return hook_main(given[1:], os.environ)
-    warning = legacy.env_warning(os.environ)
-    if warning:
-        print(warning, file=sys.stderr)
     pretty = "--pretty" in given  # anywhere on the line; hooks never use it
     given = [a for a in given if a != "--pretty"]
     parser = build_parser()

@@ -13,4 +13,3 @@ implementer chose it inside work the owner ordered.
 | [0006](0006-mechanical-standards.md) | Engineering standards are enforced by a gate, not by instructions |
 | [0007](0007-recall-off-by-default.md) | Per-prompt recall starts off on a fresh install |
 | [0008](0008-install-wrapper.md) | `bin/muninn-install` picks the install mode and previews without writing |
-| [0009](0009-rename-migration.md) | `--upgrade` migrates a pre-rename install; old markers stay flagged |

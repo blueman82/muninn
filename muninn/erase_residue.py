@@ -11,7 +11,6 @@ import sqlite3
 from pathlib import Path
 
 from muninn.erase_collect import Target
-from muninn.legacy import old_data_dir
 
 NEEDLES, NEEDLE_BYTES = 50, 48
 # A shorter head would match unrelated bytes and report false residue.
@@ -225,13 +224,9 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
     if not needles:
         return []
     hits: list[str] = []
-    # An un-migrated pre-rename data home beside this one holds the same
-    # text, so it counts as residue too.
-    for root in (home, old_data_dir(home)):
-        for path in sorted(root.rglob("*")):
-            if path.is_file() and not path.is_symlink():
-                data = path.read_bytes()
-                if any(needle in data for needle in needles):
-                    rel = path.relative_to(root).as_posix()
-                    hits.append(rel if root == home else f"{root.name}/{rel}")
+    for path in sorted(home.rglob("*")):
+        if path.is_file() and not path.is_symlink():
+            data = path.read_bytes()
+            if any(needle in data for needle in needles):
+                hits.append(path.relative_to(home).as_posix())
     return hits

@@ -15,9 +15,7 @@ from typing import Any
 from install.constants import CLAUDE_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.record import Record
-from install.steps_legacy import check_old_store
 from install.transforms import (
-    drop_legacy,
     drop_trust,
     edit_settings,
     enable,
@@ -103,9 +101,6 @@ def _check_upgradable(ctx: Ctx) -> None:
     Raises:
         StepFailedError: If the data dir, plist or current release is gone.
     """
-    if ctx.legacy:
-        check_old_store(ctx)
-        return
     if not (ctx.data.is_dir() and ctx.plist.exists()):
         raise StepFailedError("nothing to upgrade: no data dir or plist")
     if not (ctx.lib / "current").is_symlink():
@@ -124,8 +119,6 @@ def _check_installable(ctx: Ctx) -> None:
     # Guards a mistaken invocation; the documented one is python3.13.
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         raise StepFailedError("the installer needs Python 3.13+")
-    if ctx.has_old_install():
-        raise StepFailedError("a pre-rename install exists: run --upgrade")
     for path in (ctx.data, ctx.plist):
         if _exists(path):
             raise StepFailedError(f"{path} exists: already installed")
@@ -175,7 +168,7 @@ def _dry_apply(
     if ctx.config.exists():
         text = ctx.config.read_text()
         hooks = codex_hooks(files[CODEX_HOOKS_FILE])
-        text = drop_trust(drop_legacy(text) if ctx.legacy else text)
+        text = drop_trust(text)
         text = enable(repoint(text, f"{ctx.lib}/current/integrations/codex"))
         write_trust(text, hooks)
 
@@ -202,14 +195,12 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     files, fragment = _check_repo(ctx, repo, sha)
     _check_machine(ctx)
     # An upgrade re-pins only; provider config was set up by the fresh run.
-    # Migrating a pre-rename install is the exception: its entries must move.
-    touch = ctx.legacy or not ctx.upgrade
+    touch = not ctx.upgrade
     if touch:
         _dry_apply(ctx, files, fragment)
     return {
         "fresh": ctx.fresh,
         "upgrade": ctx.upgrade,
-        "legacy": ctx.legacy,
         "has_claude": touch and ctx.settings.exists(),
         "has_codex": touch and ctx.config.exists(),
         "schema": 1,

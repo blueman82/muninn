@@ -19,11 +19,6 @@ from typing import Any, Protocol, TypedDict
 from install.constants import (
     LABEL,
     MKT_NAME,
-    OLD_CLI_NAME,
-    OLD_LABEL,
-    OLD_MKT_NAME,
-    OLD_NAME,
-    OLD_PLIST,
     PLIST,
 )
 
@@ -106,13 +101,6 @@ class Ctx:
         config: Codex's config.toml.
         cache: Codex's plugin cache for our plugin.
         target: The launchd service target.
-        legacy: An upgrade that must first migrate a pre-rename install.
-        old_data: The pre-rename data directory.
-        old_lib: The pre-rename release directory.
-        old_cli: The pre-rename command link.
-        old_plist: The pre-rename launchd plist.
-        old_cache: The pre-rename Codex marketplace cache.
-        old_target: The pre-rename launchd service target.
     """
 
     home: Path
@@ -137,13 +125,6 @@ class Ctx:
     config: Path = dataclasses.field(init=False, repr=False, compare=False)
     cache: Path = dataclasses.field(init=False, repr=False, compare=False)
     target: str = dataclasses.field(init=False, repr=False, compare=False)
-    legacy: bool = dataclasses.field(init=False, repr=False, compare=False)
-    old_data: Path = dataclasses.field(init=False, repr=False, compare=False)
-    old_lib: Path = dataclasses.field(init=False, repr=False, compare=False)
-    old_cli: Path = dataclasses.field(init=False, repr=False, compare=False)
-    old_plist: Path = dataclasses.field(init=False, repr=False, compare=False)
-    old_cache: Path = dataclasses.field(init=False, repr=False, compare=False)
-    old_target: str = dataclasses.field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Derive every path from ``home`` and ``ts`` once."""
@@ -159,19 +140,6 @@ class Ctx:
         self.config = h / ".codex/config.toml"
         self.cache = h / ".codex/plugins/cache" / MKT_NAME / "muninn"
         self.target = f"gui/{self.uid}/{LABEL}"
-        self.old_data = share / OLD_NAME
-        self.old_lib = h / ".local/lib" / OLD_NAME
-        self.old_cli = h / ".local/bin" / OLD_CLI_NAME
-        self.old_plist = h / OLD_PLIST
-        self.old_cache = h / ".codex/plugins/cache" / OLD_MKT_NAME
-        self.old_target = f"gui/{self.uid}/{OLD_LABEL}"
-        self.legacy = self.upgrade and self.has_old_install()
-
-    def has_old_install(self) -> bool:
-        """Say whether a pre-rename data dir or release is on this HOME."""
-        return (
-            self.old_data.is_dir() or (self.old_lib / "current").is_symlink()
-        )
 
 
 def install_log(
@@ -275,7 +243,7 @@ def job(ctx: Ctx, target: str | None = None) -> Job | None:
 
     Args:
         ctx: The run context.
-        target: The service target; the pre-rename one when migrating.
+        target: The service target.
 
     Returns:
         None when the label is not loaded, otherwise its pid and command.

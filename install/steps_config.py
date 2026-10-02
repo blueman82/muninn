@@ -19,7 +19,6 @@ from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
     codex_check,
-    drop_legacy,
     drop_trust,
     edit_settings,
     enable,
@@ -48,7 +47,7 @@ def record(ctx: Ctx, rec: Record) -> None:
     }
     plan = (
         "would not touch Claude or Codex settings"
-        if ctx.upgrade and not ctx.legacy
+        if ctx.upgrade
         else "would note the current links and the Claude and Codex "
         "settings entries this install changes, so a failure can be undone"
     )
@@ -70,15 +69,7 @@ def claude(ctx: Ctx, rec: Record) -> None:
         ctx.say(f"{ctx.settings} not found: Claude Code left unconfigured")
         return
     added = "add the muninn SessionStart and UserPromptSubmit hooks to"
-    if dry(
-        ctx,
-        (
-            f"would remove the old pctx hook entries from {ctx.settings} and "
-            f"{added} it"
-            if ctx.legacy
-            else f"would {added} {ctx.settings}"
-        ),
-    ):
+    if dry(ctx, f"would {added} {ctx.settings}"):
         return
     frag = ctx.lib / "current/integrations/claude/settings-hooks.json"
     fragment = json.loads(frag.read_bytes())["hooks"]
@@ -143,20 +134,12 @@ def codex(ctx: Ctx, rec: Record) -> None:
     if not rec["has_codex"]:
         ctx.say(f"{ctx.config} not found: Codex left unconfigured")
         return
-    gone = (
-        "remove the old provenance-context marketplace, plugin and hook "
-        "trust entries, then "
-        if ctx.legacy
-        else ""
-    )
     if dry(
         ctx,
-        f"would {gone}add the muninn Codex plugin, enable it and trust its "
+        f"would add the muninn Codex plugin, enable it and trust its "
         f"hooks in {ctx.config}",
     ):
         return
-    if ctx.legacy:
-        _edit_config(ctx, drop_legacy)
     _edit_config(ctx, drop_trust)
     _edit_config(ctx, lambda text: repoint(text, source))
     pinned = _add_plugin(ctx, rec)

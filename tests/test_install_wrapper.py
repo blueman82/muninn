@@ -59,13 +59,6 @@ class WrapperTest(unittest.TestCase):
         (self.lib / "current").symlink_to(sha)
         self.data.mkdir(parents=True)
 
-    def installed_old(self) -> None:
-        """Make the temp HOME look like a machine on the pre-rename names."""
-        old = self.home / ".local/lib/provenance-context"
-        (old / ("b" * 40)).mkdir(parents=True)
-        (old / "current").symlink_to("b" * 40)
-        (self.home / ".local/share/provenance-context").mkdir(parents=True)
-
     def argv(self) -> str:
         """Return what the stub Python was run with, or empty if never."""
         return self.log.read_text() if self.log.exists() else ""
@@ -123,20 +116,6 @@ class WrapperTest(unittest.TestCase):
         self.assertIn("--dry-run", self.argv())
         self.assertIn("Upgrade: aaaaaaa", r.stdout)
         self.assertTrue(r.stdout.endswith("OK to run: bin/muninn-install\n"))
-
-    def test_an_old_name_install_is_upgraded_and_the_preview_says_so(
-        self,
-    ) -> None:
-        self.installed_old()
-        r = self.run_wrapper("--check")
-        self.assertIn("--upgrade --dry-run", self.argv())
-        self.assertIn("Upgrade: bbbbbbb", r.stdout)
-        self.assertIn("still runs the old pctx names", r.stdout)
-        s = self.run_wrapper("--status")
-        self.assertIn("old pctx names, will move to muninn", s.stdout)
-        self.run_wrapper()
-        self.assertIn("--upgrade", self.argv().splitlines()[-1])
-        self.assertNotIn("--fresh", self.argv())
 
     def test_check_writes_nothing_to_the_home(self) -> None:
         self.run_wrapper("--check")

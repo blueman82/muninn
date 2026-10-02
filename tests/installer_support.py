@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -23,7 +22,6 @@ from install import configedit as ce
 from install import installer as co
 from install.context import Ctx
 
-OLD_LABEL = "com.provenance-context"
 ROOT = Path(__file__).resolve().parent.parent
 CRED = "sk-fake-" + "feedface" * 5
 PINNED = (
@@ -176,9 +174,8 @@ class Fake:
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
         """Model print, kickstart, bootout and bootstrap."""
-        kind = "old" if args[-1].endswith(OLD_LABEL) else "new"
         if args[0] == "print":
-            if self.loaded == kind:
+            if self.loaded:
                 return done(b"\tpid = %d\n" % self.pid)
             return done(rc=113)
         if args[0] == "kickstart":
@@ -186,15 +183,11 @@ class Fake:
             if self.heartbeat:
                 self._heartbeat()
         elif args[0] == "bootout":
-            if self.loaded == kind:
+            if self.loaded:
                 self.loaded = None
         elif args[0] == "bootstrap":
-            prog = plistlib.loads(Path(args[2]).read_bytes())[
-                "ProgramArguments"
-            ]
-            new = "/.local/lib/muninn/" in prog[0]
-            self.loaded, self.pid = ("new" if new else "old"), self.pid + 1
-            if new and self.heartbeat:
+            self.loaded, self.pid = "new", self.pid + 1
+            if self.heartbeat:
                 self._heartbeat()
         return done()
 
@@ -202,8 +195,7 @@ class Fake:
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
         """Report the pinned release as the running command line."""
-        name = "provenance-context" if self.loaded == "old" else "muninn"
-        lib = self.home / ".local/lib" / name
+        lib = self.home / ".local/lib/muninn"
         cmd = f"python3.13 -c x {lib}/0123abc serve" if self.loaded else ""
         return done(cmd.encode())
 

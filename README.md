@@ -6,8 +6,7 @@
 It gives both one shared memory of past sessions plus a small ledger of cited
 knowledge: a Python 3.13 standard-library CLI (`muninn`) over one SQLite file,
 kept current by a launchd poller. Everything it returns is untrusted historical
-data, never instructions. MIT licensed (`LICENSE`). Formerly pctx /
-provenance-context.
+data, never instructions. MIT licensed (`LICENSE`).
 
 ## Install, upgrade, rollback
 

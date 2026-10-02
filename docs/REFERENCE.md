@@ -19,8 +19,6 @@ provider root name to path (tests); `MUNINN_PYTHON` interpreter for `bin/muninn`
 `MUNINN_NO_CALLLOG=1` no `calls.jsonl` line; `MUNINN_HOOK_DISABLE=1` hooks print `{}`; `CLAUDE_CODE_SESSION_ID`,
 `CODEX_SESSION_ID`, `CODEX_THREAD_ID` identify the calling session, which search leaves out unless told not to.
 
-Old `PCTX_*` variables are ignored; the CLI (not hooks) prints one stderr line naming the `MUNINN_*` replacement.
-
 ## Reading memory
 
 | Command | What it does | Main fields in the answer |
