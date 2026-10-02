@@ -42,6 +42,10 @@ The installer refuses a commit that breaks the stdlib standards rules.
   memory file `project_memsys_pctx_rebuild.md`).
 - `--fresh` has only been rehearsed in a temp HOME, never on a second machine.
 - Deferred by the owner: a hash-chained call log.
+- `.claude/skills/pctx-*` (11 skills, `docs/SKILLS.md`) are committed. Not
+  done: the installer does not ship them to other machines, there is no Codex
+  equivalent, and nobody has checked in a fresh session that they trigger.
+  Decision: the hook frame text stays unchanged and does not name them.
 - `query.search` takes its options as `**args` with a hand-written keyword
   check rather than a real keyword-only signature (the signature would exceed
   the argument-count limit); the TypeError text differs slightly from Python's.

@@ -17,6 +17,9 @@ Instructions for coding agents working in this repo. Any parent-directory
   `transforms.py`, `trust.py`, `rollback.py`, `configedit.py`, `tomledit.py`.
 - `tools/`: the standards gate (`python3.13 -m tools.check`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
+- `.claude/skills/pctx-*`: one Claude Code skill per user-facing command.
+  When a command, flag or answer field changes, update the matching skill and
+  `docs/REFERENCE.md` together.
 - `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 
 ## Rules

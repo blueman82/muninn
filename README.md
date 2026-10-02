@@ -55,6 +55,8 @@ session environment variables.
   health checks. `pctx compact` vacuums the database. `--pretty` (or `PCTX_PRETTY=1`) indents any JSON.
 - `pctx ingest`, `pctx serve`, `pctx hook ...`: catch-up ingest, the poller
   loop, and the provider hooks below.
+- Claude Code skills for these commands live in `.claude/skills/`
+  (`docs/SKILLS.md`).
 
 Data lives in `$PCTX_HOME` (default `~/.local/share/provenance-context`).
 `PCTX_ROOTS` overrides the provider source roots for tests and evals, and
