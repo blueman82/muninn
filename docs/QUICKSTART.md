@@ -43,8 +43,8 @@ commit and run `bin/pctx-install` to go back).
 ## Per-prompt recall starts off
 
 A `--fresh` install creates `~/.local/share/provenance-context/recall.off`, so pctx does not add earlier prompts to each of
-your prompts. Session-start memory and `pctx search` still work. A pre-release trial answered for the wrong project in some
-test questions, so recall waits for a re-check (`docs/adr/0007-recall-off-by-default.md`).
+your prompts. Session-start memory and `pctx search` still work. Recall pushes text nobody asked for and its
+relevance has not been re-checked, so it waits for that check (`docs/adr/0007-recall-off-by-default.md`).
 
 To turn recall on: `unlink ~/.local/share/provenance-context/recall.off`. To turn it off again:
 `install -m 600 /dev/null ~/.local/share/provenance-context/recall.off`. Details in `docs/REFERENCE.md`. An `--upgrade` never

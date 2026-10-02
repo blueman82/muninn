@@ -122,16 +122,17 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 **Function.** Before each prompt, the UserPromptSubmit hook (`pctx hook prompt`) can add a short block of up to 1,500
 characters: matching knowledge entries first, then up to 3 earlier prompts or replies from this repo. If a file named
 `recall.off` exists in the data directory, that hook prints `{}` and never opens the database, so no recall is added.
-SessionStart (`pctx hook session-start`) is not affected; `PCTX_HOOK_DISABLE=1` silences both hooks.
+SessionStart (`pctx hook session-start`) is not affected; `PCTX_HOOK_DISABLE=1` silences both hooks. Its block opens with
+a usage line, identical for Claude Code and Codex, that tells an agent how to search, open a hit and record an owner
+decision with `pctx know add --kind decision --text … --cite REF --quote "<verbatim>"`.
 
 **Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints how to turn recall on. `--upgrade`
 never creates or removes it, so an existing machine keeps whatever it had: a machine installed before this default has no
 file and stays on.
 
-**Why off.** A pre-release trial found the new system answering for the wrong project in 12 of its deliberate wrong-project
-questions (per the trial report; the overall difference was not statistically meaningful). Recall is the one memory pctx
-pushes without being asked, so it waits for the retrieval re-check. Full reasoning and the sources to open with
-`pctx open` are in `docs/adr/0007-recall-off-by-default.md`.
+**Why off.** Recall is the one memory pctx pushes without being asked, and a block about the wrong project costs the most
+there. Its relevance has not been re-checked, so a new install starts with it off until the retrieval re-check passes.
+Full reasoning is in `docs/adr/0007-recall-off-by-default.md`.
 
 | To | Run |
 |---|---|

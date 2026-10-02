@@ -22,8 +22,10 @@ OPEN = '<pctx-memory source="pctx" trust="untrusted-data"'
 CLOSE = "</pctx-memory>"
 USAGE = (
     "Before answering about earlier work or re-deciding a recorded choice, run"
-    ' `pctx search "<words>"` and open what you cite; record durable owner'
-    " decisions with `pctx know add … --quote`."
+    ' `pctx search "<words>"` and open what you cite. Record an owner decision'
+    " only if the owner said it: `pctx know add --kind decision --text …"
+    ' --cite REF --quote "<verbatim>"` (REF from `pctx search`; check the'
+    " quote with `pctx quote-check`; see `pctx know add --help`)."
 )
 OPEN_HINT = (
     "Open a hit with `pctx open <ref> --context 3`;"
