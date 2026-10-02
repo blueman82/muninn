@@ -112,7 +112,6 @@ class AdversarialInputTests(unittest.TestCase):
     )
 
     def test_regexes_stay_fast_on_pathological_text(self) -> None:
-
         for text in self.CASES:
             with self.subTest(text=text[:12]):
                 start = time.perf_counter()

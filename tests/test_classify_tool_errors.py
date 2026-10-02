@@ -172,8 +172,7 @@ class ToolErrorLinkTests(unittest.TestCase):
         """Pin that errors from reading transcripts or pctx output vanish.
 
         Re-ingesting such output would feed the store its own text back, so
-        the error must not be stored.  The method is bound to its test name
-        below because that name does not fit on one line.
+        the error must not be stored.
         """
         fail = PROC.format(1) + "Output:\nTraceback (most recent call last):"
         calls = (
@@ -229,6 +228,7 @@ class ToolErrorLinkTests(unittest.TestCase):
         ]
         self.assertEqual(run_claude(no_state, state=False)[1:], [])
 
+    # Keeps the established test id, which is too long for a def line.
     test_tool_error_skipped_for_pctx_call_transcript_read_or_nested_markers = (
         _skips_pctx_transcript_reads_and_nested_markers
     )

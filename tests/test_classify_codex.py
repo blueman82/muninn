@@ -50,7 +50,7 @@ class CodexMessageTests(unittest.TestCase):
         self.assertEqual((state.thread_class, state.cwd), ("primary", CWD))
 
     def test_records_below_replay_ordinal_dropped(self) -> None:
-        # A primary-labelled thread that carries K still skips its replay.
+        # A primary-labelled thread that carries a replay start ordinal still skips its replay.
         meta = codex_meta("user", "thr-k", subagent_history_start_ordinal=3)
         records = [
             meta,
@@ -65,8 +65,7 @@ class CodexMessageTests(unittest.TestCase):
         """Pin that a subagent never emits the parent history it replays.
 
         The replayed prefix includes records without an ordinal, which are
-        placed by line position; the method is bound to its test name below
-        because that name is not a lowercase identifier.
+        placed by line position.
         """
         records = [
             subagent_meta(k=4),
@@ -78,10 +77,10 @@ class CodexMessageTests(unittest.TestCase):
         ]
         no_ordinal = user_msg(0, "replayed, no ordinal")
         del no_ordinal["ordinal"]
-        records.insert(3, no_ordinal)  # line 4: position 3 < K
+        records.insert(3, no_ordinal)  # line 4: position 3 is before the replay start
         late = reply(0, "late, no ordinal")
         del late["ordinal"]
-        records.append(late)  # line 8: position 7 >= K, seq = line
+        records.append(late)  # line 8: position 7 is past the replay start, seq = line
         events, state = run_codex(records)
         self.assertEqual(
             events,
@@ -93,11 +92,11 @@ class CodexMessageTests(unittest.TestCase):
         )
         self.assertEqual(state.cwd, CWD)  # replayed turn_context ignored
 
-    # Assigned through the class namespace: the test name has a capital K,
-    # which the naming rules reject as a plain class attribute.
-    locals()[
-        "test_subagent_records_below_K_never_emitted"
-    ] = _drops_records_below_replay_start
+    # Keeps the established test id, whose capital K the lint naming rule
+    # rejects in a def statement.
+    locals()["test_subagent_records_below_K_never_emitted"] = (
+        _drops_records_below_replay_start
+    )
 
     def test_history_base_fork_keeps_all(self) -> None:
         meta = codex_meta(

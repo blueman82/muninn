@@ -98,7 +98,7 @@ def subagent_meta(
 
     Args:
         tid: Thread id.
-        k: First own ordinal; None builds a thread with no replay marker.
+        k: First own ordinal (subagent_history_start_ordinal); None builds a thread with no replay marker.
         **extra: Payload keys to add or override.
 
     Returns:
