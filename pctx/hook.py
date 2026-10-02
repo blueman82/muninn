@@ -327,12 +327,36 @@ def _respond(
     text = _build_text(build, data, env, trace)
     if not text:
         return {}
-    return {
+    out: dict[str, object] = {
         "hookSpecificOutput": {
             "hookEventName": event,
             "additionalContext": text,
         }
     }
+    line = _status_line(event, trace)
+    if line:
+        out["systemMessage"] = line
+    return out
+
+
+def _status_line(event: str, trace: Mapping[str, object]) -> str:
+    """The one line both providers show the human, apart from the model block.
+
+    Counts and ids only (ADR 0004): never stored text. Recall stays silent
+    because it runs on every prompt.
+
+    Returns:
+        The line, or an empty string when there is nothing to show.
+    """
+    if "error" in trace:
+        return f"pctx: memory unavailable ({trace['error']})"
+    if event != "SessionStart":
+        return ""
+    ids = cast("list[int]", trace.get("knowledge_ids", []))
+    if not ids:
+        return "pctx: memory loaded (no knowledge entries yet)"
+    shown = ", ".join(f"K{i}" for i in ids)
+    return f"pctx: memory loaded ({len(ids)} knowledge entries: {shown})"
 
 
 def _limits(provider: str) -> tuple[int, int]:

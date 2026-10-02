@@ -38,9 +38,7 @@ LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "pctx"
 HOOKS_JSON = LAUNCHER.parent.parent / "integrations/codex/hooks/hooks.json"
 
 
-def notice(
-    code: str, event: str = "SessionStart"
-) -> dict[str, dict[str, str]]:
+def notice(code: str, event: str = "SessionStart") -> dict[str, object]:
     """Build the fail-open notice a hook answers when it cannot read.
 
     Args:
@@ -57,7 +55,8 @@ def notice(
                 '<pctx-memory source="pctx" trust="untrusted-data"'
                 f' kind="notice">\npctx: store unavailable ({code})\n' + CLOSE
             ),
-        }
+        },
+        "systemMessage": f"pctx: memory unavailable ({code})",
     }
 
 

@@ -40,7 +40,14 @@ class SessionStartTests(HookCase):
         for provider in ("claude", "codex"):
             with self.subTest(provider):
                 out = self.start(provider)
-                self.assertEqual(list(out), ["hookSpecificOutput"])
+                self.assertEqual(
+                    list(out), ["hookSpecificOutput", "systemMessage"]
+                )
+                # What the human sees: a count and ids, never entry text.
+                self.assertEqual(
+                    out["systemMessage"],
+                    f"pctx: memory loaded (1 knowledge entries: K{first})",
+                )
                 block = hook_output(out)
                 self.assertEqual(
                     set(block), {"hookEventName", "additionalContext"}
@@ -205,9 +212,7 @@ class FailOpenTests(HookCase):
         corrupt = {"PCTX_HOME": str(bad)}
         self.assertEqual(self.start(env=corrupt), notice("store_unavailable"))
         for text in (notice("store_unavailable"),):
-            self.assertLess(
-                len(text["hookSpecificOutput"]["additionalContext"]), 200
-            )
+            self.assertLess(len(hook_output(text)["additionalContext"]), 200)
         with (
             mock.patch.object(
                 store, "connect_ro", side_effect=store.HotJournalError("hot")

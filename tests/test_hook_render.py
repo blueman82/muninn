@@ -172,7 +172,7 @@ class RenderTests(HookCase):
         self.assertIsNone(hook._first_record(str(huge)))  # over the cap
         self.assertEqual(
             self.start("codex", transcript_path=str(huge)).keys(),
-            {"hookSpecificOutput"},
+            {"hookSpecificOutput", "systemMessage"},
         )
         small = self.tmp / "small.jsonl"
         small.write_text(json.dumps(tc.subagent_meta("thr-s")) + "\n")
