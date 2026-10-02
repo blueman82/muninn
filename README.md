@@ -47,7 +47,9 @@ Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
 ## What it never stores
 
 - Codex `developer` records and Claude `attachment` records (where hook
-  contexts land), reasoning, and tool outputs other than the bounded
+  contexts land; the one exception is your own messages typed while Claude
+  works, stored as prompts in the main thread), reasoning, and tool outputs
+  other than the bounded
   `tool_error` summaries.
 - Guardian and reviewer threads, and history replayed inside forks.
 - Provider transcripts are only read, never modified.

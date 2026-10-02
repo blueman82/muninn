@@ -36,7 +36,12 @@ run `/hooks` if the installer prints `OWNER STEP`.
     bin/muninn-install
 
 It re-pins the commit, restarts the poller, verifies, then deletes every other
-release. Provider config is not touched. A failed upgrade returns to the old
+release. Provider config is not touched. When a release changes how transcripts
+are classified (`stats` shows `classifier_version`), the poller re-reads every
+transcript once after the upgrade, Claude and Codex alike, one source at a
+time; on a large store that takes a while and then ends. It holds the writer lock
+longer, so other writers see exit 3 meanwhile, and it can leave free pages:
+if `doctor` then warns `db_free_space`, run `muninn compact`. A failed upgrade returns to the old
 release; after a successful one the old release is gone (check out an earlier
 commit and run `bin/muninn-install` to go back).
 

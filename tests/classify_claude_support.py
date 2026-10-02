@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from muninn import classify as c
+from muninn.claude_events import OWNER_ORIGIN_KIND, QUEUED_COMMAND_TYPE
 from muninn.event_model import Record
 from tests.classify_support import CWD, TS
 
@@ -142,3 +143,40 @@ def run_claude(records: list[Record], state: bool = True) -> list[c.EventRec]:
     for line, record in enumerate(records, start=1):
         events += c.claude_events(record, line, parse_state)
     return events
+
+
+def queued_attachment(
+    prompt: object,
+    *,
+    origin: str | None = OWNER_ORIGIN_KIND,
+    sidechain: bool = False,
+    in_attachment: Record | None = None,
+    **extra: Any,
+) -> Record:
+    """Build the attachment record Claude Code writes for queued input.
+
+    Args:
+        prompt: Queued text, a string or a list of content blocks.
+        origin: The ``origin.kind``; ``None`` leaves the origin out.
+        sidechain: Mark the record as a subagent sidechain record.
+        in_attachment: Keys to add inside the attachment itself.
+        **extra: Top-level keys to add or override.
+
+    Returns:
+        The record.
+    """
+    attachment: Record = {
+        "type": QUEUED_COMMAND_TYPE,
+        "prompt": prompt,
+        "commandMode": "prompt",
+    } | (in_attachment or {})
+    if origin is not None:
+        attachment["origin"] = {"kind": origin}
+    return {
+        "type": "attachment",
+        "attachment": attachment,
+        "isSidechain": sidechain,
+        "uuid": "u1",
+        "timestamp": TS,
+        "sessionId": SESSION,
+    } | extra

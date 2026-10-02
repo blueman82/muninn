@@ -24,6 +24,18 @@ from muninn.event_model import (
 )
 from muninn.tool_errors import register_call, tool_error
 
+# Input the owner types while Claude works is stored as an attachment of this
+# type; only the "human" origin is the owner, the rest are system notices,
+# other sessions or coordinators.
+QUEUED_COMMAND_TYPE = "queued_command"
+OWNER_ORIGIN_KIND = "human"
+# A person in a chat channel can also carry the "human" origin; that is not
+# the owner typing into this session.
+CHANNEL_HUMAN_FLAG = "verifiedSlackHumanTurn"
+# Set by the harness on text it injected; user records carry it on the record,
+# queued input on the attachment.
+META_FLAG = "isMeta"
+
 # A Claude user text starting with one of these was written by the harness,
 # not typed by the person.
 CLAUDE_HARNESS_PREFIXES = (
@@ -147,7 +159,7 @@ def _user_events(
     if not text.strip():
         return []
     tag = starting_tag(text, CLAUDE_HARNESS_PREFIXES)
-    for flag in ("isCompactSummary", "isMeta"):
+    for flag in ("isCompactSummary", META_FLAG):
         if tag is None and record.get(flag) is True:
             tag = flag
     thread_class = (
@@ -155,6 +167,35 @@ def _user_events(
     )
     kind = user_kind(tag, thread_class)
     return [make_event(origin, "user", Draft(kind, tag, text))]
+
+
+def _queued_events(record: Record, origin: Origin) -> list[EventRec]:
+    """Events for an attachment: only the owner's mid-turn typed prompt.
+
+    Task notices, peer sessions and coordinators also arrive as queued
+    commands but are not the owner speaking, so they stay unindexed.
+
+    Args:
+        record: The attachment record.
+        origin: Position and timestamp of the record.
+
+    Returns:
+        One user event (normally a prompt) for the owner's input, otherwise
+        nothing.
+    """
+    att = as_record(record.get("attachment"))
+    if att is None or att.get("type") != QUEUED_COMMAND_TYPE:
+        return []
+    source = as_record(att.get("origin"))
+    if source is None or source.get("kind") != OWNER_ORIGIN_KIND:
+        return []
+    if att.get(CHANNEL_HUMAN_FLAG) is True:
+        return []
+    # The meta flag sits on the attachment here, not on the record, so lift
+    # it to where ordinary user records carry it.
+    meta = {META_FLAG: True} if att.get(META_FLAG) is True else {}
+    lifted = record | meta
+    return _user_events(lifted, att.get("prompt"), origin)
 
 
 def claude_events(
@@ -172,11 +213,13 @@ def claude_events(
         Zero or more events; empty for records that carry no stored text.
     """
     rtype, message = record.get("type"), as_record(record.get("message"))
+    origin = Origin(line, line, non_empty_str(record.get("timestamp")))
+    if rtype == "attachment":
+        return _queued_events(record, origin)
     if rtype not in ("user", "assistant") or message is None:
-        return []  # attachments (hook output), system, summary, titles ...
+        return []  # system, summary, titles, queue-operation ...
     if message.get("role") not in (rtype, None):
         return []
-    origin = Origin(line, line, non_empty_str(record.get("timestamp")))
     content = message.get("content")
     blocks = as_list(content) or []
     if rtype == "assistant":
