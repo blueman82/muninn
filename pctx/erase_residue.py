@@ -72,7 +72,7 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
     session; such a needle is not residue.
 
     Args:
-        conn: Read connection.
+        conn: Connection that reads main and can write TEMP objects.
         needle: Bytes to look for.
 
     Returns:
@@ -123,7 +123,7 @@ def _rare_in(conn: sqlite3.Connection, table: str, ids: list[int]) -> set[str]:
     and all of them are among ``ids``.
 
     Args:
-        conn: Read connection.
+        conn: Connection that reads main and can write TEMP objects.
         table: FTS table name.
         ids: Document ids that are being erased.
 
@@ -164,7 +164,8 @@ def rare_terms(
     residue themselves.
 
     Args:
-        conn: Read-write connection, before the erase runs.
+        conn: Connection used before the erase runs. Main is only read;
+            TEMP tables are created and filled.
         event_ids: Event rows about to be deleted.
         knowledge_ids: Knowledge rows about to be scrubbed.
 
