@@ -14,7 +14,7 @@ from pathlib import Path
 
 from install import configedit as ce
 from install.constants import CODEX_VERIFIED, OWNER_STEP, PLUGIN_ID
-from install.context import Ctx, StepFailedError, dry, must
+from install.context import Ctx, StepFailedError, dry, link_text, must
 from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
@@ -43,7 +43,7 @@ def record(ctx: Ctx, rec: Record) -> None:
     )
     links = (ctx.lib / "current", ctx.lib / "python", ctx.pctx)
     rec["links"] = {
-        str(p): str(p.readlink()) if p.is_symlink() else None for p in links
+        str(p): link_text(p) if p.is_symlink() else None for p in links
     }
     keys = [".".join(e["path"]) for e in rec["claude"]["settings"]]
     keys += [e["header"] for e in rec["codex"]]
@@ -102,13 +102,15 @@ def _add_plugin(ctx: Ctx, rec: Record) -> bytes:
     out = json.loads(must(ctx, argv, env=env, quiet=True).stdout)
     # Codex rewrites config.toml itself; it may only have touched our keys.
     codex_check(before, ctx.config.read_bytes())
+    # Read before the location check: if the pinned file is missing, that
+    # failure must surface ahead of the "unexpected place" one.
+    pinned = (ctx.lib / CODEX_HOOKS_PIN).read_bytes()
     rec["codex_plugin_version"] = out["version"]
     installed = Path(out["installedPath"]).resolve()
     if installed != (ctx.cache / out["version"]).resolve():
         raise StepFailedError(
             "codex installed the plugin somewhere unexpected"
         )
-    pinned = (ctx.lib / CODEX_HOOKS_PIN).read_bytes()
     if (installed / "hooks/hooks.json").read_bytes() != pinned:
         raise StepFailedError(
             "codex cache hooks.json differs from the pinned copy"

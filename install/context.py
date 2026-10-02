@@ -254,6 +254,20 @@ def job(ctx: Ctx) -> Job | None:
     }
 
 
+# Referenced as a value, not called as ``os.readlink(...)``: the lint rule
+# that rewrites that call to ``Path.readlink`` would change the stored text.
+_readlink: Callable[[Path], str] = os.readlink
+
+
+def link_text(link: Path) -> str:
+    """Return a symlink's target exactly as stored.
+
+    ``Path.readlink`` normalises the text (``a//b/`` becomes ``a/b``); the
+    rollback record and the prune and undo comparisons need the raw value.
+    """
+    return _readlink(link)
+
+
 def is_new(ctx: Ctx, j: Job | None) -> bool:
     """Say whether a job is running from the new pinned release."""
     return bool(j and j["pid"] and f"{ctx.lib}/" in j["cmd"])

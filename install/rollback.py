@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install.context import Ctx, Job, job, must, run_real, wait
+from install.context import Ctx, Job, job, link_text, must, run_real, wait
 from install.record import Record, load_record
 from install.steps_release import relink
 from install.transforms import codex_check
@@ -142,7 +142,7 @@ def _undo_links(ctx: Ctx, rec: Record) -> None:
         if target is None and link.is_symlink():
             _act(ctx, f"remove {link}", link.unlink)
         elif target is not None and (
-            not link.is_symlink() or str(link.readlink()) != target
+            not link.is_symlink() or link_text(link) != target
         ):
             _act(
                 ctx,

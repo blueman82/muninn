@@ -103,9 +103,8 @@ def _check_installable(ctx: Ctx) -> None:
     Raises:
         StepFailedError: If Python is too old or pctx data or a plist exist.
     """
-    # Kept despite the 3.13 lint target: the installer can be started by
-    # whatever python3 is first on PATH. The attributes
-    # form avoids the linter's "outdated version block" rule.
+    # Needed even though the project targets 3.13: the installer can be
+    # started by whatever python3 is first on PATH, which may be older.
     if (sys.version_info.major, sys.version_info.minor) < (3, 13):
         raise StepFailedError("the installer needs Python 3.13+")
     for path in (ctx.data, ctx.plist):
@@ -140,8 +139,8 @@ def _dry_apply(
 ) -> None:
     """Run every config transform on the real files and discard the result.
 
-    Any refusal (a layout we do not recognise, a stray marker) surfaces now,
-    before the first change.
+    Any refusal (``configedit.RefusedError`` for a layout we do not
+    recognise or a stray marker) surfaces now, before the first change.
 
     Args:
         ctx: The run context.
@@ -160,6 +159,9 @@ def _dry_apply(
 
 def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     """Check everything and dry-apply every config edit; change nothing.
+
+    A config file the edits cannot handle raises
+    ``configedit.RefusedError``, which ``main`` reports as a refusal.
 
     Args:
         ctx: The run context.

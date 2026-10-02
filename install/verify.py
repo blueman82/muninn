@@ -73,6 +73,18 @@ def _expected_hash(want: Mapping[str, TrustedHook], key: str) -> str | None:
     return want[key]["hash"] if key in want else None
 
 
+def _no_probe(ctx: Ctx) -> list[dict[str, Any]]:
+    """Fail like calling a missing probe, so it counts as "no answer".
+
+    Args:
+        ctx: The run context; unused.
+
+    Raises:
+        TypeError: Always.
+    """
+    raise TypeError(f"no probe configured for {ctx.target}")
+
+
 def codex_checks(ctx: Ctx, rec: Record, check: Check) -> None:
     """Ask Codex which hooks it resolves and record the outcome.
 
@@ -85,9 +97,7 @@ def codex_checks(ctx: Ctx, rec: Record, check: Check) -> None:
             ``owner``.
         check: Records one named check.
     """
-    probe = ctx.probe
-    if probe is None:
-        return
+    probe = ctx.probe or _no_probe
     hooks = ctx.lib / "current/integrations/codex/hooks/hooks.json"
     key = f"{PLUGIN_ID}:hooks/hooks.json:"
     want = {key + h["suffix"]: h for h in codex_hooks(hooks.read_bytes())}

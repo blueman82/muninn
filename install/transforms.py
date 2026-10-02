@@ -76,6 +76,9 @@ def codex_check(before: bytes, after: bytes) -> None:
     Args:
         before: The file bytes before the edit.
         after: The file bytes after the edit.
+
+    A refusal (``configedit.RefusedError``) propagates when the edit touched
+    anything else or left a stray marker or unrecognised layout.
     """
     ce.toml_check(before.decode(), after.decode(), CODEX_KEYS, MARKERS)
     codex_scan(after.decode())
@@ -91,7 +94,8 @@ def set_line(text: str, header: str, key: str, value: str) -> str:
         value: TOML literal to store.
 
     Returns:
-        The edited text.
+        The edited text; a refusal (``configedit.RefusedError``) propagates
+        for a stray marker or unrecognised layout.
     """
     codex_scan(text)
     raw, line = ce.get_section(text, header), f"{key} = {value}\n"
@@ -108,7 +112,16 @@ def set_line(text: str, header: str, key: str, value: str) -> str:
 
 
 def drop_trust(text: str) -> str:
-    """Remove every hook trust section we manage."""
+    """Remove every hook trust section we manage.
+
+    Args:
+        text: The whole config.toml.
+
+    Returns:
+        The text without our trust sections; a refusal
+        (``configedit.RefusedError``) propagates for a stray marker or
+        unrecognised layout.
+    """
     codex_scan(text)
     for header in TRUST.values():
         text = ce.put_section(text, header, None)

@@ -16,7 +16,16 @@ from pathlib import Path
 
 from install import configedit as ce
 from install.constants import GIT_ENV, HEARTBEAT_S, LABEL
-from install.context import Ctx, StepFailedError, dry, is_new, job, must, wait
+from install.context import (
+    Ctx,
+    StepFailedError,
+    dry,
+    is_new,
+    job,
+    link_text,
+    must,
+    wait,
+)
 from install.record import Record
 
 PLIST_SOURCE = "current/launchd/com.provenance-context.plist"
@@ -64,7 +73,7 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
 
 
 def pin(ctx: Ctx, rec: Record) -> None:
-    """Git archive into lib/<sha>, substitute @HOME@, relink."""
+    """Unpack the pinned commit into lib/<sha>, fill @HOME@, and relink."""
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
     if dry(ctx, f"pin {sha} -> {dest}; current, python, pctx relinked"):
         return
@@ -130,7 +139,7 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
 
 
 def restart(ctx: Ctx, rec: Record) -> None:
-    """Upgrade: kickstart the running job onto the re-pinned release."""
+    """Kickstart the running job so it runs the re-pinned release."""
     if dry(ctx, f"launchctl kickstart -k {ctx.target}"):
         return
     started = ctx.now()
@@ -145,7 +154,7 @@ def prune(ctx: Ctx, rec: Record) -> None:
     Runs last, so a failed install can still roll back to the old release.
     """
     link = ctx.lib / "current"
-    keep = str(link.readlink()) if link.is_symlink() else None
+    keep = link_text(link) if link.is_symlink() else None
     old = [
         p
         for p in sorted(ctx.lib.iterdir() if ctx.lib.is_dir() else [])
@@ -180,7 +189,7 @@ def _check_plist(ctx: Ctx, data: bytes) -> None:
 
 
 def start_new(ctx: Ctx, rec: Record) -> None:
-    """Install the pinned plist, bootstrap, live PID + heartbeat."""
+    """Install the pinned plist, bootstrap, and await PID and heartbeat."""
     src = ctx.lib / PLIST_SOURCE
     if dry(ctx, f"install {src} as {ctx.plist}; launchctl bootstrap"):
         return
