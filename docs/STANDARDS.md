@@ -12,7 +12,16 @@ not work around it. There is no `noqa`, no `# type: ignore` and no exemption lis
 | Everything | `python3.13 -m tools.check --full` | the above plus ruff, black, pyright strict, shellcheck |
 | Set up the tools | `python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt` | pinned versions in `requirements-dev.txt` |
 
-A missing tool fails the gate; it never skips.
+A missing tool fails the gate; it never skips. So does a clone whose git hooks are off.
+
+One-time setup per clone (the first two are checked by the gate and the tests):
+
+    git config core.hooksPath .githooks                  # pre-commit and pre-merge-commit run the gate
+    python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+    cp tools/claude-settings.json .claude/settings.json  # Claude Code: gate after every edit, no stopping on a failure
+
+Layers, each of which catches what the one before it can be made to skip: Claude Code's hooks, the git hooks,
+`tests/test_standards.py`, and the installer (it refuses to pin a commit that breaks a rule).
 
 ## Limits
 
