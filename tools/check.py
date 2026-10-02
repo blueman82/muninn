@@ -2,9 +2,10 @@
 
 Run ``python3.13 -m tools.check`` for the stdlib rules (what the test suite
 runs) and ``python3.13 -m tools.check --full`` for the whole gate: those
-rules plus ruff, black, pyright and shellcheck, and a check that the git
-hooks in ``.githooks`` are switched on. A missing tool or an unswitched hook is
-a failure, never a skip, so a machine without them cannot pass the full gate.
+rules plus ruff, black, pyright and shellcheck, a check that the git hooks in
+``.githooks`` are switched on, and the whole test suite (run in parallel by
+``tools.run_tests``). A missing tool, an unswitched hook or a failing test is a
+failure, never a skip, so a machine without them cannot pass the full gate.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from tools.run_tests import main as run_suite
 from tools.standards import check_repo
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -99,10 +101,10 @@ def hooks_installed() -> bool:
 
 
 def run_tools() -> int:
-    """Run the external gates and report each one.
+    """Run the external gates and the test suite, reporting each one.
 
     Returns:
-        The number of failed or missing tools.
+        The number of failed or missing tools plus one if a test failed.
     """
     failures = 0
     if not hooks_installed():
@@ -117,7 +119,11 @@ def run_tools() -> int:
         done = subprocess.run([exe, *args], cwd=ROOT, check=False)
         print(f"{'ok' if done.returncode == 0 else 'FAIL'} {name}")
         failures += done.returncode != 0
-    return failures
+    # Last: the tests are the slowest step, and a lint failure is the faster
+    # thing to learn about first.
+    suite_failed = run_suite([]) != 0
+    print(f"{'FAIL' if suite_failed else 'ok'} tests")
+    return failures + suite_failed
 
 
 def main(argv: list[str] | None = None) -> int:

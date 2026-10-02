@@ -8,8 +8,8 @@ hints, docstrings in no consistent style, and comments citing internal design la
 
 **Decision.** The rules in `docs/STANDARDS.md` are checked by code, in layers that each fail closed:
 - `tools/standards.py` (stdlib only) checks size, docstrings, comments, imports, annotations and defaults;
-  `python3.13 -m tools.check --full` adds ruff (PEP 8, 257, 484, 563, 585, 604 and complexity), black, pyright strict and
-  shellcheck. A missing tool fails the gate; it never skips.
+  `python3.13 -m tools.check --full` adds ruff (PEP 8, 257, 484, 563, 585, 604 and complexity), black, pyright strict,
+  shellcheck and the whole test suite (in parallel, `tools.run_tests`). A missing tool fails the gate; it never skips.
 - `tests/test_standards.py` runs the checker inside the normal test suite and asserts that the hooks, the pinned tools and
   the limits are still in place.
 - `.githooks/pre-commit` blocks a commit that fails the gate; `.claude/settings.json` makes Claude Code run the gate after

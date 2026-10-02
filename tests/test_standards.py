@@ -54,6 +54,11 @@ class GateCannotBeRemovedTest(unittest.TestCase):
             "run: git config core.hooksPath .githooks",
         )
 
+    def test_the_full_gate_runs_the_test_suite(self) -> None:
+        text = (ROOT / "tools" / "check.py").read_text(encoding="utf-8")
+        self.assertIn("run_tests", text)
+        self.assertIn("run_suite", text)
+
     def test_merge_commits_run_the_gate_too(self) -> None:
         hook = ROOT / ".githooks" / "pre-merge-commit"
         self.assertTrue(os.access(hook, os.X_OK), "hook is not executable")
