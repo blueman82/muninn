@@ -10,9 +10,9 @@ The poller normally does this every 60 s. Run it by hand when you need new conte
     muninn ingest            # catch up
     muninn ingest --full     # rescan everything (slower)
 
-Answer fields: `files_seen`, `files_changed`, `events_added`, `skipped_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s`.
+Answer fields: `files_seen`, `files_changed`, `events_added`, `skipped_files`, `unreadable_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s`.
 
 - Takes the writer lock: exit code 3 means busy (retry), 4 means the store is unavailable or a hot journal exists.
-- Tombstoned (erased) sessions are skipped before any line is read, by design; they count in `skipped_files`.
+- Tombstoned (erased) sessions are skipped before any line is read, by design; they count in `skipped_files`. A file that cannot be opened (permissions) counts in `unreadable_files` too.
 - Provider transcripts are only read, never modified.
 - If `poller` stays `stale`, run `muninn doctor` and check the launchd job instead of looping ingest.

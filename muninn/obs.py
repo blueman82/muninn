@@ -17,16 +17,24 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
-from muninn import ingest, store
+from muninn import ingest, store, tombstone_key
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_stats import db_space, human_bytes, reread, stats
-from muninn.obs_status import freshness, install_sha, read_status, write_status
+from muninn.obs_status import (
+    count_field,
+    freshness,
+    install_sha,
+    poller_error,
+    read_status,
+    write_status,
+)
 
 __all__ = [
     "ROTATE_BYTES",
     "CheckResult",
     "DoctorReport",
     "actor",
+    "count_field",
     "db_space",
     "doctor",
     "freshness",
@@ -34,6 +42,7 @@ __all__ = [
     "install_sha",
     "log_call",
     "log_poller",
+    "poller_error",
     "read_status",
     "run",
     "stats",
@@ -46,6 +55,10 @@ FREE_WARN_RATIO = 0.25
 FREE_WARN_BYTES = 64 * 1024**2
 
 LABEL = "com.muninn"
+# The installer parks a superseded release under this prefix until it
+# deletes it (install/steps_release.py names the same string; the
+# installer is not importable from the runtime).
+PRUNING = ".pruning-"
 # Everything muninn itself puts in the data directory; anything else is
 # reported by ``unexpected_files``.
 DATA_FILES = frozenset(
@@ -58,6 +71,7 @@ DATA_FILES = frozenset(
         "poller.log",
         "poller.log.1",
         "tombstones.jsonl",
+        "tombstone.key",
         "recall.off",
     }
 )
@@ -198,6 +212,7 @@ def _unexpected_files(home: Path) -> CheckResult:
         for n in _names(home)
         if n not in DATA_FILES
         and n != "muninn.sqlite-journal"
+        and not n.startswith(store.UNREADABLE_PREFIX)
         and not n.startswith(".status.json.")  # an atomic write in flight
     ]
     return _result("unexpected_files", not stray, ",".join(stray))
@@ -355,6 +370,41 @@ def _failed_sources(home: Path) -> CheckResult:
     return _result("failed_sources", not failed, failed, level="warn")
 
 
+def _poller_error(home: Path) -> CheckResult:
+    """The poller's last pass did not end in an exception."""
+    err = poller_error(read_status(home))
+    return _result("poller_error", err is None, err or "", level="warn")
+
+
+def _unreadable_files(home: Path) -> CheckResult:
+    """The last pass could open every transcript file it listed."""
+    n = count_field(read_status(home), "unreadable_files")
+    return _result("unreadable_files", not n, n, level="warn")
+
+
+def _aside_files(home: Path) -> CheckResult:
+    """No unreadable store set aside by a rebuild is still on disk."""
+    # erase cannot scrub these, so they keep erased text until removed.
+    kept = [n for n in _names(home) if n.startswith(store.UNREADABLE_PREFIX)]
+    return _result("aside_files", not kept, ",".join(kept), level="warn")
+
+
+def _release_leftovers(env: Mapping[str, str]) -> CheckResult:
+    """No superseded release is left waiting for deletion."""
+    lib = Path(env.get("HOME") or Path.home()) / ".local/lib/muninn"
+    try:
+        left = sorted(p.name for p in lib.glob(f"{PRUNING}*"))
+    except OSError:
+        left = []
+    return _result("release_leftovers", not left, ",".join(left), level="warn")
+
+
+def _tombstone_key(home: Path) -> CheckResult:
+    """The key the keyed tombstones need is present and whole."""
+    problem = tombstone_key.key_problem(home)
+    return _result("tombstone_key", problem is None, problem or "")
+
+
 def _launchd_job() -> CheckResult:
     """The launchd job is loaded and running."""
     job = _job()
@@ -411,6 +461,11 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _writer_pragmas(),
         _heartbeat(home),
         _failed_sources(home),
+        _poller_error(home),
+        _unreadable_files(home),
+        _aside_files(home),
+        _tombstone_key(home),
+        _release_leftovers(env),
         _launchd_job(),
         _roots_readable(env),
         _roots_present(env),

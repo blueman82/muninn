@@ -172,28 +172,88 @@ def restart(ctx: Ctx, rec: Record) -> None:
     wait(ctx, lambda: fresh(ctx, started), HEARTBEAT_S, "heartbeat not fresh")
 
 
+PRUNING = ".pruning-"
+
+
 def prune(ctx: Ctx, rec: Record) -> None:
-    """Delete every release dir but the one being installed.
+    """Move every release dir but the one being installed out of the way.
 
     Runs last, so a failed install can still roll back to the old release.
+    Only renames happen here, and one that fails is undone, so the old
+    release is whole whenever a rollback can still happen; ``sweep``
+    deletes the moved dirs after the point of no return.
     A dry run has not pinned yet, so it keeps ``rec["sha"]``, which is what
     ``current`` points at once the real run gets here.
+
+    Args:
+        ctx: The run context.
+        rec: The run record.
+
+    Raises:
+        OSError: If a rename fails, after undoing the ones already done
+            (the original error is the one raised, even when an undo
+            fails too; the dirs left behind are named in the output).
     """
     keep = rec["sha"]
     old = [
         p
         for p in sorted(ctx.lib.iterdir() if ctx.lib.is_dir() else [])
-        if p.is_dir() and not p.is_symlink() and p.name != keep
+        if p.is_dir()
+        and not p.is_symlink()
+        and p.name != keep
+        and not p.name.startswith(PRUNING)
     ]
     if ctx.dry_run:
         for p in old:
             dry(
                 ctx,
-                f"would delete the previous release {p.name} (no way back)",
+                f"would move the previous release {p.name} aside, then delete"
+                " it once the install succeeds (no way back)",
             )
         return
-    for path in old:
-        shutil.rmtree(path)
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for path in old:
+            gone = path.with_name(f"{PRUNING}{ctx.ts}-{path.name}")
+            path.rename(gone)
+            moved.append((gone, path))
+    except OSError:
+        stuck: list[str] = []
+        for gone, path in reversed(moved):
+            try:
+                gone.rename(path)
+            except OSError:  # keep undoing the rest
+                stuck.append(gone.name)
+        if stuck:
+            ctx.say(
+                f"could not move back {', '.join(stuck)} in {ctx.lib};"
+                " rename each to the name after its .pruning-<time>- prefix"
+            )
+        raise
+
+
+def sweep(ctx: Ctx) -> list[str]:
+    """Delete the dirs ``prune`` moved aside, and any a past run left.
+
+    A failure is only a warning: the install already succeeded and the
+    next upgrade retries.  ``muninn doctor`` also warns while one is left.
+
+    Args:
+        ctx: The run context.
+
+    Returns:
+        The names of the dirs that could not be deleted.
+    """
+    if ctx.dry_run or not ctx.lib.is_dir():
+        return []
+    stuck: list[str] = []
+    for path in sorted(ctx.lib.glob(f"{PRUNING}*")):
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            stuck.append(path.name)
+            ctx.say(f"could not delete {path}: {exc}; remove it by hand")
+    return stuck
 
 
 def _check_plist(ctx: Ctx, data: bytes) -> None:

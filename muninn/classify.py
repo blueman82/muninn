@@ -52,7 +52,8 @@ from muninn.tool_errors import is_error_text as _is_error
 # indexed before, so old sources must be re-read to gain them.
 # 3: Codex chatgpt_handoff sessions were classed other and had no events, so
 # they must be re-read to gain them.
-CLASSIFIER_VERSION = 3
+# 4: redaction learned more token formats, so stored text is re-redacted.
+CLASSIFIER_VERSION = 4
 # Deepest JSON nesting accepted; a hostile line cannot exhaust the stack.
 MAX_DEPTH = 1_000
 

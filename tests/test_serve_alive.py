@@ -227,6 +227,21 @@ class ServeAliveTests(CliCase):
         self.assertIsNone(self.status()[ALIVE_AT])
         self.assertEqual(obs.freshness(self.status())["poller"], "stale")
 
+    def test_a_good_pass_clears_an_earlier_error(self) -> None:
+        obs.write_status(
+            self.home, {"last_error": "OSError", "last_error_at": 1.0}
+        )
+        self.serve_one_pass(lambda *_, **__: ingest.PassStats())
+        self.assertIsNone(self.status()["last_error"])
+        self.assertIsNone(self.status()["last_error_at"])
+
+    def test_a_failed_pass_stamps_the_time_of_the_error(self) -> None:
+        def fake(*_: Any, **__: Any) -> ingest.PassStats:
+            raise RuntimeError("boom")
+
+        self.serve_one_pass(fake)
+        self.assertIsInstance(self.status()["last_error_at"], float)
+
     def test_a_busy_lock_earns_no_stamp(self) -> None:
         def fake(*_: Any, **__: Any) -> ingest.PassStats:
             raise AssertionError("must not run while the lock is busy")

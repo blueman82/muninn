@@ -16,7 +16,12 @@ __all__ = ["compact", "erase_command", "heartbeat", "ingest_command"]
 
 
 def heartbeat(
-    home: Path, stats: ingest.PassStats, env: Env, **extra: Any
+    home: Path,
+    stats: ingest.PassStats,
+    env: Env,
+    *,
+    clears_error: bool = False,
+    **extra: Any,
 ) -> None:
     """Write ``status.json`` after an ingest pass.
 
@@ -27,12 +32,19 @@ def heartbeat(
         home: Data directory.
         stats: The finished pass.
         env: Process environment, for the install revision.
+        clears_error: Forget ``last_error``; only the poller's own good
+            pass says its failure is over.
         **extra: Further fields, such as the poller's pid and pass count.
     """
     fields = dataclasses.asdict(stats)
+    # A manual ``ingest`` succeeding says nothing about whether the poller
+    # (a different process, perhaps a different release) is working again,
+    # so only the poller's pass clears the error it left.
+    cleared = {"last_error": None, "last_error_at": None}
     obs.write_status(
         home,
         fields
+        | (cleared if clears_error else {})
         | {
             "last_pass_at": time.time(),
             "duration_s": round(stats.duration_s, 3),

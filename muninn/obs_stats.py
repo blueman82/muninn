@@ -12,7 +12,12 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from muninn import classify, store
-from muninn.obs_status import freshness, install_sha, read_status
+from muninn.obs_status import (
+    freshness,
+    install_sha,
+    poller_error,
+    read_status,
+)
 from muninn.query.index_age import ALIVE_AT, seconds_since
 
 _LAST_PASS_FIELDS = (
@@ -21,6 +26,7 @@ _LAST_PASS_FIELDS = (
     "files_changed",
     "events_added",
     "skipped_files",
+    "unreadable_files",
     "failed",
     "errors",
     "busy_skips",
@@ -232,6 +238,7 @@ def stats(
         {k: status.get(k) for k in _LAST_PASS_FIELDS}
         | freshness(status)
         | {"alive_age_s": _alive_age(status)}
+        | {"last_error": poller_error(status)}
     )
     out["reread"] = reread(conn)
     out["install_sha"] = install_sha(env) or status.get("install_sha")

@@ -85,6 +85,7 @@ class RebuildTests(CliCase):
         self.assertEqual(
             self.rows("SELECT level FROM tombstone"), [("session",)]
         )
+        self.assertIsNone(out["old_kept_as"])
         leftovers = [
             p.name
             for p in self.home.iterdir()
@@ -101,10 +102,28 @@ class RebuildTests(CliCase):
 
     def test_rebuild_from_an_unreadable_store_keeps_tombstones(self) -> None:
         db = store.db_path(self.home)
-        db.write_bytes(b"not a database" * 100)
+        junk = b"not a database" * 100
+        db.write_bytes(junk)
         code, out, _ = self.muninn("rebuild")
         self.assertEqual((code, out["old_readable"]), (0, False))
+        # The unreadable file is set aside whole, private, never overwritten.
+        aside = self.home / out["old_kept_as"]
+        self.assertTrue(aside.name.startswith(store.UNREADABLE_PREFIX))
+        self.assertEqual(aside.read_bytes(), junk)
+        self.assertEqual(aside.stat().st_mode & 0o777, 0o600)
+        self.assertIsNone(self.muninn("rebuild")[1]["old_kept_as"])
         self.assertGreaterEqual(out["reapplied_tombstones"], 1)
         texts = {r[0] for r in self.rows("SELECT text FROM event")}
         self.assertIn("keep this prompt", texts)
         self.assertFalse(any(CANARY in t for t in texts))
+
+    def test_hot_journal_blocks_the_move_aside(self) -> None:
+        db = store.db_path(self.home)
+        db.write_bytes(b"not a database" * 100)
+        # Not a real rollback journal, so opening the file cannot settle it.
+        (self.home / "muninn.sqlite-journal").write_bytes(b"\x00" * 512)
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["error"]), (4, "hot_journal"))
+        self.assertEqual(db.read_bytes(), b"not a database" * 100)
+        names = [p.name for p in self.home.iterdir()]
+        self.assertFalse(any(store.UNREADABLE_PREFIX in n for n in names))

@@ -40,6 +40,7 @@ from muninn.ingest_plan import (
     plan_source,
     source_id_for,
 )
+from muninn.tombstone_key import TombstoneKeyError
 
 __all__ = ["PassStats", "default_roots", "ingest", "run_pass"]
 
@@ -239,6 +240,10 @@ def _process(
         # The cache may hold scope ids created inside the rolled-back
         # transaction; reusing one would violate the scope foreign key.
         scopes.clear()
+        if isinstance(exc, TombstoneKeyError):
+            # Not a bad source: every fork would fail the same way, and
+            # only restoring the key helps, so stop the pass loudly.
+            raise
         stats.failed += 1
         kind = type(exc).__name__
         stats.errors[kind] = stats.errors.get(kind, 0) + 1

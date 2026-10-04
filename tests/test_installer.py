@@ -267,6 +267,47 @@ class UpgradeTest(unittest.TestCase):
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(out["outcome"], "rolled_back")
 
+    def test_prune_rename_failure_rolls_back_to_a_whole_old_release(
+        self,
+    ) -> None:
+        w = self.w
+        extra = self.lib / ("0" * 40)  # a second stale release to prune
+        extra.mkdir()
+        (extra / "f").write_text("x")
+        real = Path.rename
+        calls: list[Path] = []
+
+        def flaky(src: Path, dst: Path) -> Path:
+            if src.parent == self.lib and Path(dst).name.startswith(
+                ".pruning-"
+            ):
+                calls.append(src)
+                if len(calls) == 2:
+                    raise PermissionError("denied")
+            return real(src, dst)
+
+        with (
+            mock.patch.object(Path, "rename", flaky),
+            self.assertRaises(PermissionError),
+        ):
+            co.install(self.ctx, w.repo, self.sha2)
+        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
+        self.assertTrue((self.lib / self.first / "bin").is_dir())
+        self.assertTrue((extra / "f").exists())
+        self.assertEqual(list(self.lib.glob(".pruning-*")), [])
+
+    def test_delete_failure_after_prune_only_warns(self) -> None:
+        w = self.w
+        with mock.patch("install.steps_release.shutil.rmtree") as rm:
+            rm.side_effect = [PermissionError("busy"), None]
+            rec = co.install(self.ctx, w.repo, self.sha2)
+        self.assertEqual(rec["sha"], self.sha2)
+        self.assertEqual((self.lib / "current").readlink(), Path(self.sha2))
+        self.assertTrue(list(self.lib.glob(".pruning-*")))
+        self.assertIn("remove it by hand", "\n".join(w.out))
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
+        self.assertEqual(out["outcome"], "ok")
+
     def test_refuses_when_nothing_is_installed(self) -> None:
         (self.lib / "current").unlink()
         with self.assertRaises(co.StepFailedError):
