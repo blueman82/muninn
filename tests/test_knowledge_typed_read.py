@@ -50,7 +50,7 @@ class ExpiryTests(KnowCase):
         self.assertEqual(knowledge.check(ro)["expired"], 1)
 
     def test_expired_is_not_pushed_or_searched(self) -> None:
-        got = self.add(text="stale zebra cache decision")
+        got = self.add(text="use the zebra cache")
         self.assertEqual(
             len(knowledge.block_entries(self.ro(), [self.repo])), 1
         )

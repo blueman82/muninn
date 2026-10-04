@@ -11,7 +11,9 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from muninn import query
-from muninn.tombstones import TombstoneRow, tombstone_row
+from muninn.erase_family import copies_of
+from muninn.tombstone_key import key_for
+from muninn.tombstones import TombstoneRow, event_tag, tombstone_row
 
 # Providers blocked when a session has not been ingested yet, so a later
 # ingest cannot resurrect it.
@@ -35,6 +37,11 @@ class Target:
     lines: set[tuple[int, int]] = field(default_factory=set[tuple[int, int]])
     events: list[int] = field(default_factory=list[int])
     tombstones: list[TombstoneRow] = field(default_factory=list[TombstoneRow])
+    # (provider, thread, role, text) of each content tombstone to write.
+    # Kept as text, not tags, so planning (and a dry run) needs no key.
+    content: list[tuple[str, str, str, str]] = field(
+        default_factory=list[tuple[str, str, str, str]]
+    )
     citations: set[int] = field(default_factory=set[int])
     knowledge: set[int] = field(default_factory=set[int])
 
@@ -148,7 +155,7 @@ def collect_event(conn: sqlite3.Connection, target: Target, ref: str) -> None:
 def collect_match(
     conn: sqlite3.Connection, target: Target, match: str
 ) -> None:
-    """Collect every event line, knowledge text and quote containing text.
+    """Collect every event line, knowledge text, reason and quote with text.
 
     Args:
         conn: Read connection.
@@ -167,9 +174,10 @@ def collect_match(
     target.knowledge |= {
         r[0]
         for r in conn.execute(
-            "SELECT id FROM knowledge WHERE text IS NOT NULL"
-            " AND instr(text, ?) > 0",
-            (match,),
+            "SELECT id FROM knowledge WHERE (text IS NOT NULL"
+            " AND instr(text, ?) > 0) OR (retract_reason IS NOT NULL"
+            " AND instr(retract_reason, ?) > 0)",
+            (match, match),
         )
     }
     target.citations |= {
@@ -187,10 +195,28 @@ def _add_line(
     target: Target,
     source: sqlite3.Row,
     line: int,
+    *,
+    copies: bool = True,
 ) -> None:
-    """Add every part of one line; a line tombstone blocks all its parts."""
+    """Add every part of one line; a line tombstone blocks all its parts.
+
+    Each event also gets a content tombstone, and with ``copies`` the same
+    content already stored as a copy of the history in the thread's fork
+    family is added too (see ``erase_family.copies_of``), so an erased line
+    cannot come back through another copy.
+
+    Args:
+        conn: Read connection.
+        target: Plan to fill.
+        source: The source row that holds the line.
+        line: 1-based transcript line.
+        copies: Also collect the family's copies of the line's content.
+    """
+    if (source["id"], line) in target.lines:
+        return
     rows = conn.execute(
-        "SELECT id, line_sha256 FROM event WHERE source_id = ? AND line = ?",
+        "SELECT id, line_sha256, role, text FROM event"
+        " WHERE source_id = ? AND line = ?",
         (source["id"], line),
     ).fetchall()
     target.lines.add((source["id"], line))
@@ -205,6 +231,48 @@ def _add_line(
             line_sha256=rows[0][1],
         )
     )
+    pairs = {(r[2], r[3]) for r in rows}
+    target.content += [
+        (source["provider"], source["thread_id"], role, text)
+        for role, text in sorted(pairs)
+    ]
+    if not copies:
+        return
+    for member, copy in copies_of(conn, source, pairs):
+        _add_line(conn, target, member, copy, copies=False)
+
+
+def content_tombstones(
+    conn: sqlite3.Connection, target: Target
+) -> list[TombstoneRow]:
+    """Make the content tombstones of a plan, creating the key if needed.
+
+    This is the only place a plan needs the tombstone key, so it runs when
+    the plan is applied and a dry run leaves no key file behind.
+
+    Args:
+        conn: Connection to the store.
+        target: The plan.
+
+    Returns:
+        One keyed content tombstone for each planned role and text.
+
+    Raises:
+        TombstoneKeyError: Propagated from ``key_for``.
+    """
+    if not target.content:
+        return []
+    key = key_for(conn)
+    return [
+        tombstone_row(
+            provider,
+            "line",
+            thread_id=thread,
+            line=0,
+            line_sha256=event_tag(key, role, text),
+        )
+        for provider, thread, role, text in target.content
+    ]
 
 
 def _cites(

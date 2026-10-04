@@ -11,8 +11,9 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 | `poller: stale` in every answer, `heartbeat` fails | the launchd job is down or stuck | `launchctl print gui/$(id -u)/com.muninn`; read `poller.log`; `launchctl kickstart -k gui/$(id -u)/com.muninn` |
 | `poller: stale` while the poller runs | one source is taking longer than 3 intervals (the alive stamp is written between sources, not inside one), or the poller is on a release older than the alive stamp | wait for the pass to end (`muninn stats` shows `reread.pending` falling and `last_pass.alive_age_s` while it runs, and an `alive_age_s` that keeps growing means the poller died mid-pass and was not restarted; `poller.log` gets a line only when a pass finishes); a pass that keeps failing or finding the lock busy never stamps, so it goes `stale` as it should |
 | `launchd_job` fails | job not loaded | re-run `bin/muninn-install` (it upgrades an installed machine) |
-| search finds little | few sources indexed | `muninn --pretty stats`: check `sources`, `events_by_provider` (a provider at 0 means its root was not found) and `last_pass.skipped_files`; `muninn doctor` shows `roots_present` |
+| search finds little | few sources indexed | `muninn --pretty stats`: check `sources`, `events_by_provider` (a provider at 0 means its root was not found) and `last_pass.unreadable_files` (files the poller could not open) and `last_pass.skipped_files`; `muninn doctor` shows `roots_present` |
 | `db_free_space` warns | many deletes left free pages | `muninn compact` (needs about one database's worth of free disk) |
+| `aside_files` warns | a `rebuild` set aside an unreadable store, `muninn.sqlite.unreadable-<ts>`; `erase` cannot scrub it, so erased text may survive there | salvage what you need, then run the `rm -- <path>` that `muninn erase` prints in `aside_remove` (it is never deleted for you) |
 | `db_size` warns | database over 2 GiB | `muninn compact`; consider `muninn erase` of old sessions |
 | exit 3, `busy` | another writer holds the lock (poller pass, compact, erase) | retry in a few seconds |
 | `store_unavailable` with `schema vN, need v2` (hooks say `memory unavailable`) | the file is schema v1 and no writer has migrated it yet, or a newer muninn wrote it (`doctor` `store_readable`: false) | query: `muninn doctor`; remediation: v1, run any writing command (`muninn ingest`) once to migrate it; v3 or newer, upgrade this muninn (the v2 upgrade is one-way, there is no downgrade) |
@@ -29,7 +30,8 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 - `poller.log`: one JSON line per event (`start`, `pass` when files changed or
   failed, hourly `idle`, `error` with an exception class, `heartbeat_failed`
   with the class of the error when the alive stamp could not be written (once
-  per pass; the poller will then go `stale`), `stop`). Rotates at 1 MiB to
+  per pass; the poller will then go `stale`), `crash` with the class of an
+  exception that ended the poller outside a pass (it exits 1 and launchd restarts it), `stop`). Rotates at 1 MiB to
   `poller.log.1`.
 - `calls.jsonl`: one line per CLI call, IDs and counts only; rotates likewise.
 - `status.json`: the last pass and heartbeat.

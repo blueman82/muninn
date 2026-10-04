@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from muninn import store
 from muninn.erase_collect import Target
 
 NEEDLES, NEEDLE_BYTES = 50, 48
@@ -28,6 +29,7 @@ def _texts(conn: sqlite3.Connection, target: Target) -> list[str]:
     for table, column, ids in (
         ("event", "text", target.events),
         ("knowledge", "text", sorted(target.knowledge)),
+        ("knowledge", "retract_reason", sorted(target.knowledge)),
         ("citation", "quote", sorted(target.citations)),
     ):
         for start in range(0, len(ids), CHUNK):
@@ -76,11 +78,12 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
         needle: Bytes to look for.
 
     Returns:
-        True if any event, knowledge entry or citation quote contains it.
+        True if any event, knowledge text or reason, or quote has it.
     """
     for table, column in (
         ("event", "text"),
         ("knowledge", "text"),
+        ("knowledge", "retract_reason"),
         ("citation", "quote"),
     ):
         # CAST to BLOB so instr compares bytes, matching the needle.
@@ -230,3 +233,22 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
             if any(needle in data for needle in needles):
                 hits.append(path.relative_to(home).as_posix())
     return hits
+
+
+def aside_files(home: Path) -> list[str]:
+    """Return the unreadable stores a rebuild set aside, by absolute path.
+
+    Erase cannot scrub them (they are not valid databases), so they may
+    still hold erased text until the owner removes them.
+
+    Args:
+        home: Data directory.
+
+    Returns:
+        Sorted paths of every ``muninn.sqlite.unreadable-*`` file.
+    """
+    return sorted(
+        str(p)
+        for p in home.glob(f"{store.UNREADABLE_PREFIX}*")
+        if p.is_file() and not p.is_symlink()
+    )

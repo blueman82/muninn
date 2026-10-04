@@ -140,8 +140,12 @@ def plan_source(
     """
     try:
         return _plan(conn, opts, stats, name, path, st)
-    except OSError:
+    except OSError as exc:
         stats.skipped_files += 1
+        # A file that vanished is a normal archive move; any other open
+        # failure (permissions) would otherwise look like a benign skip.
+        if not isinstance(exc, FileNotFoundError):
+            stats.unreadable_files += 1
         return None
 
 

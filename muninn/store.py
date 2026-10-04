@@ -52,6 +52,11 @@ def data_home(env: Mapping[str, str] = os.environ) -> Path:
     return Path.home() / ".local" / "share" / "muninn"
 
 
+# A store that could not be read is kept beside the new one under this
+# prefix plus a UTC timestamp (see ``muninn rebuild``).
+UNREADABLE_PREFIX = "muninn.sqlite.unreadable-"
+
+
 def db_path(home: Path) -> Path:
     """Return the database file inside a data home."""
     return home / "muninn.sqlite"

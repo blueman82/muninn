@@ -12,6 +12,7 @@ touched, only listed.
 from __future__ import annotations
 
 import os
+import shlex
 import sqlite3
 import time
 from collections.abc import Mapping
@@ -24,19 +25,18 @@ from muninn.erase_collect import (
     collect_knowledge,
     collect_match,
     collect_session,
+    content_tombstones,
 )
 from muninn.erase_residue import (
+    aside_files,
     pick_needles,
     rare_terms,
     residue_scan,
     still_stored,
     vocab_left,
 )
-from muninn.tombstones import (
-    TOMBSTONE_FILE,
-    append_tombstones,
-    reapply_tombstones,
-)
+from muninn.tombstone_key import TOMBSTONE_FILE
+from muninn.tombstones import append_tombstones, reapply_tombstones
 
 __all__ = [
     "MIN_MATCH",
@@ -99,6 +99,19 @@ def _out_of_scope(env: Mapping[str, str]) -> list[str]:
     return sorted(found)
 
 
+def _aside_report(home: Path) -> dict[str, object]:
+    """Name each set-aside store erase cannot scrub, with the removal."""
+    aside = aside_files(home)
+    return {
+        "aside_files": aside,
+        "aside_remove": (
+            "rm -- " + " ".join(shlex.quote(p) for p in aside)
+            if aside
+            else None
+        ),
+    }
+
+
 def _apply(conn: sqlite3.Connection, target: Target) -> None:
     """Write the plan; the caller wraps this in one transaction."""
     conn.executemany(
@@ -159,6 +172,8 @@ def _erase_and_verify(
     rare = rare_terms(conn, target.events, sorted(target.knowledge))
     # Write-ahead: the tombstones reach disk before the commit, so a crash
     # in between cannot lose an erasure.
+    # The key is made here, after planning, so a dry run never creates it.
+    target.tombstones += content_tombstones(conn, target)
     append_tombstones(home, target.tombstones)
     _commit(conn, target)
     if not match:  # a needle still in a surviving row is not residue
@@ -221,11 +236,11 @@ def erase(
         "events": len(target.events),
         "citations": len(target.citations),
         "knowledge": len(target.knowledge),
-        "tombstones": len(target.tombstones),
+        "tombstones": len(target.tombstones) + len(target.content),
         "provider_files": _provider_files(target, ingest.default_roots(env)),
         "out_of_scope": _out_of_scope(env),
         "not_covered": list(NOT_COVERED),
-    }
+    } | _aside_report(home)
     if dry_run:
         return out
     return out | _erase_and_verify(conn, home, target, match)

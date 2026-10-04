@@ -42,7 +42,7 @@ Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
   default search, both hook blocks and preference citations; opt in with
   `--include-subagents`.
 - Text is verbatim except secret spans (`[redacted:secret]`) and truncation
-  above 64 KiB.
+  above 64 KiB. Redaction is best-effort and can miss an unusual secret.
 
 ## What it never stores
 
@@ -93,14 +93,14 @@ These are the only automatic push, installed for Claude Code and Codex. Both
 redact secrets, escape the frame delimiter, stay silent for subagent and
 reviewer transcripts, and fail open: on any error they exit 0 with a bounded
 "store unavailable" notice (or `{}` when disabled). A stale poller (no finished pass
-or alive stamp within 3 intervals), or a last pass that failed on sources, is
-flagged in the hook block; every CLI response carries the poller's state.
+or alive stamp within 3 intervals), a failed or errored last pass, or unreadable
+transcript files, is flagged in the hook block; every CLI response carries the poller's state.
 
 - SessionStart (`muninn hook session-start --provider claude|codex`): at most
   4,000 characters framed
   `<muninn-memory source="muninn" trust="untrusted-data">`.
   It lists up to 8 current knowledge entries that cite a user prompt
-  (repository plus global scope), each with its actor and first verbatim
+  whose words back the entry text (repository plus global scope), each with its actor and first verbatim
   quote, and a usage line pointing at `muninn search` and `muninn open`.
 - UserPromptSubmit (`muninn hook prompt --provider claude|codex`): at most
   1,500 characters framed
@@ -127,15 +127,15 @@ themselves are never stored.
 - The data directory is mode 0700 and its files 0600. The CLI and poller run
   with `umask 077`, and the launchd job sets `Umask` "077".
 - Logs never hold transcript text: `calls.jsonl` is an allowlist (a query is
-  kept only as a term count and a hash prefix), `status.json` holds counts,
+  kept only as a term count and a hash prefix), `status.json` holds counts, a bare error class name and its time (`last_error`, `last_error_at`; the poller's next good pass clears both),
   and `poller.log` holds event codes, counts and exception class names.
-- Secrets are redacted at ingest and again on every output.
+- Best-effort secret redaction at ingest and on every output.
 - `muninn erase` writes tombstones (identifiers and hashes only) that are
   checked before any line is parsed, so a rescan, restart or archive move
   cannot bring erased content back. It uses secure delete on the tables and
   the full-text index, then scans the data directory for residue and reports
-  it. Provider transcripts, Time Machine and free disk blocks are out of its
-  reach; `erase` prints the provider file paths and other derived copies.
+  it. Fork copies of an erased line go too. Provider transcripts, backups and
+  free disk blocks are out of its reach; `erase` lists provider files and copies.
 
 ## Development
 

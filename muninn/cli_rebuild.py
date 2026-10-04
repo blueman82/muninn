@@ -12,6 +12,7 @@ import dataclasses
 import fcntl
 import os
 import sqlite3
+import time
 from argparse import Namespace
 from collections.abc import Sequence
 from pathlib import Path
@@ -27,6 +28,14 @@ REBUILD = "muninn.sqlite.rebuild"
 # first because ingest consults tombstones to skip deleted threads.
 _BEFORE = ("scope", "scope_path", "tombstone")
 _AFTER = ("knowledge", "citation", "knowledge_log")
+
+
+# Said whenever the old file could not be read: its ledger is not in the
+# new store, and the set-aside file is the only place it still exists.
+_UNREADABLE_WARNING = (
+    "the old store was unreadable, so the knowledge ledger, citations and"
+    " scopes were not copied; salvage them from old_kept_as"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -177,8 +186,63 @@ def _settle_journal(home: Path, db: Path) -> None:
         settle = sqlite3.connect(db)
         try:
             settle.execute("SELECT count(*) FROM sqlite_master")
+        except sqlite3.DatabaseError:
+            pass  # a corrupt file: the caller sees the journal still there
         finally:
             settle.close()
+
+
+def _set_aside(home: Path, db: Path) -> str:
+    """Rename an unreadable store to a private sibling and return its name.
+
+    The caller has already checked for a hot journal, so only a settled
+    file is moved.
+
+    Args:
+        home: Data directory.
+        db: The unreadable store.
+
+    Returns:
+        The new file name inside ``home``.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    aside = home / f"{store.UNREADABLE_PREFIX}{stamp}"
+    n = 1
+    while aside.exists():  # two rebuilds inside one second
+        n += 1
+        aside = home / f"{store.UNREADABLE_PREFIX}{stamp}-{n}"
+    # Tightened before the move: if the chmod failed afterwards, the caller
+    # would not know the file had already been renamed.
+    db.chmod(0o600)
+    db.rename(aside)
+    return aside.name
+
+
+def _discard(home: Path) -> None:
+    """Remove the half-built store and its journal."""
+    (home / REBUILD).unlink(missing_ok=True)
+    (home / f"{REBUILD}-journal").unlink(missing_ok=True)
+
+
+def _put_back(home: Path, db: Path, kept: str | None) -> bool:
+    """Undo ``_set_aside`` after the new store could not take its place.
+
+    Args:
+        home: Data directory.
+        db: Where the old store belongs.
+        kept: Name ``_set_aside`` gave it, or None if nothing was moved.
+
+    Returns:
+        True when the old store is back at ``db`` or was never moved.
+    """
+    _discard(home)
+    if kept is None:
+        return True
+    try:
+        (home / kept).rename(db)
+    except OSError:
+        return False
+    return True
 
 
 def _build(home: Path, db: Path, new: Path, env: Env) -> _Built:
@@ -211,7 +275,12 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     Scopes, knowledge, tombstones and the events of deleted sources are
     copied from the old file when it is readable; ``tombstones.jsonl`` is
     re-applied first.  The old file is replaced only after the new one
-    passes ``quick_check`` and has no hot journal.  A writer lock that stays
+    passes ``quick_check`` and has no hot journal.  An old file that is not
+    readable is never overwritten: it is renamed to
+    ``muninn.sqlite.unreadable-<UTC timestamp>`` (mode 0600) and reported
+    as ``old_kept_as`` with a ``warning`` that its ledger was not copied;
+    if the new file then cannot be moved into place, the old one is renamed
+    back.  A writer lock that stays
     busy propagates ``store.BusyError``; the dispatcher maps it to exit 3.
 
     Args:
@@ -222,25 +291,41 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
 
     Returns:
         Exit 0 and a summary, 2 if the new file fails its check, or 4 if
-        it left a hot journal.
+        it left a hot journal or could not be moved into place.
     """
     db, new = store.db_path(home), home / REBUILD
     with store.writer_lock(home, wait_s=cli_core.WRITER_WAIT_S):
         _settle_journal(home, db)
-        built = _build(home, db, new, env)
+        try:
+            built = _build(home, db, new, env)
+        except BaseException:
+            _discard(home)  # e.g. a missing tombstone key stops the build
+            raise
         if built.quick_check != "ok":
-            new.unlink()
+            _discard(home)
             return 2, {"error": "quick_check_failed"}
         if (home / "muninn.sqlite-journal").exists():
-            new.unlink()
+            _discard(home)
             return 4, {"error": "hot_journal"}
         _full_sync(new)  # the copied knowledge is not re-derivable
-        new.replace(db)
+        kept = None
+        try:
+            if db.exists() and not built.readable:
+                kept = _set_aside(home, db)  # never overwrite it
+            new.replace(db)
+        except OSError:
+            return 4, {
+                "error": "replace_failed",
+                "old_restored": _put_back(home, db, kept),
+                "old_kept_as": kept,
+            }
         _full_sync(home)  # make the rename itself durable
     record["counts"] = built.copied | {"reapplied": built.reapplied}
     return 0, {
         "rebuilt": True,
         "old_readable": built.readable,
+        "old_kept_as": kept,
+        "warning": None if built.readable else _UNREADABLE_WARNING,
         "copied": built.copied,
         "reapplied_tombstones": built.reapplied,
         "ingest": dataclasses.asdict(built.stats),

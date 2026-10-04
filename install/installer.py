@@ -82,6 +82,7 @@ from install.steps_release import (
     relink,
     restart,
     start_new,
+    sweep,
 )
 from install.transforms import (
     claude_paths,
@@ -161,6 +162,7 @@ __all__ = [
     "set_line",
     "start_new",
     "steps",
+    "sweep",
     "verify",
     "wait",
     "write_trust",
@@ -240,6 +242,9 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
             raise
         _roll_back(ctx, rec, step, exc)
         raise
+    # After the last rollback chance: a failure only warns, and is noted in
+    # the install record for support.
+    rec["sweep_failed"] = sweep(ctx)
     if ctx.upgrade and not ctx.dry_run:  # no rollback once the old is gone
         shutil.rmtree(ctx.rdir)
         rec["record_removed"] = True
