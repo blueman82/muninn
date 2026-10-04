@@ -86,6 +86,21 @@ class BoundaryTests(unittest.TestCase):
                     self.assertTrue(changed)
                     self.assertNotIn(token, got)
 
+    def test_tokens_after_a_json_escape_are_redacted(self) -> None:
+        # Tool-call bodies are json.dumps text: a newline is backslash + "n".
+        for token in (
+            "ghp_" + A36[:30],
+            "sk-" + A36,
+            "AKIA" + "B" * 16,
+            STRIPE,
+        ):
+            for esc in ("\\n", "\\t", "\\r"):
+                with self.subTest(token=token[:6], esc=esc):
+                    text = '{"content": "line' + esc + token + '"}'
+                    got, changed = redact(text)
+                    self.assertTrue(changed)
+                    self.assertNotIn(token, got)
+
 
 class KeyAndHeaderTests(unittest.TestCase):
     """Key blocks, AWS secret keys and Basic credentials."""

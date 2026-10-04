@@ -27,8 +27,10 @@ _KEYS = (
     r"secret|private[_-]?key"
 )
 # A token must not begin in the middle of an identifier or word: "disk_live_"
-# holds "sk_live_" and "task-" holds "sk-", and neither is a key.
-_EDGE = r"(?<![A-Za-z0-9])"
+# holds "sk_live_" and "task-" holds "sk-", and neither is a key. Tool-call
+# bodies are stored as JSON text, where a newline is the two characters
+# backslash and "n", so a token after one must still count as starting a word.
+_EDGE = r"(?:(?<![A-Za-z0-9])|(?<=\\[nrtbf]))"
 # Provider tokens with a fixed prefix; each needs a long enough tail that
 # ordinary words and short identifiers do not match.
 _VENDOR = (
