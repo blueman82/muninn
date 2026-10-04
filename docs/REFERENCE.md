@@ -59,12 +59,41 @@ composed, is stored as `harness`), `subagent`,
 
 ## Knowledge ledger
 
-`muninn know add --kind decision|fact|preference|procedure --text T --cite REF --quote Q [--supersedes K] [--global]`
+`muninn know add --kind decision|fact|preference|procedure|lesson|constraint --text T --cite REF --quote Q [--supersedes K] [--global]`
 records an entry; every entry needs a quote that is verbatim in a primary prompt, reply or tool call (a preference needs
 a user prompt). `--quote Q` alone searches the caller's session prompts. `know retract K [--reason R]`;
-`know list [--status current|superseded|retracted|erased|all] [--kind K] [--all-projects]`; `know show K` the entry with
+`know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--all-projects] [--scope-loop ID]`; `know show K` the entry with
 its chain and log; `know check` re-verifies every citation (`ok`, `changed`, `missing`, `erased`, `problems`).
 Entries are superseded or retracted, never edited.
+
+Optional typed fields on `know add` (all additive; an old invocation is unchanged). Each bad value is refused with a stable
+code and writes nothing:
+
+| Flag | Meaning | Refusal code |
+|---|---|---|
+| `--confidence observed\|reported\|inferred` | how the claim is known; absent means not stated | `bad_confidence` |
+| `--valid-until DATE` | ISO date or datetime (no zone means UTC), must be in the future | `bad_valid_until` |
+| `--sensitivity normal\|restricted` | default `normal` | `bad_sensitivity` |
+| `--contradicts K` | informational link to an existing entry, like `--supersedes` but it changes nothing and logs no action | `bad_contradicts` |
+| `--tag T` (repeatable) | retrieval tag, lowercase `[a-z0-9_-]`, at most 32 characters and 10 tags; stored as data, not searched | `bad_tags` |
+| `--scope-loop ID` | store in the scope of a loop (`[A-Za-z0-9_.-]`, up to 64 characters) instead of the repo; not with `--global`. `know list --scope-loop ID` lists it; a loop scope is a `dir` scope keyed `loop:<ID>` and is never in the repo or global lists or pushed by hooks | `bad_loop_scope` |
+
+Entries print `confidence`, `valid_until` (UTC ISO or null), `expired`, `sensitivity`, `contradicts` and `tags`.
+
+**Expiry is derived, never written.** A current entry whose `valid_until` has passed is reported `expired: true` and is not
+current: `know list` (default `--status current`), search, the SessionStart block and recall leave it out. Its row and status are
+untouched; `know list --status expired` shows it, `--status all` and `know show` show it flagged, `know check` reports an
+`expired` count, and `stats` counts it under `knowledge.expired` instead of `knowledge.current`.
+
+**Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block and of per-prompt recall
+(the two push paths), even when a user prompt cites it. It is still returned by the commands you run yourself (`know list`,
+`know show`, `search`). `stats` reports `knowledge_restricted`, a count only.
+
+**Schema v2 is a one-way upgrade.** The first writing command (`know add`, `ingest`, the poller) on a v1 store rebuilds the
+`knowledge` table once, in one transaction with `user_version` (ids, supersede chains, citations, the log and full-text
+index are kept; a crash leaves the v1 file intact). After that an older muninn release refuses the store as a schema mismatch.
+Read-only callers (hooks, `stats`, `doctor`) refuse a v1 file until a writer has migrated it, so hooks fail open (they exit 0
+with a `memory unavailable (store_unavailable)` notice) in that window. `muninn rebuild` accepts a v1 or v2 old store.
 
 ## Running and maintaining
 
@@ -91,7 +120,7 @@ Entries are superseded or retracted, never edited.
 `sources` counts per `provider/root/thread_class/status` (status `active` or `missing`); `events` per kind;
 `events_by_provider`; `flags` `marker` (text that looked like an injected block), `redacted` (secret removed), `truncated`
 (over 64 KiB); `skipped_lines` and `issues` (lines not parsed: `line_too_large`, `invalid_json`, `too_deep`,
-`not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status; `citations` by state;
+`not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status (`current`, `expired`, `superseded`, `retracted`, `erased`) and `knowledge_restricted` (a count); `citations` by state;
 `tombstones` by level (`session`, `thread`, `line`); `db_bytes` file size; `db_space` `page_count`, `freelist_count`,
 `page_size`, `free_ratio`; `last_pass` (`last_pass_at`, `duration_s`, `files_changed`, `events_added`, `skipped_files`,
 `failed`, `errors`, `busy_skips`, `index_age_s`, `poller`, and `alive_age_s`, the seconds since a running pass last stamped

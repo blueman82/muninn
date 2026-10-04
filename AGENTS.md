@@ -7,9 +7,9 @@ Instructions for coding agents working in this repo. Any parent-directory
 
 - `muninn/`: runtime package (Python 3.13 standard library only), one
   responsibility per module; a feature's modules share its prefix:
-  `cli*` (parser, handlers, output, poller), `store`, `ingest*` (plan, parse),
+  `cli*` (parser, handlers, output, poller), `store*` (`store_schema`, `store_migrate`), `ingest*` (plan, parse),
   `classify` with `claude_events`, `codex_events`, `event_model`,
-  `tool_errors`, `redaction`; `query/` (package), `knowledge*`, `erase*`,
+  `tool_errors`, `redaction`; `query/` (package), `knowledge*` (with `knowledge_typed`, `knowledge_expiry`), `erase*`,
   `tombstones`, `hook*`, `obs*` (logs, stats, doctor, status), `scope`.
 - `bin/muninn`: launcher that finds the interpreter; do not hardcode a path.
 - `bin/muninn-install`: sh wrapper over `install/installer.py` (bare, `--check`,

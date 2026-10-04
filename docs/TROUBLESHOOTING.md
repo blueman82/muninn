@@ -15,6 +15,7 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 | `db_free_space` warns | many deletes left free pages | `muninn compact` (needs about one database's worth of free disk) |
 | `db_size` warns | database over 2 GiB | `muninn compact`; consider `muninn erase` of old sessions |
 | exit 3, `busy` | another writer holds the lock (poller pass, compact, erase) | retry in a few seconds |
+| `store_unavailable` with `schema vN, need v2` (hooks say `memory unavailable`) | the file is schema v1 and no writer has migrated it yet, or a newer muninn wrote it (`doctor` `store_readable`: false) | query: `muninn doctor`; remediation: v1, run any writing command (`muninn ingest`) once to migrate it; v3 or newer, upgrade this muninn (the v2 upgrade is one-way, there is no downgrade) |
 | exit 4, `hot_journal` / `store_unavailable` | a writer crashed mid-transaction, or a schema mismatch | run any writing command (`muninn ingest`) to roll the journal back; `doctor` shows `unowned_journal` |
 | `unexpected_files` fails | a stray file in the data dir | move it out; `recall.off` and the logs are expected |
 | hooks print nothing | `MUNINN_HOOK_DISABLE=1`, or `recall.off` exists in the data dir | unset it, or delete `recall.off` |
