@@ -137,7 +137,7 @@ class ReaderTests(StoreCase):
         self.db.touch()  # zero bytes: no writer has created the schema yet
         self.assert_plain_unavailable()
         raw = sqlite3.connect(self.db)
-        raw.execute("PRAGMA user_version=2")  # written by a newer muninn
+        raw.execute("PRAGMA user_version=3")  # written by a newer muninn
         raw.close()
         self.assert_plain_unavailable()
 
