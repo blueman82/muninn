@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -127,9 +128,16 @@ def _table_counts(conn: sqlite3.Connection) -> dict[str, object]:
             "SELECT class_reason, count(*) FROM source"
             " WHERE thread_class = 'other' GROUP BY 1",
         ),
+        # An expired entry is counted apart from current: expiry is derived.
         "knowledge": _pairs(
-            conn, "SELECT status, count(*) FROM knowledge GROUP BY 1"
+            conn,
+            "SELECT CASE WHEN status = 'current' AND valid_until <= "
+            f"{time.time()!r} THEN 'expired' ELSE status END, count(*)"
+            " FROM knowledge GROUP BY 1",
         ),
+        "knowledge_restricted": conn.execute(
+            "SELECT count(*) FROM knowledge WHERE sensitivity = 'restricted'"
+        ).fetchone()[0],
         "citations": _pairs(
             conn, "SELECT state, count(*) FROM citation GROUP BY 1"
         ),

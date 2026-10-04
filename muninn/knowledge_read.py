@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from muninn import query, scope
+from muninn.knowledge_expiry import LIVE_SQL, PUSH_SQL, is_expired, iso_stamp
 from muninn.knowledge_model import (
     BLOCK_QUOTE,
     CHAIN_MAX,
@@ -24,6 +25,7 @@ from muninn.knowledge_model import (
     iso_date,
     parse_kid,
 )
+from muninn.knowledge_typed import loop_scope_id
 from muninn.query import NOTICE, guarded
 
 
@@ -118,6 +120,12 @@ def entry(conn: sqlite3.Connection, kid: int) -> Entry:
         "date": iso_date(row["created_at"]),
         "supersedes": entry_name(row["supersedes"]),
         "superseded_by": entry_name(row["superseded_by"]),
+        "confidence": row["confidence"],
+        "valid_until": iso_stamp(row["valid_until"]),
+        "expired": is_expired(row["status"], row["valid_until"], time.time()),
+        "sensitivity": row["sensitivity"],
+        "contradicts": entry_name(row["contradicts"]),
+        "tags": row["tags"].split(",") if row["tags"] else [],
         "cites": [_cite_view(conn, c) for c in cites],
     }
     if row["status"] == "retracted":
@@ -133,32 +141,47 @@ def list_entries(
     status: str = "current",
     kind: str | None = None,
     all_projects: bool = False,
+    loop: str | None = None,
 ) -> dict[str, Any]:
     """List entries newest first, each with its citations' verification.
 
     Args:
         conn: Open store connection.
         cwd: Working directory whose repo scope (plus global) is listed.
-        status: One of ``STATUSES`` or ``"all"``.
+        status: One of ``STATUSES``, ``"expired"`` (current entries past
+            their ``valid_until``) or ``"all"``. ``"current"`` leaves
+            expired entries out; every other value shows them flagged.
         kind: Restrict to one of ``KINDS``.
         all_projects: Drop the scope filter.
+        loop: List this loop's scope instead of the repo and global scopes.
 
     Returns:
         The entries and their count, or an error payload for a bad filter.
     """
-    if status != "all" and status not in STATUSES:
+    if status not in (*STATUSES, "expired", "all"):
         return _error("bad_status")
     if kind is not None and kind not in KINDS:
         return _error("bad_kind")
     where = ["1"]
     args: list[Any] = []
-    if status != "all":
+    now = time.time()
+    if status == "expired":
+        where.append(f"k.status = 'current' AND NOT {LIVE_SQL}")
+        args.append(now)
+    elif status != "all":
         where.append("k.status = ?")
         args.append(status)
+        if status == "current":
+            where.append(LIVE_SQL)
+            args.append(now)
     if kind is not None:
         where.append("k.kind = ?")
         args.append(kind)
-    if not all_projects:
+    if loop is not None:
+        ids = [loop_scope_id(conn, loop, create=False) or 0]
+        where.append("k.scope_id = ?")
+        args += ids
+    elif not all_projects:
         # [0] matches no scope: an unknown cwd lists nothing, not everything.
         ids = scope.scope_ids_for_read(conn, cwd) or [0]
         where.append(f"k.scope_id IN ({','.join('?' * len(ids))})")
@@ -284,6 +307,11 @@ def check(conn: sqlite3.Connection) -> dict[str, Any]:
         "notice": NOTICE,
         "citations": len(rows),
         **counts,
+        "expired": conn.execute(
+            "SELECT count(*) FROM knowledge k WHERE k.status = 'current'"
+            f" AND NOT {LIVE_SQL}",
+            (time.time(),),
+        ).fetchone()[0],
     }
     out["problems"] = problems[:PROBLEMS_MAX]
     if len(problems) > PROBLEMS_MAX:
@@ -317,10 +345,10 @@ def block_entries(
         " FROM knowledge k JOIN scope sc ON sc.id = k.scope_id"
         " JOIN citation c ON c.id = (SELECT min(m.id) FROM citation m"
         f" WHERE m.knowledge_id = k.id AND {PUSHABLE_CITE})"
-        f" WHERE k.status = 'current' AND k.scope_id IN"
+        f" WHERE k.status = 'current' AND {PUSH_SQL} AND k.scope_id IN"
         f" ({','.join('?' * len(scope_ids))})"
         " ORDER BY k.created_at DESC, k.id DESC LIMIT ?",
-        [*scope_ids, limit],
+        [time.time(), *scope_ids, limit],
     )
     return [
         {
@@ -354,7 +382,8 @@ def user_cited(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
     rows = conn.execute(
         "SELECT k.id FROM knowledge k WHERE k.id IN"
         f" ({','.join('?' * len(ids))}) AND EXISTS (SELECT 1 FROM citation m"
-        f" WHERE m.knowledge_id = k.id AND {PUSHABLE_CITE})",
-        ids,
+        f" WHERE m.knowledge_id = k.id AND {PUSHABLE_CITE})"
+        f" AND {PUSH_SQL}",
+        [*ids, time.time()],
     )
     return {row[0] for row in rows}

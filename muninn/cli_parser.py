@@ -198,15 +198,28 @@ def _add_knowledge(cmd: _Commands) -> None:
     )
     a.add_argument("--supersedes", metavar="K")
     a.add_argument("--global", action="store_true", dest="is_global")
+    a.add_argument(
+        "--confidence", metavar="LEVEL", help="observed|reported|inferred"
+    )
+    a.add_argument(
+        "--valid-until", metavar="DATE", help="ISO date; later it is expired"
+    )
+    a.add_argument("--sensitivity", default="normal", help="normal|restricted")
+    a.add_argument("--contradicts", metavar="K")
+    a.add_argument("--tag", action="append", default=[], dest="tags")
+    a.add_argument("--scope-loop", metavar="ID", dest="loop")
     a = know.add("retract", "retract a current entry")
     a.add_argument("kid", metavar="K")
     a.add_argument("--reason", default="")
     a = know.add("list", "entries of this repo and global, newest first")
     a.add_argument(
-        "--status", choices=(*knowledge.STATUSES, "all"), default="current"
+        "--status",
+        choices=(*knowledge.STATUSES, "expired", "all"),
+        default="current",
     )
     a.add_argument("--kind", choices=knowledge.KINDS)
     a.add_argument("--all-projects", action="store_true")
+    a.add_argument("--scope-loop", metavar="ID", dest="loop")
     a = know.add("show", "one entry with its chain and log")
     a.add_argument("kid", metavar="K")
     know.add("check", "re-verify every citation")

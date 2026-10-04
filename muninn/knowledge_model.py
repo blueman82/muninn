@@ -15,7 +15,14 @@ from muninn import classify
 type Entry = dict[str, Any]
 type Cite = dict[str, Any]
 
-KINDS = ("decision", "fact", "preference", "procedure")
+KINDS = (
+    "decision",
+    "fact",
+    "preference",
+    "procedure",
+    "lesson",
+    "constraint",
+)
 CITABLE = ("prompt", "reply", "tool_call")  # of a primary thread, unflagged
 STATUSES = ("current", "superseded", "retracted", "erased")
 TEXT_MAX = 500
@@ -44,8 +51,9 @@ class RefusedError(Exception):
         code: One of bad_kind, bad_actor, text_length, reason_length,
             uncited, bad_ref, not_found, ambiguous_ref, not_citable,
             quote_length, quote_not_found, approval_needs_reply,
-            no_caller_session, preference_needs_user, bad_supersedes or
-            not_current.
+            no_caller_session, preference_needs_user, bad_supersedes,
+            not_current, bad_confidence, bad_sensitivity, bad_valid_until,
+            bad_tags, bad_contradicts or bad_loop_scope.
         detail: Optional extra context for the code.
     """
 

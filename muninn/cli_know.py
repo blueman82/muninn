@@ -78,6 +78,12 @@ def _add(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             quote_only=alone,
             supersedes=a.supersedes,
             global_scope=a.is_global,
+            confidence=a.confidence,
+            valid_until=a.valid_until,
+            sensitivity=a.sensitivity,
+            contradicts=a.contradicts,
+            tags=a.tags,
+            loop=a.loop,
             cwd=current_dir(env),
             actor=obs.actor(env),
             roots=ingest.default_roots(env),
@@ -115,6 +121,7 @@ def _list(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             status=a.status,
             kind=a.kind,
             all_projects=a.all_projects,
+            loop=a.loop,
         )
 
     out = read_store(home, work)
