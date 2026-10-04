@@ -20,6 +20,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from muninn.obs_log import log_poller
 from muninn.store_migrate import migrate_v1_to_v2
 from muninn.store_schema import SCHEMA_SQL, SCHEMA_VERSION
 
@@ -112,7 +113,36 @@ def _ensure_dir(path: Path) -> None:
         ensure_private_dir(path)
 
 
-def _init_schema(conn: sqlite3.Connection) -> None:
+def _migrate_logged(conn: sqlite3.Connection, home: Path) -> None:
+    """Run the v1 to v2 migration and leave one poller.log line about it.
+
+    The line says migrated, raced (another writer won) or failed, with the
+    row count and duration; logging is best effort and never fails an open.
+    """
+    started = time.monotonic()
+    event, rows, exc = "migrated", None, None
+    try:
+        rows = migrate_v1_to_v2(conn)
+        if rows is None:
+            event = "migrate_raced"
+    except BaseException as err:
+        event, exc = "migrate_failed", type(err).__name__
+        raise
+    finally:
+        log_poller(
+            home,
+            {
+                "event": event,
+                "from_v": 1,
+                "to_v": SCHEMA_VERSION,
+                "rows": rows,
+                "ms": round((time.monotonic() - started) * 1000, 1),
+                "exc": exc,
+            },
+        )
+
+
+def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
     """Create the schema on a brand-new database.
 
     Raises:
@@ -120,7 +150,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
     """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 1:
-        migrate_v1_to_v2(conn)
+        _migrate_logged(conn, home)
         return
     if version == SCHEMA_VERSION:
         return
@@ -177,7 +207,7 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
             raise StoreUnavailableError(
                 f"journal_mode is {mode!r}, need 'delete'"
             )
-        _init_schema(conn)
+        _init_schema(conn, path.parent)
     except BaseException:
         conn.close()
         raise

@@ -7,7 +7,7 @@ import time
 from collections import Counter
 from typing import Any
 
-from muninn.knowledge_expiry import LIVE_SQL
+from muninn.knowledge_expiry import PUSH_SQL
 from muninn.query.answers import Answer, answer_citable, event_ref
 
 CANDIDATES = 300  # bm25 candidates per search, composed into pages
@@ -231,7 +231,7 @@ def knowledge(
         " FROM knowledge_fts JOIN knowledge k ON k.id = knowledge_fts.rowid"
         " JOIN scope sc ON sc.id = k.scope_id"
         " WHERE knowledge_fts MATCH ? AND k.status = 'current'"
-        f" AND {LIVE_SQL} {where}"
+        f" AND {PUSH_SQL} {where}"
         f" ORDER BY bm25(knowledge_fts), k.id LIMIT {KNOWLEDGE_HITS}",
         [fts, time.time(), *([] if everywhere else ids)],
     ).fetchall()

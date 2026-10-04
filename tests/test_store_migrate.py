@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import unittest
 from pathlib import Path
@@ -160,6 +161,21 @@ class MigrateTests(StoreCase):
         # and the next open still migrates cleanly
         self.assertEqual(
             self.rw().execute("PRAGMA user_version").fetchone()[0], 2
+        )
+
+    def test_open_logs_one_migration_line(self) -> None:
+        make_v1(self.db)
+        self.rw()
+        lines = (self.db.parent / "poller.log").read_text().splitlines()
+        self.assertEqual(len(lines), 1)
+        got = json.loads(lines[0])
+        self.assertEqual(
+            (got["event"], got["from_v"], got["to_v"], got["rows"]),
+            ("migrated", 1, 2, 4),
+        )
+        self.rw()  # already v2: no second line
+        self.assertEqual(
+            len((self.db.parent / "poller.log").read_text().splitlines()), 1
         )
 
     def test_read_only_connect_refuses_v1_so_hooks_fail_open(self) -> None:

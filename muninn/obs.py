@@ -325,7 +325,7 @@ def _store_checks(home: Path) -> list[CheckResult]:
     try:
         conn = store.connect_ro(store.db_path(home))
     except store.StoreUnavailableError as exc:
-        return [_result("store_readable", False, type(exc).__name__)]
+        return [_result("store_readable", False, str(exc)[:80])]
     results = [_result("store_readable", True)]
     try:
         # extend() appends as the generator yields, so the checks that ran

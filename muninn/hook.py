@@ -281,8 +281,9 @@ def _build_text(
     except store.HotJournalError:
         trace["error"] = "hot_journal"
         return _notice("hot_journal")
-    except store.StoreUnavailableError:
+    except store.StoreUnavailableError as exc:
         trace["error"] = "store_unavailable"
+        trace["detail"] = str(exc)[:80]
         return _notice("store_unavailable")
     except Exception:  # fail open: never break the provider's session
         trace["error"] = "error"

@@ -36,6 +36,9 @@ _NUMBERS = frozenset(
         "events_added",
         "failed",
         "duration_s",
+        "rows",
+        "from_v",
+        "to_v",
     }
 )
 _FLAGS = frozenset({"hash_ok", "logged"})
@@ -47,6 +50,7 @@ _CODES = {
     "actor": re.compile(r"user|(?:claude|codex):[\w-]{1,12}"),
     "query_sha12": re.compile(r"[0-9a-f]{12}"),
     "error": re.compile(r"[a-z_]{1,40}"),
+    "detail": re.compile(r"[A-Za-z0-9_ ,()'.-]{1,80}"),
     "event": re.compile(r"[a-z_]{1,20}"),
     "exc": re.compile(r"[A-Za-z_]{1,60}"),  # an exception class name
 }

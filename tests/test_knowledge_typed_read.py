@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from muninn import knowledge, obs_stats, query
+from muninn.query import hits
 from tests.hook_support import RecallCase
 from tests.knowledge_support import KnowCase, kid
 
@@ -92,6 +93,18 @@ class RestrictedTests(RecallCase):
         recalled = str(self.ask())
         self.assertNotIn("restricted alphaterm", recalled)
         self.assertIn("plain alphaterm", recalled)
+
+    def test_search_leaves_out_restricted_and_expired(self) -> None:
+        """Search output reaches the model, so it is a push path too."""
+        self.add(text="secretword restricted", sensitivity="restricted")
+        stale = self.add(text="secretword stale", valid_until="2099-01-01")
+        self.rw.execute(
+            "UPDATE knowledge SET valid_until = ? WHERE id = ?",
+            (time.time() - 5, kid(stale)),
+        )
+        plain = self.add(text="secretword plain")
+        got = hits.knowledge(self.ro(), "secretword", [], True)
+        self.assertEqual([a["id"] for a in got], [f"K{kid(plain)}"])
 
     def test_restricted_is_still_visible_through_list_and_show(self) -> None:
         got = self.add(text="private note", sensitivity="restricted")

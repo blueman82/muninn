@@ -20,7 +20,7 @@ V1_KNOWLEDGE_COLUMNS = (
 )
 
 
-def migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+def migrate_v1_to_v2(conn: sqlite3.Connection) -> int | None:
     """Rebuild the knowledge table in place as schema v2.
 
     All-or-nothing: the rebuild and ``user_version`` commit together, and a
@@ -29,7 +29,12 @@ def migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
 
     Args:
         conn: Autocommit read-write connection (isolation_level None).
+
+    Returns:
+        The number of knowledge rows copied, or None when another migrator
+        had already won the race.
     """
+    copied: int | None = None
     prior_fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     # Cannot be changed inside a transaction; the swap needs it off so that
     # dropping the old table does not check its referrers.
@@ -38,24 +43,30 @@ def migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         conn.execute("BEGIN IMMEDIATE")
         try:
             if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
-                _swap_knowledge(conn)
+                copied = _swap_knowledge(conn)
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
     finally:
         conn.execute(f"PRAGMA foreign_keys={'ON' if prior_fk else 'OFF'}")
+    return copied
 
 
-def _swap_knowledge(conn: sqlite3.Connection) -> None:
-    """Run the create, copy, drop, rename steps inside the open transaction."""
+def _swap_knowledge(conn: sqlite3.Connection) -> int:
+    """Run the create, copy, drop, rename steps inside the open transaction.
+
+    Returns:
+        The number of rows copied.
+    """
     conn.execute(KNOWLEDGE_TABLE.format(name="knowledge_v2"))
-    conn.execute(
+    copied = conn.execute(
         f"INSERT INTO knowledge_v2 ({V1_KNOWLEDGE_COLUMNS})"
         f" SELECT {V1_KNOWLEDGE_COLUMNS} FROM knowledge"
-    )
+    ).rowcount
     conn.execute("DROP TABLE knowledge")  # takes its three triggers with it
     conn.execute("ALTER TABLE knowledge_v2 RENAME TO knowledge")
     for trigger in KNOWLEDGE_TRIGGERS:
         conn.execute(trigger)
     conn.execute("PRAGMA user_version=2")
+    return copied

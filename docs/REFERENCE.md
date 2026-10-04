@@ -85,9 +85,9 @@ current: `know list` (default `--status current`), search, the SessionStart bloc
 untouched; `know list --status expired` shows it, `--status all` and `know show` show it flagged, `know check` reports an
 `expired` count, and `stats` counts it under `knowledge.expired` instead of `knowledge.current`.
 
-**Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block and of per-prompt recall
-(the two push paths), even when a user prompt cites it. It is still returned by the commands you run yourself (`know list`,
-`know show`, `search`). `stats` reports `knowledge_restricted`, a count only.
+**Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block, of per-prompt recall
+and of `search` (its output reaches the model, so it counts as a push path), even when a user prompt cites it. It is still
+returned by the commands a person runs to inspect the ledger (`know list`, `know show`). `stats` reports `knowledge_restricted`, a count only.
 
 **Schema v2 is a one-way upgrade.** The first writing command (`know add`, `ingest`, the poller) on a v1 store rebuilds the
 `knowledge` table once, in one transaction with `user_version` (ids, supersede chains, citations, the log and full-text
