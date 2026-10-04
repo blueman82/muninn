@@ -24,7 +24,7 @@ from install import configedit as ce
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real, wait
 from install.record import Record, load_record
-from install.steps_release import relink
+from install.steps_release import PRUNING, relink
 from install.transforms import codex_check
 
 
@@ -152,6 +152,26 @@ def _undo_links(ctx: Ctx, rec: Record) -> None:
             )
 
 
+def _undo_prune(ctx: Ctx) -> None:
+    """Give back the releases this run's ``prune`` moved aside.
+
+    A run killed after ``prune`` and before ``sweep`` leaves the old
+    release under a ``.pruning-`` name, and the links below would point at
+    a name that no longer exists.
+    """
+    prefix = f"{PRUNING}{ctx.ts}-"
+    if not ctx.lib.is_dir():
+        return
+    for gone in sorted(ctx.lib.glob(f"{prefix}*")):
+        name = gone.name[len(prefix) :]
+        if not (ctx.lib / name).exists():
+            _act(
+                ctx,
+                f"restore release {name}",
+                functools.partial(gone.rename, ctx.lib / name),
+            )
+
+
 def rollback(ctx: Ctx, rec: Record) -> list[str]:
     """Undo whatever the install did.
 
@@ -169,6 +189,7 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
     if rec.get("fresh"):
         _undo_fresh(ctx, j)
     _undo_config(ctx, rec)
+    _undo_prune(ctx)
     _undo_links(ctx, rec)
     if rec.get("upgrade") and job(ctx):  # back onto the old release
         kick = ["launchctl", "kickstart", "-k", ctx.target]

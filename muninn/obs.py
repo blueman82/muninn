@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
-from muninn import ingest, store
+from muninn import ingest, store, tombstone_key
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_stats import db_space, human_bytes, reread, stats
 from muninn.obs_status import (
@@ -55,6 +55,10 @@ FREE_WARN_RATIO = 0.25
 FREE_WARN_BYTES = 64 * 1024**2
 
 LABEL = "com.muninn"
+# The installer parks a superseded release under this prefix until it
+# deletes it (install/steps_release.py names the same string; the
+# installer is not importable from the runtime).
+PRUNING = ".pruning-"
 # Everything muninn itself puts in the data directory; anything else is
 # reported by ``unexpected_files``.
 DATA_FILES = frozenset(
@@ -385,6 +389,22 @@ def _aside_files(home: Path) -> CheckResult:
     return _result("aside_files", not kept, ",".join(kept), level="warn")
 
 
+def _release_leftovers(env: Mapping[str, str]) -> CheckResult:
+    """No superseded release is left waiting for deletion."""
+    lib = Path(env.get("HOME") or Path.home()) / ".local/lib/muninn"
+    try:
+        left = sorted(p.name for p in lib.glob(f"{PRUNING}*"))
+    except OSError:
+        left = []
+    return _result("release_leftovers", not left, ",".join(left), level="warn")
+
+
+def _tombstone_key(home: Path) -> CheckResult:
+    """The key the keyed tombstones need is present and whole."""
+    problem = tombstone_key.key_problem(home)
+    return _result("tombstone_key", problem is None, problem or "")
+
+
 def _launchd_job() -> CheckResult:
     """The launchd job is loaded and running."""
     job = _job()
@@ -444,6 +464,8 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _poller_error(home),
         _unreadable_files(home),
         _aside_files(home),
+        _tombstone_key(home),
+        _release_leftovers(env),
         _launchd_job(),
         _roots_readable(env),
         _roots_present(env),

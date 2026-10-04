@@ -127,7 +127,7 @@ themselves are never stored.
 - The data directory is mode 0700 and its files 0600. The CLI and poller run
   with `umask 077`, and the launchd job sets `Umask` "077".
 - Logs never hold transcript text: `calls.jsonl` is an allowlist (a query is
-  kept only as a term count and a hash prefix), `status.json` holds counts, a bare error class name and its time (`last_error`, `last_error_at`; a good pass clears both),
+  kept only as a term count and a hash prefix), `status.json` holds counts, a bare error class name and its time (`last_error`, `last_error_at`; the poller's next good pass clears both),
   and `poller.log` holds event codes, counts and exception class names.
 - Best-effort secret redaction at ingest and on every output.
 - `muninn erase` writes tombstones (identifiers and hashes only) that are

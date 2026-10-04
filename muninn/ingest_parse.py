@@ -10,18 +10,19 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import IO, TypedDict, cast
+from typing import TypedDict, cast
 
-from muninn import classify, event_model, ingest_model, scope, tool_errors
+from muninn import classify, event_model, scope, tool_errors
+from muninn.ingest_lines import as_record, decode, lines
 from muninn.ingest_model import PROVIDER, Record, Work
+from muninn.tombstone_key import key_for
 from muninn.tombstones import (
+    erased_ancestor_lines,
     erased_events,
     event_digests,
     event_tag,
-    key_for,
-    legacy_tag,
     role_digest,
 )
 
@@ -180,6 +181,10 @@ class _SourceParser:
             conn, self.provider, w.info.thread_id, w.info.forked_from_id
         )
         self.key = key_for(conn) if self.erased else b""
+        # Lines erased before content tags existed leave only their hash.
+        self.ancestor_lines = erased_ancestor_lines(
+            conn, self.provider, w.info.thread_id, w.info.forked_from_id
+        )
         self.prefix = (
             event_digests(conn, start.parent_id)
             if self.extra.prefix_open
@@ -188,7 +193,8 @@ class _SourceParser:
         # An old fork whose parent has no events has no prefix to skip.
         # Also a replay when an erase removed the parent's copy of it.
         replay = bool(self.prefix) or (
-            bool(self.erased) and w.info.forked_from_id is not None
+            bool(self.erased or self.ancestor_lines)
+            and w.info.forked_from_id is not None
         )
         self.extra.prefix_open = replay and self.extra.prefix_open
         self.added = 0
@@ -201,7 +207,7 @@ class _SourceParser:
         """Read every whole line from the start cursor to the end of file."""
         with self.w.path.open("rb") as handle:
             handle.seek(self.start.cursor[0])
-            for number, begin, end, raw in _lines(handle, *self.start.cursor):
+            for number, begin, end, raw in lines(handle, *self.start.cursor):
                 # Advance the cursor for every whole line, usable or not, so
                 # a bad line is skipped once and never re-read.
                 self.cursor = (end, number)
@@ -223,7 +229,12 @@ class _SourceParser:
         self.anchor = (begin, digest)
         if (number, digest) in self.tombs:
             return  # an erased line never re-enters
-        record = _decode(raw)
+        if self.extra.prefix_open and digest in self.ancestor_lines:
+            # A byte-exact copy of an erased parent line: dropped without
+            # ending the replayed prefix, or the copies after it would
+            # be stored as the fork's own.
+            return
+        record = decode(raw)
         if isinstance(record, str):
             self._issue(number, record)
             return
@@ -254,7 +265,6 @@ class _SourceParser:
             return True
         return bool(self.erased) and (
             event_tag(self.key, ev.role, ev.text) in self.erased
-            or legacy_tag(ev.role, ev.text) in self.erased
         )
 
     def _issue(self, number: int, code: str) -> None:
@@ -322,68 +332,13 @@ class _SourceParser:
                 self.extra.muninn.add(ev.call_id)
 
 
-def _lines(
-    handle: IO[bytes], offset: int, number: int
-) -> Iterator[tuple[int, int, int, bytes | None]]:
-    """Yield (line number, start, end, raw) of each whole line.
-
-    ``raw`` is None for a line over MAX_LINE_BYTES.  Iteration stops before
-    a partial tail: a line still being written is read once its newline
-    exists, so the cursor never lands mid-line.
-    """
-    limit = ingest_model.MAX_LINE_BYTES
-    while True:
-        raw = handle.readline(limit + 1)
-        if not raw.endswith(b"\n"):
-            if len(raw) <= limit:
-                return  # EOF, or a line still being written
-            # Oversize: drain it in 1 MiB reads so it is never held whole.
-            size = len(raw)
-            while not raw.endswith(b"\n"):
-                raw = handle.readline(1 << 20)
-                if not raw:
-                    return  # an oversize line still being written
-                size += len(raw)
-            number += 1
-            yield number, offset, offset + size, None
-            offset += size
-            continue
-        number += 1
-        yield number, offset, offset + len(raw), raw
-        offset += len(raw)
-
-
-def _decode(raw: bytes) -> Record | str:
-    """Return the JSON object on a line, or the issue code that rejects it."""
-    try:
-        record = json.loads(raw)
-    except RecursionError:
-        return "too_deep"
-    except ValueError:  # includes invalid UTF-8
-        return "invalid_json"
-    # The depth check comes before the type check so a hostile deeply nested
-    # array is reported as too_deep, not as not_object.
-    if not classify.within_depth(record):
-        return "too_deep"
-    obj = _as_record(record)
-    return "not_object" if obj is None else obj
-
-
-def _as_record(value: object) -> Record | None:
-    """Return ``value`` if it is a JSON object, else None."""
-    if isinstance(value, dict):
-        # isinstance leaves the types unknown; JSON object keys are strings.
-        return cast(Record, value)
-    return None
-
-
 def _count_output(record: Record, extra: _Extra, usage: Usage) -> None:
     """Count a failed exit of a muninn call's output; the output is not kept.
 
     classify skips the output text itself (its call invokes muninn), so the
     exit status is read here and only the count survives.
     """
-    payload = _as_record(record.get("payload"))
+    payload = as_record(record.get("payload"))
     if record.get("type") != "response_item" or payload is None:
         return
     call_id = payload.get("call_id")

@@ -33,7 +33,8 @@ PUSHABLE_CITE = "m.state = 'live' AND m.role = 'user' AND m.kind = 'prompt'"
 
 PULL_ONLY = (
     "pull-only: not pushed into session memory because no cited user prompt"
-    " holds this text; re-add it in the user's own words"
+    " holds this text; cite a user prompt, or re-add it in the user's own"
+    " words"
 )
 PUSH_OVERLAP = 0.8  # share of an entry's words its user quote must hold
 

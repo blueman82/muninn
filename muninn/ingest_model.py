@@ -47,7 +47,9 @@ class PassStats:
         skipped_lines: Lines recorded as source issues.
         missing: Sources newly marked missing.
         duration_s: Wall time of the pass.
-        skipped_files: Tombstoned, unidentifiable or duplicate files.
+        skipped_files: Tombstoned, unidentifiable or duplicate files, and
+            files that vanished or could not be opened (the latter also
+            count in ``unreadable_files``).
         unreadable_files: Files that could not be opened (not vanished).
         failed: Sources rolled back by an error; redone next pass.
         errors: Exception class name to count, for the failed sources.

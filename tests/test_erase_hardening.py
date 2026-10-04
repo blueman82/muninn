@@ -9,7 +9,13 @@ import stat
 from typing import Any
 from unittest import mock
 
-from muninn import cli, knowledge, knowledge_read, obs, tombstones
+from muninn import (
+    cli,
+    knowledge,
+    knowledge_read,
+    tombstone_key,
+    tombstones,
+)
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
 from tests.knowledge_support import KnowCase
@@ -94,32 +100,17 @@ class KeyedTagTests(EraseCase):
 
     def test_log_holds_no_plain_hash_and_the_key_is_private(self) -> None:
         self.erase_first_yes()
-        log = (self.home / tombstones.TOMBSTONE_FILE).read_text()
-        self.assertIn(tombstones.KEYED_PREFIX, log)
-        plain = tombstones.legacy_tag("user", "yes")
+        log = (self.home / tombstone_key.TOMBSTONE_FILE).read_text()
+        self.assertIn(tombstone_key.KEYED_PREFIX, log)
+        plain = tombstones.role_digest("user", "yes").hex()
         self.assertNotIn(plain, log)
-        key = self.home / tombstones.KEY_FILE
+        key = self.home / tombstone_key.KEY_FILE
         self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
         self.assertEqual(len(key.read_bytes()), 32)
 
     def test_the_key_is_reused_not_recreated(self) -> None:
-        first = tombstones.load_key(self.home)
-        self.assertEqual(tombstones.load_key(self.home), first)
-
-    def test_a_legacy_tag_is_still_honoured(self) -> None:
-        self.erase_first_yes()
-        self.conn.execute(
-            "DELETE FROM tombstone WHERE line = 0 AND level = 'line'"
-        )
-        self.conn.execute(
-            "INSERT INTO tombstone(created_at, provider, level, thread_id,"
-            " line, line_sha256) VALUES (0, 'codex', 'line', ?, 0, ?)",
-            (PARENT, tombstones.legacy_tag("user", "yes")),
-        )
-        self.write(rollout(FORK), fork_records())
-        self.run_ingest()
-        got = [e[3] for e in self.events(FORK)]
-        self.assertEqual(got, ["fork own", "yes"])
+        first = tombstone_key.load_key(self.home)
+        self.assertEqual(tombstone_key.load_key(self.home), first)
 
 
 class AsideFileTests(EraseCase):
@@ -156,21 +147,6 @@ class AsideDoctorTests(CliCase):
         self.assertIs(got["ok"], False)
         self.assertEqual(got["level"], "warn")
         self.assertEqual(got["detail"], ASIDE)
-
-
-class ManualPassClearsErrorTests(CliCase):
-    """A good manual pass clears the failure fields like the poller's."""
-
-    def test_ingest_clears_last_error_and_its_time(self) -> None:
-        self.session("thr-clear", "hello")
-        obs.write_status(
-            self.home, {"last_error": "OSError", "last_error_at": 5.0}
-        )
-        code, _, _ = self.muninn("ingest")
-        self.assertEqual(code, 0)
-        status = obs.read_status(self.home)
-        self.assertIsNone(status["last_error"])
-        self.assertIsNone(status["last_error_at"])
 
 
 class BoundedBlockTests(KnowCase):

@@ -181,6 +181,7 @@ class _Poller:
             self.home,
             stats,
             self.env,
+            clears_error=True,
             pid=os.getpid(),
             interval_s=self.interval,
             passes=self.passes,
@@ -253,7 +254,13 @@ def _quiet_streams(home: Path) -> None:
     try:
         log = (home / "poller.log").stat()
         null = os.open(os.devnull, os.O_WRONLY)
-    except OSError:
+    except FileNotFoundError:
+        return  # no log file, so launchd is not writing to one
+    except OSError as exc:
+        # Streams that stay on the log would bypass its allowlist.
+        obs.log_poller(
+            home, {"event": "quiet_failed", "exc": type(exc).__name__}
+        )
         return
     try:
         for fd in (1, 2):
@@ -262,7 +269,13 @@ def _quiet_streams(home: Path) -> None:
             except OSError:
                 continue
             if (seen.st_dev, seen.st_ino) == (log.st_dev, log.st_ino):
-                os.dup2(null, fd)
+                try:
+                    os.dup2(null, fd)
+                except OSError as exc:
+                    obs.log_poller(
+                        home,
+                        {"event": "quiet_failed", "exc": type(exc).__name__},
+                    )
     finally:
         os.close(null)
 
@@ -287,6 +300,13 @@ def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
         poller.prepare()
         return poller.run()
     except Exception as exc:
-        # Class name only, like the pass errors above.
-        obs.log_poller(home, {"event": "crash", "exc": type(exc).__name__})
+        # Class name only, like the pass errors above.  Neither write may
+        # raise here: launchd must still see exit 1 and restart the job.
+        name = type(exc).__name__
+        with contextlib.suppress(Exception):
+            obs.log_poller(home, {"event": "crash", "exc": name})
+        with contextlib.suppress(Exception):
+            obs.write_status(
+                home, {"last_error": name, "last_error_at": time.time()}
+            )
         return 1, None

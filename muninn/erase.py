@@ -25,6 +25,7 @@ from muninn.erase_collect import (
     collect_knowledge,
     collect_match,
     collect_session,
+    content_tombstones,
 )
 from muninn.erase_residue import (
     aside_files,
@@ -34,11 +35,8 @@ from muninn.erase_residue import (
     still_stored,
     vocab_left,
 )
-from muninn.tombstones import (
-    TOMBSTONE_FILE,
-    append_tombstones,
-    reapply_tombstones,
-)
+from muninn.tombstone_key import TOMBSTONE_FILE
+from muninn.tombstones import append_tombstones, reapply_tombstones
 
 __all__ = [
     "MIN_MATCH",
@@ -174,6 +172,8 @@ def _erase_and_verify(
     rare = rare_terms(conn, target.events, sorted(target.knowledge))
     # Write-ahead: the tombstones reach disk before the commit, so a crash
     # in between cannot lose an erasure.
+    # The key is made here, after planning, so a dry run never creates it.
+    target.tombstones += content_tombstones(conn, target)
     append_tombstones(home, target.tombstones)
     _commit(conn, target)
     if not match:  # a needle still in a surviving row is not residue
@@ -236,7 +236,7 @@ def erase(
         "events": len(target.events),
         "citations": len(target.citations),
         "knowledge": len(target.knowledge),
-        "tombstones": len(target.tombstones),
+        "tombstones": len(target.tombstones) + len(target.content),
         "provider_files": _provider_files(target, ingest.default_roots(env)),
         "out_of_scope": _out_of_scope(env),
         "not_covered": list(NOT_COVERED),

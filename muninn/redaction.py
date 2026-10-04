@@ -23,17 +23,20 @@ REDACTED = "[redacted:secret]"
 _URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
 _KEYS = (
     r"api[_-]?key|access[_-]?token|client[_-]?secret|token|"
-    r"auth(?:orization)?|bearer|password|passwd|secret[_-]?access[_-]?key|"
+    r"bearer|password|passwd|secret[_-]?access[_-]?key|"
     r"secret|private[_-]?key"
 )
+# A token must not begin in the middle of an identifier or word: "disk_live_"
+# holds "sk_live_" and "task-" holds "sk-", and neither is a key.
+_EDGE = r"(?<![A-Za-z0-9])"
 # Provider tokens with a fixed prefix; each needs a long enough tail that
 # ordinary words and short identifiers do not match.
 _VENDOR = (
-    r"xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}"
+    _EDGE + r"(?:xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}"
     r"|AIza[0-9A-Za-z_-]{35}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"
     r"|whsec_[A-Za-z0-9]{16,}|glpat-[A-Za-z0-9_-]{20,}"
     r"|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}"
-    r"|dop_v1_[A-Za-z0-9]{40,}"
+    r"|dop_v1_[A-Za-z0-9]{40,})"
 )
 _JWT = r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
 # A key block's header and footer, including "PGP PRIVATE KEY BLOCK".
@@ -42,20 +45,31 @@ _PEM_TAG = r"(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
 # Group "v" marks the secret value to blank out; a pattern without it
 # redacts its whole match. A separate pattern for secrets in URL query
 # strings is deliberately absent: every such span already lies inside a
-# key=value match of the first pattern.
+# key=value match of the first pattern or the auth one.
 SECRET_PATTERNS = (
     re.compile(rf"(?i)(?:{_KEYS})\s*(?:=|:)\s*(?P<v>\S+)"),
     re.compile(r"(?i)bearer\s+(?P<v>\S+)"),
     re.compile(
-        r"(?i)sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}"
-        r"|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
+        rf"(?i){_EDGE}(?:sk-[A-Za-z0-9_-]{{20,}}|gh[pousr]_[A-Za-z0-9_]{{20,}}"
+        r"|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})"
     ),
     re.compile(_VENDOR),
     re.compile(_JWT),
-    # Pattern 1 stops at "Basic"; this takes the credential after it.
+    # An auth header's value, except "Basic" before an ordinary word (prose
+    # such as "authorization: basic configuration"); a real Basic header is
+    # taken whole by the next pattern.  The inline flags make the word test
+    # case-sensitive: base64 mixes cases inside a word, prose does not.
     re.compile(
-        r"(?i)auth(?:orization)?[ \t]*[:=][ \t]*"
-        r"(?P<v>basic[ \t]+[A-Za-z0-9+/=]{8,})"
+        r"(?i)auth(?:orization)?\s*[=:]\s*"
+        r"(?!basic[ \t]+(?-i:[A-Za-z][a-z]*)(?![A-Za-z0-9+/=]))(?P<v>\S+)"
+    ),
+    # The credential after "Basic": it must look like base64 (a digit, a
+    # sign, padding or a case change inside the run), so a plain word is not
+    # taken for one.
+    re.compile(
+        r"(?i)auth(?:orization)?[ \t]*[:=][ \t]*(?P<v>basic[ \t]+"
+        r"(?=[A-Za-z0-9+/]*(?:[0-9+/=]|(?-i:[a-z][A-Z])))"
+        r"[A-Za-z0-9+/=]{8,})"
     ),
     re.compile(rf"(?i){_URL}(?P<v>[^/\s@]+)@\S+"),
     # The optional backslashes cover JSON nested inside a JSON string, where

@@ -57,6 +57,36 @@ class ProviderTokenTests(unittest.TestCase):
                 self.assertEqual(redact(text), (text, False))
 
 
+class BoundaryTests(unittest.TestCase):
+    """A prefix inside a longer word or identifier is not a token."""
+
+    def test_prefixes_inside_identifiers_are_untouched(self) -> None:
+        for text in (
+            "disk" + "_live_" + A36[:24],
+            "task" + "_test_" + A36[:24],
+            "prefi" + "xoxb-1234567890-abcdefghij",
+            "task-abcdefghijklmnopqrstuvwx",
+            "highp_abcdefghijklmnopqrstuvwx",
+            "mynpm" + "_" + A36[:36],
+        ):
+            with self.subTest(text=text[:12]):
+                self.assertEqual(redact(text), (text, False))
+
+    def test_real_tokens_after_punctuation_are_still_redacted(self) -> None:
+        for token in (
+            STRIPE,
+            SLACK,
+            NPM,
+            "sk-" + A36 + "xyz",
+            "AKIA" + "B" * 16,
+        ):
+            for pre, post in (("(", ")"), ('"', '"'), (" ", "."), ("_", "")):
+                with self.subTest(token=token[:6], pre=pre):
+                    got, changed = redact(f"x{pre}{token}{post}y")
+                    self.assertTrue(changed)
+                    self.assertNotIn(token, got)
+
+
 class KeyAndHeaderTests(unittest.TestCase):
     """Key blocks, AWS secret keys and Basic credentials."""
 
@@ -79,6 +109,43 @@ class KeyAndHeaderTests(unittest.TestCase):
     def test_basic_authorization_loses_the_credential(self) -> None:
         got, _ = redact("Authorization: Basic dXNlcjpwYXNzd29yZA==")
         self.assertEqual(got, f"Authorization: {R}")
+
+
+class BasicProseTests(unittest.TestCase):
+    """The word Basic before an ordinary word is prose, not a credential."""
+
+    def test_prose_words_after_basic_are_kept(self) -> None:
+        for text in (
+            "authorization: basic configuration",
+            "Authorization: Basic Configuration is described below",
+            "auth = basic authentication",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text), (text, False))
+
+    def test_base64_looking_credentials_are_redacted(self) -> None:
+        for cred in (
+            "dXNlcjpwYXNzd29yZA==",
+            "dXNlcjpwYXNz",
+            "QWxhZGRpbjoxMjM0",
+        ):
+            with self.subTest(cred=cred):
+                self.assertEqual(
+                    redact(f"Authorization: Basic {cred} tail"),
+                    (f"Authorization: {R} tail", True),
+                )
+
+    def test_a_bare_basic_or_another_key_is_still_redacted(self) -> None:
+        self.assertEqual(
+            redact("authorization: basic"), (f"authorization: {R}", True)
+        )
+        got, changed = redact("password: basic configuration")
+        self.assertEqual(
+            (got, changed), (f"password: {R} configuration", True)
+        )
+
+    def test_other_auth_values_are_redacted(self) -> None:
+        self.assertEqual(redact("auth=abc123def456"), (f"auth={R}", True))
 
 
 class EscapedJsonTests(unittest.TestCase):

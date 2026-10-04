@@ -11,7 +11,9 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from muninn import query
-from muninn.tombstones import TombstoneRow, event_tag, key_for, tombstone_row
+from muninn.erase_family import copies_of
+from muninn.tombstone_key import key_for
+from muninn.tombstones import TombstoneRow, event_tag, tombstone_row
 
 # Providers blocked when a session has not been ingested yet, so a later
 # ingest cannot resurrect it.
@@ -35,6 +37,11 @@ class Target:
     lines: set[tuple[int, int]] = field(default_factory=set[tuple[int, int]])
     events: list[int] = field(default_factory=list[int])
     tombstones: list[TombstoneRow] = field(default_factory=list[TombstoneRow])
+    # (provider, thread, role, text) of each content tombstone to write.
+    # Kept as text, not tags, so planning (and a dry run) needs no key.
+    content: list[tuple[str, str, str, str]] = field(
+        default_factory=list[tuple[str, str, str, str]]
+    )
     citations: set[int] = field(default_factory=set[int])
     knowledge: set[int] = field(default_factory=set[int])
 
@@ -183,62 +190,6 @@ def collect_match(
     }
 
 
-def _fork_sources(
-    conn: sqlite3.Connection, source: sqlite3.Row
-) -> list[sqlite3.Row]:
-    """Return every source forked, directly or not, from a source's thread."""
-    seen = {source["thread_id"]}
-    frontier = set(seen)
-    found: list[sqlite3.Row] = []
-    while frontier:  # terminates: a thread already seen is not revisited
-        rows = conn.execute(
-            "SELECT * FROM source WHERE provider = ? AND forked_from_id IN"
-            f" ({_marks(len(frontier))})",
-            (source["provider"], *frontier),
-        ).fetchall()
-        rows = [r for r in rows if r["thread_id"] not in seen]
-        found += rows
-        frontier = {r["thread_id"] for r in rows}
-        seen |= frontier
-    return found
-
-
-def _ancestors(
-    conn: sqlite3.Connection, source: sqlite3.Row
-) -> list[sqlite3.Row]:
-    """Return the sources a source's thread was forked from, nearest first."""
-    seen = {source["thread_id"]}
-    found: list[sqlite3.Row] = []
-    parent = source["forked_from_id"]
-    while parent and parent not in seen:  # a loop ends the walk
-        seen.add(parent)
-        row = conn.execute(
-            "SELECT * FROM source WHERE provider = ? AND thread_id = ?",
-            (source["provider"], parent),
-        ).fetchone()
-        if row is None:
-            break
-        found.append(row)
-        parent = row["forked_from_id"]
-    return found
-
-
-def _family(
-    conn: sqlite3.Connection, source: sqlite3.Row
-) -> list[sqlite3.Row]:
-    """Return every other source in a fork family that could hold a copy.
-
-    That is the ancestors, and the forks of the source and of each ancestor
-    (so siblings too).  An unrelated session is never part of it.
-    """
-    chain = [source, *_ancestors(conn, source)]
-    related: dict[int, sqlite3.Row] = {r["id"]: r for r in chain[1:]}
-    for member in chain:
-        related.update((r["id"], r) for r in _fork_sources(conn, member))
-    related.pop(source["id"], None)
-    return list(related.values())
-
-
 def _add_line(
     conn: sqlite3.Connection,
     target: Target,
@@ -250,11 +201,16 @@ def _add_line(
     """Add every part of one line; a line tombstone blocks all its parts.
 
     Each event also gets a content tombstone, and with ``copies`` the same
-    content already stored in the thread's fork family (its ancestors, its
-    forks and their siblings) is added too, so an erased line cannot come
-    back through another copy of the history.  A fork's own replayed prefix
-    is not stored, so the ancestor's copy is the one that matters when the
-    erase starts from a fork's ref.
+    content already stored as a copy of the history in the thread's fork
+    family is added too (see ``erase_family.copies_of``), so an erased line
+    cannot come back through another copy.
+
+    Args:
+        conn: Read connection.
+        target: Plan to fill.
+        source: The source row that holds the line.
+        line: 1-based transcript line.
+        copies: Also collect the family's copies of the line's content.
     """
     if (source["id"], line) in target.lines:
         return
@@ -275,28 +231,48 @@ def _add_line(
             line_sha256=rows[0][1],
         )
     )
-    key = key_for(conn)
-    tags = {event_tag(key, r[2], r[3]) for r in rows}
-    target.tombstones += [
-        tombstone_row(
-            source["provider"],
-            "line",
-            thread_id=source["thread_id"],
-            line=0,
-            line_sha256=tag,
-        )
-        for tag in sorted(tags)
+    pairs = {(r[2], r[3]) for r in rows}
+    target.content += [
+        (source["provider"], source["thread_id"], role, text)
+        for role, text in sorted(pairs)
     ]
     if not copies:
         return
-    for fork in _family(conn, source):
-        for role, text in {(r[2], r[3]) for r in rows}:
-            for (copy,) in conn.execute(
-                "SELECT DISTINCT line FROM event WHERE source_id = ?"
-                " AND role = ? AND text = ?",
-                (fork["id"], role, text),
-            ).fetchall():
-                _add_line(conn, target, fork, copy, copies=False)
+    for member, copy in copies_of(conn, source, pairs):
+        _add_line(conn, target, member, copy, copies=False)
+
+
+def content_tombstones(
+    conn: sqlite3.Connection, target: Target
+) -> list[TombstoneRow]:
+    """Make the content tombstones of a plan, creating the key if needed.
+
+    This is the only place a plan needs the tombstone key, so it runs when
+    the plan is applied and a dry run leaves no key file behind.
+
+    Args:
+        conn: Connection to the store.
+        target: The plan.
+
+    Returns:
+        One keyed content tombstone for each planned role and text.
+
+    Raises:
+        TombstoneKeyError: Propagated from ``key_for``.
+    """
+    if not target.content:
+        return []
+    key = key_for(conn)
+    return [
+        tombstone_row(
+            provider,
+            "line",
+            thread_id=thread,
+            line=0,
+            line_sha256=event_tag(key, role, text),
+        )
+        for provider, thread, role, text in target.content
+    ]
 
 
 def _cites(

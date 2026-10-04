@@ -190,7 +190,9 @@ def prune(ctx: Ctx, rec: Record) -> None:
         rec: The run record.
 
     Raises:
-        OSError: If a rename fails, after undoing the ones already done.
+        OSError: If a rename fails, after undoing the ones already done
+            (the original error is the one raised, even when an undo
+            fails too; the dirs left behind are named in the output).
     """
     keep = rec["sha"]
     old = [
@@ -216,27 +218,42 @@ def prune(ctx: Ctx, rec: Record) -> None:
             path.rename(gone)
             moved.append((gone, path))
     except OSError:
+        stuck: list[str] = []
         for gone, path in reversed(moved):
-            gone.rename(path)
+            try:
+                gone.rename(path)
+            except OSError:  # keep undoing the rest
+                stuck.append(gone.name)
+        if stuck:
+            ctx.say(
+                f"could not move back {', '.join(stuck)} in {ctx.lib};"
+                " rename each to the name after its .pruning-<time>- prefix"
+            )
         raise
 
 
-def sweep(ctx: Ctx) -> None:
+def sweep(ctx: Ctx) -> list[str]:
     """Delete the dirs ``prune`` moved aside, and any a past run left.
 
     A failure is only a warning: the install already succeeded and the
-    next upgrade retries.
+    next upgrade retries.  ``muninn doctor`` also warns while one is left.
 
     Args:
         ctx: The run context.
+
+    Returns:
+        The names of the dirs that could not be deleted.
     """
     if ctx.dry_run or not ctx.lib.is_dir():
-        return
+        return []
+    stuck: list[str] = []
     for path in sorted(ctx.lib.glob(f"{PRUNING}*")):
         try:
             shutil.rmtree(path)
         except OSError as exc:
+            stuck.append(path.name)
             ctx.say(f"could not delete {path}: {exc}; remove it by hand")
+    return stuck
 
 
 def _check_plist(ctx: Ctx, data: bytes) -> None:

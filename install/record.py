@@ -29,6 +29,7 @@ _SUMMARY_FIELDS = (
     "python",
     "steps",
     "failed",
+    "sweep_failed",
 )
 
 

@@ -292,9 +292,11 @@ def check(conn: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
-# Citation rows read per wanted entry, and the most ever read, so the hook's
-# cost stays flat as the ledger grows; Python then drops entries whose quote
-# does not back the text.  Beyond the cap an older entry is simply not pushed.
+# Entries examined per wanted entry, and the most ever examined, so the
+# hook's cost stays flat as the ledger grows; Python then drops entries whose
+# quote does not back the text.  The scan counts entries, not citation rows,
+# so one entry with many citations cannot crowd the rest out.  Beyond the cap
+# an older entry is simply not pushed.
 _OVERFETCH = 10
 _SCAN_CAP = 200
 
@@ -321,39 +323,53 @@ def block_entries(
     """
     if not scope_ids or limit < 1:
         return []
-    cursor = conn.execute(
-        "SELECT k.id, k.kind, k.text, k.actor, k.created_at, sc.label,"
-        " m.provider, m.thread_id, m.line, m.part, m.quote"
+    candidates = conn.execute(
+        "SELECT k.id, k.kind, k.text, k.actor, k.created_at, sc.label"
         " FROM knowledge k JOIN scope sc ON sc.id = k.scope_id"
-        " JOIN citation m ON m.knowledge_id = k.id"
-        f" AND {PUSHABLE_CITE}"
-        f" WHERE k.status = 'current' AND k.scope_id IN"
-        f" ({','.join('?' * len(scope_ids))})"
-        " ORDER BY k.created_at DESC, k.id DESC, m.id LIMIT ?",
+        " WHERE k.status = 'current' AND k.scope_id IN"
+        f" ({','.join('?' * len(scope_ids))}) AND EXISTS"
+        " (SELECT 1 FROM citation m WHERE m.knowledge_id = k.id"
+        f" AND {PUSHABLE_CITE})"
+        " ORDER BY k.created_at DESC, k.id DESC LIMIT ?",
         [*scope_ids, min(limit * _OVERFETCH, _SCAN_CAP)],
     )
-    seen: set[int] = set()
-    rows: list[sqlite3.Row] = []
-    for r in cursor:
-        if r["id"] in seen or not text_backed(r["text"], r["quote"] or ""):
+    out: list[dict[str, Any]] = []
+    for k in candidates:
+        cite = _backing_cite(conn, k["id"], k["text"])
+        if cite is None:
             continue
-        seen.add(r["id"])
-        rows.append(r)
-        if len(rows) == limit:
+        out.append(
+            {
+                "id": f"K{k['id']}",
+                "kind": k["kind"],
+                "scope": k["label"],
+                "text": k["text"],
+                "actor": k["actor"],
+                "date": iso_date(k["created_at"]),
+                "cite": _ref(cite),
+                "quote": cite["quote"][:BLOCK_QUOTE],
+            }
+        )
+        if len(out) == limit:
             break
-    return [
-        {
-            "id": f"K{r['id']}",
-            "kind": r["kind"],
-            "scope": r["label"],
-            "text": r["text"],
-            "actor": r["actor"],
-            "date": iso_date(r["created_at"]),
-            "cite": _ref(r),
-            "quote": r["quote"][:BLOCK_QUOTE],
-        }
-        for r in rows
-    ]
+    return out
+
+
+def _backing_cite(
+    conn: sqlite3.Connection, kid: int, text: str
+) -> sqlite3.Row | None:
+    """Return an entry's first user-prompt citation that backs its text."""
+    # Iterated, not fetched: an entry with a great many citations is read
+    # only as far as its first backing one.
+    for cite in conn.execute(
+        "SELECT m.provider, m.thread_id, m.line, m.part, m.quote"
+        " FROM citation m WHERE m.knowledge_id = ?"
+        f" AND {PUSHABLE_CITE} ORDER BY m.id",
+        (kid,),
+    ):
+        if text_backed(text, cite["quote"] or ""):
+            return cite
+    return None
 
 
 @guarded
