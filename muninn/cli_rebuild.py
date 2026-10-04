@@ -62,7 +62,8 @@ def _attach_old(conn: sqlite3.Connection, db: Path) -> bool:
         version = conn.execute("PRAGMA old.user_version").fetchone()[0]
         # Touch a table: a corrupt file can attach and still fail here.
         conn.execute("SELECT count(*) FROM old.event").fetchone()
-        if version == store.SCHEMA_VERSION:
+        # A v1 file is copied by column name; its missing columns default.
+        if version in (1, store.SCHEMA_VERSION):
             return True
     except sqlite3.DatabaseError:
         pass
@@ -79,12 +80,19 @@ def _copy_old(
     # Supersede chains reference rows that may be inserted later in the
     # same copy; check the foreign keys at COMMIT instead of per row.
     conn.execute("PRAGMA defer_foreign_keys = ON")
-    done = {
-        t: conn.execute(f"INSERT INTO {t} SELECT * FROM old.{t}").rowcount
-        for t in tables
-    }
+    done = {t: _copy_table(conn, t) for t in tables}
     conn.execute("COMMIT")
     return done
+
+
+def _copy_table(conn: sqlite3.Connection, table: str) -> int:
+    """Copy one table by the column names both files share, ids kept."""
+    new = [r[1] for r in conn.execute(f"PRAGMA main.table_info({table})")]
+    old = {r[1] for r in conn.execute(f"PRAGMA old.table_info({table})")}
+    cols = ", ".join(c for c in new if c in old)
+    return conn.execute(
+        f"INSERT INTO {table} ({cols}) SELECT {cols} FROM old.{table}"
+    ).rowcount
 
 
 def _insert(conn: sqlite3.Connection, sql: str, params: Sequence[Any]) -> int:

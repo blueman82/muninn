@@ -7,6 +7,7 @@ from typing import Any
 from muninn import store
 from tests.cli_support import CANARY, CliCase
 from tests.test_ingest import TID
+from tests.test_store_migrate import make_v1
 
 
 class RebuildTests(CliCase):
@@ -108,3 +109,58 @@ class RebuildTests(CliCase):
         texts = {r[0] for r in self.rows("SELECT text FROM event")}
         self.assertIn("keep this prompt", texts)
         self.assertFalse(any(CANARY in t for t in texts))
+
+
+class RebuildFromV1Tests(CliCase):
+    """A rebuild reads an old v1 file and keeps its ledger."""
+
+    def test_ledger_survives_a_rebuild_from_a_v1_file(self) -> None:
+        self.conn.close()
+        db = store.db_path(self.home)
+        db.unlink()
+        make_v1(db)
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        self.assertIs(out["old_readable"], True)
+        conn = store.connect_ro(db)
+        self.addCleanup(conn.close)
+        got = [
+            tuple(r)
+            for r in conn.execute(
+                "SELECT id, status, supersedes, sensitivity FROM knowledge"
+            )
+        ]
+        self.assertEqual(
+            got,
+            [
+                (1, "superseded", None, "normal"),
+                (2, "current", 1, "normal"),
+                (3, "retracted", None, "normal"),
+                (4, "erased", None, "normal"),
+            ],
+        )
+
+    def test_typed_columns_survive_a_rebuild_from_v2(self) -> None:
+        conn = self.conn
+        sid = conn.execute(
+            "INSERT INTO scope(key, label, kind) VALUES ('/r', 'r', 'git')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
+            " created_at, confidence, valid_until, sensitivity, tags)"
+            " VALUES (?, 'lesson', 'typed', 'current', 'user', 1,"
+            " 'observed', 99, 'restricted', 'a,b')",
+            (sid,),
+        )
+        conn.close()
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        ro = store.connect_ro(store.db_path(self.home))
+        self.addCleanup(ro.close)
+        got = ro.execute(
+            "SELECT kind, confidence, valid_until, sensitivity, tags"
+            " FROM knowledge"
+        ).fetchone()
+        self.assertEqual(
+            tuple(got), ("lesson", "observed", 99.0, "restricted", "a,b")
+        )
