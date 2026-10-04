@@ -12,6 +12,7 @@ touched, only listed.
 from __future__ import annotations
 
 import os
+import shlex
 import sqlite3
 import time
 from collections.abc import Mapping
@@ -26,6 +27,7 @@ from muninn.erase_collect import (
     collect_session,
 )
 from muninn.erase_residue import (
+    aside_files,
     pick_needles,
     rare_terms,
     residue_scan,
@@ -97,6 +99,19 @@ def _out_of_scope(env: Mapping[str, str]) -> list[str]:
     home = Path(env.get("HOME") or Path.home())
     found = [str(home / rel) for rel in _DERIVED if (home / rel).exists()]
     return sorted(found)
+
+
+def _aside_report(home: Path) -> dict[str, object]:
+    """Name each set-aside store erase cannot scrub, with the removal."""
+    aside = aside_files(home)
+    return {
+        "aside_files": aside,
+        "aside_remove": (
+            "rm -- " + " ".join(shlex.quote(p) for p in aside)
+            if aside
+            else None
+        ),
+    }
 
 
 def _apply(conn: sqlite3.Connection, target: Target) -> None:
@@ -225,7 +240,7 @@ def erase(
         "provider_files": _provider_files(target, ingest.default_roots(env)),
         "out_of_scope": _out_of_scope(env),
         "not_covered": list(NOT_COVERED),
-    }
+    } | _aside_report(home)
     if dry_run:
         return out
     return out | _erase_and_verify(conn, home, target, match)

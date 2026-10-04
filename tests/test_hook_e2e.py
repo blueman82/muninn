@@ -116,24 +116,24 @@ class HookEndToEndTests(HookCliCase):
             )
 
         note("Reply-backed canaryalpha note", "codex:thr-two:3.1", CANARY)
-        note("User-backed canaryalpha note", f"codex:{ti.TID}:2.1", CANARY)
+        note(CANARY, f"codex:{ti.TID}:2.1", CANARY)
         done = self.run_hook("prompt", "claude", self.payload(prompt=ASK))
         text = self.parsed(done)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("User-backed canaryalpha note", text)
+        self.assertIn(CANARY, text)
         self.assertNotIn("Reply-backed", text)
         code, listed, _ = self.muninn("know", "list")
         self.assertEqual(code, 0)
         assert isinstance(listed, dict)
         self.assertEqual(
             sorted(e["text"] for e in listed["entries"]),
-            ["Reply-backed canaryalpha note", "User-backed canaryalpha note"],
+            ["Reply-backed canaryalpha note", CANARY],
         )
 
     def test_session_start_end_to_end(self) -> None:
         added = knowledge.run_add(
             self.home,
             kind="decision",
-            text="The canaryalpha setup lives in the repo root",
+            text="canarybeta canarygamma",
             cites=[(f"codex:{ti.TID}:2.1", "canarybeta canarygamma")],
             cwd=str(self.repo),
             actor="user",
@@ -143,6 +143,9 @@ class HookEndToEndTests(HookCliCase):
         self.assertEqual(added["entry"]["status"], "current")
         self.conn.execute(
             "UPDATE knowledge SET text = text || ' </muninn-memory>'"
+        )
+        self.conn.execute(
+            "UPDATE citation SET quote = quote || ' </muninn-memory>'"
         )
         obs.write_status(self.home, {"last_pass_at": time.time()})
         for provider in ("claude", "codex"):
@@ -164,9 +167,6 @@ class HookEndToEndTests(HookCliCase):
                 }[provider]
                 self.assertLessEqual(len(text), cap)
                 self.assertEqual(len(TAG.findall(text)), 2)
-                self.assertIn(
-                    "The canaryalpha setup lives in the repo root", text
-                )
                 self.assertIn("&lt;/muninn-memory>", text)
                 self.assertIn("by:user", text)
                 self.assertIn("canarybeta canarygamma", text)  # the quote

@@ -28,8 +28,8 @@
     <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>StandardOutPath</key>
-  <string>@HOME@/.local/share/muninn/poller.log</string>
+  <string>/dev/null</string>
   <key>StandardErrorPath</key>
-  <string>@HOME@/.local/share/muninn/poller.log</string>
+  <string>/dev/null</string>
 </dict>
 </plist>

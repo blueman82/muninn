@@ -8,6 +8,7 @@ than as an error.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
@@ -31,6 +32,42 @@ def read_status(home: Path) -> dict[str, object]:
         return {}
     # json.loads gives Any; JSON object keys are always strings.
     return cast("dict[str, object]", data) if isinstance(data, dict) else {}
+
+
+_ERROR_CODE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+
+
+def poller_error(status: Mapping[str, object]) -> str | None:
+    """Return the poller's last error class name, if it is one.
+
+    ``status.json`` is read back from disk and could be hand-edited, so only
+    a bare identifier passes; anything else could smuggle text into doctor
+    or a hook block.
+
+    Args:
+        status: Parsed ``status.json``.
+
+    Returns:
+        The exception class name, or None when absent or malformed.
+    """
+    err = status.get("last_error")
+    if isinstance(err, str) and _ERROR_CODE.fullmatch(err):
+        return err
+    return None
+
+
+def count_field(status: Mapping[str, object], key: str) -> int:
+    """Read a count from ``status.json``, treating anything odd as zero.
+
+    Args:
+        status: Parsed ``status.json``.
+        key: Field name.
+
+    Returns:
+        The non-negative int, else 0.
+    """
+    n = status.get(key)
+    return n if isinstance(n, int) and not isinstance(n, bool) and n > 0 else 0
 
 
 def write_status(home: Path, fields: Mapping[str, object]) -> None:

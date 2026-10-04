@@ -7,7 +7,6 @@ events it produced, which is what makes a resume after a crash exact.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import time
@@ -17,6 +16,14 @@ from typing import IO, TypedDict, cast
 
 from muninn import classify, event_model, ingest_model, scope, tool_errors
 from muninn.ingest_model import PROVIDER, Record, Work
+from muninn.tombstones import (
+    erased_events,
+    event_digests,
+    event_tag,
+    key_for,
+    legacy_tag,
+    role_digest,
+)
 
 __all__ = [
     "ParseResult",
@@ -169,13 +176,21 @@ class _SourceParser:
                 (self.provider, w.info.thread_id),
             )
         }
+        self.erased = erased_events(
+            conn, self.provider, w.info.thread_id, w.info.forked_from_id
+        )
+        self.key = key_for(conn) if self.erased else b""
         self.prefix = (
-            _event_hashes(conn, start.parent_id)
+            event_digests(conn, start.parent_id)
             if self.extra.prefix_open
             else set[bytes]()
         )
         # An old fork whose parent has no events has no prefix to skip.
-        self.extra.prefix_open = bool(self.prefix) and self.extra.prefix_open
+        # Also a replay when an erase removed the parent's copy of it.
+        replay = bool(self.prefix) or (
+            bool(self.erased) and w.info.forked_from_id is not None
+        )
+        self.extra.prefix_open = replay and self.extra.prefix_open
         self.added = 0
         self.skipped = 0
         self.usage = Usage()
@@ -218,13 +233,29 @@ class _SourceParser:
         cwd = classify.cwd_of(record, self.state)
         for ev in found:
             if self.extra.prefix_open:
-                if _role_text(ev.role, ev.text) in self.prefix:
+                if self._is_replay(ev):
                     continue  # the fork's copy of its parent's history
                 self.extra.prefix_open = False
             event_id = self._insert(ev, cwd, begin, digest)
             self.added += 1
             if ev.kind == "tool_call":
                 self._note_call(ev, event_id)
+
+    def _is_replay(self, ev: classify.EventRec) -> bool:
+        """Tell whether an event copies the parent's (maybe erased) history.
+
+        Erased content is matched only here, in a fork's replayed prefix, so
+        a later identical turn of the user's own stays.
+
+        Returns:
+            True for a replayed copy.
+        """
+        if role_digest(ev.role, ev.text) in self.prefix:
+            return True
+        return bool(self.erased) and (
+            event_tag(self.key, ev.role, ev.text) in self.erased
+            or legacy_tag(ev.role, ev.text) in self.erased
+        )
 
     def _issue(self, number: int, code: str) -> None:
         """Record a code (never the line's text) for an unusable line."""
@@ -371,29 +402,6 @@ def _count_output(record: Record, extra: _Extra, usage: Usage) -> None:
         int(a or b) != 0 for a, b in exits
     ):
         usage.errors += 1
-
-
-def _role_text(role: str, text: str) -> bytes:
-    """Return sha256(role, text), the identity of a copied history entry.
-
-    The content-prefix rule compares a fork's early events with its
-    parent's by this hash.  ``surrogatepass`` keeps lone surrogates from a
-    lossy transcript hashable instead of raising.
-    """
-    data = f"{role}\n{text}".encode("utf-8", "surrogatepass")
-    return hashlib.sha256(data).digest()
-
-
-def _event_hashes(
-    conn: sqlite3.Connection, source_id: int | None
-) -> set[bytes]:
-    """Return the `_role_text` hash of every event of a source."""
-    if source_id is None:
-        return set()
-    rows = conn.execute(
-        "SELECT role, text FROM event WHERE source_id = ?", (source_id,)
-    )
-    return {_role_text(role, text) for role, text in rows}
 
 
 def _pairs(raw: Mapping[str, list[str | None]]) -> dict[str, CallPair]:

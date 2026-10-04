@@ -164,6 +164,10 @@ class StatsDoctorTests(CliCase):
             (code, self.checks(out)["unexpected_files"]), (1, False)
         )
         stray.unlink()
+        kept = self.home / f"{store.UNREADABLE_PREFIX}20260101T000000Z"
+        kept.touch(0o600)  # a store that rebuild set aside is known
+        self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
+        kept.unlink()
         (self.home / "recall.off").touch(0o600)  # the recall switch is known
         self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
         (self.home / "status.json").chmod(0o644)

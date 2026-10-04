@@ -215,7 +215,9 @@ class _Poller:
             # text or paths, and poller.log must stay free of both.
             name = type(exc).__name__
             obs.log_poller(self.home, {"event": "error", "exc": name})
-            obs.write_status(self.home, {"last_error": name})
+            obs.write_status(
+                self.home, {"last_error": name, "last_error_at": time.time()}
+            )
         finally:
             self._clear_alive()
 
@@ -237,6 +239,34 @@ class _Poller:
         return 0, None
 
 
+def _quiet_streams(home: Path) -> None:
+    """Point stdout and stderr at /dev/null if they are ``poller.log``.
+
+    A job installed with the old plist has launchd writing both streams to
+    ``poller.log``, bypassing the log allowlist and the rotation (launchd
+    keeps appending to the renamed file). Only a stream that is that very
+    file is replaced, so a terminal or a pipe keeps its traceback.
+
+    Args:
+        home: Data directory.
+    """
+    try:
+        log = (home / "poller.log").stat()
+        null = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        for fd in (1, 2):
+            try:
+                seen = os.fstat(fd)
+            except OSError:
+                continue
+            if (seen.st_dev, seen.st_ino) == (log.st_dev, log.st_ino):
+                os.dup2(null, fd)
+    finally:
+        os.close(null)
+
+
 def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Run the poller until SIGTERM or SIGHUP.
 
@@ -247,8 +277,16 @@ def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
         record: Call-log entry (unused; serve logs to ``poller.log``).
 
     Returns:
-        Exit 0 and no output once stopped.
+        Exit 0 and no output once stopped; exit 1 after logging a content-
+        free ``crash`` line if anything outside a pass raised, so launchd
+        restarts it without a traceback reaching a file.
     """
+    _quiet_streams(home)
     poller = _Poller(home, env, a.interval)
-    poller.prepare()
-    return poller.run()
+    try:
+        poller.prepare()
+        return poller.run()
+    except Exception as exc:
+        # Class name only, like the pass errors above.
+        obs.log_poller(home, {"event": "crash", "exc": type(exc).__name__})
+        return 1, None

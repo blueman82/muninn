@@ -8,6 +8,8 @@ write-ahead ``tombstones.jsonl`` next to the database.
 from __future__ import annotations
 
 import fcntl
+import hashlib
+import hmac
 import json
 import os
 import sqlite3
@@ -17,7 +19,15 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 TOMBSTONE_FILE = "tombstones.jsonl"
+# A line tombstone whose hash starts with this blocks one event's content
+# (role and text) rather than one byte-exact line; its line number is 0.
+EVENT_PREFIX = "ev:"
+# The keyed form (HMAC-SHA256); ``ev:`` rows from older versions are plain
+# sha256 and are still honoured, but cannot be re-keyed without the text.
+KEYED_PREFIX = "ev2:"
+KEY_FILE = "tombstone.key"
 _PROVIDERS = ("codex", "claude")
+_MEMORY_KEY = os.urandom(32)
 # Columns that identify a tombstone; their order is the INSERT column order.
 _KEY = (
     "provider",
@@ -74,6 +84,133 @@ def tombstone_row(
         line_sha256=line_sha256,
         created_at=time.time(),
     )
+
+
+def role_digest(role: str, text: str) -> bytes:
+    """Return sha256(role, text), the identity of one event's content.
+
+    A fork's early events are compared with its parent's by this hash in
+    memory only; it is never stored (see ``event_tag`` for what is).
+    ``surrogatepass`` keeps lone surrogates from a lossy transcript
+    hashable instead of raising.
+
+    Args:
+        role: Event role.
+        text: Event text.
+
+    Returns:
+        The 32-byte digest.
+    """
+    data = f"{role}\n{text}".encode("utf-8", "surrogatepass")
+    return hashlib.sha256(data).digest()
+
+
+def event_digests(
+    conn: sqlite3.Connection, source_id: int | None
+) -> set[bytes]:
+    """Return the ``role_digest`` of every event of a source (in memory)."""
+    if source_id is None:
+        return set()
+    rows = conn.execute(
+        "SELECT role, text FROM event WHERE source_id = ?", (source_id,)
+    )
+    return {role_digest(role, text) for role, text in rows}
+
+
+def legacy_tag(role: str, text: str) -> str:
+    """Return the unkeyed ``ev:`` tag that older versions wrote."""
+    return EVENT_PREFIX + role_digest(role, text).hex()
+
+
+def load_key(home: Path) -> bytes:
+    """Return the per-install tombstone key, creating it on first need.
+
+    The key makes a content tag unguessable from ``tombstones.jsonl``
+    alone, so an erased short secret cannot be confirmed by dictionary
+    attack.  The file is 0600 and is never logged.  The caller holds the
+    writer lock, but a lost creation race is handled anyway.
+
+    Args:
+        home: Data directory.
+
+    Returns:
+        The 32-byte key.
+    """
+    path = home / KEY_FILE
+    try:
+        # O_EXCL: two creators cannot each keep a different key.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return path.read_bytes()
+    try:
+        key = os.urandom(32)
+        os.write(fd, key)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return key
+
+
+def key_for(conn: sqlite3.Connection) -> bytes:
+    """Return the key that belongs to a connection's database.
+
+    The data directory is the database file's directory.  A database with
+    no file (in memory) gets a key that lives as long as the process.
+
+    Args:
+        conn: Any connection to the store.
+
+    Returns:
+        The 32-byte key.
+    """
+    row = conn.execute("PRAGMA database_list").fetchone()
+    if not row or not row[2]:
+        return _MEMORY_KEY
+    return load_key(Path(row[2]).parent)
+
+
+def event_tag(key: bytes, role: str, text: str) -> str:
+    """Return the ``line_sha256`` value of a content tombstone."""
+    data = f"{role}\n{text}".encode("utf-8", "surrogatepass")
+    return KEYED_PREFIX + hmac.new(key, data, hashlib.sha256).hexdigest()
+
+
+def erased_events(
+    conn: sqlite3.Connection,
+    provider: str,
+    thread_id: str,
+    forked_from_id: str | None,
+) -> set[str]:
+    """Return the content tags erased in a thread or any of its ancestors.
+
+    Both the keyed (``ev2:``) and the legacy (``ev:``) forms come back.
+
+    A fork copies its parent's history under a new thread id, and perhaps
+    new line numbers, so a line tombstone cannot find the copy; the tag of
+    the event's role and text can.  The scope is the fork family, not the
+    whole provider: the same text typed in an unrelated session is not
+    residue of the erase.
+    """
+    family = {thread_id}
+    parent = forked_from_id
+    while parent and parent not in family:  # a loop ends the walk
+        family.add(parent)
+        row = conn.execute(
+            "SELECT forked_from_id FROM source WHERE provider = ?"
+            " AND thread_id = ?",
+            (provider, parent),
+        ).fetchone()
+        parent = row[0] if row else None
+    marks = ",".join("?" * len(family))
+    return {
+        r[0]
+        for r in conn.execute(
+            "SELECT line_sha256 FROM tombstone WHERE provider = ? AND"
+            f" level = 'line' AND line = 0 AND thread_id IN ({marks})"
+            " AND substr(line_sha256, 1, 2) = 'ev'",
+            (provider, *family),
+        )
+    }
 
 
 def append_tombstones(home: Path, tombstones: list[TombstoneRow]) -> None:

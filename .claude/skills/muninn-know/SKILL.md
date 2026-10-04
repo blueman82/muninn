@@ -12,6 +12,7 @@ A small ledger of durable decisions, each backed by a verbatim quote. Entries ar
       --text "short statement" --cite REF --quote "verbatim words" [--supersedes K] [--global]
 
 - The quote must be verbatim in a primary prompt, reply or tool call at `REF`; a `preference` needs a user prompt. Find the ref with `muninn search`, confirm with `muninn open`, or test with `muninn quote-check REF QUOTE` first.
+- Only entries whose `--text` stays close to the cited user prompt quote (inside it, or mostly its words) are pushed into session memory; otherwise `know add` answers `pull_only`: re-add using the user's own phrasing.
 - Record owner decisions only when the owner actually said them. Do not invent or paraphrase the quote.
 - `--global` for cross-repo entries; default is this repo.
 - Check `know list` first so you supersede instead of duplicating.

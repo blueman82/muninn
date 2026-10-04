@@ -38,6 +38,6 @@ flowchart LR
   installed machine back out by removing our own entries (no record survives an
   upgrade) and moves the data dir aside instead of deleting it (unless
   `--purge-data`).
-- **Trust.** Everything stored is untrusted historical data. Secrets are
-  redacted at ingest and on output; automatic injection is framed so pasted
+- **Trust.** Everything stored is untrusted historical data. Secrets get
+  best-effort redaction at ingest and on output; automatic injection is framed so pasted
   copies are flagged on ingest. See the README for the full list.

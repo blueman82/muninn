@@ -23,6 +23,7 @@ from muninn.knowledge_model import (
     entry_name,
     iso_date,
     parse_kid,
+    text_backed,
 )
 from muninn.query import NOTICE, guarded
 
@@ -291,14 +292,23 @@ def check(conn: sqlite3.Connection) -> dict[str, Any]:
     return out
 
 
+# Citation rows read per wanted entry, and the most ever read, so the hook's
+# cost stays flat as the ledger grows; Python then drops entries whose quote
+# does not back the text.  Beyond the cap an older entry is simply not pushed.
+_OVERFETCH = 10
+_SCAN_CAP = 200
+
+
 @guarded
 def block_entries(
     conn: sqlite3.Connection, scope_ids: list[int], limit: int = 8
 ) -> list[dict[str, Any]]:
     """Return the entries the SessionStart block may push.
 
-    Only current entries with at least one live user-prompt citation qualify;
-    entries cited by replies or tool calls alone stay pull-only.
+    Only current entries with a live user-prompt citation whose quote backs
+    the entry text qualify (``text_backed``); entries cited by replies or
+    tool calls alone, or whose text the user's words do not back, stay
+    pull-only.
 
     Args:
         conn: Open store connection.
@@ -306,22 +316,31 @@ def block_entries(
         limit: Maximum number of entries.
 
     Returns:
-        Newest first, each with its actor and the first user-prompt quote
-        cut to ``BLOCK_QUOTE`` characters.
+        Newest first, each with its actor and the first backing user-prompt
+        quote cut to ``BLOCK_QUOTE`` characters.
     """
     if not scope_ids or limit < 1:
         return []
-    rows = conn.execute(
+    cursor = conn.execute(
         "SELECT k.id, k.kind, k.text, k.actor, k.created_at, sc.label,"
-        " c.provider, c.thread_id, c.line, c.part, c.quote"
+        " m.provider, m.thread_id, m.line, m.part, m.quote"
         " FROM knowledge k JOIN scope sc ON sc.id = k.scope_id"
-        " JOIN citation c ON c.id = (SELECT min(m.id) FROM citation m"
-        f" WHERE m.knowledge_id = k.id AND {PUSHABLE_CITE})"
+        " JOIN citation m ON m.knowledge_id = k.id"
+        f" AND {PUSHABLE_CITE}"
         f" WHERE k.status = 'current' AND k.scope_id IN"
         f" ({','.join('?' * len(scope_ids))})"
-        " ORDER BY k.created_at DESC, k.id DESC LIMIT ?",
-        [*scope_ids, limit],
+        " ORDER BY k.created_at DESC, k.id DESC, m.id LIMIT ?",
+        [*scope_ids, min(limit * _OVERFETCH, _SCAN_CAP)],
     )
+    seen: set[int] = set()
+    rows: list[sqlite3.Row] = []
+    for r in cursor:
+        if r["id"] in seen or not text_backed(r["text"], r["quote"] or ""):
+            continue
+        seen.add(r["id"])
+        rows.append(r)
+        if len(rows) == limit:
+            break
     return [
         {
             "id": f"K{r['id']}",
@@ -341,8 +360,8 @@ def block_entries(
 def user_cited(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
     """Return which entry ids may be pushed into a prompt.
 
-    This is the same rule ``block_entries`` applies: at least one live
-    user-prompt citation.
+    This is the same rule ``block_entries`` applies: a live user-prompt
+    citation whose quote backs the entry text.
 
     Args:
         conn: Open store connection.
@@ -352,9 +371,10 @@ def user_cited(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
         The subset of ``ids`` that qualify.
     """
     rows = conn.execute(
-        "SELECT k.id FROM knowledge k WHERE k.id IN"
-        f" ({','.join('?' * len(ids))}) AND EXISTS (SELECT 1 FROM citation m"
-        f" WHERE m.knowledge_id = k.id AND {PUSHABLE_CITE})",
+        "SELECT k.id, k.text, m.quote FROM knowledge k"
+        " JOIN citation m ON m.knowledge_id = k.id"
+        f" WHERE k.id IN ({','.join('?' * len(ids))})"
+        f" AND {PUSHABLE_CITE}",
         ids,
     )
-    return {row[0] for row in rows}
+    return {r[0] for r in rows if text_backed(r[1], r[2] or "")}

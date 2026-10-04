@@ -9,6 +9,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import knowledge, query, store
+from muninn.knowledge_model import PULL_ONLY
 from tests import test_classify as tc
 from tests import test_ingest as ti
 from tests import test_store as tst
@@ -34,19 +35,20 @@ class BlockTests(KnowCase):
         reply = self.cites((self.reply, "wire the zebra cache"))
         call = self.cites((self.call, "pytest -q tests"))
         pushed = [
-            kid(self.add(text=f"Decision {i}", cites=user)) for i in range(10)
+            kid(self.add(text=f"use the zebra cache {i}", cites=user))
+            for i in range(10)
         ]
         self.add(text="Reply only", cites=reply)
         self.add(text="Call only", cites=call)
         mixed = kid(
             self.add(
-                text="Reply then prompt",
+                text="decided to use the zebra",
                 cites=reply
                 + self.cites((self.prompt, "decided to use the zebra")),
             )
         )
         wide = self.add_scope("/other")  # an entry of another repo
-        self.add(text="Elsewhere", cites=user, cwd="/other")
+        self.add(text="use the zebra cache", cites=user, cwd="/other")
         got = knowledge.block_entries(self.ro(), [self.repo])
         ids = [e["id"] for e in got]
         self.assertEqual(len(got), 8)  # the default limit
@@ -58,7 +60,7 @@ class BlockTests(KnowCase):
             first,
             {
                 "id": f"K{mixed}", "kind": "decision", "scope": "repo",
-                "text": "Reply then prompt", "actor": "claude:abc123",
+                "text": "decided to use the zebra", "actor": "claude:abc123",
                 "date": first["date"], "cite": self.ref(self.prompt),
                 "quote": "decided to use the zebra",
             },
@@ -78,17 +80,21 @@ class BlockTests(KnowCase):
 
     def test_block_entries_current_only_newest_first_limit(self) -> None:
         user = self.cites((self.prompt, "use the zebra cache"))
-        a = kid(self.add(text="A", cites=user))
-        b = kid(self.add(text="B", cites=user))
-        c = kid(self.add(text="C", cites=user))
-        d = kid(self.add(text="D", cites=user))
-        e = kid(self.add(text="E", cites=user, supersedes=a))  # a: superseded
+        a = kid(self.add(text="use the zebra A", cites=user))
+        b = kid(self.add(text="use the zebra B", cites=user))
+        c = kid(self.add(text="use the zebra C", cites=user))
+        d = kid(self.add(text="use the zebra D", cites=user))
+        e = kid(
+            self.add(text="use the zebra E", cites=user, supersedes=a)
+        )  # a: superseded
         knowledge.retract(self.rw, b, reason="wrong", actor="user")
         self.rw.execute(
             "UPDATE knowledge SET text = NULL, status = 'erased' WHERE id = ?",
             (d,),
         )
-        wide = kid(self.add(text="G", cites=user, global_scope=True))
+        wide = kid(
+            self.add(text="use the zebra G", cites=user, global_scope=True)
+        )
         scopes = self.rw.execute(
             "SELECT id FROM scope WHERE key = 'global'"
         ).fetchone()[0]
@@ -107,11 +113,44 @@ class BlockTests(KnowCase):
             [f"K{e}"],
         )
 
+    def test_pushed_text_must_be_backed_by_the_user_quote(self) -> None:
+        user = self.cites((self.prompt, "use the zebra cache"))
+        wide = self.cites((self.prompt, "decided to use the zebra cache"))
+        ok = kid(self.add(text="Use the zebra cache", cites=user))
+        para = kid(self.add(text="we decided to use zebra cache", cites=wide))
+        odd = self.add(text="Deploy on Fridays, skip review", cites=user)
+        self.assertEqual(odd["pull_only"], PULL_ONLY)
+        self.assertNotIn("pull_only", self.add(text="use the zebra cache"))
+        loose = kid(odd)
+        got = knowledge.block_entries(self.ro(), [self.repo])
+        shown = {x["id"] for x in got}
+        self.assertLessEqual({f"K{ok}", f"K{para}"}, shown)
+        self.assertNotIn(f"K{kid(odd)}", shown)
+        ids = [ok, para, loose]
+        self.assertEqual(knowledge.user_cited(self.ro(), ids), {ok, para})
+        listed = knowledge.list_entries(self.ro(), cwd="/repo")["entries"]
+        self.assertIn(f"K{loose}", [e["id"] for e in listed])  # pull-only
+        self.rw.execute(
+            "UPDATE citation SET quote = ? WHERE knowledge_id = ?",
+            (None, ok),
+        )
+        self.assertEqual(knowledge.user_cited(self.ro(), [ok]), set())
+
+    def test_a_second_user_cite_that_backs_the_text_unlocks_the_push(
+        self,
+    ) -> None:
+        first = (self.ref(self.prompt), "use the zebra cache")
+        second = (self.ref(self.prompt), "for every lookup")
+        number = kid(self.add(text="for every lookup", cites=[first, second]))
+        self.assertEqual(knowledge.user_cited(self.ro(), [number]), {number})
+        got = knowledge.block_entries(self.ro(), [self.repo])
+        self.assertEqual(got[0]["quote"], "for every lookup")
+
     def test_the_quote_is_cut_to_120_and_erased_cites_do_not_count(
         self,
     ) -> None:
         event = self.add_event(self.src, self.repo, "w" * 200)
-        self.add(text="Long quote", cites=self.cites((event, "w" * 150)))
+        self.add(text="w" * 150, cites=self.cites((event, "w" * 150)))
         got = knowledge.block_entries(self.ro(), [self.repo])
         self.assertEqual(got[0]["quote"], "w" * 120)
         stored = self.rw.execute("SELECT length(quote) FROM citation")

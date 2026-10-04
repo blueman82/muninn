@@ -165,6 +165,24 @@ class EventAndMatchTests(EraseCase):
         self.assertEqual(logs, 3)
         self.assertEqual(out["knowledge"], 3)
 
+    def test_erase_match_scrubs_retract_reason(self) -> None:
+        self.write(rollout(), primary())
+        self.run_ingest()
+        kid = self.knowledge("harmless", [(TID, 2, 1, "q one")])
+        self.conn.execute(
+            "UPDATE knowledge SET status = 'retracted', retract_reason = ?"
+            " WHERE id = ?",
+            (f"wrong, it was {CANARY}", kid),
+        )
+        out = self.erase(match=CANARY, dry_run=True)
+        self.assertEqual(out["knowledge"], 1)
+        out = self.erase(match=CANARY)
+        self.assertEqual((out["knowledge"], out["residue"]), (1, 0))
+        row = self.conn.execute(
+            "SELECT status, text, retract_reason FROM knowledge"
+        ).fetchone()
+        self.assertEqual(tuple(row), ("erased", None, None))
+
     def test_match_needs_a_real_string_and_one_target(self) -> None:
         for session, match in (
             (None, None),
@@ -200,6 +218,10 @@ class VerificationTests(EraseCase):
             erase.residue_scan(self.home, [CANARY.encode()]),
             ["muninn.sqlite-journal"],
         )
+        # A store set aside by rebuild is scanned like any other file.
+        aside = f"{store.UNREADABLE_PREFIX}20260101T000000Z"
+        (self.home / aside).write_bytes(b"old " + CANARY.encode())
+        self.assertIn(aside, erase.residue_scan(self.home, [CANARY.encode()]))
 
     def test_vocab_check_passes_after_erase_and_fails_on_unsecured_delete(
         self,

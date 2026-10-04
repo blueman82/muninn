@@ -47,7 +47,8 @@ class UpgradePlanTest(unittest.TestCase):
 
     def test_names_the_release_a_real_upgrade_deletes(self) -> None:
         self.assertIn(
-            f"would delete the previous release {self.first}", self.said
+            f"would move the previous release {self.first} aside, then delete",
+            self.said,
         )
         self.assertIn("no way back", self.said)
 

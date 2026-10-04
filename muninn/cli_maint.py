@@ -35,6 +35,10 @@ def heartbeat(
         fields
         | {
             "last_pass_at": time.time(),
+            # One rule for the poller and a manual pass: a good pass clears
+            # an earlier failure, so the hook note and doctor agree.
+            "last_error": None,
+            "last_error_at": None,
             "duration_s": round(stats.duration_s, 3),
             "classifier_version": classify.CLASSIFIER_VERSION,
             "schema_version": store.SCHEMA_VERSION,

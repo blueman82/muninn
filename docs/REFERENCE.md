@@ -65,25 +65,29 @@ a user prompt). `--quote Q` alone searches the caller's session prompts. `know r
 `know list [--status current|superseded|retracted|erased|all] [--kind K] [--all-projects]`; `know show K` the entry with
 its chain and log; `know check` re-verifies every citation (`ok`, `changed`, `missing`, `erased`, `problems`).
 Entries are superseded or retracted, never edited.
+Only text the person typed is pushed unprompted: an entry is pushed (SessionStart, recall) only if a live user-prompt
+citation's quote backs the entry text, meaning the text is inside the quote or at least 80% of its words of three or
+more characters occur in it. Otherwise it stays pull-only (still in `know list` and `search`) and `know add` answers
+with a `pull_only` line; re-add it in the user's own words. The rule is read-time, so it also covers older entries.
 
 ## Running and maintaining
 
 | Command | What it does |
 |---|---|
-| `muninn ingest [--full]` | catch up with provider transcripts now; `--full` rescans everything. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
+| `muninn ingest [--full]` | catch up with provider transcripts now; `--full` rescans everything. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `unreadable_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
 | `muninn serve [--interval S]` | the launchd poller loop (default 60 s); prints nothing |
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
 | `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
-| `muninn rebuild` | build a new store from the transcripts, then copy over what cannot be re-derived: scopes, tombstones, the knowledge ledger (entries, citations, log) and the events of sources that have gone missing |
-| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget content; without `--yes` it is a dry run. Writes tombstones so a rescan cannot restore it. Lists provider files and other derived copies it cannot reach (`not_covered`, `out_of_scope`) |
+| `muninn rebuild` | build a new store from the transcripts, then copy over what cannot be re-derived: scopes, tombstones, the knowledge ledger (entries, citations, log) and the events of sources that have gone missing. A store that cannot be read is never overwritten: it is renamed to `muninn.sqlite.unreadable-<UTC timestamp>` (mode 0600, only after checking for a hot journal, which exits 4) and the answer names it in `old_kept_as` (null otherwise) |
+| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget content; without `--yes` it is a dry run. `--match` searches event text, knowledge text, retract reasons and citation quotes. Writes tombstones so a rescan cannot restore it; each erased event also gets a content tombstone (a keyed HMAC of role and text, no text; see `tombstone.key`). It is applied only to a fork's replayed copy of its parent's history, never to a later identical turn, so erasing one `yes` does not drop the next. Copies already stored anywhere in the fork family (ancestors, forks and their siblings, matched by role and text) are erased with it, whichever member the ref names. Answer also has `aside_files` and `aside_remove` (set-aside stores erase cannot scrub, and the command that removes them). Erases made before this change carry no content tombstone, and there is no re-read to add one. Lists provider files and other derived copies it cannot reach (`not_covered`, `out_of_scope`) |
 | `muninn hook session-start\|prompt --provider claude\|codex` | provider hooks: payload on stdin, JSON on stdout (see the README) |
 
 ## Installing and removing (from a checkout)
 
 | Command | What it does |
 |---|---|
-| `bin/muninn-install` | fresh install, or upgrade when installed; `--check` previews, `--status` compares the installed commit with `HEAD` |
+| `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns and the next upgrade retries); `--check` previews, `--status` compares the installed commit with `HEAD` |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | the same as `bin/muninn-install --uninstall`. Stops the poller; removes the launchd plist, our hooks from Claude's `settings.json`, our sections from Codex's `config.toml`, the Codex plugin cache, `~/.local/lib/muninn` and the `~/.local/bin/muninn` link (only when it points into that release directory). Moves the data directory to `~/.local/share/muninn-removed-<ts>/muninn` (`--purge-data` deletes it instead). `--dry-run` writes nothing. Prints one line per action, then `uninstall done`, `dry run only: nothing was removed` or `muninn is not installed here`, and exits 0. A provider config it cannot edit safely, a taken data-move name, or a job launchd will not unload prints `FAILED: <why>` and exits 1; the config and name checks run first, in a dry run too, before anything is changed |
 
 ## `muninn stats`
@@ -94,12 +98,12 @@ Entries are superseded or retracted, never edited.
 `not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status; `citations` by state;
 `tombstones` by level (`session`, `thread`, `line`); `db_bytes` file size; `db_space` `page_count`, `freelist_count`,
 `page_size`, `free_ratio`; `last_pass` (`last_pass_at`, `duration_s`, `files_changed`, `events_added`, `skipped_files`,
-`failed`, `errors`, `busy_skips`, `index_age_s`, `poller`, and `alive_age_s`, the seconds since a running pass last stamped
+`unreadable_files`, `last_error` (class name of the last failed pass, null after a good one), `failed`, `errors`, `busy_skips`, `index_age_s`, `poller`, and `alive_age_s`, the seconds since a running pass last stamped
 alive: null between passes and when no usable stamp exists, and growing if the poller was killed mid-pass and not
 restarted); `reread`
 (`pending` active sources still read under an older classifier version, `of` all active sources: the progress of the
 one-time re-read after a classifier change; it normally falls to 0, and a source that fails or is skipped stays pending,
-so look at `last_pass.failed` and `skipped_files`); `install_sha`; `classifier_version`; `hash_mismatches` (open-time
+so look at `last_pass.failed`, `unreadable_files` and `skipped_files`); `install_sha`; `classifier_version`; `hash_mismatches` (open-time
 line hash failures seen in the call log). `--usage` adds `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen
 in transcripts) and `usage_totals` per provider.
 
@@ -129,6 +133,8 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
 | `failed_sources` | warn | no file failed in the last pass | count failed; the SessionStart block, and a recall block that has a hit, also say so |
+| `poller_error` | warn | the last poller pass did not end in an exception; a good pass clears it | the exception class name only |
+| `unreadable_files` | warn | the last pass could open every transcript file | count of files it could not open (permissions; a file that vanished does not count); the SessionStart block also says so |
 | `db_size` | warn | the database is under 2 GB | its size; the threshold |
 | `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
 | `missing_sources` | info | always | count of indexed files no longer on disk |
@@ -170,8 +176,9 @@ the next prompt; no restart is needed.
 
 ## Files in the data directory
 
-`muninn.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only; `alive_at` is refreshed every few seconds while a pass runs, so a long
+`muninn.sqlite` the database; `writer.lock` the writer lock; `status.json` the poller heartbeat (counts only; `last_error` and `last_error_at` name the class and time of a failed pass and are both cleared by the next good pass, poller or manual `ingest`; `alive_at` is refreshed every few seconds while a pass runs, so a long
 re-read after a classifier change still shows `poller` `ok` while `index_age_s` keeps counting from the last finished pass);
 `calls.jsonl` and `calls.jsonl.1` one allowlisted line per CLI call (ids and counts, no text; rotated at 1 MiB);
-`poller.log` and `poller.log.1` poller events (rotated likewise); `tombstones.jsonl` erase records;
+`poller.log` and `poller.log.1` poller events (rotated likewise; the plist sends launchd's own stdout and stderr to `/dev/null`, and a poller started by an older plist silences them itself, so nothing reaches the log except allowlisted lines; launchd restarts the poller on any exit, a clean stop included, so only `launchctl bootout` keeps it down); `tombstones.jsonl` erase records; `tombstone.key` (mode 0600, created on the first erase, survives `rebuild`, never logged) the random key that makes the content tombstones in `tombstones.jsonl` HMAC-SHA256 tags (`ev2:`) instead of plain hashes, so an erased short text cannot be confirmed by guessing; delete it and the keyed tombstones stop matching, while older plain `ev:` tombstones are still honoured; `muninn.sqlite.unreadable-<UTC timestamp>` a store `rebuild` set aside because it could not be read. `erase` cannot scrub it (it is not a readable database), so it may still hold erased text: `erase` names every such file in `aside_files` with the exact command in `aside_remove` (`rm -- <path>`), and `doctor` warns (`aside_files`) while one exists. Nothing deletes it for you; salvage what you need, then run that command;
+`.pruning-<UTC timestamp>-<sha>` directories in `~/.local/lib/muninn` are old releases an upgrade moved aside (see Upgrade, below);
 `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). Anything else fails `unexpected_files`.

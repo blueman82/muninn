@@ -118,7 +118,7 @@ class KnowCase(QueryCase):
         """
         args: dict[str, Any] = {
             "kind": "decision",
-            "text": "Use the zebra cache for lookups",
+            "text": "Use the zebra cache",
             "cites": [(self.ref(self.prompt), "use the zebra cache")],
             "quote_only": None,
             "supersedes": None,

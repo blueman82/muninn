@@ -269,7 +269,7 @@ class EdgeTests(KnowCase):
         first = (self.ref(self.prompt), "decided to use the zebra")
         second = (self.ref(self.prompt), "for every lookup")
         reply = (self.ref(self.reply), "wire the zebra cache")
-        self.add(text="Two quotes", cites=[reply, first, second])
+        self.add(text="decided to use the zebra", cites=[reply, first, second])
         got = knowledge.block_entries(self.ro(), [self.repo])
         self.assertEqual(got[0]["quote"], "decided to use the zebra")
         self.assertEqual(got[0]["cite"], self.ref(self.prompt))

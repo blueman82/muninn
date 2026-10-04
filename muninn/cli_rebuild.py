@@ -12,6 +12,7 @@ import dataclasses
 import fcntl
 import os
 import sqlite3
+import time
 from argparse import Namespace
 from collections.abc import Sequence
 from pathlib import Path
@@ -169,8 +170,34 @@ def _settle_journal(home: Path, db: Path) -> None:
         settle = sqlite3.connect(db)
         try:
             settle.execute("SELECT count(*) FROM sqlite_master")
+        except sqlite3.DatabaseError:
+            pass  # a corrupt file: the caller sees the journal still there
         finally:
             settle.close()
+
+
+def _set_aside(home: Path, db: Path) -> str:
+    """Rename an unreadable store to a private sibling and return its name.
+
+    The caller has already checked for a hot journal, so only a settled
+    file is moved.
+
+    Args:
+        home: Data directory.
+        db: The unreadable store.
+
+    Returns:
+        The new file name inside ``home``.
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    aside = home / f"{store.UNREADABLE_PREFIX}{stamp}"
+    n = 1
+    while aside.exists():  # two rebuilds inside one second
+        n += 1
+        aside = home / f"{store.UNREADABLE_PREFIX}{stamp}-{n}"
+    db.rename(aside)
+    aside.chmod(0o600)
+    return aside.name
 
 
 def _build(home: Path, db: Path, new: Path, env: Env) -> _Built:
@@ -203,7 +230,10 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     Scopes, knowledge, tombstones and the events of deleted sources are
     copied from the old file when it is readable; ``tombstones.jsonl`` is
     re-applied first.  The old file is replaced only after the new one
-    passes ``quick_check`` and has no hot journal.  A writer lock that stays
+    passes ``quick_check`` and has no hot journal.  An old file that is not
+    readable is never overwritten: it is renamed to
+    ``muninn.sqlite.unreadable-<UTC timestamp>`` (mode 0600) and reported
+    as ``old_kept_as``.  A writer lock that stays
     busy propagates ``store.BusyError``; the dispatcher maps it to exit 3.
 
     Args:
@@ -227,12 +257,16 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             new.unlink()
             return 4, {"error": "hot_journal"}
         _full_sync(new)  # the copied knowledge is not re-derivable
+        kept = None
+        if db.exists() and not built.readable:
+            kept = _set_aside(home, db)  # never overwrite an unreadable file
         new.replace(db)
         _full_sync(home)  # make the rename itself durable
     record["counts"] = built.copied | {"reapplied": built.reapplied}
     return 0, {
         "rebuilt": True,
         "old_readable": built.readable,
+        "old_kept_as": kept,
         "copied": built.copied,
         "reapplied_tombstones": built.reapplied,
         "ingest": dataclasses.asdict(built.stats),

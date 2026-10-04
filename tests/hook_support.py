@@ -87,6 +87,28 @@ class HookCase(tk.KnowCase):
             self.home, {"last_pass_at": time.time(), "interval_s": 60}
         )
 
+    def add(self, **kw: Any) -> dict[str, Any]:
+        """Add an entry whose user quote also holds its text.
+
+        Hook tests care about rendering, not about whether the user's words
+        back the text; ``backed=False`` keeps the plain quote.
+
+        Args:
+            **kw: Arguments for ``knowledge.add``, plus ``backed``.
+
+        Returns:
+            The result of ``knowledge.add``.
+        """
+        backed = kw.pop("backed", True)
+        out = super().add(**kw)
+        if backed:
+            self.rw.execute(
+                "UPDATE citation SET quote = quote || ' ' || ?"
+                " WHERE knowledge_id = ?",
+                (out["entry"]["text"], tk.kid(out)),
+            )
+        return out
+
     def payload(self, **kw: object) -> dict[str, object]:
         """Build a SessionStart payload for the repo.
 
@@ -141,12 +163,20 @@ class HookCase(tk.KnowCase):
     def raw_text(self, number: int, text: str) -> None:
         """Store text the way an older writer might: unescaped.
 
+        The entry's quotes get the text appended so the user's words still
+        back it and it stays pushable.
+
         Args:
             number: Knowledge entry id.
             text: Text to write unchanged.
         """
         self.rw.execute(
             "UPDATE knowledge SET text = ? WHERE id = ?", (text, number)
+        )
+        self.rw.execute(
+            "UPDATE citation SET quote = quote || ' ' || ?"
+            " WHERE knowledge_id = ?",
+            (text, number),
         )
 
 

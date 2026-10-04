@@ -58,7 +58,8 @@ class TombstoneFileTests(EraseCase):
         levels = sorted(
             r[0] for r in self.conn.execute("SELECT level FROM tombstone")
         )
-        self.assertEqual(levels, ["line", "line", "line", "session"])
+        # Three erased lines, each with a byte tombstone and a content one.
+        self.assertEqual(levels, ["line"] * 6 + ["session"])
 
     def test_tombstones_jsonl_written_and_reapplied(self) -> None:
         self.ingest_canaries()

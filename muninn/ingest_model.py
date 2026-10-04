@@ -48,6 +48,7 @@ class PassStats:
         missing: Sources newly marked missing.
         duration_s: Wall time of the pass.
         skipped_files: Tombstoned, unidentifiable or duplicate files.
+        unreadable_files: Files that could not be opened (not vanished).
         failed: Sources rolled back by an error; redone next pass.
         errors: Exception class name to count, for the failed sources.
     """
@@ -60,6 +61,7 @@ class PassStats:
     missing: int = 0
     duration_s: float = 0.0
     skipped_files: int = 0
+    unreadable_files: int = 0
     failed: int = 0
     errors: dict[str, int] = field(default_factory=dict[str, int])
 

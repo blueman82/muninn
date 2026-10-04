@@ -11,7 +11,7 @@ import sqlite3
 from dataclasses import dataclass, field
 
 from muninn import query
-from muninn.tombstones import TombstoneRow, tombstone_row
+from muninn.tombstones import TombstoneRow, event_tag, key_for, tombstone_row
 
 # Providers blocked when a session has not been ingested yet, so a later
 # ingest cannot resurrect it.
@@ -148,7 +148,7 @@ def collect_event(conn: sqlite3.Connection, target: Target, ref: str) -> None:
 def collect_match(
     conn: sqlite3.Connection, target: Target, match: str
 ) -> None:
-    """Collect every event line, knowledge text and quote containing text.
+    """Collect every event line, knowledge text, reason and quote with text.
 
     Args:
         conn: Read connection.
@@ -167,9 +167,10 @@ def collect_match(
     target.knowledge |= {
         r[0]
         for r in conn.execute(
-            "SELECT id FROM knowledge WHERE text IS NOT NULL"
-            " AND instr(text, ?) > 0",
-            (match,),
+            "SELECT id FROM knowledge WHERE (text IS NOT NULL"
+            " AND instr(text, ?) > 0) OR (retract_reason IS NOT NULL"
+            " AND instr(retract_reason, ?) > 0)",
+            (match, match),
         )
     }
     target.citations |= {
@@ -182,15 +183,84 @@ def collect_match(
     }
 
 
+def _fork_sources(
+    conn: sqlite3.Connection, source: sqlite3.Row
+) -> list[sqlite3.Row]:
+    """Return every source forked, directly or not, from a source's thread."""
+    seen = {source["thread_id"]}
+    frontier = set(seen)
+    found: list[sqlite3.Row] = []
+    while frontier:  # terminates: a thread already seen is not revisited
+        rows = conn.execute(
+            "SELECT * FROM source WHERE provider = ? AND forked_from_id IN"
+            f" ({_marks(len(frontier))})",
+            (source["provider"], *frontier),
+        ).fetchall()
+        rows = [r for r in rows if r["thread_id"] not in seen]
+        found += rows
+        frontier = {r["thread_id"] for r in rows}
+        seen |= frontier
+    return found
+
+
+def _ancestors(
+    conn: sqlite3.Connection, source: sqlite3.Row
+) -> list[sqlite3.Row]:
+    """Return the sources a source's thread was forked from, nearest first."""
+    seen = {source["thread_id"]}
+    found: list[sqlite3.Row] = []
+    parent = source["forked_from_id"]
+    while parent and parent not in seen:  # a loop ends the walk
+        seen.add(parent)
+        row = conn.execute(
+            "SELECT * FROM source WHERE provider = ? AND thread_id = ?",
+            (source["provider"], parent),
+        ).fetchone()
+        if row is None:
+            break
+        found.append(row)
+        parent = row["forked_from_id"]
+    return found
+
+
+def _family(
+    conn: sqlite3.Connection, source: sqlite3.Row
+) -> list[sqlite3.Row]:
+    """Return every other source in a fork family that could hold a copy.
+
+    That is the ancestors, and the forks of the source and of each ancestor
+    (so siblings too).  An unrelated session is never part of it.
+    """
+    chain = [source, *_ancestors(conn, source)]
+    related: dict[int, sqlite3.Row] = {r["id"]: r for r in chain[1:]}
+    for member in chain:
+        related.update((r["id"], r) for r in _fork_sources(conn, member))
+    related.pop(source["id"], None)
+    return list(related.values())
+
+
 def _add_line(
     conn: sqlite3.Connection,
     target: Target,
     source: sqlite3.Row,
     line: int,
+    *,
+    copies: bool = True,
 ) -> None:
-    """Add every part of one line; a line tombstone blocks all its parts."""
+    """Add every part of one line; a line tombstone blocks all its parts.
+
+    Each event also gets a content tombstone, and with ``copies`` the same
+    content already stored in the thread's fork family (its ancestors, its
+    forks and their siblings) is added too, so an erased line cannot come
+    back through another copy of the history.  A fork's own replayed prefix
+    is not stored, so the ancestor's copy is the one that matters when the
+    erase starts from a fork's ref.
+    """
+    if (source["id"], line) in target.lines:
+        return
     rows = conn.execute(
-        "SELECT id, line_sha256 FROM event WHERE source_id = ? AND line = ?",
+        "SELECT id, line_sha256, role, text FROM event"
+        " WHERE source_id = ? AND line = ?",
         (source["id"], line),
     ).fetchall()
     target.lines.add((source["id"], line))
@@ -205,6 +275,28 @@ def _add_line(
             line_sha256=rows[0][1],
         )
     )
+    key = key_for(conn)
+    tags = {event_tag(key, r[2], r[3]) for r in rows}
+    target.tombstones += [
+        tombstone_row(
+            source["provider"],
+            "line",
+            thread_id=source["thread_id"],
+            line=0,
+            line_sha256=tag,
+        )
+        for tag in sorted(tags)
+    ]
+    if not copies:
+        return
+    for fork in _family(conn, source):
+        for role, text in {(r[2], r[3]) for r in rows}:
+            for (copy,) in conn.execute(
+                "SELECT DISTINCT line FROM event WHERE source_id = ?"
+                " AND role = ? AND text = ?",
+                (fork["id"], role, text),
+            ).fetchall():
+                _add_line(conn, target, fork, copy, copies=False)
 
 
 def _cites(

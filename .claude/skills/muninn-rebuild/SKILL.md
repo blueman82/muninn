@@ -18,4 +18,6 @@ Why the care: it replaces the live database and takes time proportional to all t
 3. Run it. Exit code 3 means busy (retry); 4 means the store is unavailable.
 4. Run `muninn doctor`, then compare `muninn stats` counts and `muninn know check` with the before picture. Report any differences instead of assuming parity.
 
+If the old store cannot be read it is not overwritten: it is renamed to `muninn.sqlite.unreadable-<UTC timestamp>` and the answer says so in `old_kept_as`. Tell the user the name; it stays until they delete it.
+
 Erased content stays erased because tombstones are carried over and checked before any line is read.

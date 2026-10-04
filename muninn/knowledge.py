@@ -35,6 +35,7 @@ from muninn.knowledge_cite import (
 )
 from muninn.knowledge_model import (
     KINDS,
+    PULL_ONLY,
     REASON_MAX,
     STATUSES,
     TEXT_MAX,
@@ -225,7 +226,8 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
         **kwargs: The fields described by ``AddArgs``.
 
     Returns:
-        The notice and the rendered new entry.
+        The notice and the rendered new entry, plus ``pull_only`` when the
+        entry will not be pushed (see ``user_cited``).
 
     Raises:
         RefusedError: If any rule is broken; nothing is written.
@@ -243,7 +245,10 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
     if request.quote_only is not None and root is None:
         raise RefusedError("no_caller_session")
     kid = _write_entry(conn, request, body, root)
-    return {"notice": NOTICE, "entry": entry(conn, kid)}
+    out: dict[str, Any] = {"notice": NOTICE, "entry": entry(conn, kid)}
+    if kid not in user_cited(conn, [kid]):
+        out["pull_only"] = PULL_ONLY
+    return out
 
 
 @guarded

@@ -184,9 +184,10 @@ class PlistTest(unittest.TestCase):
         self.assertIs(plist["RunAtLoad"], True)
         self.assertEqual(plist["ProcessType"], "Background")
         self.assertIs(plist["LowPriorityIO"], True)
-        log = f"{HOME}/.local/share/muninn/poller.log"
-        self.assertEqual(plist["StandardOutPath"], log)
-        self.assertEqual(plist["StandardErrorPath"], log)
+        # The poller writes poller.log itself (allowlisted, rotated); launchd
+        # must not hold a second raw handle on it.
+        self.assertEqual(plist["StandardOutPath"], "/dev/null")
+        self.assertEqual(plist["StandardErrorPath"], "/dev/null")
 
     def test_umask_is_an_octal_string(self) -> None:
         # launchd.plist(5): a string is parsed by strtoul; a leading 0 = octal.
@@ -259,7 +260,7 @@ class HomeSubstitutionTest(unittest.TestCase):
     def test_placeholder_substitutes_to_absolute_paths(self) -> None:
         plist = load_plist()
         strings = [c for _, c in all_commands()]
-        strings += [plist["StandardOutPath"], plist["StandardErrorPath"]]
+        self.assertEqual(plist["StandardOutPath"], "/dev/null")
         with tempfile.TemporaryDirectory() as tmp:
             home = os.path.realpath(tmp)
             for text in strings:

@@ -23,8 +23,21 @@ REDACTED = "[redacted:secret]"
 _URL = r"(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://"
 _KEYS = (
     r"api[_-]?key|access[_-]?token|client[_-]?secret|token|"
-    r"auth(?:orization)?|bearer|password|passwd|secret|private[_-]?key"
+    r"auth(?:orization)?|bearer|password|passwd|secret[_-]?access[_-]?key|"
+    r"secret|private[_-]?key"
 )
+# Provider tokens with a fixed prefix; each needs a long enough tail that
+# ordinary words and short identifiers do not match.
+_VENDOR = (
+    r"xox[abprs]-[A-Za-z0-9-]{10,}|xapp-[A-Za-z0-9-]{10,}"
+    r"|AIza[0-9A-Za-z_-]{35}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"
+    r"|whsec_[A-Za-z0-9]{16,}|glpat-[A-Za-z0-9_-]{20,}"
+    r"|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|ya29\.[A-Za-z0-9_-]{20,}"
+    r"|dop_v1_[A-Za-z0-9]{40,}"
+)
+_JWT = r"eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
+# A key block's header and footer, including "PGP PRIVATE KEY BLOCK".
+_PEM_TAG = r"(?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
 
 # Group "v" marks the secret value to blank out; a pattern without it
 # redacts its whole match. A separate pattern for secrets in URL query
@@ -37,11 +50,22 @@ SECRET_PATTERNS = (
         r"(?i)sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}"
         r"|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
     ),
-    re.compile(rf"(?i){_URL}(?P<v>[^/\s@]+)@\S+"),
+    re.compile(_VENDOR),
+    re.compile(_JWT),
+    # Pattern 1 stops at "Basic"; this takes the credential after it.
     re.compile(
-        r"(?i)[\"'](?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
-        r"auth(?:orization)?|password|passwd|secret|private[_-]?key)[\"']"
-        r"\s*:\s*[\"'](?P<v>[^\"']+)[\"']"
+        r"(?i)auth(?:orization)?[ \t]*[:=][ \t]*"
+        r"(?P<v>basic[ \t]+[A-Za-z0-9+/=]{8,})"
+    ),
+    re.compile(rf"(?i){_URL}(?P<v>[^/\s@]+)@\S+"),
+    # The optional backslashes cover JSON nested inside a JSON string, where
+    # every quote arrives escaped. A backslash not followed by a quote is
+    # part of the value, so the value loop's two branches never overlap.
+    re.compile(
+        r"(?i)\\?[\"'](?:api[_-]?key|access[_-]?token|client[_-]?secret|"
+        r"token|auth(?:orization)?|password|passwd|"
+        r"secret[_-]?access[_-]?key|secret|private[_-]?key)\\?[\"']"
+        r"\s*:\s*\\?[\"'](?P<v>(?:[^\"'\\]|\\(?![\"']))+)\\?[\"']"
     ),
     re.compile(
         r"(?is)(?:api[_-]?key|access[_-]?token|client[_-]?secret|token|"
@@ -50,9 +74,9 @@ SECRET_PATTERNS = (
     # A private-key block whose END line was cut off (truncated output) still
     # loses the base64 lines that follow its BEGIN line.
     re.compile(
-        r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+        rf"-----BEGIN {_PEM_TAG}"
         r"(?:(?:(?!-----BEGIN ).){0,16384}?"
-        r"-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
+        rf"-----END {_PEM_TAG}"
         r"|(?:(?:\r?\n|\\n)[A-Za-z0-9+/=]+)*)",
         re.S,
     ),

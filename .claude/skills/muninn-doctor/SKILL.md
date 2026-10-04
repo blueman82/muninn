@@ -17,7 +17,9 @@ Common fixes:
 - `unexpected_files`: a stray file in the data dir; remove or move it.
 - `unowned_journal`: a crashed writer's journal; the next writer rolls it back.
 - `db_free_space` warn: run `muninn compact`.
-- `reread` (info): `N of M` active sources are still to be re-read after an upgrade changed the classifier. It normally falls to `0 of M`; if it stays above 0, look at `failed_sources` and `stats` `last_pass.skipped_files`. It never fails the run.
+- `poller_error` (warn): the last pass stopped with an exception; `detail` is its class name. A good pass clears it; if it stays, the poller keeps failing.
+- `unreadable_files` (warn): the last pass could not open that many transcript files; check file permissions (macOS may need Full Disk Access for the poller).
+- `reread` (info): `N of M` active sources are still to be re-read after an upgrade changed the classifier. It normally falls to `0 of M`; if it stays above 0, look at `failed_sources` and `stats` `last_pass.unreadable_files`. It never fails the run.
 - `citations_resolve` warn: run `muninn know check`.
 
 Report failing checks as found; do not mark them fixed until `doctor` is re-run and passes.

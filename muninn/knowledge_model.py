@@ -31,6 +31,12 @@ BLOCK_QUOTE = 120  # characters of a quote pushed in the SessionStart block
 # only text the person typed is trusted enough to be injected unprompted.
 PUSHABLE_CITE = "m.state = 'live' AND m.role = 'user' AND m.kind = 'prompt'"
 
+PULL_ONLY = (
+    "pull-only: not pushed into session memory because no cited user prompt"
+    " holds this text; re-add it in the user's own words"
+)
+PUSH_OVERLAP = 0.8  # share of an entry's words its user quote must hold
+
 # The ``<`` of a muninn frame delimiter, however spaced or cased. Escaping it
 # stops stored text from closing or opening a memory block when it is
 # rendered back into a prompt.
@@ -100,3 +106,32 @@ def entry_name(kid: int | None) -> str | None:
 def iso_date(at: float) -> str:
     """Return the UTC calendar date of a timestamp."""
     return time.strftime("%Y-%m-%d", time.gmtime(at))
+
+
+def text_backed(text: str, quote: str) -> bool:
+    """Say whether a user's quote backs the text that would be pushed.
+
+    The pushed text is written by an agent; the quote is what the person
+    typed. Pushing is trusted only when the text is inside the quote or
+    mostly made of its words, so unrelated text cannot ride on a cite.
+
+    Args:
+        text: The entry text.
+        quote: A cited user-prompt quote.
+
+    Returns:
+        True if the text is a substring of the quote (whitespace collapsed,
+        case folded) or at least ``PUSH_OVERLAP`` of its words of three or
+        more characters occur in the quote.
+    """
+    body = " ".join(text.split()).casefold()
+    said = " ".join(quote.split()).casefold()
+    if not body:
+        return False
+    if body in said:
+        return True
+    words = [w for w in re.findall(r"\w+", body) if len(w) >= 3]
+    heard = set(re.findall(r"\w+", said))
+    if not words:
+        return False
+    return sum(w in heard for w in words) / len(words) >= PUSH_OVERLAP
