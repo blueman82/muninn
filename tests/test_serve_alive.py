@@ -10,6 +10,7 @@ import unittest
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -43,6 +44,24 @@ class ServeAliveTests(CliCase):
         if fields.get(ALIVE_AT) is not None:
             self.alive_writes.append(fields[ALIVE_AT])
         REAL_WRITE_STATUS(self.home, fields)
+
+    def no_sleep(self) -> Any:
+        """Make ``serve`` fail if it sleeps, without patching ``time``.
+
+        Only the name ``time`` inside ``cli_serve`` is replaced, so the
+        global ``time.sleep`` that unittest and other threads use is intact.
+
+        Returns:
+            A context manager for the stand-in.
+        """
+
+        def refuse(_seconds: float) -> None:
+            raise AssertionError("kept running after the stop")
+
+        stand_in = SimpleNamespace(
+            sleep=refuse, monotonic=time.monotonic, time=time.time
+        )
+        return mock.patch.object(cli_serve, "time", stand_in)
 
     def keep_signal_handlers(self) -> None:
         """Put the process's SIGTERM and SIGHUP handlers back after the test.
@@ -108,11 +127,7 @@ class ServeAliveTests(CliCase):
         with (
             mock.patch.object(cli_serve.ingest, "ingest", fake),
             mock.patch.object(Path, "replace", replace_then_sigterm),
-            mock.patch.object(
-                cli_serve.time,
-                "sleep",
-                side_effect=AssertionError("kept running after the stop"),
-            ),
+            self.no_sleep(),
         ):
             result = cli_serve.serve(
                 Namespace(interval=60.0), self.env, self.home, {}
@@ -141,11 +156,7 @@ class ServeAliveTests(CliCase):
                 lambda *_, **__: ingest.PassStats(files_changed=1),
             ),
             mock.patch.object(cli_serve, "heartbeat", heartbeat_then_sigterm),
-            mock.patch.object(
-                cli_serve.time,
-                "sleep",
-                side_effect=AssertionError("kept running after the stop"),
-            ),
+            self.no_sleep(),
         ):
             result = cli_serve.serve(
                 Namespace(interval=60.0), self.env, self.home, {}
@@ -170,11 +181,7 @@ class ServeAliveTests(CliCase):
         self.keep_signal_handlers()
         with (
             mock.patch.object(cli_serve.ingest, "ingest", fake),
-            mock.patch.object(
-                cli_serve.time,
-                "sleep",
-                side_effect=AssertionError("kept running after the stop"),
-            ),
+            self.no_sleep(),
         ):
             result = cli_serve.serve(
                 Namespace(interval=60.0), self.env, self.home, {}

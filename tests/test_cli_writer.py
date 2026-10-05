@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -158,8 +160,9 @@ class ServeTests(CliCase):
     def fail_if_exited(self, what: str) -> None:
         """Fail at once, with a diagnosis, if the poller process is gone.
 
-        Without this a poller that crashes at startup leaves the waits
-        below spinning for their whole timeout with nothing to read.
+        Valid only after ``start_serve``. Without this a poller that
+        crashes at startup leaves the wait_* helpers spinning for their
+        whole timeout with nothing to read.
 
         Args:
             what: What the caller was still waiting for.
@@ -182,6 +185,34 @@ class ServeTests(CliCase):
         except FileNotFoundError:
             return ""
 
+    def wait_for(
+        self, what: str, check: Callable[[], Any], timeout: float
+    ) -> Any:
+        """Poll ``check`` until it returns something truthy.
+
+        Args:
+            what: Description of the awaited condition, for failures.
+            check: Returns a falsy value until the condition holds.
+            timeout: Seconds to wait before failing the test.
+
+        Returns:
+            The first truthy value ``check`` returned.
+
+        Raises:
+            AssertionError: On timeout, or if serve exited first.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if found := check():
+                return found
+            if self.proc.poll() is not None:
+                # The condition may have become true just before the exit.
+                if found := check():
+                    return found
+                self.fail_if_exited(what)
+            time.sleep(0.05)
+        raise AssertionError(f"timed out waiting for {what}")
+
     def wait_status(self, key: str, timeout: float = 60) -> dict[str, Any]:
         """Wait until the heartbeat file reports a truthy ``key``.
 
@@ -191,31 +222,12 @@ class ServeTests(CliCase):
 
         Returns:
             The status document that contains the field.
-
-        Raises:
-            AssertionError: If the field never appears or serve exits.
         """
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            status = obs.read_status(self.home)
-            if status.get(key):
-                return status
-            self.fail_if_exited(f"{key} appeared in status.json")
-            time.sleep(0.05)
-        raise AssertionError(f"no {key} in status.json")
-
-    def wait_started(self, timeout: float = 60) -> None:
-        """Wait until the poller has installed its handlers and said so.
-
-        The ``start`` line is logged after the SIGTERM handler is installed,
-        so a signal sent once it appears is always handled. Signalling a
-        process that is still starting up kills it with the default action
-        (exit -15), which is what made this test flaky under load.
-
-        Args:
-            timeout: Seconds to wait before failing the test.
-        """
-        self.wait_log('"event":"start"', timeout)
+        return self.wait_for(
+            f"{key} in status.json",
+            lambda: (s := obs.read_status(self.home)).get(key) and s,
+            timeout,
+        )
 
     def wait_log(self, needle: str, timeout: float = 60) -> None:
         """Wait until ``poller.log`` contains ``needle``.
@@ -223,21 +235,18 @@ class ServeTests(CliCase):
         Args:
             needle: Text that must appear in the log.
             timeout: Seconds to wait before failing the test.
-
-        Raises:
-            AssertionError: If the text never appears or serve exits.
         """
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            if needle in self.log_text():
-                return
-            self.fail_if_exited(f"poller.log had {needle}")
-            time.sleep(0.05)
-        raise AssertionError(f"poller.log never had {needle}")
+        self.wait_for(
+            f"poller.log to have {needle}",
+            lambda: needle in self.log_text(),
+            timeout,
+        )
 
     def test_serve_sigterm_during_idle_sleep(self) -> None:
         self.session(TID, f"{CANARY} in a prompt", "a reply")
-        proc = self.start_serve()
+        # A long interval: after the pass line the poller can only be in
+        # its idle sleep, so the signal lands there and not in a second pass.
+        proc = self.start_serve(interval="60")
         status = self.wait_status("passes")
         # The heartbeat is written before the pass line, so SIGTERM sent on
         # the heartbeat alone can land between the two and lose the line.
@@ -246,7 +255,7 @@ class ServeTests(CliCase):
         self.assertEqual(proc.wait(timeout=30), 0)
         self.assertFalse((self.home / "muninn.sqlite-journal").exists())
         self.assertEqual(status["pid"], proc.pid)
-        self.assertEqual(status["interval_s"], 0.2)
+        self.assertEqual(status["interval_s"], 60.0)
         self.assertLessEqual(
             {
                 "last_pass_at",
@@ -270,10 +279,8 @@ class ServeTests(CliCase):
             json.loads(x)
             for x in (self.home / "poller.log").read_text().splitlines()
         ]
-        self.assertEqual(
-            [e["event"] for e in events][0 :: len(events) - 1],
-            ["start", "stop"],
-        )
+        self.assertEqual(events[0]["event"], "start")
+        self.assertEqual(events[-1]["event"], "stop")
         (first,) = [e for e in events if e["event"] == "pass"][:1]
         self.assertEqual(first["events_added"], 2)
         self.muninn("search", CANARY)
@@ -281,12 +288,33 @@ class ServeTests(CliCase):
             with self.subTest(file=name):
                 self.assertNotIn(CANARY, (self.home / name).read_text())
 
+    def committed_sources(self) -> int:
+        """Count sources the poller has committed, 0 while it is busy."""
+        try:
+            conn = store.connect_ro(store.db_path(self.home))
+        except store.StoreUnavailableError:
+            return 0  # no store yet, or a journal mid-write
+        try:
+            return int(
+                conn.execute(
+                    "SELECT count(*) FROM source WHERE cursor_line > 0"
+                ).fetchone()[0]
+            )
+        except sqlite3.Error:
+            return 0  # locked by the writer: ask again
+        finally:
+            conn.close()
+
     def test_serve_sigterm_mid_pass_leaves_no_journal(self) -> None:
-        for n in range(300):
+        total = 5000  # ~1 ms each to ingest: seconds of window to land in
+        for n in range(total):
             self.session(f"thr-{n:04d}", f"prompt {n}", f"reply {n}")
         proc = self.start_serve(interval="60")
-        # The alive stamp exists only while a pass holds the writer lock.
-        self.wait_status(ALIVE_AT)
+        # ALIVE_AT is stamped after planning the first file, before any
+        # transaction is open, so it is not proof of a write. Wait for a
+        # committed source: the pass is then between transactions of a pass
+        # that still has sources left, which is the stop-after-COMMIT path.
+        self.wait_for("a committed source", self.committed_sources, 60)
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(timeout=60), 0)
         self.assertFalse((self.home / "muninn.sqlite-journal").exists())
@@ -300,6 +328,10 @@ class ServeTests(CliCase):
             " (SELECT count(*) FROM event e WHERE e.source_id = s.id) != 2"
         ).fetchone()[0]
         self.assertEqual(torn, 0)  # every committed source is whole
+        done = self.committed_sources()
+        # Fails loudly if the stop ever stops landing inside a real pass.
+        self.assertGreaterEqual(done, 1)
+        self.assertLess(done, total)
 
     def test_status_json_heartbeat_and_poller_stale(self) -> None:
         self.session(TID, "hello there", "hi")
