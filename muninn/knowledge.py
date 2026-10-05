@@ -5,14 +5,16 @@ primary prompt, reply or tool_call event plus a verbatim quote of it,
 checked when the entry is written. Writers (``add``, ``retract``) must run
 under ``store.writer_lock`` with a ``store.connect_rw`` connection;
 ``run_add`` and ``run_retract`` do that. Readers (``list_entries``, ``show``,
-``check``, ``verify_citation``, ``block_entries``, ``user_cited``) work on a
-``connect_ro`` connection. A refused write raises ``RefusedError`` and leaves
-nothing behind.
+``check``, ``verify_citation``, ``block_entries``, ``user_cited``,
+``withheld``) work on a ``connect_ro`` connection. A refused write raises
+``RefusedError`` and leaves nothing behind.
 
 The module is split by responsibility: ``knowledge_model`` (limits, refusals,
-text rules), ``knowledge_cite`` (citation checks) and ``knowledge_read``
-(readers). Their public names are re-exported here, which is where the rest
-of muninn imports them from.
+text rules), ``knowledge_cite`` (citation checks), ``knowledge_read``
+(readers), ``knowledge_push`` (what a hook may push, and ``withheld``),
+``knowledge_typed`` (validation of the typed fields) and ``knowledge_expiry``
+(the shared expiry and restriction predicates). Their public names are
+re-exported here, which is where the rest of muninn imports them from.
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ from muninn.knowledge_cite import (
 )
 from muninn.knowledge_model import (
     KINDS,
-    PULL_ONLY,
     REASON_MAX,
     STATUSES,
     TEXT_MAX,
@@ -44,17 +45,21 @@ from muninn.knowledge_model import (
     clean_text,
     parse_kid,
 )
-from muninn.knowledge_read import (
+from muninn.knowledge_push import (
     block_entries,
+    pull_only_note,
+    user_cited,
+    withheld,
+)
+from muninn.knowledge_read import (
     check,
     entry,
     list_entries,
     show,
-    user_cited,
     verify_citation,
-    withheld,
 )
 from muninn.knowledge_typed import (
+    DEFAULT_SENSITIVITY,
     Typed,
     TypedRequest,
     loop_scope_id,
@@ -139,7 +144,7 @@ class _AddRequest:
     global_scope: bool = False
     confidence: str | None = None
     valid_until: str | None = None
-    sensitivity: str = "normal"
+    sensitivity: str = DEFAULT_SENSITIVITY
     contradicts: str | int | None = None
     tags: Sequence[str] = ()
     loop: str | None = None
@@ -271,8 +276,9 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
         **kwargs: The fields described by ``AddArgs``.
 
     Returns:
-        The notice and the rendered new entry, plus ``pull_only`` when the
-        entry will not be pushed (see ``user_cited``).
+        The notice and the rendered new entry, plus ``pull_only`` (the
+        reason) when the entry will not be pushed: restricted, expired, or
+        not backed by a cited user prompt (see ``pull_only_note``).
 
     Raises:
         RefusedError: If any rule is broken; nothing is written.
@@ -303,8 +309,9 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
         raise RefusedError("no_caller_session")
     kid = _write_entry(conn, request, body, root, typed)
     out: dict[str, Any] = {"notice": NOTICE, "entry": entry(conn, kid)}
-    if kid not in user_cited(conn, [kid]):
-        out["pull_only"] = PULL_ONLY
+    note = pull_only_note(conn, kid)
+    if note is not None:
+        out["pull_only"] = note
     return out
 
 

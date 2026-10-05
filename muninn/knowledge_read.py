@@ -12,25 +12,22 @@ import time
 from typing import Any
 
 from muninn import query, scope
-from muninn.knowledge_expiry import LIVE_SQL, PUSH_SQL, is_expired, iso_stamp
+from muninn.knowledge_expiry import LIVE_SQL, is_expired, iso_stamp
 from muninn.knowledge_model import (
-    BLOCK_QUOTE,
     CHAIN_MAX,
     KINDS,
     PROBLEMS_MAX,
-    PUSHABLE_CITE,
     STATUSES,
     Entry,
     entry_name,
     iso_date,
     parse_kid,
-    text_backed,
 )
 from muninn.knowledge_typed import loop_scope_id, valid_loop
 from muninn.query import NOTICE, guarded
 
 
-def _ref(row: sqlite3.Row) -> str:
+def cite_ref(row: sqlite3.Row) -> str:
     """Return the ``provider:thread:line.part`` reference of a citation."""
     return f"{row['provider']}:{row['thread_id']}:{row['line']}.{row['part']}"
 
@@ -86,7 +83,7 @@ def verify_citation(conn: sqlite3.Connection, row: sqlite3.Row) -> str:
 def _cite_view(conn: sqlite3.Connection, cite: sqlite3.Row) -> Entry:
     """Return the public description of one citation row."""
     return {
-        "ref": _ref(cite),
+        "ref": cite_ref(cite),
         "role": cite["role"],
         "kind": cite["kind"],
         "ts": cite["ts"],
@@ -134,6 +131,20 @@ def entry(conn: sqlite3.Connection, kid: int) -> Entry:
     return out
 
 
+def _status_filter(status: str, where: list[str], args: list[Any]) -> None:
+    """Append the SQL of a ``know list`` status filter and its parameters."""
+    now = time.time()
+    if status == "expired":
+        where.append(f"k.status = 'current' AND NOT {LIVE_SQL}")
+        args.append(now)
+    elif status != "all":
+        where.append("k.status = ?")
+        args.append(status)
+        if status == "current":
+            where.append(LIVE_SQL)
+            args.append(now)
+
+
 @guarded
 def list_entries(
     conn: sqlite3.Connection,
@@ -158,6 +169,8 @@ def list_entries(
 
     Returns:
         The entries and their count, or an error payload for a bad filter.
+        ``loop_not_found`` is true when ``loop`` names a loop with no
+        entries ever written (the count is then 0).
     """
     if status not in (*STATUSES, "expired", "all"):
         return _error("bad_status")
@@ -167,23 +180,16 @@ def list_entries(
         return _error("bad_loop_scope")
     where = ["1"]
     args: list[Any] = []
-    now = time.time()
-    if status == "expired":
-        where.append(f"k.status = 'current' AND NOT {LIVE_SQL}")
-        args.append(now)
-    elif status != "all":
-        where.append("k.status = ?")
-        args.append(status)
-        if status == "current":
-            where.append(LIVE_SQL)
-            args.append(now)
+    _status_filter(status, where, args)
     if kind is not None:
         where.append("k.kind = ?")
         args.append(kind)
+    loop_known = True
     if loop is not None:
-        ids = [loop_scope_id(conn, loop, create=False) or 0]
+        found = loop_scope_id(conn, loop, create=False)
+        loop_known = found is not None
         where.append("k.scope_id = ?")
-        args += ids
+        args.append(found or 0)
     elif not all_projects:
         # [0] matches no scope: an unknown cwd lists nothing, not everything.
         ids = scope.scope_ids_for_read(conn, cwd) or [0]
@@ -195,7 +201,16 @@ def list_entries(
         args,
     ).fetchall()
     entries = [entry(conn, row["id"]) for row in rows]
-    return {"notice": NOTICE, "count": len(entries), "entries": entries}
+    out: dict[str, Any] = {
+        "notice": NOTICE,
+        "count": len(entries),
+        "entries": entries,
+    }
+    if not loop_known:
+        # Not an error: a loop gets its scope row with its first entry, so
+        # an unknown id and an empty list differ only by this flag.
+        out["loop_not_found"] = True
+    return out
 
 
 def _chain(conn: sqlite3.Connection, kid: int, column: str) -> list[Entry]:
@@ -302,7 +317,7 @@ def check(conn: sqlite3.Connection) -> dict[str, Any]:
                 {
                     "id": f"K{row['knowledge_id']}",
                     "status": row["entry_status"],
-                    "ref": _ref(row),
+                    "ref": cite_ref(row),
                     "state": state,
                 }
             )
@@ -320,130 +335,3 @@ def check(conn: sqlite3.Connection) -> dict[str, Any]:
     if len(problems) > PROBLEMS_MAX:
         out["problems_omitted"] = len(problems) - PROBLEMS_MAX
     return out
-
-
-# Entries examined per wanted entry, and the most ever examined, so the
-# hook's cost stays flat as the ledger grows; Python then drops entries whose
-# quote does not back the text.  The scan counts entries, not citation rows,
-# so one entry with many citations cannot crowd the rest out.  Beyond the cap
-# an older entry is simply not pushed.
-_OVERFETCH = 10
-_SCAN_CAP = 200
-
-
-@guarded
-def block_entries(
-    conn: sqlite3.Connection, scope_ids: list[int], limit: int = 8
-) -> list[dict[str, Any]]:
-    """Return the entries the SessionStart block may push.
-
-    Only current entries with a live user-prompt citation whose quote backs
-    the entry text qualify (``text_backed``); entries cited by replies or
-    tool calls alone, or whose text the user's words do not back, stay
-    pull-only.
-
-    Args:
-        conn: Open store connection.
-        scope_ids: Scopes to draw from.
-        limit: Maximum number of entries.
-
-    Returns:
-        Newest first, each with its actor and the first backing user-prompt
-        quote cut to ``BLOCK_QUOTE`` characters.
-    """
-    if not scope_ids or limit < 1:
-        return []
-    candidates = conn.execute(
-        "SELECT k.id, k.kind, k.text, k.actor, k.created_at, sc.label"
-        " FROM knowledge k JOIN scope sc ON sc.id = k.scope_id"
-        f" WHERE k.status = 'current' AND {PUSH_SQL} AND k.scope_id IN"
-        f" ({','.join('?' * len(scope_ids))}) AND EXISTS"
-        " (SELECT 1 FROM citation m WHERE m.knowledge_id = k.id"
-        f" AND {PUSHABLE_CITE})"
-        " ORDER BY k.created_at DESC, k.id DESC LIMIT ?",
-        [time.time(), *scope_ids, min(limit * _OVERFETCH, _SCAN_CAP)],
-    )
-    out: list[dict[str, Any]] = []
-    for k in candidates:
-        cite = _backing_cite(conn, k["id"], k["text"])
-        if cite is None:
-            continue
-        out.append(
-            {
-                "id": f"K{k['id']}",
-                "kind": k["kind"],
-                "scope": k["label"],
-                "text": k["text"],
-                "actor": k["actor"],
-                "date": iso_date(k["created_at"]),
-                "cite": _ref(cite),
-                "quote": cite["quote"][:BLOCK_QUOTE],
-            }
-        )
-        if len(out) == limit:
-            break
-    return out
-
-
-def _backing_cite(
-    conn: sqlite3.Connection, kid: int, text: str
-) -> sqlite3.Row | None:
-    """Return an entry's first user-prompt citation that backs its text."""
-    # Iterated, not fetched: an entry with a great many citations is read
-    # only as far as its first backing one.
-    for cite in conn.execute(
-        "SELECT m.provider, m.thread_id, m.line, m.part, m.quote"
-        " FROM citation m WHERE m.knowledge_id = ?"
-        f" AND {PUSHABLE_CITE} ORDER BY m.id",
-        (kid,),
-    ):
-        if text_backed(text, cite["quote"] or ""):
-            return cite
-    return None
-
-
-@guarded
-def withheld(conn: sqlite3.Connection, scope_ids: list[int]) -> dict[str, int]:
-    """Count current entries a push leaves out, by reason code.
-
-    Args:
-        conn: Open store connection.
-        scope_ids: Scopes a push draws from.
-
-    Returns:
-        ``expired`` (past valid_until) and ``restricted`` (live but
-        restricted) counts; numbers only, never entry text.
-    """
-    if not scope_ids:
-        return {"expired": 0, "restricted": 0}
-    row = conn.execute(
-        f"SELECT sum(NOT {LIVE_SQL}), sum({LIVE_SQL} AND k.sensitivity ="
-        " 'restricted') FROM knowledge k WHERE k.status = 'current'"
-        f" AND k.scope_id IN ({','.join('?' * len(scope_ids))})",
-        [time.time(), time.time(), *scope_ids],
-    ).fetchone()
-    return {"expired": row[0] or 0, "restricted": row[1] or 0}
-
-
-@guarded
-def user_cited(conn: sqlite3.Connection, ids: list[int]) -> set[int]:
-    """Return which entry ids may be pushed into a prompt.
-
-    This is the same rule ``block_entries`` applies: a live user-prompt
-    citation whose quote backs the entry text.
-
-    Args:
-        conn: Open store connection.
-        ids: Candidate entry numbers.
-
-    Returns:
-        The subset of ``ids`` that qualify.
-    """
-    rows = conn.execute(
-        "SELECT k.id, k.text, m.quote FROM knowledge k"
-        " JOIN citation m ON m.knowledge_id = k.id"
-        f" WHERE k.id IN ({','.join('?' * len(ids))})"
-        f" AND {PUSHABLE_CITE} AND {PUSH_SQL}",
-        [*ids, time.time()],
-    )
-    return {r[0] for r in rows if text_backed(r[1], r[2] or "")}

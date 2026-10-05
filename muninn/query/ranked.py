@@ -24,6 +24,7 @@ from muninn.query.hits import (
     CANDIDATES,
     CANDIDATES_SQL,
     compose,
+    expired_omitted,
     knowledge,
     render,
     tally,
@@ -57,6 +58,7 @@ class SearchArgs(TypedDict, total=False):
     include_subagents: bool
     current_session: str | None
     status: Mapping[str, Any] | None
+    push_only: bool
 
 
 def _eligibility(
@@ -96,6 +98,31 @@ def _other_scopes(other: Counter[str]) -> dict[str, int]:
     """Return the biggest outside scopes, ties broken by label."""
     ranked = sorted(other.items(), key=lambda kv: (-kv[1], kv[0]))
     return dict(ranked[:OTHER_SCOPES])
+
+
+def _knowledge_part(
+    conn: sqlite3.Connection,
+    fts: str,
+    ids: list[int],
+    everywhere: bool,
+    push_only: bool,
+) -> Answer:
+    """Return the knowledge hits and, for a pull, the expired-omitted count."""
+    part: Answer = {
+        "knowledge": knowledge(conn, fts, ids, everywhere, push_only=push_only)
+    }
+    omitted = 0 if push_only else expired_omitted(conn, fts, ids, everywhere)
+    if omitted:
+        part["knowledge_expired_omitted"] = omitted
+    return part
+
+
+def _outside_note(outside: int) -> str:
+    """Say that every match lies outside the searched scope."""
+    return (
+        f"0 matches in this scope; {outside} matches outside"
+        " this scope; use --all-projects"
+    )
 
 
 def _check_keywords(args: Mapping[str, object]) -> None:
@@ -150,7 +177,9 @@ def search(
             ``kinds``, ``provider``, ``since``, ``until``, ``session``,
             ``recent``, ``limit`` (default 10), ``page`` (default 1),
             ``include_current``, ``scope``, ``include_subagents``,
-            ``current_session`` and ``status`` (a parsed status.json).
+            ``current_session``, ``push_only`` (knowledge a hook may push; the
+            CLI also gets restricted entries, flagged) and ``status`` (a
+            parsed status.json).
 
     Returns:
         The answer, or ``{"error": code}`` for bad input.
@@ -220,10 +249,9 @@ def search(
         },
     }
     if root is None:
-        out["knowledge"] = knowledge(conn, fts, ids, everywhere)
-    if not total and other:
-        out["note"] = (
-            f"0 matches in this scope; {sum(other.values())} matches outside"
-            " this scope; use --all-projects"
+        out |= _knowledge_part(
+            conn, fts, ids, everywhere, args.get("push_only", False)
         )
+    if not total and other:
+        out["note"] = _outside_note(sum(other.values()))
     return paginate(hits, out | freshness(status), limit, page)

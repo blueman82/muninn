@@ -43,6 +43,14 @@ PULL_ONLY = (
     " holds this text; cite a user prompt, or re-add it in the user's own"
     " words"
 )
+PULL_RESTRICTED = (
+    "pull-only: this entry is restricted, so it is never pushed into session"
+    " memory; it still shows in know list and search"
+)
+PULL_EXPIRED = (
+    "pull-only: this entry's valid_until has passed, so it is not pushed"
+    " into session memory"
+)
 PUSH_OVERLAP = 0.8  # share of an entry's words its user quote must hold
 
 # The ``<`` of a muninn frame delimiter, however spaced or cased. Escaping it

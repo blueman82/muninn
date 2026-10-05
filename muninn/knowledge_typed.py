@@ -13,12 +13,16 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import cast
+from typing import Literal, cast
 
 from muninn.knowledge_model import RefusedError, parse_kid
 
-CONFIDENCE = ("observed", "reported", "inferred")
-SENSITIVITY = ("normal", "restricted")
+type Confidence = Literal["observed", "reported", "inferred"]
+type Sensitivity = Literal["normal", "restricted"]
+
+CONFIDENCE: tuple[Confidence, ...] = ("observed", "reported", "inferred")
+SENSITIVITY: tuple[Sensitivity, ...] = ("normal", "restricted")
+DEFAULT_SENSITIVITY: Sensitivity = "normal"
 TAGS_MAX = 10
 LOOP_PREFIX = "loop:"
 _TAG = re.compile(r"[a-z0-9_-]{1,32}")
@@ -43,9 +47,9 @@ class Typed:
         loop: Loop id for a loop scope, else None.
     """
 
-    confidence: str | None = None
+    confidence: Confidence | None = None
     valid_until: float | None = None
-    sensitivity: str = "normal"
+    sensitivity: Sensitivity = DEFAULT_SENSITIVITY
     contradicts: int | None = None
     tags: tuple[str, ...] = ()
     loop: str | None = None
@@ -91,8 +95,8 @@ class TypedRequest:
 
     confidence: str | None = None
     valid_until: str | None = None
-    sensitivity: str = "normal"
-    contradicts: object = None
+    sensitivity: str = DEFAULT_SENSITIVITY
+    contradicts: str | int | None = None
     tags: Sequence[str] = ()
     loop: str | None = None
     global_scope: bool = False

@@ -146,6 +146,7 @@ def _search_page(
         limit=POOL_PAGE,
         page=page,
         current_session=session if isinstance(session, str) else None,
+        push_only=True,
     )
 
 

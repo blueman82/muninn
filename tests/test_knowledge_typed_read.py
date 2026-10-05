@@ -56,6 +56,7 @@ class ExpiryTests(KnowCase):
             self.assertEqual(got["error"], "bad_loop_scope", bad)
         ok = knowledge.list_entries(self.ro(), cwd="/x", loop="never-seen")
         self.assertEqual(ok["count"], 0)
+        self.assertIs(ok["loop_not_found"], True)
 
     def test_expired_is_not_pushed_or_searched(self) -> None:
         got = self.add(text="use the zebra cache")
@@ -113,9 +114,11 @@ class RestrictedTests(RecallCase):
         self.assertNotIn("restricted alphaterm", recalled)
         self.assertIn("plain alphaterm", recalled)
 
-    def test_search_leaves_out_restricted_and_expired(self) -> None:
-        """Search output reaches the model, so it is a push path too."""
-        self.add(text="secretword restricted", sensitivity="restricted")
+    def test_search_flags_restricted_and_leaves_out_expired(self) -> None:
+        """The CLI is a pull path: restricted is shown, flagged."""
+        secret = self.add(
+            text="secretword restricted", sensitivity="restricted"
+        )
         stale = self.add(text="secretword stale", valid_until="2099-01-01")
         self.rw.execute(
             "UPDATE knowledge SET valid_until = ? WHERE id = ?",
@@ -123,7 +126,14 @@ class RestrictedTests(RecallCase):
         )
         plain = self.add(text="secretword plain")
         got = hits.knowledge(self.ro(), "secretword", [], True)
-        self.assertEqual([a["id"] for a in got], [f"K{kid(plain)}"])
+        self.assertEqual(
+            {a["id"]: a["restricted"] for a in got},
+            {f"K{kid(plain)}": False, f"K{kid(secret)}": True},
+        )
+        pushed = hits.knowledge(
+            self.ro(), "secretword", [], True, push_only=True
+        )
+        self.assertEqual([a["id"] for a in pushed], [f"K{kid(plain)}"])
 
     def test_session_start_trace_counts_what_it_withheld(self) -> None:
         self.add(text="use the zebra cache")

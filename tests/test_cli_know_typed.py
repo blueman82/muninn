@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
+from muninn import store
 from tests.cli_support import ALWAYS, CliCase
 from tests.test_ingest import TID
 
@@ -120,3 +122,44 @@ class TypedAddTests(CliCase):
         self.assertEqual((code, out["error"]), (2, "bad_valid_until"))
         code, out, _ = self.add("--scope-loop", "x", "--global")
         self.assertEqual((code, out["error"]), (2, "bad_loop_scope"))
+
+    def loop_list(self, *extra: str) -> tuple[int, Any]:
+        """Run ``know list --scope-loop loop-7`` with extra flags."""
+        code, out, _ = self.muninn(
+            "know", "list", "--scope-loop", "loop-7", *extra
+        )
+        return code, out
+
+    def test_unknown_loop_is_flagged_not_just_empty(self) -> None:
+        code, out = self.loop_list()
+        self.assertEqual((code, out["count"], out["entries"]), (0, 0, []))
+        self.assertIs(out["loop_not_found"], True)
+        self.assertEqual(self.add("--scope-loop", "loop-7")[0], 0)
+        code, out = self.loop_list()
+        self.assertEqual((code, out["count"]), (0, 1))
+        self.assertNotIn("loop_not_found", out)
+
+    def test_loop_list_honours_status_and_kind(self) -> None:
+        self.assertEqual(
+            self.add("--scope-loop", "loop-7", kind="fact", text="a fact")[0],
+            0,
+        )
+        self.assertEqual(
+            self.add("--scope-loop", "loop-7", text="a lesson")[0], 0
+        )
+        conn = store.connect_rw(store.db_path(self.home), fullfsync=False)
+        conn.execute(
+            "UPDATE knowledge SET valid_until = ? WHERE text = 'a lesson'",
+            (time.time() - 5,),
+        )
+        conn.close()
+        for flags, want in (
+            (("--status", "expired"), ["a lesson"]),
+            (("--status", "all"), ["a lesson", "a fact"]),
+            (("--status", "all", "--kind", "fact"), ["a fact"]),
+            ((), ["a fact"]),
+        ):
+            with self.subTest(flags):
+                _, out = self.loop_list(*flags)
+                self.assertEqual([e["text"] for e in out["entries"]], want)
+                self.assertNotIn("loop_not_found", out)

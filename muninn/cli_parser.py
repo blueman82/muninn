@@ -9,6 +9,7 @@ from typing import Any, NoReturn, Protocol
 
 from muninn import knowledge, query
 from muninn.cli_hook import HOOKS, PROVIDERS
+from muninn.knowledge_typed import DEFAULT_SENSITIVITY
 
 __all__ = ["HELP", "build_parser"]
 
@@ -204,7 +205,9 @@ def _add_knowledge(cmd: _Commands) -> None:
     a.add_argument(
         "--valid-until", metavar="DATE", help="ISO date; later it is expired"
     )
-    a.add_argument("--sensitivity", default="normal", help="normal|restricted")
+    a.add_argument(
+        "--sensitivity", default=DEFAULT_SENSITIVITY, help="normal|restricted"
+    )
     a.add_argument("--contradicts", metavar="K")
     a.add_argument("--tag", action="append", default=[], dest="tags")
     a.add_argument("--scope-loop", metavar="ID", dest="loop")
