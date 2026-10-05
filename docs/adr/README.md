@@ -15,3 +15,5 @@ implementer chose it inside work the owner ordered.
 | [0008](0008-install-wrapper.md) | `bin/muninn-install` picks the install mode and previews without writing |
 | [0009](0009-uninstall.md) | `bin/muninn-uninstall` removes muninn and keeps the data unless told otherwise |
 | [0010](0010-chatgpt-handoff-sessions.md) | Codex ChatGPT-handoff sessions are the owner's primary sessions |
+| [0011](0011-one-way-schema-migration-with-snapshot.md) | The store schema migration is one-way, and an upgrade takes a snapshot first |
+| [0012](0012-keyed-content-tombstones.md) | Content tombstones are keyed HMAC tags, and `tombstone.key` is a durable secret |
