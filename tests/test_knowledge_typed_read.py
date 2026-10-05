@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from unittest import mock
 
 from muninn import hook, knowledge, obs_stats, query
 from muninn.query import hits
@@ -77,6 +78,17 @@ class ExpiryTests(KnowCase):
         self.assertEqual(out["knowledge_restricted"], 1)
         self.assertNotIn("private entry", str(out))
 
+    def test_restricted_count_ignores_retracted_and_erased(self) -> None:
+        self.add(text="live private", sensitivity="restricted")
+        for state in ("retracted", "erased"):
+            gone = self.add(text=f"{state} private", sensitivity="restricted")
+            self.rw.execute(
+                "UPDATE knowledge SET status = ? WHERE id = ?",
+                (state, kid(gone)),
+            )
+        out = obs_stats.stats(self.ro(), self.home, {})
+        self.assertEqual(out["knowledge_restricted"], 1)
+
 
 class RestrictedTests(RecallCase):
     """Restricted entries stay in the CLI views and out of every push."""
@@ -124,6 +136,20 @@ class RestrictedTests(RecallCase):
         trace: dict[str, object] = {}
         hook.session_start(self.payload(), "claude", self.env, trace=trace)
         self.assertEqual(trace["withheld"], {"expired": 1, "restricted": 1})
+
+    def test_withheld_failure_keeps_the_block(self) -> None:
+        self.add(text="use the zebra cache")
+        trace: dict[str, object] = {}
+        with mock.patch.object(
+            knowledge, "withheld", side_effect=RuntimeError("boom")
+        ):
+            out = hook.session_start(
+                self.payload(), "claude", self.env, trace=trace
+            )
+        self.assertNotIn("error", trace)
+        self.assertNotIn("withheld", trace)
+        context = str(out["hookSpecificOutput"])
+        self.assertIn("zebra", context)
 
     def test_restricted_is_still_visible_through_list_and_show(self) -> None:
         got = self.add(text="private note", sensitivity="restricted")

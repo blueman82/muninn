@@ -113,6 +113,8 @@ def _retract(a: Namespace, env: Env, home: Path, record: Record) -> Result:
 
 def _list(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """List entries of this repo and global, newest first."""
+    if a.loop is not None and a.all_projects:  # a loop is one scope
+        return 2, {"error": "loop_with_all_projects"}
 
     def work(conn: sqlite3.Connection) -> Out:
         return knowledge.list_entries(

@@ -11,6 +11,7 @@ transcript belongs to a subagent or reviewer thread.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -384,7 +385,9 @@ def _start_block(
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
-    trace["withheld"] = _KNOWLEDGE.withheld(conn, ids)
+    # The count is a diagnostic: its failure must not cost the block.
+    with contextlib.suppress(Exception):
+        trace["withheld"] = _KNOWLEDGE.withheld(conn, ids)
     trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
     return render_block(
         entries, _label(conn, ids, cwd), notes=index_notes(home), limit=limit

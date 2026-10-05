@@ -109,6 +109,12 @@ class TypedAddTests(CliCase):
         _, listed, _ = self.muninn("know", "list", "--status", "all")
         self.assertEqual(listed["count"], 0)
 
+    def test_scope_loop_with_all_projects_refused(self) -> None:
+        code, out, _ = self.muninn(
+            "know", "list", "--scope-loop", "x", "--all-projects"
+        )
+        self.assertEqual((code, out["error"]), (2, "loop_with_all_projects"))
+
     def test_past_valid_until_and_loop_with_global_refused(self) -> None:
         code, out, _ = self.add("--valid-until", "2001-01-01")
         self.assertEqual((code, out["error"]), (2, "bad_valid_until"))

@@ -89,14 +89,16 @@ current: `know list` (default `--status current`), search, the SessionStart bloc
 untouched; `know list --status expired` shows it, `--status all` and `know show` show it flagged, `know check` reports an
 `expired` count, and `stats` counts it under `knowledge.expired` instead of `knowledge.current`.
 
-**Withheld is counted.** Each SessionStart hook line in `calls`-style logs carries `withheld: {"expired": N, "restricted": N}`
-(counts of live-scope current entries the block left out, never text), so an empty block with a non-zero count is a decision
-the hook withheld, not an empty ledger. `know list --scope-loop` refuses a malformed id with `bad_loop_scope`, as `know add` does;
-a well-formed unknown loop lists 0.
+**Withheld is counted.** The `hook session-start` line in `calls.jsonl` carries `withheld: {"expired": N, "restricted": N}`
+(counts of current entries in the repo and global scopes that the block left out, never text; the field passes the
+`obs_log` allowlist as a map of integer counts), so an empty block with a non-zero count is a decision the hook withheld,
+not an empty ledger. If the count cannot be computed the field is left out and the block is still sent.
+`know list --scope-loop` refuses a malformed id with `bad_loop_scope`, as `know add` does; a well-formed unknown loop
+lists 0. `--scope-loop` with `--all-projects` is refused with `loop_with_all_projects` (exit 2).
 
 **Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block, of per-prompt recall
 and of `search` (its output reaches the model, so it counts as a push path), even when a user prompt cites it. It is still
-returned by the commands a person runs to inspect the ledger (`know list`, `know show`). `stats` reports `knowledge_restricted`, a count only.
+returned by the commands a person runs to inspect the ledger (`know list`, `know show`). `stats` reports `knowledge_restricted`, a count of current entries only.
 
 **Schema v2 is a one-way upgrade.** The first writing command (`know add`, `ingest`, the poller) on a v1 store rebuilds the
 `knowledge` table once, in one transaction with `user_version` (ids, supersede chains, citations, the log and full-text
@@ -129,7 +131,7 @@ with a `memory unavailable (store_unavailable)` notice) in that window. `muninn 
 `sources` counts per `provider/root/thread_class/status` (status `active` or `missing`); `events` per kind;
 `events_by_provider`; `flags` `marker` (text that looked like an injected block), `redacted` (secret removed), `truncated`
 (over 64 KiB); `skipped_lines` and `issues` (lines not parsed: `line_too_large`, `invalid_json`, `too_deep`,
-`not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status (`current`, `expired`, `superseded`, `retracted`, `erased`) and `knowledge_restricted` (a count); `citations` by state;
+`not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status (`current`, `expired`, `superseded`, `retracted`, `erased`) and `knowledge_restricted` (a count of current restricted entries); `citations` by state;
 `tombstones` by level (`session`, `thread`, `line`); `db_bytes` file size; `db_space` `page_count`, `freelist_count`,
 `page_size`, `free_ratio`; `last_pass` (`last_pass_at`, `duration_s`, `files_changed`, `events_added`, `skipped_files`,
 `unreadable_files`, `last_error` (class name of the last failed pass, null after the poller's next good pass), `failed`, `errors`, `busy_skips`, `index_age_s`, `poller`, and `alive_age_s`, the seconds since a running pass last stamped
