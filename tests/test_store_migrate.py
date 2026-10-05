@@ -178,6 +178,32 @@ class MigrateTests(StoreCase):
             len((self.db.parent / "poller.log").read_text().splitlines()), 1
         )
 
+    def _poller_events(self) -> list[dict[str, Any]]:
+        """Return the parsed poller.log lines."""
+        text = (self.db.parent / "poller.log").read_text()
+        return [json.loads(line) for line in text.splitlines()]
+
+    def test_losing_the_race_logs_migrate_raced(self) -> None:
+        make_v1(self.db)
+        conn = sqlite3.connect(self.db, isolation_level=None)
+        self.addCleanup(conn.close)
+        conn.execute("PRAGMA user_version=2")  # the winner already committed
+        store._migrate_logged(conn, self.db.parent)
+        (got,) = self._poller_events()
+        self.assertEqual(got["event"], "migrate_raced")
+        self.assertNotIn("rows", got)
+
+    def test_failed_migration_logs_the_exception_class(self) -> None:
+        make_v1(self.db)
+        conn = sqlite3.connect(self.db, isolation_level=None)
+        conn.close()  # any use now raises ProgrammingError
+        with self.assertRaises(sqlite3.ProgrammingError):
+            store._migrate_logged(conn, self.db.parent)
+        (got,) = self._poller_events()
+        self.assertEqual(
+            (got["event"], got["exc"]), ("migrate_failed", "ProgrammingError")
+        )
+
     def test_read_only_connect_refuses_v1_so_hooks_fail_open(self) -> None:
         make_v1(self.db)
         with self.assertRaises(store.StoreUnavailableError):
