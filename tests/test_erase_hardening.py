@@ -12,7 +12,7 @@ from unittest import mock
 from muninn import (
     cli,
     knowledge,
-    knowledge_read,
+    knowledge_push,
     tombstone_key,
     tombstones,
 )
@@ -156,6 +156,6 @@ class BoundedBlockTests(KnowCase):
         user = [(self.ref(self.prompt), "use the zebra cache")]
         for i in range(6):
             self.add(text=f"use the zebra cache {i}", cites=user)
-        with mock.patch.object(knowledge_read, "_SCAN_CAP", 2):
+        with mock.patch.object(knowledge_push, "_SCAN_CAP", 2):
             got = knowledge.block_entries(self.ro(), [self.repo], limit=8)
         self.assertEqual(len(got), 2)

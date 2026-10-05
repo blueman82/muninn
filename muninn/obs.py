@@ -213,6 +213,7 @@ def _unexpected_files(home: Path) -> CheckResult:
         if n not in DATA_FILES
         and n != "muninn.sqlite-journal"
         and not n.startswith(store.UNREADABLE_PREFIX)
+        and not n.startswith(store.PRE_UPGRADE_PREFIX)
         and not n.startswith(".status.json.")  # an atomic write in flight
     ]
     return _result("unexpected_files", not stray, ",".join(stray))
@@ -340,7 +341,7 @@ def _store_checks(home: Path) -> list[CheckResult]:
     try:
         conn = store.connect_ro(store.db_path(home))
     except store.StoreUnavailableError as exc:
-        return [_result("store_readable", False, type(exc).__name__)]
+        return [_result("store_readable", False, str(exc)[:80])]
     results = [_result("store_readable", True)]
     try:
         # extend() appends as the generator yields, so the checks that ran
@@ -387,6 +388,14 @@ def _aside_files(home: Path) -> CheckResult:
     # erase cannot scrub these, so they keep erased text until removed.
     kept = [n for n in _names(home) if n.startswith(store.UNREADABLE_PREFIX)]
     return _result("aside_files", not kept, ",".join(kept), level="warn")
+
+
+def _upgrade_snapshots(home: Path) -> CheckResult:
+    """No pre-upgrade copy of the store is left on disk."""
+    # The installer deletes it after a good upgrade; one left behind is a
+    # full copy of the transcript text that erase cannot scrub.
+    kept = [n for n in _names(home) if n.startswith(store.PRE_UPGRADE_PREFIX)]
+    return _result("upgrade_snapshot", not kept, ",".join(kept), level="warn")
 
 
 def _release_leftovers(env: Mapping[str, str]) -> CheckResult:
@@ -464,6 +473,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _poller_error(home),
         _unreadable_files(home),
         _aside_files(home),
+        _upgrade_snapshots(home),
         _tombstone_key(home),
         _release_leftovers(env),
         _launchd_job(),

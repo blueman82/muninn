@@ -78,8 +78,9 @@ def _dispatch(args: Namespace, env: Env, home: Path, record: Record) -> Result:
         # Exit 4 like an unavailable store: nothing was written, and the
         # key must be restored before any ingest or erase can go on.
         return 4, {"error": "tombstone_key"}
-    except store.StoreUnavailableError:
-        return 4, {"error": "store_unavailable"}
+    except store.StoreUnavailableError as exc:
+        # The message is code-authored ("schema v1, need v2"), never data.
+        return 4, {"error": "store_unavailable", "detail": str(exc)[:80]}
     except (ValueError, LookupError) as refused:  # e.g. erase arguments
         return 2, {"error": "refused", "reason": str(refused)[:200]}
 
@@ -108,6 +109,8 @@ def _answer(
     }
     if "error" in out:
         record["error"] = out["error"]
+    if "detail" in out and out["error"] == "store_unavailable":
+        record["detail"] = out["detail"]
     out["logged"] = obs.log_call(home, record, env)
     pretty = getattr(args, "pretty", False) or os.environ.get("MUNINN_PRETTY")
     print(json.dumps(out, sort_keys=True, indent=2 if pretty else None))

@@ -78,6 +78,12 @@ def _add(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             quote_only=alone,
             supersedes=a.supersedes,
             global_scope=a.is_global,
+            confidence=a.confidence,
+            valid_until=a.valid_until,
+            sensitivity=a.sensitivity,
+            contradicts=a.contradicts,
+            tags=a.tags,
+            loop=a.loop,
             cwd=current_dir(env),
             actor=obs.actor(env),
             roots=ingest.default_roots(env),
@@ -107,6 +113,8 @@ def _retract(a: Namespace, env: Env, home: Path, record: Record) -> Result:
 
 def _list(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """List entries of this repo and global, newest first."""
+    if a.loop is not None and a.all_projects:  # a loop is one scope
+        return 2, {"error": "loop_with_all_projects"}
 
     def work(conn: sqlite3.Connection) -> Out:
         return knowledge.list_entries(
@@ -115,6 +123,8 @@ def _list(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             status=a.status,
             kind=a.kind,
             all_projects=a.all_projects,
+            loop=a.loop,
+            tags=a.tags,
         )
 
     out = read_store(home, work)

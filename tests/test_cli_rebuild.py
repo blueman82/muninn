@@ -7,6 +7,7 @@ from typing import Any
 from muninn import store
 from tests.cli_support import CANARY, CliCase
 from tests.test_ingest import TID
+from tests.test_store_migrate import make_v1
 
 
 class RebuildTests(CliCase):
@@ -127,3 +128,88 @@ class RebuildTests(CliCase):
         self.assertEqual(db.read_bytes(), b"not a database" * 100)
         names = [p.name for p in self.home.iterdir()]
         self.assertFalse(any(store.UNREADABLE_PREFIX in n for n in names))
+
+
+class RebuildFromV1Tests(CliCase):
+    """A rebuild reads an old v1 file and keeps its ledger."""
+
+    def test_ledger_survives_a_rebuild_from_a_v1_file(self) -> None:
+        self.conn.close()
+        db = store.db_path(self.home)
+        db.unlink()
+        make_v1(db)
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        self.assertIs(out["old_readable"], True)
+        conn = store.connect_ro(db)
+        self.addCleanup(conn.close)
+        got = [
+            tuple(r)
+            for r in conn.execute(
+                "SELECT id, status, supersedes, sensitivity FROM knowledge"
+            )
+        ]
+        self.assertEqual(
+            got,
+            [
+                (1, "superseded", None, "normal"),
+                (2, "current", 1, "normal"),
+                (3, "retracted", None, "normal"),
+                (4, "erased", None, "normal"),
+            ],
+        )
+
+    def test_typed_columns_survive_a_rebuild_from_v2(self) -> None:
+        conn = self.conn
+        sid = conn.execute(
+            "INSERT INTO scope(key, label, kind) VALUES ('/r', 'r', 'git')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
+            " created_at, confidence, valid_until, sensitivity, tags)"
+            " VALUES (?, 'lesson', 'typed', 'current', 'user', 1,"
+            " 'observed', 99, 'restricted', 'a,b')",
+            (sid,),
+        )
+        conn.close()
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        ro = store.connect_ro(store.db_path(self.home))
+        self.addCleanup(ro.close)
+        got = ro.execute(
+            "SELECT kind, confidence, valid_until, sensitivity, tags"
+            " FROM knowledge"
+        ).fetchone()
+        self.assertEqual(
+            tuple(got), ("lesson", "observed", 99.0, "restricted", "a,b")
+        )
+
+    def test_contradicts_and_a_loop_scope_row_survive_a_rebuild(self) -> None:
+        conn = self.conn
+        loop = conn.execute(
+            "INSERT INTO scope(key, label, kind)"
+            " VALUES ('loop:run-3', 'loop:run-3', 'dir')"
+        ).lastrowid
+        for text in ("first", "second"):
+            conn.execute(
+                "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
+                " created_at) VALUES (?, 'fact', ?, 'current', 'user', 1)",
+                (loop, text),
+            )
+        conn.execute("UPDATE knowledge SET contradicts = 1 WHERE id = 2")
+        conn.close()
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        ro = store.connect_ro(store.db_path(self.home))
+        self.addCleanup(ro.close)
+        got = [
+            tuple(r)
+            for r in ro.execute(
+                "SELECT k.id, k.contradicts, sc.key, sc.kind FROM knowledge k"
+                " JOIN scope sc ON sc.id = k.scope_id ORDER BY k.id"
+            )
+        ]
+        self.assertEqual(
+            got,
+            [(1, None, "loop:run-3", "dir"), (2, 1, "loop:run-3", "dir")],
+        )

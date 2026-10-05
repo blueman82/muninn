@@ -33,8 +33,10 @@ flowchart LR
   Python 3.13+ on PATH.
 - **Installer.** `install/installer.py` has two modes (`--fresh`,
   `--upgrade`) over one step pipeline: record, pin, build or restart, merge
-  provider config, verify, prune. `install/rollback.py`
-  reverses it from the recorded values. `install/uninstall.py` takes an
+  provider config, verify, prune (an upgrade first copies the store when the
+  new release will migrate its schema, `install/snapshot.py`, and deletes the
+  copy after the prune). `install/rollback.py` reverses it from the recorded
+  values, restoring that copy over a migrated store. `install/uninstall.py` takes an
   installed machine back out by removing our own entries (no record survives an
   upgrade) and moves the data dir aside instead of deleting it (unless
   `--purge-data`).

@@ -30,6 +30,7 @@ def _texts(conn: sqlite3.Connection, target: Target) -> list[str]:
         ("event", "text", target.events),
         ("knowledge", "text", sorted(target.knowledge)),
         ("knowledge", "retract_reason", sorted(target.knowledge)),
+        ("knowledge", "tags", sorted(target.knowledge)),
         ("citation", "quote", sorted(target.citations)),
     ):
         for start in range(0, len(ids), CHUNK):
@@ -78,12 +79,13 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
         needle: Bytes to look for.
 
     Returns:
-        True if any event, knowledge text or reason, or quote has it.
+        True if any event, knowledge text, reason or tags, or quote has it.
     """
     for table, column in (
         ("event", "text"),
         ("knowledge", "text"),
         ("knowledge", "retract_reason"),
+        ("knowledge", "tags"),
         ("citation", "quote"),
     ):
         # CAST to BLOB so instr compares bytes, matching the needle.
@@ -236,19 +238,23 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
 
 
 def aside_files(home: Path) -> list[str]:
-    """Return the unreadable stores a rebuild set aside, by absolute path.
+    """Return the store copies set aside, by absolute path.
 
-    Erase cannot scrub them (they are not valid databases), so they may
-    still hold erased text until the owner removes them.
+    These are the unreadable stores a rebuild kept and any pre-upgrade copy
+    the installer left. Erase cannot scrub them (the first are not valid
+    databases, the second is a frozen copy), so they may still hold erased
+    text until the owner removes them.
 
     Args:
         home: Data directory.
 
     Returns:
-        Sorted paths of every ``muninn.sqlite.unreadable-*`` file.
+        Sorted paths of every ``muninn.sqlite.unreadable-*`` and
+        ``muninn.sqlite.pre-upgrade-*`` file.
     """
     return sorted(
         str(p)
-        for p in home.glob(f"{store.UNREADABLE_PREFIX}*")
+        for prefix in (store.UNREADABLE_PREFIX, store.PRE_UPGRADE_PREFIX)
+        for p in home.glob(f"{prefix}*")
         if p.is_file() and not p.is_symlink()
     )

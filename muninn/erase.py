@@ -129,9 +129,14 @@ def _apply(conn: sqlite3.Connection, target: Target) -> None:
         [(i,) for i in sorted(target.citations)],
     )
     now = time.time()
+    # Every value field of an erased entry is cleared (tags are free text the
+    # person chose); only structural ids stay: scope, supersede links and any
+    # other entry's contradicts pointer to it, none of which carry content.
     for kid in sorted(target.knowledge):
         conn.execute(
             "UPDATE knowledge SET text = NULL, retract_reason = NULL,"
+            " tags = NULL, confidence = NULL, valid_until = NULL,"
+            " contradicts = NULL, sensitivity = 'normal',"
             " status = 'erased' WHERE id = ?",
             (kid,),
         )

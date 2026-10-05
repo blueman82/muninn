@@ -9,6 +9,7 @@ from typing import Any, NoReturn, Protocol
 
 from muninn import knowledge, query
 from muninn.cli_hook import HOOKS, PROVIDERS
+from muninn.knowledge_typed import DEFAULT_SENSITIVITY
 
 __all__ = ["HELP", "build_parser"]
 
@@ -198,15 +199,53 @@ def _add_knowledge(cmd: _Commands) -> None:
     )
     a.add_argument("--supersedes", metavar="K")
     a.add_argument("--global", action="store_true", dest="is_global")
+    a.add_argument(
+        "--confidence", metavar="LEVEL", help="observed|reported|inferred"
+    )
+    a.add_argument(
+        "--valid-until",
+        metavar="DATE",
+        help="ISO date or datetime, UTC if no zone, in the future;"
+        " later the entry is expired",
+    )
+    a.add_argument(
+        "--sensitivity", default=DEFAULT_SENSITIVITY, help="normal|restricted"
+    )
+    a.add_argument("--contradicts", metavar="K")
+    a.add_argument("--tag", action="append", default=[], dest="tags")
+    a.add_argument(
+        "--scope-loop",
+        metavar="ID",
+        dest="loop",
+        help="store in this loop's own scope, never pushed by hooks;"
+        " not with --global",
+    )
     a = know.add("retract", "retract a current entry")
     a.add_argument("kid", metavar="K")
     a.add_argument("--reason", default="")
     a = know.add("list", "entries of this repo and global, newest first")
     a.add_argument(
-        "--status", choices=(*knowledge.STATUSES, "all"), default="current"
+        "--status",
+        choices=(*knowledge.STATUSES, "expired", "all"),
+        default="current",
     )
     a.add_argument("--kind", choices=knowledge.KINDS)
+    a.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        dest="tags",
+        metavar="TAG",
+        help="only entries carrying this tag; repeat to require every one",
+    )
     a.add_argument("--all-projects", action="store_true")
+    a.add_argument(
+        "--scope-loop",
+        metavar="ID",
+        dest="loop",
+        help="list this loop's own scope instead of the repo and global;"
+        " not with --all-projects",
+    )
     a = know.add("show", "one entry with its chain and log")
     a.add_argument("kid", metavar="K")
     know.add("check", "re-verify every citation")

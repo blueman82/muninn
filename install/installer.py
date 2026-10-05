@@ -72,6 +72,7 @@ from install.record import (
     save,
 )
 from install.rollback import rollback
+from install.snapshot import discard, snapshot_store
 from install.steps_config import claude, codex, record
 from install.steps_release import (
     fresh,
@@ -160,6 +161,7 @@ __all__ = [
     "run_real",
     "save",
     "set_line",
+    "snapshot_store",
     "start_new",
     "steps",
     "sweep",
@@ -179,7 +181,14 @@ FRESH_STEPS: tuple[Step, ...] = (
     verify,
     prune,
 )
-UPGRADE_STEPS: tuple[Step, ...] = (pin, restart, verify, prune)
+# The copy comes before pin: nothing may change if it cannot be made.
+UPGRADE_STEPS: tuple[Step, ...] = (
+    snapshot_store,
+    pin,
+    restart,
+    verify,
+    prune,
+)
 
 
 def steps(ctx: Ctx) -> tuple[Step, ...]:
@@ -245,6 +254,7 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     # After the last rollback chance: a failure only warns, and is noted in
     # the install record for support.
     rec["sweep_failed"] = sweep(ctx)
+    discard(ctx, rec)
     if ctx.upgrade and not ctx.dry_run:  # no rollback once the old is gone
         shutil.rmtree(ctx.rdir)
         rec["record_removed"] = True

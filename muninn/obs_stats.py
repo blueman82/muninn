@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
 from muninn import classify, store
+from muninn.knowledge_expiry import LIVE_SQL
 from muninn.obs_status import (
     freshness,
     install_sha,
@@ -87,9 +89,11 @@ def _hash_mismatches(home: Path) -> int:
     return bad
 
 
-def _pairs(conn: sqlite3.Connection, sql: str) -> dict[str, int]:
+def _pairs(
+    conn: sqlite3.Connection, sql: str, args: tuple[float, ...] = ()
+) -> dict[str, int]:
     """Run a two-column query and return it as a mapping."""
-    return {r[0]: r[1] for r in conn.execute(sql)}
+    return {r[0]: r[1] for r in conn.execute(sql, args)}
 
 
 def _flag_counts(conn: sqlite3.Connection) -> dict[str, int]:
@@ -133,9 +137,21 @@ def _table_counts(conn: sqlite3.Connection) -> dict[str, object]:
             "SELECT class_reason, count(*) FROM source"
             " WHERE thread_class = 'other' GROUP BY 1",
         ),
+        # An expired entry is counted apart from current: expiry is derived.
         "knowledge": _pairs(
-            conn, "SELECT status, count(*) FROM knowledge GROUP BY 1"
+            conn,
+            "SELECT CASE WHEN status = 'current' AND valid_until <= ?"
+            " THEN 'expired' ELSE status END, count(*)"
+            " FROM knowledge GROUP BY 1",
+            (time.time(),),
         ),
+        # Current in the same sense as ``knowledge.current`` above: an
+        # expired restricted entry is counted as expired, not here.
+        "knowledge_restricted": conn.execute(
+            "SELECT count(*) FROM knowledge k WHERE k.status = 'current'"
+            f" AND {LIVE_SQL} AND k.sensitivity = 'restricted'",
+            (time.time(),),
+        ).fetchone()[0],
         "citations": _pairs(
             conn, "SELECT state, count(*) FROM citation GROUP BY 1"
         ),

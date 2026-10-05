@@ -24,6 +24,7 @@ from install import configedit as ce
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real, wait
 from install.record import Record, load_record
+from install.snapshot import start_again, undo_store
 from install.steps_release import PRUNING, relink
 from install.transforms import codex_check
 
@@ -185,13 +186,22 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
         actions that should be survivable.
     """
     problems: list[str] = []
+    # The copy of the store comes before anything is changed, so a failure
+    # there has nothing to undo and must not restart the running job.
+    if rec.get("failed", {}).get("step") == "snapshot_store":
+        return problems
     j = job(ctx)
     if rec.get("fresh"):
         _undo_fresh(ctx, j)
     _undo_config(ctx, rec)
     _undo_prune(ctx)
     _undo_links(ctx, rec)
-    if rec.get("upgrade") and job(ctx):  # back onto the old release
+    # After the relink and before any restart: the old release must find a
+    # store it can open, and nothing may be writing while it is swapped.
+    stopped = undo_store(ctx, rec)
+    if stopped:
+        _act(ctx, "start the job on the old release", lambda: start_again(ctx))
+    elif rec.get("upgrade") and job(ctx):  # back onto the old release
         kick = ["launchctl", "kickstart", "-k", ctx.target]
         _act(ctx, "restart the job", lambda: must(ctx, kick))
     return problems

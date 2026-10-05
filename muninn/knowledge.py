@@ -5,14 +5,16 @@ primary prompt, reply or tool_call event plus a verbatim quote of it,
 checked when the entry is written. Writers (``add``, ``retract``) must run
 under ``store.writer_lock`` with a ``store.connect_rw`` connection;
 ``run_add`` and ``run_retract`` do that. Readers (``list_entries``, ``show``,
-``check``, ``verify_citation``, ``block_entries``, ``user_cited``) work on a
-``connect_ro`` connection. A refused write raises ``RefusedError`` and leaves
-nothing behind.
+``check``, ``verify_citation``, ``block_entries``, ``user_cited``,
+``withheld``) work on a ``connect_ro`` connection. A refused write raises
+``RefusedError`` and leaves nothing behind.
 
 The module is split by responsibility: ``knowledge_model`` (limits, refusals,
-text rules), ``knowledge_cite`` (citation checks) and ``knowledge_read``
-(readers). Their public names are re-exported here, which is where the rest
-of muninn imports them from.
+text rules), ``knowledge_cite`` (citation checks), ``knowledge_read``
+(readers), ``knowledge_push`` (what a hook may push, and ``withheld``),
+``knowledge_typed`` (validation of the typed fields) and ``knowledge_expiry``
+(the shared expiry and restriction predicates). Their public names are
+re-exported here, which is where the rest of muninn imports them from.
 """
 
 from __future__ import annotations
@@ -35,7 +37,6 @@ from muninn.knowledge_cite import (
 )
 from muninn.knowledge_model import (
     KINDS,
-    PULL_ONLY,
     REASON_MAX,
     STATUSES,
     TEXT_MAX,
@@ -44,14 +45,26 @@ from muninn.knowledge_model import (
     clean_text,
     parse_kid,
 )
-from muninn.knowledge_read import (
+from muninn.knowledge_push import (
     block_entries,
+    pull_only_note,
+    user_cited,
+    withheld,
+)
+from muninn.knowledge_read import (
     check,
     entry,
     list_entries,
     show,
-    user_cited,
     verify_citation,
+)
+from muninn.knowledge_typed import (
+    DEFAULT_SENSITIVITY,
+    Typed,
+    TypedRequest,
+    loop_scope_id,
+    require_contradicted,
+    validate,
 )
 from muninn.query import NOTICE, guarded
 
@@ -69,6 +82,7 @@ __all__ = [
     "show",
     "user_cited",
     "verify_citation",
+    "withheld",
 ]
 
 
@@ -84,6 +98,12 @@ class AddArgs(TypedDict):
         quote_only: A quote to find in the caller's own session prompts.
         supersedes: Entry id this one replaces.
         global_scope: Store in the global scope instead of the repo scope.
+        confidence: ``observed``, ``reported`` or ``inferred``.
+        valid_until: ISO date or datetime after which the entry is expired.
+        sensitivity: ``normal`` or ``restricted`` (never pushed to a prompt).
+        contradicts: Entry id this one disagrees with; informational only.
+        tags: Retrieval tags, lowercase ``[a-z0-9_-]``.
+        loop: Store in the scope of this loop id instead of the repo scope.
         cwd: Working directory that selects the repo scope.
         actor: Who is writing, such as ``claude:abc123``.
         roots: Transcript roots, used to refresh the caller's threads.
@@ -96,6 +116,12 @@ class AddArgs(TypedDict):
     quote_only: NotRequired[str | None]
     supersedes: NotRequired[int | None]
     global_scope: NotRequired[bool]
+    confidence: NotRequired[str | None]
+    valid_until: NotRequired[str | None]
+    sensitivity: NotRequired[str]
+    contradicts: NotRequired[str | int | None]
+    tags: NotRequired[Sequence[str]]
+    loop: NotRequired[str | None]
     cwd: str
     actor: str
     roots: Mapping[str, Path]
@@ -116,6 +142,12 @@ class _AddRequest:
     quote_only: str | None = None
     supersedes: int | None = None
     global_scope: bool = False
+    confidence: str | None = None
+    valid_until: str | None = None
+    sensitivity: str = DEFAULT_SENSITIVITY
+    contradicts: str | int | None = None
+    tags: Sequence[str] = ()
+    loop: str | None = None
 
 
 @contextmanager
@@ -144,13 +176,28 @@ def _insert(
     body: str,
     cites: list[Cite],
     old: int | None,
+    typed: Typed,
 ) -> int:
     """Insert the entry, its citations and log rows; return the new id."""
     now = time.time()
     kid = conn.execute(
         "INSERT INTO knowledge(scope_id, kind, text, status, supersedes,"
-        " actor, created_at) VALUES (?, ?, ?, 'current', ?, ?, ?)",
-        (sid, request.kind, body, old, request.actor, now),
+        " actor, created_at, confidence, valid_until, sensitivity,"
+        " contradicts, tags)"
+        " VALUES (?, ?, ?, 'current', ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            sid,
+            request.kind,
+            body,
+            old,
+            request.actor,
+            now,
+            typed.confidence,
+            typed.valid_until,
+            typed.sensitivity,
+            typed.contradicts,
+            ",".join(typed.tags) or None,
+        ),
     ).lastrowid
     conn.executemany(
         "INSERT INTO citation(knowledge_id, provider, thread_id, line, part,"
@@ -188,14 +235,17 @@ def _write_entry(
     request: _AddRequest,
     body: str,
     root: str | None,
+    typed: Typed,
 ) -> int:
     """Check the citations and write the entry in one transaction."""
     with _immediate(conn):
-        sid = (
-            scope.global_scope_id(conn)
-            if request.global_scope
-            else scope.scope_id(conn, request.cwd)
-        )
+        require_contradicted(conn, typed)
+        if typed.loop is not None:
+            sid = cast(int, loop_scope_id(conn, typed.loop, create=True))
+        elif request.global_scope:
+            sid = scope.global_scope_id(conn)
+        else:
+            sid = scope.scope_id(conn, request.cwd)
         found = [check_citation(conn, ref, q) for ref, q in request.cites]
         if request.quote_only is not None and root is not None:
             found.append(caller_prompt(conn, root, request.quote_only))
@@ -209,7 +259,7 @@ def _write_entry(
         old = None
         if request.supersedes is not None:
             old = supersedable(conn, request.supersedes, sid)
-        return _insert(conn, sid, request, body, found, old)
+        return _insert(conn, sid, request, body, found, old, typed)
 
 
 @guarded
@@ -226,8 +276,9 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
         **kwargs: The fields described by ``AddArgs``.
 
     Returns:
-        The notice and the rendered new entry, plus ``pull_only`` when the
-        entry will not be pushed (see ``user_cited``).
+        The notice and the rendered new entry, plus ``pull_only`` (the
+        reason) when the entry will not be pushed: restricted, expired, or
+        not backed by a cited user prompt (see ``pull_only_note``).
 
     Raises:
         RefusedError: If any rule is broken; nothing is written.
@@ -239,15 +290,28 @@ def add(conn: sqlite3.Connection, **kwargs: Unpack[AddArgs]) -> dict[str, Any]:
     if not request.actor:
         raise RefusedError("bad_actor")
     body = clean_text(request.text, "text_length", 1, TEXT_MAX)
+    typed = validate(
+        TypedRequest(
+            request.confidence,
+            request.valid_until,
+            request.sensitivity,
+            request.contradicts,
+            request.tags,
+            request.loop,
+            request.global_scope,
+        ),
+        time.time(),
+    )
     if not request.cites and request.quote_only is None:
         raise RefusedError("uncited")
     root = caller_session(conn, request.roots, request.env)
     if request.quote_only is not None and root is None:
         raise RefusedError("no_caller_session")
-    kid = _write_entry(conn, request, body, root)
+    kid = _write_entry(conn, request, body, root, typed)
     out: dict[str, Any] = {"notice": NOTICE, "entry": entry(conn, kid)}
-    if kid not in user_cited(conn, [kid]):
-        out["pull_only"] = PULL_ONLY
+    note = pull_only_note(conn, kid)
+    if note is not None:
+        out["pull_only"] = note
     return out
 
 

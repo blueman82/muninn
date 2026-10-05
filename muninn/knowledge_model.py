@@ -15,7 +15,14 @@ from muninn import classify
 type Entry = dict[str, Any]
 type Cite = dict[str, Any]
 
-KINDS = ("decision", "fact", "preference", "procedure")
+KINDS = (
+    "decision",
+    "fact",
+    "preference",
+    "procedure",
+    "lesson",
+    "constraint",
+)
 CITABLE = ("prompt", "reply", "tool_call")  # of a primary thread, unflagged
 STATUSES = ("current", "superseded", "retracted", "erased")
 TEXT_MAX = 500
@@ -36,6 +43,14 @@ PULL_ONLY = (
     " holds this text; cite a user prompt, or re-add it in the user's own"
     " words"
 )
+PULL_RESTRICTED = (
+    "pull-only: this entry is restricted, so it is never pushed into session"
+    " memory; it still shows in know list and search"
+)
+PULL_EXPIRED = (
+    "pull-only: this entry's valid_until has passed, so it is not pushed"
+    " into session memory"
+)
 PUSH_OVERLAP = 0.8  # share of an entry's words its user quote must hold
 
 # The ``<`` of a muninn frame delimiter, however spaced or cased. Escaping it
@@ -51,8 +66,9 @@ class RefusedError(Exception):
         code: One of bad_kind, bad_actor, text_length, reason_length,
             uncited, bad_ref, not_found, ambiguous_ref, not_citable,
             quote_length, quote_not_found, approval_needs_reply,
-            no_caller_session, preference_needs_user, bad_supersedes or
-            not_current.
+            no_caller_session, preference_needs_user, bad_supersedes,
+            not_current, bad_confidence, bad_sensitivity, bad_valid_until,
+            bad_tags, bad_contradicts or bad_loop_scope.
         detail: Optional extra context for the code.
     """
 

@@ -18,7 +18,8 @@ The data dir holds the index and the cited knowledge ledger, which cannot be
 rebuilt from transcripts. It is moved aside to ``muninn-removed-<ts>`` next
 to it, never deleted, unless ``--purge-data`` says so. That includes any
 ``muninn.sqlite.unreadable-<ts>`` file a rebuild set aside, since the whole
-dir moves (or is deleted) as one.
+dir moves (or is deleted) as one; a leftover
+``muninn.sqlite.pre-upgrade-<sha>`` copy from an upgrade goes the same way.
 """
 
 from __future__ import annotations

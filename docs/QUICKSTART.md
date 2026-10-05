@@ -25,7 +25,9 @@ straight to `install.installer` (`--repo`, `--sha`, `--fresh`, `--upgrade`,
 A fresh install refuses if the data directory or the launchd plist already exists.
 It pins the release, indexes your existing transcripts, starts the poller,
 merges the two hooks into Claude's settings, adds the Codex plugin, runs
-`muninn doctor`, and prunes to one release. Any failure rolls back.
+`muninn doctor`, and prunes to one release. Any failure rolls back. An
+upgrade that will migrate the store first copies it aside (deleted after a
+good upgrade, restored after a failed one).
 
 Codex only runs plugin hooks after you trust them: start a Codex session and
 run `/hooks` if the installer prints `OWNER STEP`.

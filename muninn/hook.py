@@ -11,6 +11,7 @@ transcript belongs to a subagent or reviewer thread.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
@@ -82,6 +83,12 @@ class _Knowledge(Protocol):
         self, conn: sqlite3.Connection, scope_ids: list[int], limit: int
     ) -> list[BlockEntry]:
         """Current user-cited entries of the scopes, newest first."""
+        ...
+
+    def withheld(
+        self, conn: sqlite3.Connection, scope_ids: list[int]
+    ) -> dict[str, int]:
+        """Counts of expired and restricted entries a push left out."""
         ...
 
 
@@ -281,8 +288,9 @@ def _build_text(
     except store.HotJournalError:
         trace["error"] = "hot_journal"
         return _notice("hot_journal")
-    except store.StoreUnavailableError:
+    except store.StoreUnavailableError as exc:
         trace["error"] = "store_unavailable"
+        trace["detail"] = str(exc)[:80]
         return _notice("store_unavailable")
     except Exception:  # fail open: never break the provider's session
         trace["error"] = "error"
@@ -377,6 +385,10 @@ def _start_block(
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
+    # The count is a diagnostic: a store fault must not cost the block, but
+    # anything else is a bug and reaches the outer handler.
+    with contextlib.suppress(store.StoreUnavailableError, sqlite3.Error):
+        trace["withheld"] = _KNOWLEDGE.withheld(conn, ids)
     trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
     return render_block(
         entries, _label(conn, ids, cwd), notes=index_notes(home), limit=limit

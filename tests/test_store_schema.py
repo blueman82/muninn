@@ -20,12 +20,12 @@ from tests.store_support import (
 
 
 class SchemaTests(StoreCase):
-    """Schema version 1 layout, pragmas, constraints and FTS triggers."""
+    """Schema version 2 layout, pragmas, constraints and FTS triggers."""
 
-    def test_connect_rw_creates_schema_version_1(self) -> None:
+    def test_connect_rw_creates_schema_version_2(self) -> None:
         conn = self.rw()
-        self.assertEqual(store.SCHEMA_VERSION, 1)
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(store.SCHEMA_VERSION, 2)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
         found = {
             (r["type"], r["name"])
             for r in conn.execute(
@@ -73,7 +73,7 @@ class SchemaTests(StoreCase):
         insert_scope(first, "/keep")
         first.close()
         again = self.rw()
-        self.assertEqual(again.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(again.execute("PRAGMA user_version").fetchone()[0], 2)
         keys = [r["key"] for r in again.execute("SELECT key FROM scope")]
         self.assertEqual(keys, ["/keep"])
 
@@ -98,7 +98,7 @@ class SchemaTests(StoreCase):
     def test_connect_rw_refuses_newer_schema(self) -> None:
         store.ensure_private_dir(self.home)
         raw = sqlite3.connect(self.db)
-        raw.execute("PRAGMA user_version=2")
+        raw.execute("PRAGMA user_version=3")
         raw.close()
         with self.assertRaises(store.StoreUnavailableError):
             store.connect_rw(self.db)
