@@ -10,6 +10,7 @@ compact JSON). Apart from `serve` and the hooks, every answer also carries these
 | `poller` | `ok`, or `stale` when the last pass is older than 3 poll intervals or there is none |
 | `logged` | `true` if the call was written to `calls.jsonl`, `false` if disabled or denied |
 | `error` | only on failure: `busy`, `hot_journal`, `store_unavailable` or `refused` (with `reason`) |
+| `detail` | with `store_unavailable` only: the refusal message (at most 80 characters, such as `schema v1, need v2`), written by muninn and never from stored text. The same string is in the `calls.jsonl` line for that call and in the hook's trace (`hook session-start` and `hook prompt` lines) |
 
 **Exit codes:** 0 ok; 1 `doctor` found an error-level problem; 2 refused or bad usage; 3 busy (another
 writer holds the lock, retry); 4 store unavailable or a crashed writer's hot journal.
@@ -23,7 +24,7 @@ provider root name to path (tests); `MUNINN_PYTHON` interpreter for `bin/muninn`
 
 | Command | What it does | Main fields in the answer |
 |---|---|---|
-| `muninn search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]`, `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
+| `muninn search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]` (each flagged `restricted`), `knowledge_expired_omitted`, `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
 | `muninn open REF` | one event in full with neighbours; REF is an event id or `provider:thread_id:line.part` | `text`, `neighbours[]`, `provenance`, `hash_ok`, `redacted`, `truncated`, `next_offset` |
 | `muninn sessions` | sessions in scope, newest first | `sessions[]` (`session`, `provider`, `events`, `threads`, `forks`, `first_ts`, `last_ts`, `kinds`, `preview`) |
 | `muninn session ROOT` | one session's events across its threads, in order; ROOT is the `session` value from `sessions` | `events[]` (`id`, `ref`, `kind`, `role`, `ts`, `preview`, `answer_citable`, `tag`), `total`, `provider`, `next_from` (pass as `--from` for the next page) |
@@ -63,12 +64,14 @@ composed, is stored as `harness`), `subagent`,
 records an entry; every entry needs a quote that is verbatim in a primary prompt, reply or tool call (a preference needs
 a user prompt). `--quote Q` alone searches the caller's session prompts. `know retract K [--reason R]`;
 `know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--all-projects] [--scope-loop ID]`; `know show K` the entry with
-its chain and log; `know check` re-verifies every citation (`ok`, `changed`, `missing`, `erased`, `problems`).
+its chain and log; `know check` re-verifies every citation (`ok`, `changed`, `missing`, `erased`, `problems`) and counts `expired` entries.
 Entries are superseded or retracted, never edited.
 Only text the person typed is pushed unprompted: an entry is pushed (SessionStart, recall) only if a live user-prompt
 citation's quote backs the entry text, meaning the text is inside the quote or at least 80% of its words of three or
 more characters occur in it. Otherwise it stays pull-only (still in `know list` and `search`) and `know add` answers
-with a `pull_only` line; re-add it in the user's own words. The rule is read-time, so it also covers older entries.
+with a `pull_only` line; re-add it in the user's own words. A restricted or an expired entry also gets a `pull_only` line, but
+a different one: it says the entry is restricted (or past its `valid_until`), because citing a user prompt would not change that.
+The rule is read-time, so it also covers older entries.
 
 Optional typed fields on `know add` (all additive; an old invocation is unchanged). Each bad value is refused with a stable
 code and writes nothing:
@@ -76,10 +79,10 @@ code and writes nothing:
 | Flag | Meaning | Refusal code |
 |---|---|---|
 | `--confidence observed\|reported\|inferred` | how the claim is known; absent means not stated | `bad_confidence` |
-| `--valid-until DATE` | ISO date or datetime (no zone means UTC), must be in the future | `bad_valid_until` |
+| `--valid-until DATE` | `YYYY-MM-DD` (midnight UTC) or an ISO 8601 datetime; no zone means UTC; must be after now, and a value equal to now is refused | `bad_valid_until` |
 | `--sensitivity normal\|restricted` | default `normal` | `bad_sensitivity` |
 | `--contradicts K` | informational link to an existing entry, like `--supersedes` but it changes nothing and logs no action | `bad_contradicts` |
-| `--tag T` (repeatable) | retrieval tag, lowercase `[a-z0-9_-]`, at most 32 characters and 10 tags; stored as data, not searched | `bad_tags` |
+| `--tag T` (repeatable) | retrieval tag, lowercase `[a-z0-9_-]`, 1 to 32 characters, at most 10 tags (the count is checked on what was given, before duplicates are dropped, so 10 distinct plus a repeat is refused); stored sorted and unique, as data, not searched | `bad_tags` |
 | `--scope-loop ID` | store in the scope of a loop (`[A-Za-z0-9_.-]`, up to 64 characters) instead of the repo; not with `--global`. `know list --scope-loop ID` lists it; a loop scope is a `dir` scope keyed `loop:<ID>` and is never in the repo or global lists or pushed by hooks | `bad_loop_scope` |
 
 Entries print `confidence`, `valid_until` (UTC ISO or null), `expired`, `sensitivity`, `contradicts` and `tags`.
@@ -92,17 +95,30 @@ untouched; `know list --status expired` shows it, `--status all` and `know show`
 **Withheld is counted.** The `hook session-start` line in `calls.jsonl` carries `withheld: {"expired": N, "restricted": N}`
 (counts of current entries in the repo and global scopes that the block left out, never text; the field passes the
 `obs_log` allowlist as a map of integer counts), so an empty block with a non-zero count is a decision the hook withheld,
-not an empty ledger. If the count cannot be computed the field is left out and the block is still sent.
-`know list --scope-loop` refuses a malformed id with `bad_loop_scope`, as `know add` does; a well-formed unknown loop
-lists 0. `--scope-loop` with `--all-projects` is refused with `loop_with_all_projects` (exit 2).
+not an empty ledger. An entry that is both expired and restricted counts as `expired` only. The converse does not hold: an
+entry that is pull-only for lack of a backing user citation is in neither counter, so a zero count does not mean everything
+in scope was pushed. If the count cannot be computed because of a store fault the field is left out and the block is still
+sent; any other failure reaches the hook's outer handler and gives the `error` notice.
+`know list --scope-loop` refuses a malformed id with `bad_loop_scope`, as `know add` does; a well-formed id that has never
+had an entry lists 0 with `loop_not_found: true` (still exit 0, one JSON object). `--scope-loop` with `--all-projects` is
+refused with `loop_with_all_projects` (exit 2).
 
-**Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block, of per-prompt recall
-and of `search` (its output reaches the model, so it counts as a push path), even when a user prompt cites it. It is still
-returned by the commands a person runs to inspect the ledger (`know list`, `know show`). `stats` reports `knowledge_restricted`, a count of current entries only.
+**Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block and of per-prompt
+recall, even when a user prompt cites it. The commands someone runs on purpose show it: `know list`, `know show` and
+`search`, where each `knowledge[]` hit carries `restricted: true|false`. An expired entry is not current, so `search` leaves
+it out and reports how many it left out as `knowledge_expired_omitted` (absent when 0). A loop-scope entry is never in
+SessionStart, recall or a repo-scoped search; `search --all-projects` drops the scope filter and does return it, as it does
+for any other scope. `stats` reports `knowledge_restricted`, a count of entries that are current in the same sense as
+`knowledge.current` (status `current` and not expired), so a restricted entry past its `valid_until` is counted under
+`knowledge.expired` instead.
 
 **Schema v2 is a one-way upgrade.** The first writing command (`know add`, `ingest`, the poller) on a v1 store rebuilds the
 `knowledge` table once, in one transaction with `user_version` (ids, supersede chains, citations, the log and full-text
-index are kept; a crash leaves the v1 file intact). After that an older muninn release refuses the store as a schema mismatch.
+index are kept; a crash leaves the v1 file intact). Before it commits, the row count of the new table must equal the old
+one and `PRAGMA foreign_key_check` must show no new violation, or the whole upgrade rolls back. If the commit, the rollback
+or the pragma restore itself fails, the original error is the one reported. Each attempt writes one `poller.log` line:
+`event` `migrated`, `migrate_raced` (another writer got there first) or `migrate_failed`, with `from_v`, `to_v`, `rows`
+(rows copied; absent unless it migrated), `ms` and, for a failure, `exc` (the exception class name, never its message). After that an older muninn release refuses the store as a schema mismatch.
 Read-only callers (hooks, `stats`, `doctor`) refuse a v1 file until a writer has migrated it, so hooks fail open (they exit 0
 with a `memory unavailable (store_unavailable)` notice) in that window. `muninn rebuild` accepts a v1 or v2 old store.
 
@@ -159,7 +175,7 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `file_modes` | error | no data file is readable by group or others | names of loose files |
 | `unexpected_files` | error | only known files are in the data dir | names of stray files |
 | `unowned_journal` | error | no crashed writer's journal is lying around | explanation |
-| `store_readable` | error | the database opens read-only and has the right schema | error class if not |
+| `store_readable` | error | the database opens read-only and has the right schema | the refusal message if not, such as `schema v1, need v2` or `cannot read the store (SQLITE_BUSY)` |
 | `journal_mode` | error | SQLite journal mode is `delete` | the mode |
 | `fts_secure_delete` | error | both full-text indexes have secure delete on | none |
 | `quick_check` | error | SQLite's `quick_check` says `ok` | its first 80 characters |

@@ -117,8 +117,9 @@ def _pushable(
 ) -> list[RecallEntry]:
     """Keep the entries a hook may push without being asked.
 
-    Those with a live user-prompt citation, as at SessionStart; the others
-    stay pull-only.
+    Those that may be pushed as at SessionStart (``knowledge.user_cited``):
+    not expired, not restricted, and with a live user-prompt citation whose
+    quote backs the text; the others stay pull-only.
 
     Returns:
         The entries with a live user-prompt citation, in input order.

@@ -148,10 +148,18 @@ def _migrate_logged(conn: sqlite3.Connection, home: Path) -> None:
 
 
 def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
-    """Create the schema on a brand-new database.
+    """Create the schema on a new database, or bring a v1 file to v2.
+
+    A version 0 file gets the full schema.  A version 1 file is migrated in
+    place (``migrate_v1_to_v2``, logged to poller.log).  A current file is
+    left alone.
+
+    Args:
+        conn: Autocommit read-write connection.
+        home: Data directory, for the migration's poller.log line.
 
     Raises:
-        StoreUnavailableError: If the file holds another schema version.
+        StoreUnavailableError: If the file holds any other schema version.
     """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version == 1:

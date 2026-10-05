@@ -298,8 +298,9 @@ def check(conn: sqlite3.Connection) -> dict[str, Any]:
         conn: Open store connection.
 
     Returns:
-        Counts of ok, changed, missing and erased citations, plus the
-        changed or missing ones (capped at ``PROBLEMS_MAX``).
+        Counts of ok, changed, missing and erased citations, the number of
+        ``expired`` current entries, and the changed or missing citations
+        (capped at ``PROBLEMS_MAX``).
     """
     counts: dict[str, int] = dict.fromkeys(
         ("ok", "changed", "missing", "erased"), 0

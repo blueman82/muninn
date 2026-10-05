@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from muninn import classify, store
+from muninn.knowledge_expiry import LIVE_SQL
 from muninn.obs_status import (
     freshness,
     install_sha,
@@ -144,9 +145,12 @@ def _table_counts(conn: sqlite3.Connection) -> dict[str, object]:
             " FROM knowledge GROUP BY 1",
             (time.time(),),
         ),
+        # Current in the same sense as ``knowledge.current`` above: an
+        # expired restricted entry is counted as expired, not here.
         "knowledge_restricted": conn.execute(
-            "SELECT count(*) FROM knowledge WHERE sensitivity = 'restricted'"
-            " AND status = 'current'"
+            "SELECT count(*) FROM knowledge k WHERE k.status = 'current'"
+            f" AND {LIVE_SQL} AND k.sensitivity = 'restricted'",
+            (time.time(),),
         ).fetchone()[0],
         "citations": _pairs(
             conn, "SELECT state, count(*) FROM citation GROUP BY 1"

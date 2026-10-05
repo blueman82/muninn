@@ -183,3 +183,33 @@ class RebuildFromV1Tests(CliCase):
         self.assertEqual(
             tuple(got), ("lesson", "observed", 99.0, "restricted", "a,b")
         )
+
+    def test_contradicts_and_a_loop_scope_row_survive_a_rebuild(self) -> None:
+        conn = self.conn
+        loop = conn.execute(
+            "INSERT INTO scope(key, label, kind)"
+            " VALUES ('loop:run-3', 'loop:run-3', 'dir')"
+        ).lastrowid
+        for text in ("first", "second"):
+            conn.execute(
+                "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
+                " created_at) VALUES (?, 'fact', ?, 'current', 'user', 1)",
+                (loop, text),
+            )
+        conn.execute("UPDATE knowledge SET contradicts = 1 WHERE id = 2")
+        conn.close()
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        ro = store.connect_ro(store.db_path(self.home))
+        self.addCleanup(ro.close)
+        got = [
+            tuple(r)
+            for r in ro.execute(
+                "SELECT k.id, k.contradicts, sc.key, sc.kind FROM knowledge k"
+                " JOIN scope sc ON sc.id = k.scope_id ORDER BY k.id"
+            )
+        ]
+        self.assertEqual(
+            got,
+            [(1, None, "loop:run-3", "dir"), (2, 1, "loop:run-3", "dir")],
+        )
