@@ -43,7 +43,7 @@ _NUMBERS = frozenset(
 )
 _FLAGS = frozenset({"hash_ok", "logged"})
 _ID_LISTS = ("returned_ids", "knowledge_ids", "ids")
-_COUNTS = frozenset({"stages", "counts"})
+_COUNTS = frozenset({"stages", "counts", "withheld"})
 # String fields are accepted only in shapes that cannot carry free text.
 _CODES = {
     "cmd": re.compile(r"[a-z][a-z-]{0,30}(?: [a-z-]{1,20})?"),

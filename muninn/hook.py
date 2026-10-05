@@ -84,6 +84,12 @@ class _Knowledge(Protocol):
         """Current user-cited entries of the scopes, newest first."""
         ...
 
+    def withheld(
+        self, conn: sqlite3.Connection, scope_ids: list[int]
+    ) -> dict[str, int]:
+        """Counts of expired and restricted entries a push left out."""
+        ...
+
 
 # classify and knowledge annotate their dicts bare, which pyright strict
 # reads as partly unknown; viewing the modules through these protocols
@@ -378,6 +384,7 @@ def _start_block(
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
+    trace["withheld"] = _KNOWLEDGE.withheld(conn, ids)
     trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
     return render_block(
         entries, _label(conn, ids, cwd), notes=index_notes(home), limit=limit

@@ -52,6 +52,7 @@ from muninn.knowledge_read import (
     show,
     user_cited,
     verify_citation,
+    withheld,
 )
 from muninn.knowledge_typed import (
     Typed,
@@ -76,6 +77,7 @@ __all__ = [
     "show",
     "user_cited",
     "verify_citation",
+    "withheld",
 ]
 
 

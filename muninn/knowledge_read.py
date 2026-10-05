@@ -26,7 +26,7 @@ from muninn.knowledge_model import (
     parse_kid,
     text_backed,
 )
-from muninn.knowledge_typed import loop_scope_id
+from muninn.knowledge_typed import loop_scope_id, valid_loop
 from muninn.query import NOTICE, guarded
 
 
@@ -163,6 +163,8 @@ def list_entries(
         return _error("bad_status")
     if kind is not None and kind not in KINDS:
         return _error("bad_kind")
+    if loop is not None and not valid_loop(loop):
+        return _error("bad_loop_scope")
     where = ["1"]
     args: list[Any] = []
     now = time.time()
@@ -398,6 +400,29 @@ def _backing_cite(
         if text_backed(text, cite["quote"] or ""):
             return cite
     return None
+
+
+@guarded
+def withheld(conn: sqlite3.Connection, scope_ids: list[int]) -> dict[str, int]:
+    """Count current entries a push leaves out, by reason code.
+
+    Args:
+        conn: Open store connection.
+        scope_ids: Scopes a push draws from.
+
+    Returns:
+        ``expired`` (past valid_until) and ``restricted`` (live but
+        restricted) counts; numbers only, never entry text.
+    """
+    if not scope_ids:
+        return {"expired": 0, "restricted": 0}
+    row = conn.execute(
+        f"SELECT sum(NOT {LIVE_SQL}), sum({LIVE_SQL} AND k.sensitivity ="
+        " 'restricted') FROM knowledge k WHERE k.status = 'current'"
+        f" AND k.scope_id IN ({','.join('?' * len(scope_ids))})",
+        [time.time(), time.time(), *scope_ids],
+    ).fetchone()
+    return {"expired": row[0] or 0, "restricted": row[1] or 0}
 
 
 @guarded

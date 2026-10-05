@@ -25,6 +25,11 @@ _TAG = re.compile(r"[a-z0-9_-]{1,32}")
 _LOOP = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
+def valid_loop(loop: str) -> bool:
+    """Say whether a loop id is well formed; add and list share this rule."""
+    return _LOOP.fullmatch(loop) is not None
+
+
 @dataclass(frozen=True)
 class Typed:
     """The validated optional fields of one new entry.
@@ -114,9 +119,7 @@ def validate(raw: TypedRequest, now: float) -> Typed:
         _TAG.fullmatch(t) for t in raw.tags
     ):
         raise RefusedError("bad_tags")
-    if raw.loop is not None and (
-        raw.global_scope or not _LOOP.fullmatch(raw.loop)
-    ):
+    if raw.loop is not None and (raw.global_scope or not valid_loop(raw.loop)):
         raise RefusedError("bad_loop_scope")
     link = None
     if raw.contradicts is not None:

@@ -89,6 +89,11 @@ current: `know list` (default `--status current`), search, the SessionStart bloc
 untouched; `know list --status expired` shows it, `--status all` and `know show` show it flagged, `know check` reports an
 `expired` count, and `stats` counts it under `knowledge.expired` instead of `knowledge.current`.
 
+**Withheld is counted.** Each SessionStart hook line in `calls`-style logs carries `withheld: {"expired": N, "restricted": N}`
+(counts of live-scope current entries the block left out, never text), so an empty block with a non-zero count is a decision
+the hook withheld, not an empty ledger. `know list --scope-loop` refuses a malformed id with `bad_loop_scope`, as `know add` does;
+a well-formed unknown loop lists 0.
+
 **Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block, of per-prompt recall
 and of `search` (its output reaches the model, so it counts as a push path), even when a user prompt cites it. It is still
 returned by the commands a person runs to inspect the ledger (`know list`, `know show`). `stats` reports `knowledge_restricted`, a count only.

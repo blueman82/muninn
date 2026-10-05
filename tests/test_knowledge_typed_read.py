@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from muninn import knowledge, obs_stats, query
+from muninn import hook, knowledge, obs_stats, query
 from muninn.query import hits
 from tests.hook_support import RecallCase
 from tests.knowledge_support import KnowCase, kid
@@ -48,6 +48,13 @@ class ExpiryTests(KnowCase):
         ).fetchone()
         self.assertEqual(row[0], "current")  # status was never rewritten
         self.assertEqual(knowledge.check(ro)["expired"], 1)
+
+    def test_list_refuses_a_bad_loop_id_like_add_does(self) -> None:
+        for bad in ("bad id!! " * 20, "x" * 65, ""):
+            got = knowledge.list_entries(self.ro(), cwd="/x", loop=bad)
+            self.assertEqual(got["error"], "bad_loop_scope", bad)
+        ok = knowledge.list_entries(self.ro(), cwd="/x", loop="never-seen")
+        self.assertEqual(ok["count"], 0)
 
     def test_expired_is_not_pushed_or_searched(self) -> None:
         got = self.add(text="use the zebra cache")
@@ -105,6 +112,18 @@ class RestrictedTests(RecallCase):
         plain = self.add(text="secretword plain")
         got = hits.knowledge(self.ro(), "secretword", [], True)
         self.assertEqual([a["id"] for a in got], [f"K{kid(plain)}"])
+
+    def test_session_start_trace_counts_what_it_withheld(self) -> None:
+        self.add(text="use the zebra cache")
+        self.add(text="restricted one", sensitivity="restricted")
+        stale = self.add(text="stale one", valid_until="2099-01-01")
+        self.rw.execute(
+            "UPDATE knowledge SET valid_until = ? WHERE id = ?",
+            (time.time() - 5, kid(stale)),
+        )
+        trace: dict[str, object] = {}
+        hook.session_start(self.payload(), "claude", self.env, trace=trace)
+        self.assertEqual(trace["withheld"], {"expired": 1, "restricted": 1})
 
     def test_restricted_is_still_visible_through_list_and_show(self) -> None:
         got = self.add(text="private note", sensitivity="restricted")
