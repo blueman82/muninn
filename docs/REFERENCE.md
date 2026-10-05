@@ -63,7 +63,7 @@ composed, is stored as `harness`), `subagent`,
 `muninn know add --kind decision|fact|preference|procedure|lesson|constraint --text T --cite REF --quote Q [--supersedes K] [--global]`
 records an entry; every entry needs a quote that is verbatim in a primary prompt, reply or tool call (a preference needs
 a user prompt). `--quote Q` alone searches the caller's session prompts. `know retract K [--reason R]`;
-`know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--all-projects] [--scope-loop ID]`; `know show K` the entry with
+`know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--tag T]... [--all-projects] [--scope-loop ID]`; `know show K` the entry with
 its chain and log; `know check` re-verifies every citation (`ok`, `changed`, `missing`, `erased`, `problems`) and counts `expired` entries.
 Entries are superseded or retracted, never edited.
 Only text the person typed is pushed unprompted: an entry is pushed (SessionStart, recall) only if a live user-prompt
@@ -102,6 +102,9 @@ sent; any other failure reaches the hook's outer handler and gives the `error` n
 `know list --scope-loop` refuses a malformed id with `bad_loop_scope`, as `know add` does; a well-formed id that has never
 had an entry lists 0 with `loop_not_found: true` (still exit 0, one JSON object). `--scope-loop` with `--all-projects` is
 refused with `loop_with_all_projects` (exit 2).
+`know list --tag T` (repeatable) keeps entries that carry every given tag, in any order, matched as whole tags (`run-1` does not
+match `run-10`); it combines with `--kind`, `--status` and the scope flags, `count` is taken after it, and a tag that `know add`
+would refuse gives `bad_tags` (exit 2). Search and the hooks have no tag filter.
 
 **Restricted entries are never pushed.** A `restricted` entry is left out of the SessionStart block and of per-prompt
 recall, even when a user prompt cites it. The commands someone runs on purpose show it: `know list`, `know show` and

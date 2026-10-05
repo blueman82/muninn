@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from muninn import query, scope
@@ -23,7 +24,7 @@ from muninn.knowledge_model import (
     iso_date,
     parse_kid,
 )
-from muninn.knowledge_typed import loop_scope_id, valid_loop
+from muninn.knowledge_typed import loop_scope_id, valid_loop, valid_tags
 from muninn.query import NOTICE, guarded
 
 
@@ -154,6 +155,7 @@ def list_entries(
     kind: str | None = None,
     all_projects: bool = False,
     loop: str | None = None,
+    tags: Sequence[str] = (),
 ) -> dict[str, Any]:
     """List entries newest first, each with its citations' verification.
 
@@ -166,6 +168,8 @@ def list_entries(
         kind: Restrict to one of ``KINDS``.
         all_projects: Drop the scope filter.
         loop: List this loop's scope instead of the repo and global scopes.
+        tags: Keep only entries that carry every one of these tags; the
+            count is taken after this filter.
 
     Returns:
         The entries and their count, or an error payload for a bad filter.
@@ -178,9 +182,16 @@ def list_entries(
         return _error("bad_kind")
     if loop is not None and not valid_loop(loop):
         return _error("bad_loop_scope")
+    if not valid_tags(tags):
+        return _error("bad_tags")
     where = ["1"]
     args: list[Any] = []
     _status_filter(status, where, args)
+    for tag in sorted(set(tags)):
+        # Tags are stored comma-joined: match a whole element, so run-1
+        # never matches run-10. instr, not LIKE, because _ is a wildcard.
+        where.append("instr(',' || k.tags || ',', ?) > 0")
+        args.append(f",{tag},")
     if kind is not None:
         where.append("k.kind = ?")
         args.append(kind)

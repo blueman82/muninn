@@ -124,6 +124,7 @@ def _list(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             kind=a.kind,
             all_projects=a.all_projects,
             loop=a.loop,
+            tags=a.tags,
         )
 
     out = read_store(home, work)

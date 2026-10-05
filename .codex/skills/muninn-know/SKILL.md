@@ -19,7 +19,7 @@ A small ledger of durable decisions, each backed by a verbatim quote. Entries ar
 - Check `know list` first so you supersede instead of duplicating.
 
 ## Read and maintain
-- `muninn know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--all-projects] [--scope-loop ID]` (an unknown loop id lists 0 and sets `loop_not_found`)
+- `muninn know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--tag T]... [--all-projects] [--scope-loop ID]` (an unknown loop id lists 0 and sets `loop_not_found`); `--tag` is repeatable and an entry must carry every tag given (whole tags, so `run-1` never matches `run-10`; the count is after the filter; a malformed tag is refused with `bad_tags`)
 - `muninn know show K` entry, supersede chain and log.
 - `muninn know retract K --reason "why"` when a decision no longer stands.
 - `muninn know check` re-verifies every citation (`ok`, `changed`, `missing`, `erased`) and counts `expired` entries.

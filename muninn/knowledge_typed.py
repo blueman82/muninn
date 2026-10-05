@@ -34,6 +34,11 @@ def valid_loop(loop: str) -> bool:
     return _LOOP.fullmatch(loop) is not None
 
 
+def valid_tags(tags: Sequence[str]) -> bool:
+    """Say whether tags are well formed; add and list share this rule."""
+    return len(tags) <= TAGS_MAX and all(_TAG.fullmatch(t) for t in tags)
+
+
 @dataclass(frozen=True)
 class Typed:
     """The validated optional fields of one new entry.
@@ -119,9 +124,7 @@ def validate(raw: TypedRequest, now: float) -> Typed:
         raise RefusedError("bad_confidence")
     if raw.sensitivity not in SENSITIVITY:
         raise RefusedError("bad_sensitivity")
-    if len(raw.tags) > TAGS_MAX or not all(
-        _TAG.fullmatch(t) for t in raw.tags
-    ):
+    if not valid_tags(raw.tags):
         raise RefusedError("bad_tags")
     if raw.loop is not None and (raw.global_scope or not valid_loop(raw.loop)):
         raise RefusedError("bad_loop_scope")

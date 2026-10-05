@@ -230,6 +230,14 @@ def _add_knowledge(cmd: _Commands) -> None:
         default="current",
     )
     a.add_argument("--kind", choices=knowledge.KINDS)
+    a.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        dest="tags",
+        metavar="TAG",
+        help="only entries carrying this tag; repeat to require every one",
+    )
     a.add_argument("--all-projects", action="store_true")
     a.add_argument(
         "--scope-loop",
