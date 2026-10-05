@@ -55,6 +55,11 @@ def data_home(env: Mapping[str, str] = os.environ) -> Path:
 # A store that could not be read is kept beside the new one under this
 # prefix plus a UTC timestamp (see ``muninn rebuild``).
 UNREADABLE_PREFIX = "muninn.sqlite.unreadable-"
+# The installer copies the store here before an upgrade that migrates its
+# schema, and deletes the copy once the upgrade has succeeded. The installer
+# is not importable from the runtime, so install/snapshot.py repeats the
+# string and a test keeps the two equal.
+PRE_UPGRADE_PREFIX = "muninn.sqlite.pre-upgrade-"
 
 
 def db_path(home: Path) -> Path:

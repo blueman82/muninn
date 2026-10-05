@@ -30,6 +30,7 @@ _SUMMARY_FIELDS = (
     "steps",
     "failed",
     "sweep_failed",
+    "snapshot",
 )
 
 

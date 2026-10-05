@@ -122,7 +122,7 @@ class FreshInstallTest(unittest.TestCase):
 
     def test_refuses_a_commit_that_breaks_the_standards(self) -> None:
         w = self.w
-        (w.repo / "muninn").mkdir()
+        (w.repo / "muninn").mkdir(exist_ok=True)
         (w.repo / "muninn/sloppy.py").write_text("x = 1\n")
         git(w.repo, "add", "-A")
         git(w.repo, "commit", "-qm", "sloppy")

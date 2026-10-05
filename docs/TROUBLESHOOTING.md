@@ -14,6 +14,7 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 | search finds little | few sources indexed | `muninn --pretty stats`: check `sources`, `events_by_provider` (a provider at 0 means its root was not found) and `last_pass.unreadable_files` (files the poller could not open) and `last_pass.skipped_files`; `muninn doctor` shows `roots_present` |
 | `db_free_space` warns | many deletes left free pages | `muninn compact` (needs about one database's worth of free disk) |
 | `aside_files` warns | a `rebuild` set aside an unreadable store, `muninn.sqlite.unreadable-<ts>`; `erase` cannot scrub it, so erased text may survive there | salvage what you need, then run the `rm -- <path>` that `muninn erase` prints in `aside_remove` (it is never deleted for you) |
+| `upgrade_snapshot` warns | an `--upgrade` that migrated the store left `muninn.sqlite.pre-upgrade-<sha>` (a full copy of the index and ledger) because it could not delete it; `erase` cannot scrub it | `rm -- <path>` (`muninn erase` also lists it in `aside_files`); it is only needed while an upgrade can still roll back |
 | `db_size` warns | database over 2 GiB | `muninn compact`; consider `muninn erase` of old sessions |
 | exit 3, `busy` | another writer holds the lock (poller pass, compact, erase) | retry in a few seconds |
 | `store_unavailable` with `schema vN, need v2` (hooks say `memory unavailable`) | the file is schema v1 and no writer has migrated it yet, or a newer muninn wrote it (`doctor` `store_readable`: false) | query: `muninn doctor`; remediation: v1, run any writing command (`muninn ingest`) once to migrate it; v3 or newer, upgrade this muninn (the v2 upgrade is one-way, there is no downgrade) |
@@ -21,7 +22,7 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 | `unexpected_files` fails | a stray file in the data dir | move it out; `recall.off` and the logs are expected |
 | hooks print nothing | `MUNINN_HOOK_DISABLE=1`, or `recall.off` exists in the data dir | unset it, or delete `recall.off` |
 | Codex shows no memory | plugin hooks not trusted | start Codex, run `/hooks`, trust the two hooks |
-| installer failed | see `install.log` and `install-record.json` (`outcome`, `failed`) | it already rolled back; fix the cause and re-run |
+| installer failed | see `install.log` and `install-record.json` (`outcome`, `failed`) | it already rolled back, and put the pre-upgrade store copy back if the new release had migrated the store (`snapshot.state` `restored`); fix the cause and re-run |
 | want muninn gone | not a fault | `bin/muninn-uninstall --dry-run`, then `bin/muninn-uninstall`; the data moves to `~/.local/share/muninn-removed-<ts>` (`--purge-data` deletes it) |
 | `bin/muninn-install` says half-installed after an uninstall | an uninstall that was interrupted left the data dir or the release link | run `bin/muninn-uninstall` again; it removes whatever is left |
 

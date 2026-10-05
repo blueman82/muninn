@@ -41,6 +41,11 @@ PRIVATE_UMASK = 0o077
 PRIVATE_DIR_MODE = 0o700
 # The value-free summary an install leaves in the lib dir for support.
 INSTALL_RECORD = "install-record.json"
+# The store file in the data dir, and the prefix of the copy an upgrade makes
+# before the new release migrates it (muninn/store.py repeats the prefix; a
+# test keeps them equal, since the runtime cannot import the installer).
+STORE_FILE = "muninn.sqlite"
+PRE_UPGRADE_PREFIX = "muninn.sqlite.pre-upgrade-"
 # Longest age of status.json that still counts as a live heartbeat.
 HEARTBEAT_S = 120
 # Files read from git at the pinned commit, never from the working tree. The

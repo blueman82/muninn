@@ -15,6 +15,7 @@ from typing import Any
 from install.constants import CLAUDE_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.record import Record
+from install.snapshot import release_schema
 from install.transforms import (
     drop_trust,
     edit_settings,
@@ -198,6 +199,7 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     touch = not ctx.upgrade
     if touch:
         _dry_apply(ctx, files, fragment)
+    schema = release_schema(ctx, repo, sha) if ctx.upgrade else None
     return {
         "fresh": ctx.fresh,
         "upgrade": ctx.upgrade,
@@ -208,6 +210,7 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
         "home": str(ctx.home),
         "repo": str(repo),
         "sha": sha,
+        "schema_to": schema,
         "python": {"path": sys.executable, "version": sys.version.split()[0]},
         "rdir": str(ctx.rdir),
         "steps": [],

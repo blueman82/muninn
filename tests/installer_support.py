@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -21,6 +22,7 @@ from typing import Any
 from install import configedit as ce
 from install import installer as co
 from install.context import Ctx
+from muninn import store
 
 ROOT = Path(__file__).resolve().parent.parent
 CRED = "sk-fake-" + "feedface" * 5
@@ -31,6 +33,7 @@ PINNED = (
     "integrations/codex/.codex-plugin/plugin.json",
     "integrations/codex/hooks/hooks.json",
     "launchd/com.muninn.plist",
+    "muninn/store_schema.py",
 )
 # Real Codex 0.160.0 `hooks/list` currentHash values for the shipped
 # hooks.json (literal @HOME@ commands), from an isolated CODEX_HOME probe
@@ -79,6 +82,29 @@ def done(
     return subprocess.CompletedProcess([], rc, stdout, b"")
 
 
+def make_store(data: Path, version: int, marker: str = "row") -> Path:
+    """Write a small real SQLite store with a schema version and one row.
+
+    Args:
+        data: The data directory.
+        version: The ``user_version`` to stamp.
+        marker: Text of the one row, so a test can tell stores apart.
+
+    Returns:
+        The store path.
+    """
+    path = data / "muninn.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE IF NOT EXISTS t(x TEXT)")
+    conn.execute("DELETE FROM t")
+    conn.execute("INSERT INTO t VALUES (?)", (marker,))
+    conn.commit()
+    conn.execute(f"PRAGMA user_version={version}")
+    conn.close()
+    path.chmod(0o600)
+    return path
+
+
 def dump(obj: object) -> bytes:
     """Serialise ``obj`` as two-space-indented JSON with a final newline.
 
@@ -121,6 +147,8 @@ class Fake:
         self.doctor = 0
         self.toml_writes: list[str] = []
         self.probe_mode = "ok"
+        self.store_version = store.SCHEMA_VERSION
+        self.migrates: str | None = None  # the release that migrates
         self.version = b"codex-cli 0.159.2\n"
 
     def now(self) -> float:
@@ -178,6 +206,8 @@ class Fake:
             if self.loaded:
                 return done(b"\tpid = %d\n" % self.pid)
             return done(rc=113)
+        if args[0] in ("kickstart", "bootstrap") and self._runs_migrator():
+            self._migrate()
         if args[0] == "kickstart":
             self.pid += 1
             if self.heartbeat:
@@ -190,6 +220,24 @@ class Fake:
             if self.heartbeat:
                 self._heartbeat()
         return done()
+
+    def _runs_migrator(self) -> bool:
+        """Say whether ``current`` is the release that migrates the store."""
+        link = self.home / ".local/lib/muninn/current"
+        return bool(
+            self.migrates
+            and link.is_symlink()
+            and str(link.readlink()) == self.migrates
+        )
+
+    def _migrate(self) -> None:
+        """Model the new poller migrating the store to the newest schema."""
+        path = self.home / ".local/share/muninn/muninn.sqlite"
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE IF NOT EXISTS migrated(x)")
+        conn.commit()
+        conn.execute(f"PRAGMA user_version={store.SCHEMA_VERSION}")
+        conn.close()
 
     def _ps(
         self, args: list[str], env: Mapping[str, str], input: bytes | None
@@ -210,7 +258,7 @@ class Fake:
             assert env.get("MUNINN_HOOK_DISABLE") == "1" and input == b"{}"
             return done(b"{}")
         if args[0] == "ingest":
-            (Path(env["MUNINN_HOME"]) / "muninn.sqlite").write_bytes(b"store")
+            make_store(Path(env["MUNINN_HOME"]), self.store_version)
             return done()
         assert args == ["doctor"], args
         return done(rc=self.doctor)

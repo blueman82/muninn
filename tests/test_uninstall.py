@@ -13,7 +13,7 @@ from unittest import mock
 
 from install import installer as co
 from install import uninstall as un
-from install.constants import PRIVATE_UMASK
+from install.constants import PRE_UPGRADE_PREFIX, PRIVATE_UMASK
 from install.context import StepFailedError
 from install.errors import RefusedError
 from tests.installer_support import World, snapshot
@@ -81,6 +81,18 @@ class UninstallTest(UninstallCase):
         )
         self.assertEqual(self.c.removed.stat().st_mode & 0o777, 0o700)
         self.assertFalse(self.c.data.exists())
+
+    def test_a_leftover_pre_upgrade_copy_goes_with_the_data(self) -> None:
+        name = f"{PRE_UPGRADE_PREFIX}abc"
+        (self.c.data / name).write_bytes(b"store copy")
+        self.run_uninstall()
+        self.assertTrue((self.c.removed / self.c.data.name / name).exists())
+
+    def test_purge_deletes_a_leftover_pre_upgrade_copy(self) -> None:
+        (self.c.data / f"{PRE_UPGRADE_PREFIX}abc").write_bytes(b"copy")
+        self.run_uninstall(purge=True)
+        self.assertFalse(self.c.data.exists())
+        self.assertFalse(self.c.removed.exists())
 
     def test_purge_deletes_the_data(self) -> None:
         self.run_uninstall(purge=True)
