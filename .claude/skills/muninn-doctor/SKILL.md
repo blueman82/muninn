@@ -18,6 +18,8 @@ Common fixes:
 - `unowned_journal`: a crashed writer's journal; the next writer rolls it back.
 - `db_free_space` warn: run `muninn compact`.
 - `tombstone_key` (error): `tombstone.key` is `missing` or `damaged` while erased content is tracked by it; ingest, rebuild and erase stop until it is restored from a backup. Do not recreate it by hand.
+- `aside_files` (warn): `rebuild` set aside an unreadable store (`muninn.sqlite.unreadable-*`); `erase` cannot scrub it, so it may still hold erased text. Salvage what you need, then delete it; nothing deletes it for you.
+- `upgrade_snapshot` (warn): a pre-upgrade copy of the store (`muninn.sqlite.pre-upgrade-*`) was left because the installer could not delete it; it holds transcript text and `erase` cannot scrub it. Delete it.
 - `release_leftovers` (warn): a `.pruning-*` directory of an old release is still in `~/.local/lib/muninn`; the next `bin/muninn-install` removes it, or delete it by hand.
 - `poller_error` (warn): the last pass stopped with an exception; `detail` is its class name. The poller's next good pass clears it (a manual `ingest` does not); if it stays, the poller keeps failing.
 - `unreadable_files` (warn): the last pass could not open that many transcript files; check file permissions (macOS may need Full Disk Access for the poller).

@@ -15,6 +15,8 @@ When asking for help, share `doctor`, `stats`, `install.log` and
 | `db_free_space` warns | many deletes left free pages | `muninn compact` (needs about one database's worth of free disk) |
 | `aside_files` warns | a `rebuild` set aside an unreadable store, `muninn.sqlite.unreadable-<ts>`; `erase` cannot scrub it, so erased text may survive there | salvage what you need, then run the `rm -- <path>` that `muninn erase` prints in `aside_remove` (it is never deleted for you) |
 | `upgrade_snapshot` warns | an `--upgrade` that migrated the store left `muninn.sqlite.pre-upgrade-<sha>` (a full copy of the index and ledger) because it could not delete it; `erase` cannot scrub it | `rm -- <path>` (`muninn erase` also lists it in `aside_files`); it is only needed while an upgrade can still roll back |
+| exit 4, `error` `tombstone_key`; `doctor` `tombstone_key` fails (`missing` or `damaged`) | `tombstone.key` is missing or damaged while keyed tombstones exist; ingest, rebuild and erase refuse to run | restore `tombstone.key` from a backup. Do not recreate it: a new key stops the existing tombstones matching, so erased content could come back |
+| `release_leftovers` warns | an upgrade's sweep could not delete an old `.pruning-<ts>-<sha>` release directory in `~/.local/lib/muninn` | the next `bin/muninn-install` retries the sweep; or delete the named directory by hand |
 | `db_size` warns | database over 2 GiB | `muninn compact`; consider `muninn erase` of old sessions |
 | exit 3, `busy` | another writer holds the lock (poller pass, compact, erase) | retry in a few seconds |
 | `store_unavailable` with `schema vN, need v2` (hooks say `memory unavailable`) | the file is schema v1 and no writer has migrated it yet, or a newer muninn wrote it (`doctor` `store_readable`: false) | query: `muninn doctor`; remediation: v1, run any writing command (`muninn ingest`) once to migrate it; v3 or newer, upgrade this muninn (the v2 upgrade is one-way, there is no downgrade) |
@@ -32,7 +34,10 @@ When asking for help, share `doctor`, `stats`, `install.log` and
   failed, hourly `idle`, `error` with an exception class, `heartbeat_failed`
   with the class of the error when the alive stamp could not be written (once
   per pass; the poller will then go `stale`), `crash` with the class of an
-  exception that ended the poller outside a pass (it exits 1 and launchd restarts it), `stop`). Rotates at 1 MiB to
+  exception that ended the poller outside a pass (it exits 1 and launchd restarts it), `stop`,
+  `migrated`, `migrate_raced` and `migrate_failed` for the schema v1 to v2 upgrade (`from_v`,
+  `to_v`, `rows`, `ms`, and `exc` on a failure), and `quiet_failed` with the class of the error when
+  the poller could not redirect launchd's output away from the log). Rotates at 1 MiB to
   `poller.log.1`.
 - `calls.jsonl`: one line per CLI call, IDs and counts only; rotates likewise.
 - `status.json`: the last pass and heartbeat.

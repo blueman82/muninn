@@ -7,10 +7,12 @@ Instructions for coding agents working in this repo. Any parent-directory
 
 - `muninn/`: runtime package (Python 3.13 standard library only), one
   responsibility per module; a feature's modules share its prefix:
-  `cli*` (parser, handlers, output, poller), `store*` (`store_schema`, `store_migrate`), `ingest*` (plan, parse),
+  `cli*` (parser, handlers, output, poller, `cli_rebuild`), `store*` (`store_schema`, `store_migrate`),
+  `ingest*` (plan, parse, lines, model),
   `classify` with `claude_events`, `codex_events`, `event_model`,
-  `tool_errors`, `redaction`; `query/` (package), `knowledge*` (with `knowledge_typed`, `knowledge_expiry`), `erase*`,
-  `tombstones`, `hook*`, `obs*` (logs, stats, doctor, status), `scope`.
+  `tool_errors`, `redaction`; `query/` (package), `knowledge*` (with `knowledge_typed`, `knowledge_expiry`), `erase*` (`erase_collect`, `erase_family`, `erase_residue`),
+  `tombstones`, `tombstone_key` (the HMAC key for content tombstones), `hook*` (`hook_frame`, `hook_notes`,
+  `hook_recall`), `obs*` (`obs_log`, `obs_stats`, `obs_status`; `obs` holds doctor), `scope`.
 - `bin/muninn`: launcher that finds the interpreter; do not hardcode a path.
 - `bin/muninn-install`: sh wrapper over `install/installer.py` (bare, `--check`,
   `--status`, `--uninstall`); other arguments pass through.
@@ -18,20 +20,21 @@ Instructions for coding agents working in this repo. Any parent-directory
   (`--dry-run`, `--purge-data`). Agents run only `--dry-run`.
 - `install/`: `installer.py` (`--fresh`, `--upgrade`; the runner),
   `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`,
-  `transforms.py`, `trust.py`, `rollback.py`, `uninstall.py`, `configedit.py`,
-  `tomledit.py`.
+  `transforms.py`, `trust.py`, `rollback.py`, `snapshot.py` (pre-upgrade store copy), `record.py`,
+  `probe.py`, `context.py`, `errors.py`, `constants.py`, `uninstall.py`, `configedit.py`,
+  `tomledit.py`; `ls install` is the full list.
 - `tools/`: the standards gate (`python3.13 -m tools.check`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`.
-- `.claude/skills/muninn-*`: one Claude Code skill per user-facing command.
-  When a command, flag or answer field changes, update the matching skill and
-  `docs/REFERENCE.md` together.
+- `.claude/skills/muninn-*` and the mirrors `.codex/skills/muninn-*`: one skill per
+  user-facing command. When a command, flag or answer field changes, update both skills and
+  `docs/REFERENCE.md` together (`docs/SKILLS.md`).
 - `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 
 ## Rules
 
 - No third-party imports in `muninn/` or `install/`.
 - Logs and `doctor`/`stats` output hold counts, codes and ids, never
-  transcript text. New log fields go through the allowlist in `obs.py`.
+  transcript text. New log fields go through the allowlist in `muninn/obs_log.py`.
 - Output is JSON on stdout; `--pretty` only changes indentation. muninn provider
   hooks must keep returning compact JSON and exit 0.
 - Do not write to a user's real `HOME`, launchd domain or provider config in
@@ -58,8 +61,8 @@ Instructions for coding agents working in this repo. Any parent-directory
 
     python3.13 -m tools.check --full       # the whole gate: standards, ruff, black,
                                            # pyright strict, shellcheck, hooks, tests
-    python3.13 -m tools.run_tests          # the suite alone, in parallel (~8 s)
-    python3.13 -m unittest discover -s tests -t .   # the suite, serial (~35 s)
+    python3.13 -m tools.run_tests          # the suite alone, in parallel (roughly 9 s)
+    python3.13 -m unittest discover -s tests -t .   # the suite, serial (roughly 42 s)
 
 Set up once: `python3.13 -m venv .venv && .venv/bin/pip install -r
 requirements-dev.txt` and `git config core.hooksPath .githooks`. If Codex cannot
