@@ -70,7 +70,7 @@ busy, 4 store unavailable, a crashed writer's hot journal, or a missing or damag
   entries are never pushed.
 - `muninn quote-check REF QUOTE`: check a quote against an event.
 - `muninn erase --session S | --event REF | --match TEXT`: forget content. It is a dry run that
-  lists the targets unless you add `--yes`.
+  lists the targets unless you add `--yes` (`--dry-run` forces a dry run).
 - `muninn stats` and `muninn doctor`: counts, database size and free space, and health checks.
   `muninn compact` vacuums the database; `muninn rebuild` builds a new store from the transcripts,
   keeping ledger and tombstones. `--pretty` (or `MUNINN_PRETTY=1`) indents any JSON.
@@ -85,7 +85,7 @@ provider source roots for tests and evals, and `MUNINN_HOOK_DISABLE=1` silences 
 These are the only automatic push, installed for Claude Code and Codex. Both redact secrets, escape
 the frame delimiter, stay silent for subagent and reviewer transcripts, and fail open: on any error
 they exit 0 with a bounded "store unavailable" notice (or `{}` when disabled). A stale poller (no
-finished pass or alive stamp within 3 intervals), a failed last pass, or unreadable transcript files
+finished pass or alive stamp within 3 intervals), a failed or errored last pass, or unreadable transcript files
 is flagged in the hook block; every CLI answer carries the poller's state.
 
 - SessionStart (`muninn hook session-start --provider claude|codex`): at most 4,000 characters
