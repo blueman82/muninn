@@ -1,7 +1,7 @@
 # 0011: The store schema migration is one-way, and an upgrade takes a snapshot first
 
-Status: Accepted, 2026-10-05. Decided by: owner (asked how a failed upgrade could return across a schema change; chose the
-snapshot option: "I approve of option 2"). ADR 0001 is unchanged.
+Status: Accepted, 2026-10-05. Decided by: owner (a review found that a failed upgrade could not return across a schema change; offered
+the snapshot option as the recommended default, the owner answered "i approve"). ADR 0001 is unchanged.
 
 **Context.** Schema v2 (typed ledger fields, tags, loop scope) migrates a v1 store in one transaction the first time a v2
 writer (the poller, `ingest` or `know add`) opens it; row ids and the FTS index are kept. An older release refuses a v2 store
