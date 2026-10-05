@@ -9,11 +9,12 @@ compact JSON). Apart from `serve` and the hooks, every answer also carries these
 | `index_age_s` | seconds since the poller last finished a pass (`null` if it never has) |
 | `poller` | `ok`, or `stale` when the last pass is older than 3 poll intervals or there is none |
 | `logged` | `true` if the call was written to `calls.jsonl`, `false` if disabled or denied |
-| `error` | only on failure: `busy`, `hot_journal`, `store_unavailable` or `refused` (with `reason`) |
+| `error` | only on failure: `busy`, `hot_journal`, `tombstone_key`, `store_unavailable` or `refused` (with `reason`) |
 | `detail` | with `store_unavailable` only: the refusal message (at most 80 characters, such as `schema v1, need v2`), written by muninn and never from stored text. The same string is in the `calls.jsonl` line for that call and in the hook's trace (`hook session-start` and `hook prompt` lines) |
 
 **Exit codes:** 0 ok; 1 `doctor` found an error-level problem; 2 refused or bad usage; 3 busy (another
-writer holds the lock, retry); 4 store unavailable or a crashed writer's hot journal.
+writer holds the lock, retry); 4 store unavailable, a crashed writer's hot journal, or a missing or damaged `tombstone.key` (`error` `tombstone_key`).
+`muninn --version` prints `muninn <version>`.
 
 **Environment:** `MUNINN_HOME` data dir (default `~/.local/share/muninn`); `MUNINN_ROOTS` JSON map of
 provider root name to path (tests); `MUNINN_PYTHON` interpreter for `bin/muninn`; `MUNINN_PRETTY=1` indent;
@@ -186,27 +187,28 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `data_dir_mode` | error | the data dir is mode 0700 | its mode, or `absent` |
 | `file_modes` | error | no data file is readable by group or others | names of loose files |
 | `unexpected_files` | error | only known files are in the data dir | names of stray files |
-| `upgrade_snapshot` | warn | no pre-upgrade copy of the store is left in the data dir | names of leftover `muninn.sqlite.pre-upgrade-*` files |
 | `unowned_journal` | error | no crashed writer's journal is lying around | explanation |
 | `store_readable` | error | the database opens read-only and has the right schema | the refusal message if not, such as `schema v1, need v2` or `cannot read the store (SQLITE_BUSY)` |
 | `journal_mode` | error | SQLite journal mode is `delete` | the mode |
 | `fts_secure_delete` | error | both full-text indexes have secure delete on | none |
 | `quick_check` | error | SQLite's `quick_check` says `ok` | its first 80 characters |
-| `writer_secure_delete` | error | writer connections turn secure delete on | none |
-| `heartbeat` | error | the poller finished a pass, or a running pass stamped `alive_at`, within 3 intervals (`poller: ok`) | `index_age_s` |
-| `launchd_job` | error | the launchd job is loaded with a live process | its pid |
-| `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
-| `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
-| `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
-| `failed_sources` | warn | no file failed in the last pass | count failed; the SessionStart block, and a recall block that has a hit, also say so |
-| `poller_error` | warn | the last poller pass did not end in an exception; the poller's next good pass clears it, a manual `ingest` does not | the exception class name only |
-| `unreadable_files` | warn | the last pass could open every transcript file | count of files it could not open (permissions; a file that vanished does not count); the SessionStart block, and a recall block that has a hit, also say so |
-| `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
-| `db_size` | warn | the database is under 2 GB | its size; the threshold |
-| `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
 | `missing_sources` | info | always | count of indexed files no longer on disk |
 | `other_threads` | info | always | count of unrecognised thread types |
 | `reread` | info | always | `N of M`: active sources still to be re-read after a classifier change; failing sources are reported by `failed_sources` |
+| `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
+| `db_size` | warn | the database is under 2 GB | its size; the threshold |
+| `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
+| `writer_secure_delete` | error | writer connections turn secure delete on | none |
+| `heartbeat` | error | the poller finished a pass, or a running pass stamped `alive_at`, within 3 intervals (`poller: ok`) | `index_age_s` |
+| `failed_sources` | warn | no file failed in the last pass | count failed; the SessionStart block, and a recall block that has a hit, also say so |
+| `poller_error` | warn | the last poller pass did not end in an exception; the poller's next good pass clears it, a manual `ingest` does not | the exception class name only |
+| `unreadable_files` | warn | the last pass could open every transcript file | count of files it could not open (permissions; a file that vanished does not count); the SessionStart block, and a recall block that has a hit, also say so |
+| `aside_files` | warn | no unreadable store set aside by `rebuild` is left in the data dir | names of `muninn.sqlite.unreadable-*` files |
+| `upgrade_snapshot` | warn | no pre-upgrade copy of the store is left in the data dir | names of leftover `muninn.sqlite.pre-upgrade-*` files |
+| `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
+| `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
+| `launchd_job` | error | the launchd job is loaded with a live process | its pid |
+| `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `roots_present` | info | always | names of provider roots that do not exist |
 
 ## Per-prompt recall switch (`recall.off`)
@@ -247,4 +249,5 @@ the next prompt; no restart is needed.
 re-read after a classifier change still shows `poller` `ok` while `index_age_s` keeps counting from the last finished pass);
 `calls.jsonl` and `calls.jsonl.1` one allowlisted line per CLI call (ids and counts, no text; rotated at 1 MiB);
 `poller.log` and `poller.log.1` poller events (rotated likewise; the plist sends launchd's own stdout and stderr to `/dev/null`, and a poller whose plist still sends them to the log silences them itself, so nothing reaches the log except allowlisted lines; launchd restarts the poller on any exit, a clean stop included, so only `launchctl bootout` keeps it down); `tombstones.jsonl` erase records; `tombstone.key` (exactly 32 random bytes, mode 0600, created whole the first time an erase needs it and never by a dry run, survives `rebuild`, never logged) the key that makes the content tombstones in `tombstones.jsonl` HMAC-SHA256 tags (`ev2:`) instead of plain hashes, so an erased short text cannot be confirmed by guessing. A new key is never made while keyed tombstones exist, because it would stop them matching: if the file is missing or damaged then, `ingest`, `rebuild` and `erase` exit 4 with `tombstone_key` and `doctor` fails `tombstone_key`; restore the file from a backup; `muninn.sqlite.unreadable-<UTC timestamp>` a store `rebuild` set aside because it could not be read. `erase` cannot scrub it (it is not a readable database), so it may still hold erased text: `erase` names every such file in `aside_files` with the exact command in `aside_remove` (`rm -- <path>`), and `doctor` warns (`aside_files`) while one exists. Nothing deletes it for you; salvage what you need, then run that command;
+`muninn.sqlite-journal` SQLite's rollback journal, allowed by `unexpected_files` but a leftover one fails `unowned_journal`;
 `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). During an upgrade that migrates the schema, `muninn.sqlite.pre-upgrade-<sha>` (mode 0600) exists briefly and is allowed. Anything else fails `unexpected_files`.

@@ -10,4 +10,4 @@ class name) and rotate at 1 MiB, two files. The installer log records a message,
 a failed command's stderr tail, never stdout. The install record stores config key names, never values.
 
 **Consequences.** Support gets timing, counts and error classes, not what a failure was about. Adding a log field means
-adding it to the allowlist in `muninn/obs.py` and covering it in `tests/test_obs.py`.
+adding it to the allowlist in `muninn/obs_log.py` and covering it in `tests/test_obs.py`.

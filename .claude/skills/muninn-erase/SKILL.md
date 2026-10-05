@@ -9,7 +9,7 @@ disable-model-invocation: true
     muninn erase --session S | --event REF | --match TEXT            # dry run (default)
     muninn erase --session S | --event REF | --match TEXT --yes      # actually erase
 
-Why the care: erase is permanent. It secure-deletes rows and full-text entries and writes tombstones (ids and hashes only) so a rescan cannot bring the content back, including through a fork copy. `--match` also searches knowledge retract reasons.
+Why the care: erase is permanent. It secure-deletes rows and full-text entries and writes tombstones (ids and hashes only) so a rescan cannot bring the content back, including through a fork copy. `--match` searches event text, knowledge text, tags, retract reasons and citation quotes.
 
 ## Procedure
 1. Run the dry run first and show the user the targets it lists. Do not add `--yes` yet.
