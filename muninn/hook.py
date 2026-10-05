@@ -385,8 +385,9 @@ def _start_block(
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
-    # The count is a diagnostic: its failure must not cost the block.
-    with contextlib.suppress(Exception):
+    # The count is a diagnostic: a store fault must not cost the block, but
+    # anything else is a bug and reaches the outer handler.
+    with contextlib.suppress(store.StoreUnavailableError, sqlite3.Error):
         trace["withheld"] = _KNOWLEDGE.withheld(conn, ids)
     trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
     return render_block(

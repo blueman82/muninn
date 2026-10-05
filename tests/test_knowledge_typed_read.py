@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from typing import Any
 from unittest import mock
 
-from muninn import hook, knowledge, obs_stats, query
+from muninn import hook, knowledge, obs_stats, query, store
 from muninn.query import hits
 from tests.hook_support import RecallCase
 from tests.knowledge_support import KnowCase, kid
@@ -147,7 +148,26 @@ class RestrictedTests(RecallCase):
         hook.session_start(self.payload(), "claude", self.env, trace=trace)
         self.assertEqual(trace["withheld"], {"expired": 1, "restricted": 1})
 
-    def test_withheld_failure_keeps_the_block(self) -> None:
+    def test_a_store_fault_in_withheld_keeps_the_block(self) -> None:
+        self.add(text="use the zebra cache")
+        for fault in (
+            sqlite3.OperationalError("disk I/O error"),
+            store.StoreUnavailableError("locked"),
+            store.HotJournalError("hot"),
+        ):
+            trace: dict[str, object] = {}
+            with (
+                self.subTest(fault=type(fault).__name__),
+                mock.patch.object(knowledge, "withheld", side_effect=fault),
+            ):
+                out = hook.session_start(
+                    self.payload(), "claude", self.env, trace=trace
+                )
+            self.assertNotIn("error", trace)
+            self.assertNotIn("withheld", trace)
+            self.assertIn("zebra", str(out["hookSpecificOutput"]))
+
+    def test_a_bug_in_withheld_reaches_the_outer_handler(self) -> None:
         self.add(text="use the zebra cache")
         trace: dict[str, object] = {}
         with mock.patch.object(
@@ -156,10 +176,8 @@ class RestrictedTests(RecallCase):
             out = hook.session_start(
                 self.payload(), "claude", self.env, trace=trace
             )
-        self.assertNotIn("error", trace)
-        self.assertNotIn("withheld", trace)
-        context = str(out["hookSpecificOutput"])
-        self.assertIn("zebra", context)
+        self.assertEqual(trace["error"], "error")
+        self.assertNotIn("zebra", str(out["hookSpecificOutput"]))
 
     def test_restricted_is_still_visible_through_list_and_show(self) -> None:
         got = self.add(text="private note", sensitivity="restricted")

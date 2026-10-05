@@ -9,6 +9,7 @@ external-content knowledge_fts index stay valid without a reindex.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 
 from muninn.store_schema import KNOWLEDGE_TABLE, KNOWLEDGE_TRIGGERS
@@ -46,27 +47,51 @@ def migrate_v1_to_v2(conn: sqlite3.Connection) -> int | None:
                 copied = _swap_knowledge(conn)
             conn.execute("COMMIT")
         except BaseException:
-            conn.execute("ROLLBACK")
+            # A failing ROLLBACK must not replace the error that caused it.
+            with contextlib.suppress(sqlite3.Error):
+                conn.execute("ROLLBACK")
             raise
     finally:
-        conn.execute(f"PRAGMA foreign_keys={'ON' if prior_fk else 'OFF'}")
+        # Same reason: restoring the pragma must not mask the real failure.
+        with contextlib.suppress(sqlite3.Error):
+            conn.execute(f"PRAGMA foreign_keys={'ON' if prior_fk else 'OFF'}")
     return copied
+
+
+def _violations(conn: sqlite3.Connection) -> int:
+    """Count the rows ``PRAGMA foreign_key_check`` reports."""
+    return len(conn.execute("PRAGMA foreign_key_check").fetchall())
 
 
 def _swap_knowledge(conn: sqlite3.Connection) -> int:
     """Run the create, copy, drop, rename steps inside the open transaction.
 
+    Before the swap can commit the copy is checked: the new table must hold
+    as many rows as the old one and the swap must add no foreign key
+    violation (one that was already there is not the migration's to fix).
+
     Returns:
         The number of rows copied.
+
+    Raises:
+        sqlite3.IntegrityError: If rows were lost or a link was broken; the
+            caller rolls the whole swap back.
     """
+    before = _violations(conn)
+    wanted = conn.execute("SELECT count(*) FROM knowledge").fetchone()[0]
     conn.execute(KNOWLEDGE_TABLE.format(name="knowledge_v2"))
-    copied = conn.execute(
+    conn.execute(
         f"INSERT INTO knowledge_v2 ({V1_KNOWLEDGE_COLUMNS})"
         f" SELECT {V1_KNOWLEDGE_COLUMNS} FROM knowledge"
-    ).rowcount
+    )
+    copied = conn.execute("SELECT count(*) FROM knowledge_v2").fetchone()[0]
+    if copied != wanted:
+        raise sqlite3.IntegrityError("migration copied the wrong row count")
     conn.execute("DROP TABLE knowledge")  # takes its three triggers with it
     conn.execute("ALTER TABLE knowledge_v2 RENAME TO knowledge")
     for trigger in KNOWLEDGE_TRIGGERS:
         conn.execute(trigger)
+    if _violations(conn) > before:
+        raise sqlite3.IntegrityError("migration broke a foreign key")
     conn.execute("PRAGMA user_version=2")
-    return copied
+    return int(copied)

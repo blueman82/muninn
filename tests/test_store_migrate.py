@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from muninn import store
 from muninn.store_migrate import migrate_v1_to_v2
@@ -208,6 +210,156 @@ class MigrateTests(StoreCase):
         make_v1(self.db)
         with self.assertRaises(store.StoreUnavailableError):
             store.connect_ro(self.db)
+
+
+class SwapFailureTests(StoreCase):
+    """A swap that fails for real rolls back, reports the true error."""
+
+    def v1_with_clash(self) -> None:
+        """Make a v1 file whose swap fails when it creates knowledge_v2."""
+        make_v1(self.db)
+        raw = sqlite3.connect(self.db, isolation_level=None)
+        raw.execute("CREATE TABLE knowledge_v2 (x INTEGER)")
+        raw.close()
+
+    def assert_still_v1(self) -> None:
+        """Check the file is the untouched v1 ledger."""
+        raw = sqlite3.connect(self.db)
+        self.addCleanup(raw.close)
+        self.assertEqual(raw.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(rows(raw, "SELECT count(*) FROM knowledge"), [(4,)])
+        cols = [r[1] for r in raw.execute("PRAGMA table_info(knowledge)")]
+        self.assertNotIn("tags", cols)
+
+    def test_foreign_keys_restored_after_a_real_mid_swap_failure(self) -> None:
+        for before in (1, 0):
+            with self.subTest(foreign_keys_before=before):
+                self.v1_with_clash()
+                conn = sqlite3.connect(self.db, isolation_level=None)
+                self.addCleanup(conn.close)
+                conn.execute(f"PRAGMA foreign_keys={before}")
+                with self.assertRaises(sqlite3.OperationalError):
+                    migrate_v1_to_v2(conn)
+                self.assertEqual(
+                    conn.execute("PRAGMA foreign_keys").fetchone()[0], before
+                )
+                self.assertFalse(conn.in_transaction)
+                self.assert_still_v1()
+                conn.close()
+                self.db.unlink()
+
+    def test_connect_rw_logs_the_true_exception_class(self) -> None:
+        self.v1_with_clash()
+        with self.assertRaises(sqlite3.OperationalError):
+            store.connect_rw(self.db, fullfsync=False)
+        text = (self.db.parent / "poller.log").read_text()
+        (got,) = [json.loads(line) for line in text.splitlines()]
+        self.assertEqual(
+            (got["event"], got["exc"]), ("migrate_failed", "OperationalError")
+        )
+
+    def test_failing_commit_rollback_and_pragma_keep_the_first_error(
+        self,
+    ) -> None:
+        make_v1(self.db)
+
+        class Broken(sqlite3.Connection):
+            """COMMIT fails, then so do ROLLBACK and the pragma restore."""
+
+            def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
+                if sql == "COMMIT":
+                    raise sqlite3.OperationalError("commit failed")
+                if sql == "ROLLBACK":
+                    raise sqlite3.DatabaseError("rollback failed")
+                if sql == "PRAGMA foreign_keys=ON":
+                    raise sqlite3.DatabaseError("pragma failed")
+                return super().execute(sql, *args)
+
+        conn = sqlite3.connect(self.db, isolation_level=None, factory=Broken)
+        # The prior state, set past the override that breaks the restore.
+        sqlite3.Connection.execute(conn, "PRAGMA foreign_keys=ON")
+        with self.assertRaisesRegex(sqlite3.OperationalError, "commit failed"):
+            migrate_v1_to_v2(conn)
+        conn.close()
+        self.assert_still_v1()
+
+    def swap_with(self, tamper: str) -> sqlite3.Connection:
+        """Run the migration with ``tamper`` run right after the copy."""
+        make_v1(self.db)
+
+        class Tampering(sqlite3.Connection):
+            """Damages the new table once the copy statement has run."""
+
+            def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
+                done = super().execute(sql, *args)
+                if sql.startswith("INSERT INTO knowledge_v2"):
+                    super().execute(tamper)
+                return done
+
+        conn = sqlite3.connect(
+            self.db, isolation_level=None, factory=Tampering
+        )
+        self.addCleanup(conn.close)
+        return conn
+
+    def test_lost_rows_roll_the_migration_back(self) -> None:
+        conn = self.swap_with("DELETE FROM knowledge_v2 WHERE id = 1")
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "row count"):
+            migrate_v1_to_v2(conn)
+        self.assert_still_v1()
+
+    def test_a_new_foreign_key_violation_rolls_the_migration_back(
+        self,
+    ) -> None:
+        conn = self.swap_with("UPDATE knowledge_v2 SET supersedes = 99")
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "foreign key"):
+            migrate_v1_to_v2(conn)
+        self.assert_still_v1()
+
+    def test_an_old_foreign_key_violation_does_not_block_the_upgrade(
+        self,
+    ) -> None:
+        make_v1(self.db)
+        raw = sqlite3.connect(self.db, isolation_level=None)
+        raw.execute(
+            "INSERT INTO citation(knowledge_id, provider, thread_id, line,"
+            " part, line_sha256, role, kind, quote) VALUES (99, 'claude',"
+            " 't', 9, 1, 'h', 'user', 'prompt', 'orphan')"
+        )
+        raw.close()
+        conn = self.rw()
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+
+    def test_two_real_connections_racing_migrate_once(self) -> None:
+        make_v1(self.db)
+        gate = threading.Barrier(2, timeout=10)
+        real = store.migrate_v1_to_v2
+
+        def after_both_saw_v1(conn: sqlite3.Connection) -> int | None:
+            gate.wait()  # neither starts before both read user_version 1
+            return real(conn)
+
+        failures: list[BaseException] = []
+
+        def open_store() -> None:
+            try:
+                store.connect_rw(self.db, fullfsync=False).close()
+            except BaseException as exc:  # reported on the main thread
+                failures.append(exc)
+
+        with mock.patch.object(store, "migrate_v1_to_v2", after_both_saw_v1):
+            workers = [threading.Thread(target=open_store) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(30)
+        self.assertEqual(failures, [])
+        text = (self.db.parent / "poller.log").read_text()
+        events = sorted(json.loads(x)["event"] for x in text.splitlines())
+        self.assertEqual(events, ["migrate_raced", "migrated"])
+        self.assertEqual(
+            self.rw().execute("PRAGMA user_version").fetchone()[0], 2
+        )
 
 
 if __name__ == "__main__":
