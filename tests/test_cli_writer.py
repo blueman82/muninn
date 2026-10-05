@@ -152,7 +152,35 @@ class ServeTests(CliCase):
         )
         self.addCleanup(proc.wait)
         self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        self.proc = proc
         return proc
+
+    def fail_if_exited(self, what: str) -> None:
+        """Fail at once, with a diagnosis, if the poller process is gone.
+
+        Without this a poller that crashes at startup leaves the waits
+        below spinning for their whole timeout with nothing to read.
+
+        Args:
+            what: What the caller was still waiting for.
+
+        Raises:
+            AssertionError: If the process has exited.
+        """
+        code = self.proc.poll()
+        if code is not None:
+            tail = self.log_text()[-500:]
+            raise AssertionError(
+                f"serve exited with {code} before {what}; poller.log "
+                f"ends: {tail!r}"
+            )
+
+    def log_text(self) -> str:
+        """Return ``poller.log``, or an empty string if it is not there."""
+        try:
+            return (self.home / "poller.log").read_text()
+        except FileNotFoundError:
+            return ""
 
     def wait_status(self, key: str, timeout: float = 60) -> dict[str, Any]:
         """Wait until the heartbeat file reports a truthy ``key``.
@@ -165,13 +193,14 @@ class ServeTests(CliCase):
             The status document that contains the field.
 
         Raises:
-            AssertionError: If the field never appears.
+            AssertionError: If the field never appears or serve exits.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             status = obs.read_status(self.home)
             if status.get(key):
                 return status
+            self.fail_if_exited(f"{key} appeared in status.json")
             time.sleep(0.05)
         raise AssertionError(f"no {key} in status.json")
 
@@ -196,16 +225,17 @@ class ServeTests(CliCase):
             timeout: Seconds to wait before failing the test.
 
         Raises:
-            AssertionError: If the text never appears.
+            AssertionError: If the text never appears or serve exits.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if needle in (self.home / "poller.log").read_text():
+            if needle in self.log_text():
                 return
+            self.fail_if_exited(f"poller.log had {needle}")
             time.sleep(0.05)
         raise AssertionError(f"poller.log never had {needle}")
 
-    def test_serve_sigterm_between_sources(self) -> None:
+    def test_serve_sigterm_during_idle_sleep(self) -> None:
         self.session(TID, f"{CANARY} in a prompt", "a reply")
         proc = self.start_serve()
         status = self.wait_status("passes")
@@ -255,8 +285,8 @@ class ServeTests(CliCase):
         for n in range(300):
             self.session(f"thr-{n:04d}", f"prompt {n}", f"reply {n}")
         proc = self.start_serve(interval="60")
-        self.wait_started()
-        time.sleep(0.2)  # most likely inside the first pass
+        # The alive stamp exists only while a pass holds the writer lock.
+        self.wait_status(ALIVE_AT)
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(timeout=60), 0)
         self.assertFalse((self.home / "muninn.sqlite-journal").exists())

@@ -120,6 +120,42 @@ class ServeAliveTests(CliCase):
         self.assertEqual(result, (0, None))
         self.assertEqual(fired, [1])
 
+    def test_a_stop_after_the_heartbeat_loses_the_pass_line(self) -> None:
+        """Pinned: the pass is counted, its log line may be lost, exit 0.
+
+        The heartbeat is the record of a finished pass; the log line is
+        news for a human. A stop in between ends the poller cleanly rather
+        than finishing a line, so the log shows ``stop`` with no ``pass``.
+        """
+        real_heartbeat = cli_serve.heartbeat
+
+        def heartbeat_then_sigterm(*args: Any, **kwargs: Any) -> None:
+            real_heartbeat(*args, **kwargs)
+            os.kill(os.getpid(), signal.SIGTERM)  # the poller's handler
+
+        self.keep_signal_handlers()
+        with (
+            mock.patch.object(
+                cli_serve.ingest,
+                "ingest",
+                lambda *_, **__: ingest.PassStats(files_changed=1),
+            ),
+            mock.patch.object(cli_serve, "heartbeat", heartbeat_then_sigterm),
+            mock.patch.object(
+                cli_serve.time,
+                "sleep",
+                side_effect=AssertionError("kept running after the stop"),
+            ),
+        ):
+            result = cli_serve.serve(
+                Namespace(interval=60.0), self.env, self.home, {}
+            )
+        self.assertEqual(result, (0, None))
+        self.assertEqual(self.status()["passes"], 1)
+        lines = (self.home / "poller.log").read_text().splitlines()
+        events = [json.loads(x)["event"] for x in lines]
+        self.assertEqual(events, ["start", "stop"])
+
     def test_a_stop_noted_mid_transaction_survives_a_silent_rollback(
         self,
     ) -> None:
