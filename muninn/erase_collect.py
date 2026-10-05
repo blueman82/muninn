@@ -155,7 +155,7 @@ def collect_event(conn: sqlite3.Connection, target: Target, ref: str) -> None:
 def collect_match(
     conn: sqlite3.Connection, target: Target, match: str
 ) -> None:
-    """Collect every event line, knowledge text, reason and quote with text.
+    """Collect every event line, knowledge text, reason, tag and quote.
 
     Args:
         conn: Read connection.
@@ -176,8 +176,9 @@ def collect_match(
         for r in conn.execute(
             "SELECT id FROM knowledge WHERE (text IS NOT NULL"
             " AND instr(text, ?) > 0) OR (retract_reason IS NOT NULL"
-            " AND instr(retract_reason, ?) > 0)",
-            (match, match),
+            " AND instr(retract_reason, ?) > 0) OR (tags IS NOT NULL"
+            " AND instr(tags, ?) > 0)",
+            (match, match, match),
         )
     }
     target.citations |= {

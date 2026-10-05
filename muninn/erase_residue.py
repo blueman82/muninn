@@ -30,6 +30,7 @@ def _texts(conn: sqlite3.Connection, target: Target) -> list[str]:
         ("event", "text", target.events),
         ("knowledge", "text", sorted(target.knowledge)),
         ("knowledge", "retract_reason", sorted(target.knowledge)),
+        ("knowledge", "tags", sorted(target.knowledge)),
         ("citation", "quote", sorted(target.citations)),
     ):
         for start in range(0, len(ids), CHUNK):
@@ -78,12 +79,13 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
         needle: Bytes to look for.
 
     Returns:
-        True if any event, knowledge text or reason, or quote has it.
+        True if any event, knowledge text, reason or tags, or quote has it.
     """
     for table, column in (
         ("event", "text"),
         ("knowledge", "text"),
         ("knowledge", "retract_reason"),
+        ("knowledge", "tags"),
         ("citation", "quote"),
     ):
         # CAST to BLOB so instr compares bytes, matching the needle.
