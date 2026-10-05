@@ -185,22 +185,33 @@ class ServeTests(CliCase):
 
         Args:
             timeout: Seconds to wait before failing the test.
+        """
+        self.wait_log('"event":"start"', timeout)
+
+    def wait_log(self, needle: str, timeout: float = 60) -> None:
+        """Wait until ``poller.log`` contains ``needle``.
+
+        Args:
+            needle: Text that must appear in the log.
+            timeout: Seconds to wait before failing the test.
 
         Raises:
-            AssertionError: If the poller never logs its start.
+            AssertionError: If the text never appears.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            text = (self.home / "poller.log").read_text()
-            if '"event":"start"' in text:
+            if needle in (self.home / "poller.log").read_text():
                 return
             time.sleep(0.05)
-        raise AssertionError("poller never logged its start")
+        raise AssertionError(f"poller.log never had {needle}")
 
     def test_serve_sigterm_between_sources(self) -> None:
         self.session(TID, f"{CANARY} in a prompt", "a reply")
         proc = self.start_serve()
         status = self.wait_status("passes")
+        # The heartbeat is written before the pass line, so SIGTERM sent on
+        # the heartbeat alone can land between the two and lose the line.
+        self.wait_log('"event":"pass"')
         proc.send_signal(signal.SIGTERM)
         self.assertEqual(proc.wait(timeout=30), 0)
         self.assertFalse((self.home / "muninn.sqlite-journal").exists())
