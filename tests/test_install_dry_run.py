@@ -57,6 +57,18 @@ class UpgradePlanTest(unittest.TestCase):
         self.assertNotIn("config keys", self.said)
         self.assertIn("would not touch Claude or Codex settings", self.said)
 
+    def test_explains_history_import_would_be_skipped(self) -> None:
+        self.assertIn(
+            "History import: would be skipped during upgrade; existing index "
+            "would be retained.",
+            self.said,
+        )
+        self.assertIn(
+            "Claude and Codex polling would resume after install; Cursor "
+            "would not be re-imported.",
+            self.said,
+        )
+
     def test_does_not_name_a_record_directory_it_never_creates(self) -> None:
         self.assertNotIn("record in", self.said)
         self.assertIn("nothing was written", self.said)

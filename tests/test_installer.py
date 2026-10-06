@@ -275,6 +275,22 @@ class UpgradeTest(unittest.TestCase):
         record = self.lib / co.INSTALL_RECORD
         self.assertIn(f"record in {record}", "\n".join(w.out))
 
+    def test_upgrade_explains_history_import_behavior(self) -> None:
+        """An upgrade says which provider history work it skips."""
+        w = self.w
+        w.out.clear()
+        co.install(self.ctx, w.repo, self.sha2)
+        output = "\n".join(w.out)
+        self.assertIn(
+            "History import: skipped during upgrade; existing index retained.",
+            output,
+        )
+        self.assertIn(
+            "Claude and Codex polling resumes after install; Cursor is not "
+            "re-imported.",
+            output,
+        )
+
     def test_upgrade_leaves_the_recall_switch_as_the_owner_set_it(
         self,
     ) -> None:

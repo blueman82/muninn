@@ -76,6 +76,7 @@ from install.snapshot import discard, snapshot_store
 from install.steps_config import claude, codex, record
 from install.steps_release import (
     fresh,
+    history_upgrade,
     ingest_fresh,
     muninn_env,
     pin,
@@ -138,6 +139,7 @@ __all__ = [
     "edit_settings",
     "enable",
     "fresh",
+    "history_upgrade",
     "hook_commands",
     "ingest_fresh",
     "install",
@@ -183,6 +185,7 @@ FRESH_STEPS: tuple[Step, ...] = (
 )
 # The copy comes before pin: nothing may change if it cannot be made.
 UPGRADE_STEPS: tuple[Step, ...] = (
+    history_upgrade,
     snapshot_store,
     pin,
     restart,
