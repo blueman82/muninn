@@ -39,7 +39,8 @@ run `/hooks` if the installer prints `OWNER STEP`.
 
 It re-pins the commit, restarts the poller, verifies, then deletes every other
 release. It keeps the existing index instead of running the fresh-install
-history import; Claude and Codex polling resumes, while Cursor is not
+history import; after a successful upgrade, Claude and Codex polling resumes,
+while Cursor is not
 re-imported. Provider config is not touched. When a release changes how transcripts
 are classified (`stats` shows `classifier_version`), the poller re-reads every
 transcript once after the upgrade, Claude and Codex alike, one source at a
