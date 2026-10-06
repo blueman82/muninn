@@ -5,8 +5,10 @@ flowchart LR
   subgraph Providers["Provider transcripts (read only)"]
     CC["Claude Code<br/>~/.claude/projects"]
     CX["Codex<br/>sessions + archived"]
+    CUR["Cursor database<br/>state.vscdb"]
   end
   P["poller<br/>muninn serve (launchd, 60 s)"]
+  CI["fresh install /<br/>muninn ingest --full"]
   DB[("muninn.sqlite<br/>events, knowledge,<br/>tombstones, FTS5")]
   CLI["muninn CLI<br/>search, open, know,<br/>stats, doctor, compact,<br/>rebuild"]
   H["hooks<br/>SessionStart,<br/>UserPromptSubmit"]
@@ -15,6 +17,8 @@ flowchart LR
   CC --> P
   CX --> P
   P -->|"ingest: classify, redact"| DB
+  CUR --> CI
+  CI -->|"read-only import;<br/>no polling"| DB
   P --> L
   DB --> CLI
   DB --> H

@@ -1,7 +1,7 @@
 ![Muninn: a rune-hung raven in flight over a night sky](assets/muninn-banner-wide.png)
 # Muninn: cross-provider memory and knowledge
 
-**Muninn: Odin's raven of memory, for your Claude Code and Codex sessions.**
+**Muninn: Odin's raven of memory, for your Claude Code, Codex and Cursor history.**
 
 It gives both one shared memory of past sessions plus a small ledger of cited knowledge: a Python
 3.13 standard-library CLI (`muninn`) over one SQLite file, kept current by a launchd poller.
@@ -9,7 +9,8 @@ Everything it returns is untrusted historical data, never instructions. MIT lice
 
 ## Install, upgrade, uninstall, rollback
 
-Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
+Needs macOS, Python 3.13+, git, and Claude Code and/or Codex for the hook integrations.
+Cursor is optional; Muninn can import its local history database without Cursor installed.
 
     git clone https://github.com/blueman82/muninn && cd muninn
     bin/muninn-install --check   # plain-sentence preview, writes nothing
@@ -31,7 +32,10 @@ Needs macOS, Python 3.13+, git, and Claude Code and/or Codex.
 ## What it stores
 
 - Primary threads: Codex user and `chatgpt_handoff` sessions (a handoff's opening message is
-  `harness`) and Claude Code main transcripts. Only these are searched, pushed and cited by default.
+  `harness`), Claude Code main transcripts, and imported Cursor conversations. Only primary threads
+  are searched, pushed and cited by default.
+- Cursor conversations are imported read-only from the standard local database during fresh install
+  and `muninn ingest --full`. Cursor is not required, and its database is not polled.
 - Event kinds: `prompt`, `reply`, `tool_call`, tagged `harness` text, and `tool_error`, a redacted
   head and tail of an error-bearing tool output (never pushed and never citable).
 - Subagent threads are also indexed, as class `subagent`, but stay out of default search, both hook
