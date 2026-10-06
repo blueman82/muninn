@@ -168,7 +168,7 @@ def _add_maintenance(cmd: _Commands) -> None:
     what.add_argument("--match")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--yes", action="store_true", help="really erase")
-    p = cmd.add("ingest", "catch up with the provider transcripts")
+    p = cmd.add("ingest", "catch up with provider history")
     p.add_argument("--full", action="store_true")
     p = cmd.add("serve", "the launchd poller")
     p.add_argument("--interval", type=float, default=60.0)

@@ -258,8 +258,15 @@ class Fake:
             assert env.get("MUNINN_HOOK_DISABLE") == "1" and input == b"{}"
             return done(b"{}")
         if args[0] == "ingest":
+            assert env.get("HOME") == str(self.home), "ingest saw another HOME"
+            assert args == ["ingest", "--full"], args
             make_store(Path(env["MUNINN_HOME"]), self.store_version)
             return done()
+        if args == ["stats"]:
+            assert env.get("HOME") == str(self.home), "stats saw another HOME"
+            return done(
+                b'{"events_by_provider":{"claude":2,"codex":3,"cursor":1}}'
+            )
         assert args == ["doctor"], args
         return done(rc=self.doctor)
 

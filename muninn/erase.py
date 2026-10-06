@@ -85,9 +85,13 @@ def _provider_files(target: Target, roots: Mapping[str, Path]) -> list[str]:
     """List transcript files the erased content came from (never touched)."""
     return sorted(
         {
-            str(roots[s["root"]] / s["path"])
+            (
+                s["path"].rsplit("#", 1)[0]
+                if s["root"] == "cursor-imports"
+                else str(roots[s["root"]] / s["path"])
+            )
             for s in target.touched.values()
-            if s["root"] in roots
+            if s["root"] in roots or s["root"] == "cursor-imports"
         }
     )
 

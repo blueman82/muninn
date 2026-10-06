@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from install import installer as co
+from muninn.cursor_import import default_database
 from tests.installer_support import World, git
 
 
@@ -74,6 +75,26 @@ class FreshPlanTest(unittest.TestCase):
         self.assertIn("Claude Code left unconfigured", said)
         self.assertNotIn("add the Codex plugin", said)
         self.assertNotIn("add SessionStart", said)
+
+    def test_history_detection_reports_without_writing(self) -> None:
+        w = World(self)
+        history = w.home / ".claude/projects/project/session.jsonl"
+        cursor = default_database(w.home)
+        history.parent.mkdir(parents=True)
+        cursor.parent.mkdir(parents=True)
+        history.touch()
+        cursor.touch()
+
+        co.install(w.ctx(fresh=True, dry_run=True), w.repo, w.sha)
+
+        said = "\n".join(w.out)
+        self.assertIn("Claude: found; would index", said)
+        self.assertIn("Codex: no history found", said)
+        self.assertIn("Cursor: found; would index", said)
+        self.assertFalse((w.home / ".local/share/muninn").exists())
+        self.assertFalse(
+            any(Path(call[0]).name == "muninn" for call in w.fake.calls)
+        )
 
 
 class DryRunWritesNothingTest(unittest.TestCase):

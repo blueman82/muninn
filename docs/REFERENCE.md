@@ -32,7 +32,7 @@ provider root name to path (tests); `MUNINN_PYTHON` interpreter for `bin/muninn`
 | `muninn quote-check REF QUOTE` | is QUOTE verbatim in that event? | match result |
 
 **search flags:** `--all-projects` widen beyond this repo; `--include-subagents`; `--include-current` also search the
-caller's own session; `--current-session ID` name it; `--kind a,b` event kinds; `--provider codex|claude`;
+caller's own session; `--current-session ID` name it; `--kind a,b` event kinds; `--provider codex|claude|cursor`;
 `--scope DIR` only events whose cwd is exactly DIR; `--since`/`--until`; `--session ID`; `--recent` newest first;
 `--limit N` upper bound on hits (page sizes vary with a byte budget); `--page N` when `has_more` is true, repeat with N+1,
 even if a page has no hits.
@@ -57,7 +57,7 @@ thread; `tool_error` redacted head and tail of an error-bearing tool output (nev
 **Thread classes:** `primary` (searched by default; this includes a Codex desktop session that continues a ChatGPT
 conversation, `thread_source` `chatgpt_handoff`, whose opening message, the pasted conversation and the request ChatGPT
 composed, is stored as `harness`), `subagent`,
-`reviewer`, `other` (unrecognised format, never guessed primary). **Providers:** `claude`, `codex`. **Source roots:** `claude-projects`, `codex-sessions`, `codex-archived`.
+`reviewer`, `other` (unrecognised format, never guessed primary). **Providers:** `claude`, `codex`, `cursor`. **Source roots:** `claude-projects`, `codex-sessions`, `codex-archived`, `cursor-imports`.
 
 ## Knowledge ledger
 
@@ -132,14 +132,14 @@ removed first) and starts the old release on it; a store the new release never t
 upgrade deletes the copy after the prune, because it holds transcript text; if the delete fails the installer warns, and
 `doctor` warns `upgrade_snapshot` until it is removed. `install-record.json` records `snapshot` (name, byte size, `from` and
 `to` versions, `state`: `deleted`, `restored` or `kept`), never content; `--check` names the copy and writes nothing.
-Read-only callers (hooks, `stats`, `doctor`) refuse a v1 file until a writer has migrated it, so hooks fail open (they exit 0
+Read-only callers (hooks, `stats`, `doctor`) refuse a v1 or v2 file until a writer has migrated it, so hooks fail open (they exit 0
 with a `memory unavailable (store_unavailable)` notice) in that window. `muninn rebuild` accepts a v1 or v2 old store.
 
 ## Running and maintaining
 
 | Command | What it does |
 |---|---|
-| `muninn ingest [--full]` | catch up with provider transcripts now; `--full` rescans everything. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `unreadable_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
+| `muninn ingest [--full]` | catch up with Claude and Codex provider transcripts now; `--full` rescans everything and imports Cursor history from `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` when present. Cursor data is read-only and is not polled. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `unreadable_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
 | `muninn serve [--interval S]` | the launchd poller loop (default 60 s); prints nothing |
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |

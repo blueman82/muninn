@@ -9,7 +9,7 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
-from muninn import classify, cli_core, erase, ingest, obs, store
+from muninn import classify, cli_core, cursor_import, erase, ingest, obs, store
 from muninn.cli_core import Env, Out, Record, Result, counts
 
 __all__ = ["compact", "erase_command", "heartbeat", "ingest_command"]
@@ -59,13 +59,24 @@ def heartbeat(
 def ingest_command(
     a: Namespace, env: Env, home: Path, record: Record
 ) -> Result:
-    """Run ``muninn ingest``: catch up with the provider transcripts."""
+    """Catch up with transcripts; a full pass also imports Cursor history."""
     stats = ingest.run_pass(
         home,
         ingest.default_roots(env),
         full=a.full,
         wait_s=cli_core.WRITER_WAIT_S,
     )
+    if a.full:
+        cursor_db = cursor_import.default_database(
+            Path(env.get("HOME") or Path.home())
+        )
+        if cursor_db.is_file():
+            cursor_import.run(
+                home,
+                cursor_db,
+                cli_core.current_dir(env),
+                cli_core.WRITER_WAIT_S,
+            )
     heartbeat(home, stats, env)
     out: Out = {"ingest": dataclasses.asdict(stats)}
     record["counts"] = counts(out["ingest"])

@@ -17,7 +17,7 @@ from muninn.tombstones import TombstoneRow, event_tag, tombstone_row
 
 # Providers blocked when a session has not been ingested yet, so a later
 # ingest cannot resurrect it.
-_ALL_PROVIDERS = ["codex", "claude"]
+_ALL_PROVIDERS = ["codex", "claude", "cursor"]
 
 
 @dataclass

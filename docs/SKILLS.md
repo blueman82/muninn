@@ -3,8 +3,8 @@
 `.claude/skills/muninn-*` and `.codex/skills/muninn-*/SKILL.md` hold one
 skill per user-facing command: `search`, `open`, `sessions` (also `session`),
 `know`, `quote-check`, `stats`, `doctor`, `compact`, `ingest`, `erase` and
-`rebuild`. They tell the model when to reach for the command and how to read
-its answer (snippets are navigation; open before citing). `erase` and `rebuild`
+`rebuild`. They tell the model when to reach for a command and how to read its
+answer (snippets are navigation; open before citing). `erase` and `rebuild`
 are destructive: their Codex skills set `allow_implicit_invocation: false`, and
 their Claude skills set `disable-model-invocation`, so only the owner can
 invoke them. `serve` and `hook` have no skill because launchd and the providers

@@ -1,4 +1,4 @@
-"""SQLite store: schema v2, connections, the writer lock, private files.
+"""SQLite store: schema v3, connections, the writer lock, private files.
 
 The store is one rollback-journal SQLite file under the data home.  Every
 writer takes the flock in `writer_lock` first, so there is exactly one
@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from muninn.obs_log import log_poller
-from muninn.store_migrate import migrate_v1_to_v2
+from muninn.store_migrate import migrate_v1_to_v2, migrate_v2_to_v3
 from muninn.store_schema import SCHEMA_SQL, SCHEMA_VERSION
 
 
@@ -124,16 +124,21 @@ def _ensure_dir(path: Path) -> None:
 
 
 def _migrate_logged(conn: sqlite3.Connection, home: Path) -> None:
-    """Run the v1 to v2 migration and leave one poller.log line about it.
+    """Migrate an older store and leave one poller.log line about it.
 
     The line says migrated, raced (another writer won) or failed, with the
     row count and duration; logging is best effort and never fails an open.
     """
     started = time.monotonic()
+    from_version = 1
     event, rows, exc = "migrated", None, None
     try:
-        rows = migrate_v1_to_v2(conn)
-        if rows is None:
+        from_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if from_version == 1:
+            rows = migrate_v1_to_v2(conn)
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        migrated = migrate_v2_to_v3(conn) if version == 2 else False
+        if rows is None and not migrated:
             event = "migrate_raced"
     except BaseException as err:
         event, exc = "migrate_failed", type(err).__name__
@@ -143,7 +148,7 @@ def _migrate_logged(conn: sqlite3.Connection, home: Path) -> None:
             home,
             {
                 "event": event,
-                "from_v": 1,
+                "from_v": from_version,
                 "to_v": SCHEMA_VERSION,
                 "rows": rows,
                 "ms": round((time.monotonic() - started) * 1000, 1),
@@ -153,11 +158,10 @@ def _migrate_logged(conn: sqlite3.Connection, home: Path) -> None:
 
 
 def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
-    """Create the schema on a new database, or bring a v1 file to v2.
+    """Create a new schema, or bring an older file to the current version.
 
-    A version 0 file gets the full schema.  A version 1 file is migrated in
-    place (``migrate_v1_to_v2``, logged to poller.log).  A current file is
-    left alone.
+    Version 0 gets the full schema. Versions 1 and 2 are migrated in place;
+    a current file is left alone.
 
     Args:
         conn: Autocommit read-write connection.
@@ -167,7 +171,7 @@ def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
         StoreUnavailableError: If the file holds any other schema version.
     """
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version == 1:
+    if version in (1, 2):
         _migrate_logged(conn, home)
         return
     if version == SCHEMA_VERSION:
