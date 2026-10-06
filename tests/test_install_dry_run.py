@@ -64,8 +64,8 @@ class UpgradePlanTest(unittest.TestCase):
             self.said,
         )
         self.assertIn(
-            "Claude and Codex polling would resume after install; Cursor "
-            "would not be re-imported.",
+            "Claude and Codex polling would resume after a successful "
+            "upgrade; Cursor would not be re-imported.",
             self.said,
         )
 

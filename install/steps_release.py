@@ -230,14 +230,14 @@ def history_upgrade(ctx: Ctx, _rec: Record) -> None:
             "would be retained."
         )
         ctx.say(
-            "Claude and Codex polling would resume after install; Cursor "
-            "would not be re-imported."
+            "Claude and Codex polling would resume after a successful "
+            "upgrade; Cursor would not be re-imported."
         )
         return
     ctx.say("History import: skipped during upgrade; existing index retained.")
     ctx.say(
-        "Claude and Codex polling resumes after install; Cursor is not "
-        "re-imported."
+        "Claude and Codex polling resumes after a successful upgrade; Cursor "
+        "is not re-imported."
     )
 
 

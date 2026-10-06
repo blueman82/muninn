@@ -286,8 +286,8 @@ class UpgradeTest(unittest.TestCase):
             output,
         )
         self.assertIn(
-            "Claude and Codex polling resumes after install; Cursor is not "
-            "re-imported.",
+            "Claude and Codex polling resumes after a successful upgrade; "
+            "Cursor is not re-imported.",
             output,
         )
 
