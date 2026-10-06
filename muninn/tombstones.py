@@ -20,7 +20,7 @@ from typing import Literal, TypedDict, cast
 
 from muninn.tombstone_key import KEYED_PREFIX, TOMBSTONE_FILE
 
-_PROVIDERS = ("codex", "claude")
+_PROVIDERS = ("codex", "claude", "cursor")
 # Columns that identify a tombstone; their order is the INSERT column order.
 _KEY = (
     "provider",
@@ -58,7 +58,7 @@ def tombstone_row(
     The row has a fixed set of fields, so no free-form field can be added.
 
     Args:
-        provider: ``codex`` or ``claude``.
+        provider: A supported transcript provider.
         level: ``session``, ``thread`` or ``line``.
         session_root: Session id, for a session tombstone.
         thread_id: Thread id, for a thread or line tombstone.
@@ -152,7 +152,7 @@ def erased_events(
 
     Args:
         conn: Any connection to the store.
-        provider: ``codex`` or ``claude``.
+        provider: A supported transcript provider.
         thread_id: The thread being read.
         forked_from_id: Its parent thread, if it is a fork.
 
@@ -186,7 +186,7 @@ def erased_ancestor_lines(
 
     Args:
         conn: Any connection to the store.
-        provider: ``codex`` or ``claude``.
+        provider: A supported transcript provider.
         thread_id: The thread being read.
         forked_from_id: Its parent thread, if it is a fork.
 

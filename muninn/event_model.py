@@ -62,7 +62,7 @@ class ThreadInfo:
     """Identity and classification of one transcript thread.
 
     Attributes:
-        provider: ``codex`` or ``claude``.
+        provider: ``codex``, ``claude`` or ``cursor``.
         thread_id: Provider thread identifier.
         session_root: Identifier of the session the thread belongs to.
         parent_thread_id: Thread that spawned this one, if known.

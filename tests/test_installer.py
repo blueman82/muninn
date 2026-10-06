@@ -13,6 +13,7 @@ from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
+from muninn.cursor_import import default_database
 from tests.installer_support import (
     CRED,
     World,
@@ -92,6 +93,38 @@ class FreshInstallTest(unittest.TestCase):
         said = "\n".join(self.w.out)
         self.assertIn(f"unlink {flag}", said)
         self.assertIn("docs/adr/0007", said)
+
+    def test_history_checklist_indexes_detected_providers(self) -> None:
+        w = self.w
+        claude = w.home / ".claude/projects/project/session.jsonl"
+        codex = w.home / ".codex/archived_sessions/rollout-one.jsonl"
+        cursor = default_database(w.home)
+        for path in (claude, codex, cursor):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+
+        self.install()
+
+        said = "\n".join(w.out)
+        self.assertIn("Claude: found; indexing...", said)
+        self.assertIn("Codex: found; indexing...", said)
+        self.assertIn("Cursor: found; indexing...", said)
+        self.assertIn(
+            "History indexing complete: Claude 2 events · Codex 3 events · "
+            "Cursor 1 event.",
+            said,
+        )
+        self.assertIn(
+            [str(w.home / ".local/bin/muninn"), "ingest", "--full"],
+            w.fake.calls,
+        )
+        self.assertFalse(any("import-cursor" in call for call in w.fake.calls))
+
+    def test_history_checklist_reports_missing_providers(self) -> None:
+        self.install()
+        said = "\n".join(self.w.out)
+        for provider in ("Claude", "Codex", "Cursor"):
+            self.assertIn(f"{provider}: no history found", said)
 
     def test_dry_run_creates_no_recall_switch(self) -> None:
         self.install(dry_run=True)

@@ -53,7 +53,7 @@ class MigrateTests(StoreCase):
     def test_v1_ledger_survives_with_ids_chain_citation_and_fts(self) -> None:
         make_v1(self.db)
         conn = self.rw()
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
         self.assertEqual(
             rows(conn, "SELECT id, status, supersedes FROM knowledge"),
             [
@@ -121,7 +121,7 @@ class MigrateTests(StoreCase):
         before = rows(conn, "SELECT * FROM knowledge")
         migrate_v1_to_v2(conn)
         self.assertEqual(rows(conn, "SELECT * FROM knowledge"), before)
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
 
     def test_foreign_keys_setting_is_restored(self) -> None:
         make_v1(self.db)
@@ -162,7 +162,7 @@ class MigrateTests(StoreCase):
         self.assertNotIn("knowledge_v2", names)
         # and the next open still migrates cleanly
         self.assertEqual(
-            self.rw().execute("PRAGMA user_version").fetchone()[0], 2
+            self.rw().execute("PRAGMA user_version").fetchone()[0], 3
         )
 
     def test_open_logs_one_migration_line(self) -> None:
@@ -173,7 +173,7 @@ class MigrateTests(StoreCase):
         got = json.loads(lines[0])
         self.assertEqual(
             (got["event"], got["from_v"], got["to_v"], got["rows"]),
-            ("migrated", 1, 2, 4),
+            ("migrated", 1, 3, 4),
         )
         self.rw()  # already v2: no second line
         self.assertEqual(
@@ -189,7 +189,7 @@ class MigrateTests(StoreCase):
         make_v1(self.db)
         conn = sqlite3.connect(self.db, isolation_level=None)
         self.addCleanup(conn.close)
-        conn.execute("PRAGMA user_version=2")  # the winner already committed
+        conn.execute("PRAGMA user_version=3")  # the winner already committed
         store._migrate_logged(conn, self.db.parent)
         (got,) = self._poller_events()
         self.assertEqual(got["event"], "migrate_raced")
@@ -328,7 +328,7 @@ class SwapFailureTests(StoreCase):
         )
         raw.close()
         conn = self.rw()
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
 
     def test_two_real_connections_racing_migrate_once(self) -> None:
         make_v1(self.db)
@@ -358,7 +358,77 @@ class SwapFailureTests(StoreCase):
         events = sorted(json.loads(x)["event"] for x in text.splitlines())
         self.assertEqual(events, ["migrate_raced", "migrated"])
         self.assertEqual(
-            self.rw().execute("PRAGMA user_version").fetchone()[0], 2
+            self.rw().execute("PRAGMA user_version").fetchone()[0], 3
+        )
+
+
+class ProviderMigrationTests(StoreCase):
+    """Schema v3 widens provider storage without losing existing rows."""
+
+    def test_v2_source_and_usage_rows_survive_provider_migration(
+        self,
+    ) -> None:
+        make_v1(self.db)
+        raw = sqlite3.connect(self.db, isolation_level=None)
+        migrate_v1_to_v2(raw)
+        raw.execute(
+            "INSERT INTO source(provider, thread_id, session_root,"
+            " thread_class, class_reason, replay_mode, root, path,"
+            " first_line_sha256, ino, size, mtime_ns, classifier_version,"
+            " first_seen, last_seen) VALUES"
+            " ('codex', 'old-thread', 'old-thread', 'primary', 'test',"
+            " 'none', 'codex-sessions', 'old.jsonl', 'hash', 1, 2, 3, 1,"
+            " 1, 1)"
+        )
+        source_id = raw.execute("SELECT id FROM source").fetchone()[0]
+        raw.execute(
+            "INSERT INTO event(source_id, line, part, byte_offset,"
+            " line_sha256, seq, role, kind, scope_id, text)"
+            " VALUES (?, 1, 1, 0, 'hash', 1, 'user', 'prompt', 1, 'old')",
+            (source_id,),
+        )
+        raw.execute(
+            "INSERT INTO usage(source_id, provider, session_root, calls)"
+            " VALUES (?, 'codex', 'old-thread', 4)",
+            (source_id,),
+        )
+        raw.close()
+
+        conn = self.rw()
+        self.assertEqual(
+            tuple(
+                conn.execute(
+                    "SELECT provider, thread_id FROM source"
+                ).fetchone()
+            ),
+            ("codex", "old-thread"),
+        )
+        self.assertEqual(
+            tuple(
+                conn.execute("SELECT provider, calls FROM usage").fetchone()
+            ),
+            ("codex", 4),
+        )
+        self.assertEqual(
+            conn.execute("SELECT text FROM event").fetchone()[0], "old"
+        )
+        conn.execute(
+            "INSERT INTO source(provider, thread_id, session_root,"
+            " thread_class, class_reason, replay_mode, root, path,"
+            " first_line_sha256, ino, size, mtime_ns, classifier_version,"
+            " first_seen, last_seen) VALUES"
+            " ('cursor', 'new-thread', 'new-thread', 'primary', 'cursor',"
+            " 'none', 'cursor-imports', 'new-thread', 'hash', 1, 2, 3, 1,"
+            " 1, 1)"
+        )
+        cursor_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            "INSERT INTO usage(source_id, provider, session_root)"
+            " VALUES (?, 'cursor', 'new-thread')",
+            (cursor_id,),
+        )
+        self.assertEqual(
+            conn.execute("PRAGMA foreign_key_check").fetchall(), []
         )
 
 

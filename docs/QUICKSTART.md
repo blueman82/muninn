@@ -84,6 +84,16 @@ changes the file.
     muninn --pretty stats    # counts; add --pretty for indented JSON
     muninn search "a phrase you remember"
 
+## Cursor history
+
+On a fresh install, Muninn checks for Cursor's database at
+`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and
+imports it when present. Cursor does not need to be installed. The installer
+prints which of Claude, Codex and Cursor have history to index; `--dry-run`
+reports what it would index without importing anything.
+
+    muninn search "a phrase from Cursor" --provider cursor
+
 ## What the installer leaves behind
 
 | Path | What |

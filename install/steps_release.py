@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import plistlib
 import shutil
 import sys
 import tarfile
 from pathlib import Path
+from typing import cast
 
 from install import configedit as ce
 from install.constants import (
@@ -32,8 +34,28 @@ from install.context import (
     wait,
 )
 from install.record import Record
+from muninn.cursor_import import default_database
 
 PLIST_SOURCE = "current/launchd/com.muninn.plist"
+HISTORY_ROOTS = (
+    ("Claude", ".claude/projects", "*.jsonl"),
+    ("Codex", ".codex/sessions", "rollout-*.jsonl"),
+    ("Codex", ".codex/archived_sessions", "rollout-*.jsonl"),
+)
+
+
+def _history_found(ctx: Ctx) -> dict[str, bool]:
+    """Detect provider history from paths without opening transcripts."""
+    found = {"Claude": False, "Codex": False, "Cursor": False}
+    for provider, relative, pattern in HISTORY_ROOTS:
+        root = ctx.home / relative
+        if root.is_dir() and any(
+            path.is_file() and not path.is_symlink()
+            for path in root.rglob(pattern)
+        ):
+            found[provider] = True
+    found["Cursor"] = default_database(ctx.home).is_file()
+    return found
 
 
 def relink(link: Path, target: str | Path, ts: str) -> None:
@@ -141,7 +163,19 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
     to turn it on; only a fresh install does, never an upgrade.
 
     ``doctor`` runs in verify, once the launchd job is up.
+
+    Raises:
+        StepFailedError: If the completed ingest lacks provider event counts.
     """
+    found = _history_found(ctx)
+    ctx.say("Conversation history:")
+    for provider, detected in found.items():
+        status = (
+            "found; would index"
+            if detected and ctx.dry_run
+            else "found; indexing..." if detected else "no history found"
+        )
+        ctx.say(f"  {provider}: {status}")
     if dry(
         ctx,
         f"would create {ctx.data}, start with recall off and index "
@@ -159,7 +193,28 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
         "project, so recall waits for a re-check (docs/adr/0007). "
         f"To turn recall on: unlink {flag}"
     )
-    must(ctx, [ctx.muninn, "ingest", "--full"], env=muninn_env(ctx.data))
+    env = muninn_env(ctx.data, HOME=str(ctx.home))
+    must(ctx, [ctx.muninn, "ingest", "--full"], env=env)
+    raw_stats: object = json.loads(
+        must(ctx, [ctx.muninn, "stats"], env=env).stdout
+    )
+    if not isinstance(raw_stats, dict):
+        raise StepFailedError("muninn stats omitted provider event counts")
+    stats = cast(dict[str, object], raw_stats)
+    raw_counts = stats.get("events_by_provider")
+    if not isinstance(raw_counts, dict):
+        raise StepFailedError("muninn stats omitted provider event counts")
+    counts = cast(dict[str, object], raw_counts)
+    totals: list[str] = []
+    for provider in ("Claude", "Codex", "Cursor"):
+        count: object = counts.get(provider.lower(), 0)
+        if not isinstance(count, int) or isinstance(count, bool):
+            raise StepFailedError(
+                "muninn stats returned invalid provider counts"
+            )
+        noun = "event" if count == 1 else "events"
+        totals.append(f"{provider} {count} {noun}")
+    ctx.say(f"History indexing complete: {' · '.join(totals)}.")
 
 
 def restart(ctx: Ctx, rec: Record) -> None:

@@ -1,4 +1,4 @@
-"""Store schema v2: the DDL a fresh store gets, in reusable pieces.
+"""Store schema v3: the DDL a fresh store gets, in reusable pieces.
 
 Schema v2 adds typed ledger fields to the knowledge table.  Its kind CHECK
 cannot be altered in place, so ``store_migrate`` rebuilds the table from the
@@ -13,7 +13,7 @@ that is not indexed corrupts the index.
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCOPE_SQL = r"""
 CREATE TABLE scope (id INTEGER PRIMARY KEY,
@@ -70,7 +70,7 @@ CREATE TABLE scope_path (cwd TEXT PRIMARY KEY,
   method TEXT NOT NULL
     CHECK (method IN ('git','worktree','prefix','cwd','alias')));
 CREATE TABLE source (id INTEGER PRIMARY KEY,
-  provider TEXT NOT NULL CHECK (provider IN ('codex','claude')),
+  provider TEXT NOT NULL CHECK (provider IN ('codex','claude','cursor')),
   thread_id TEXT NOT NULL,     -- codex line-1 payload.id | claude sessionId
   session_root TEXT NOT NULL,  -- codex payload.session_id | claude sessionId
   parent_thread_id TEXT, forked_from_id TEXT,
@@ -81,7 +81,8 @@ CREATE TABLE source (id INTEGER PRIMARY KEY,
     ('none','ordinal','history_base','content_prefix','unverified')),
   replay_before INTEGER,       -- codex subagent_history_start_ordinal
   root TEXT NOT NULL
-    CHECK (root IN ('codex-sessions','codex-archived','claude-projects')),
+    CHECK (root IN ('codex-sessions','codex-archived','claude-projects',
+                    'cursor-imports')),
   path TEXT NOT NULL,          -- relative to root; mutable (archive moves)
   first_line_sha256 TEXT NOT NULL, ino INTEGER NOT NULL,
   size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
@@ -97,7 +98,7 @@ CREATE TABLE source (id INTEGER PRIMARY KEY,
 CREATE INDEX source_session ON source(provider, session_root);
 CREATE TABLE usage (  -- muninn invocations seen at ingest; counts only
   source_id INTEGER PRIMARY KEY REFERENCES source(id) ON DELETE CASCADE,
-  provider TEXT NOT NULL CHECK (provider IN ('codex','claude')),
+  provider TEXT NOT NULL CHECK (provider IN ('codex','claude','cursor')),
   session_root TEXT NOT NULL,
   calls INTEGER NOT NULL DEFAULT 0,
   errors INTEGER NOT NULL DEFAULT 0,  -- codex outputs with a failed exit

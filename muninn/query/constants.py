@@ -23,4 +23,4 @@ ALL_KINDS = (
     "delegation",
     "tool_error",
 )
-PROVIDERS = ("codex", "claude")
+PROVIDERS = ("codex", "claude", "cursor")

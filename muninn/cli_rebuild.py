@@ -72,7 +72,7 @@ def _attach_old(conn: sqlite3.Connection, db: Path) -> bool:
         # Touch a table: a corrupt file can attach and still fail here.
         conn.execute("SELECT count(*) FROM old.event").fetchone()
         # A v1 file is copied by column name; its missing columns default.
-        if version in (1, store.SCHEMA_VERSION):
+        if version in (1, 2, store.SCHEMA_VERSION):
             return True
     except sqlite3.DatabaseError:
         pass
@@ -152,7 +152,8 @@ def _copy_missing(conn: sqlite3.Connection) -> dict[str, int]:
     ecols = [r[1] for r in conn.execute("PRAGMA table_info(event)")][2:]
     gone = conn.execute(
         f"SELECT id, {', '.join(cols)} FROM old.source o WHERE"
-        " status = 'missing' AND NOT EXISTS (SELECT 1 FROM main.source m"
+        " (status = 'missing' OR provider = 'cursor')"
+        " AND NOT EXISTS (SELECT 1 FROM main.source m"
         " WHERE m.provider = o.provider AND m.thread_id = o.thread_id)"
     ).fetchall()
     copied = {"missing_sources": 0, "missing_events": 0}
