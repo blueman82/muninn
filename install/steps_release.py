@@ -217,6 +217,30 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
     ctx.say(f"History indexing complete: {' · '.join(totals)}.")
 
 
+def history_upgrade(ctx: Ctx, _rec: Record) -> None:
+    """Explain the history behavior during an upgrade.
+
+    Args:
+        ctx: The run context.
+        _rec: The install record, unused by this informational step.
+    """
+    if ctx.dry_run:
+        ctx.say(
+            "History import: would be skipped during upgrade; existing index "
+            "would be retained."
+        )
+        ctx.say(
+            "Claude and Codex polling would resume after a successful "
+            "upgrade; Cursor would not be re-imported."
+        )
+        return
+    ctx.say("History import: skipped during upgrade; existing index retained.")
+    ctx.say(
+        "Claude and Codex polling resumes after a successful upgrade; Cursor "
+        "is not re-imported."
+    )
+
+
 def restart(ctx: Ctx, rec: Record) -> None:
     """Kickstart the running job so it runs the re-pinned release."""
     if dry(ctx, f"would restart the poller ({ctx.target})"):

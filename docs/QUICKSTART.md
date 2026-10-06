@@ -38,7 +38,10 @@ run `/hooks` if the installer prints `OWNER STEP`.
     bin/muninn-install
 
 It re-pins the commit, restarts the poller, verifies, then deletes every other
-release. Provider config is not touched. When a release changes how transcripts
+release. It keeps the existing index instead of running the fresh-install
+history import; after a successful upgrade, Claude and Codex polling resumes,
+while Cursor is not
+re-imported. Provider config is not touched. When a release changes how transcripts
 are classified (`stats` shows `classifier_version`), the poller re-reads every
 transcript once after the upgrade, Claude and Codex alike, one source at a
 time; on a large store that takes a while. Watch it with `muninn stats`
