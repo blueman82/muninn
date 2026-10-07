@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
 
-from muninn import platform_rebuild, platform_windows, store, tombstone_key
+from muninn import (
+    platform_io,
+    platform_rebuild,
+    platform_windows,
+    store,
+    tombstone_key,
+)
+from muninn.file_sync import sync_fd
 from tests import test_platform_windows
 from tests.cli_support import CliCase, fake_run
 from tests.test_ingest import ROOT, TID
@@ -29,6 +37,18 @@ if sys.platform == "win32":
                 store.connect_rw(db)
             self.assertEqual(db.read_bytes(), before)
             self.assertEqual(journal.read_bytes(), b"original journal")
+
+        def test_append_only_private_descriptor_can_sync(self) -> None:
+            path = self.home / "tombstones.jsonl"
+            fd = platform_io.open_private(
+                path, os.O_CREAT | os.O_WRONLY | os.O_APPEND
+            )
+            try:
+                os.write(fd, b"synthetic\n")
+                sync_fd(fd)
+            finally:
+                os.close(fd)
+            self.assertEqual(path.read_bytes(), b"synthetic\n")
 
         def test_new_sqlite_journal_inherits_private_acl(self) -> None:
             db = store.db_path(self.home)

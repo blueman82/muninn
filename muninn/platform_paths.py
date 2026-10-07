@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
@@ -70,7 +71,10 @@ def read_selection(base: Path) -> tuple[Path, Path] | None:
             raise ValueError("unsafe or absent selected release")
         if not interpreter.is_absolute() or not interpreter.is_file():
             raise ValueError("recorded interpreter is absent or relative")
-        with platform_io.open_regular(interpreter.resolve()):
+        checked = (
+            interpreter if sys.platform == "win32" else interpreter.resolve()
+        )
+        with platform_io.open_regular(checked):
             pass
         return release, interpreter
     except (OSError, RecursionError) as exc:

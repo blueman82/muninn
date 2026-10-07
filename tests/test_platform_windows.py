@@ -97,16 +97,25 @@ if sys.platform == "win32":
                 self.assertEqual(target.read_bytes(), b"old")
                 self.assertEqual(source.read_bytes(), b"new")
 
-        def test_shared_descriptor_preserves_old_bytes(
+        def test_shared_reader_replacement_or_refusal_preserves_bytes(
             self,
         ) -> None:
             target, source = self.write("state", b"old"), self.write(
                 "temp", b"new"
             )
+            refused = False
             with platform_io.open_regular(target) as handle:
-                platform_windows.publish(source, target, replace=True)
+                try:
+                    platform_windows.publish(source, target, replace=True)
+                except OSError:
+                    refused = True
+                    self.assertEqual(target.read_bytes(), b"old")
+                    self.assertEqual(source.read_bytes(), b"new")
                 self.assertEqual(handle.read(), b"old")
+            if refused:
+                platform_windows.publish(source, target, replace=True)
             self.assertEqual(target.read_bytes(), b"new")
+            self.assertFalse(source.exists())
 
         def test_junction_escape_is_refused(self) -> None:
             outside = self.home.parent / "outside"

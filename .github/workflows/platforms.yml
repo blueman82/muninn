@@ -144,7 +144,8 @@ jobs:
                'tests.test_file_sync', 'tests.test_platform_io',
                'tests.test_platform_windows', 'tests.test_windows_runtime',
                'tests.test_platform_paths', 'tests.test_poller_stop',
-               'tests.test_sqlite_privacy'], check=True,
+               'tests.test_sqlite_privacy', 'tests.test_native_tools',
+               'tests.test_native_launcher'], check=True,
           )
       - name: Check Windows native API typing
         if: runner.os == 'Windows'
