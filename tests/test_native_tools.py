@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.ingest_support import ROOT
+from tests.test_bootstrap_guards import diagnose_bootstrap
 from tools import check
 
 
@@ -47,3 +48,14 @@ class NativeToolTests(unittest.TestCase):
             done.stdout.splitlines(),
             ["bin/muninn: eol: lf", "bin/muninn-install: eol: lf"],
         )
+
+    def test_synthetic_diagnostics_emit_only_on_refusal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            bin_dir = Path(temp)
+            script = bin_dir / "muninn.ps1"
+            script.write_bytes((ROOT / "bin/muninn.ps1").read_bytes())
+            diagnose_bootstrap(bin_dir)
+            prefix, _ = script.read_text(encoding="utf-8").rsplit(
+                "} catch {", 1
+            )
+            self.assertNotIn("[Console]::Error.WriteLine", prefix)

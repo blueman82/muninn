@@ -174,17 +174,20 @@ def diagnose_bootstrap(bin_dir: Path) -> None:
     source = source.replace(
         marker,
         "    [Console]::Error.WriteLine($_.Exception.ToString())\n"
-        "    [Console]::Error.WriteLine($_.ScriptStackTrace)\n" + marker,
+        "    [Console]::Error.WriteLine($_.ScriptStackTrace)\n"
+        "    if ($muninnPathDiagnostic) {\n"
+        "        [Console]::Error.WriteLine($muninnPathDiagnostic)\n"
+        "    }\n" + marker,
     )
     path_probe = (
         "                $candidate = Assert-InterpreterField $command.Path"
     )
     source = source.replace(
         path_probe,
-        "                [Console]::Error.WriteLine((@{"
+        "                $muninnPathDiagnostic = (@{"
         "type=$command.GetType().FullName; source=$command.Source;"
         "path=$command.Path; definition=$command.Definition; "
         "commandType=[string]$command.CommandType; name=$name} "
-        "| ConvertTo-Json -Compress))\n" + path_probe,
+        "| ConvertTo-Json -Compress)\n" + path_probe,
     )
     script.write_text(source, encoding="utf-8")

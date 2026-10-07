@@ -95,6 +95,7 @@ if sys.platform == "win32":
             self.env["MUNINN_PYTHON"] = str(self.root / "missing.exe")
             done = self.run_cmd(["stats"])
             self.assertEqual(done.returncode, 17, done.stderr)
+            self.assertEqual(done.stderr, "")
             self.assertEqual(json.loads(done.stdout), ["stats"])
 
         def install_selection(self, record: dict[str, str]) -> Path:
@@ -126,6 +127,7 @@ if sys.platform == "win32":
             )
             done = self.run_cmd(["stats"])
             self.assertEqual(done.returncode, 17, done.stderr)
+            self.assertEqual(done.stderr, "")
             self.assertEqual(json.loads(done.stdout), ["stats"])
 
         def test_missing_recorded_interpreter_uses_verified_path(self) -> None:
@@ -140,6 +142,7 @@ if sys.platform == "win32":
             )
             done = self.run_cmd(["stats"])
             self.assertEqual(done.returncode, 17, done.stderr)
+            self.assertEqual(done.stderr, "")
             self.assertEqual(json.loads(done.stdout), ["stats"])
 
         def test_malformed_record_refuses_before_override_marker_executes(
