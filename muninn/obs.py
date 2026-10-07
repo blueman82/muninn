@@ -74,6 +74,7 @@ DATA_FILES = frozenset(
         "tombstones.jsonl",
         "tombstone.key",
         "recall.off",
+        "stop.json",
     }
 )
 
@@ -137,11 +138,6 @@ def _result(
     }
 
 
-def _mode(path: Path) -> int:
-    """Return the permission bits of a path."""
-    return path.stat().st_mode & 0o777
-
-
 def _names(home: Path) -> list[str]:
     """Sorted names in the data directory; empty if it is absent."""
     return sorted(p.name for p in home.iterdir()) if home.is_dir() else []
@@ -195,7 +191,9 @@ def _writer_secure_delete() -> bool:
 def _data_dir_mode(home: Path) -> CheckResult:
     """Check private data-directory permissions or the native Windows ACL."""
     present = home.is_dir()
-    detail = "ACL" if sys.platform == "win32" else oct(_mode(home))
+    detail = "ACL"
+    if present and sys.platform != "win32":
+        detail = oct(home.stat().st_mode & 0o777)
     return _result(
         "data_dir_mode",
         present and platform_io.is_private(home, directory=True),
@@ -220,7 +218,7 @@ def _unexpected_files(home: Path) -> CheckResult:
         for n in _names(home)
         if n not in DATA_FILES
         and n != "muninn.sqlite-journal"
-        and not n.startswith(store.UNREADABLE_PREFIX)
+        and not n.startswith((store.UNREADABLE_PREFIX, store.RECOVERY_PREFIX))
         and not n.startswith(store.PRE_UPGRADE_PREFIX)
         and not n.startswith(".status.json.")  # an atomic write in flight
     ]
@@ -392,9 +390,13 @@ def _unreadable_files(home: Path) -> CheckResult:
 
 
 def _aside_files(home: Path) -> CheckResult:
-    """No unreadable store set aside by a rebuild is still on disk."""
+    """No unreadable or recovery store copy remains after a rebuild."""
     # erase cannot scrub these, so they keep erased text until removed.
-    kept = [n for n in _names(home) if n.startswith(store.UNREADABLE_PREFIX)]
+    kept = [
+        n
+        for n in _names(home)
+        if n.startswith((store.UNREADABLE_PREFIX, store.RECOVERY_PREFIX))
+    ]
     return _result("aside_files", not kept, ",".join(kept), level="warn")
 
 

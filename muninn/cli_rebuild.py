@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import os
 import sqlite3
 import time
 from argparse import Namespace
@@ -16,7 +17,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from muninn import cli_core, erase, ingest, store
+from muninn import (
+    cli_core,
+    erase,
+    ingest,
+    platform_rebuild,
+    store,
+)
 from muninn.cli_core import Env, Record, Result
 from muninn.file_sync import sync_path
 
@@ -174,6 +181,7 @@ def _copy_missing(conn: sqlite3.Connection) -> dict[str, int]:
 
 def _settle_journal(home: Path, db: Path) -> None:
     """Roll back a leftover journal by opening the old file once."""
+    store.assert_sqlite_private(db)
     if (home / "muninn.sqlite-journal").exists():
         settle = sqlite3.connect(db)
         try:
@@ -301,23 +309,39 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             return 4, {"error": "hot_journal"}
         _full_sync(new)  # the copied knowledge is not re-derivable
         kept = None
-        try:
-            if db.exists() and not built.readable:
-                kept = _set_aside(home, db)  # never overwrite it
-            new.replace(db)
-        except OSError:
-            return 4, {
-                "error": "replace_failed",
-                "old_restored": _put_back(home, db, kept),
-                "old_kept_as": kept,
-            }
-        _full_sync(home)  # make the rename itself durable
+        if os.name == "nt":
+            published, kept, restored = platform_rebuild.publish_store(
+                home, db, new, readable=built.readable
+            )
+            if not published:
+                _discard(home)
+                return 4, {
+                    "error": "replace_failed",
+                    "old_restored": restored,
+                    "old_kept_as": kept,
+                }
+        else:
+            try:
+                if db.exists() and not built.readable:
+                    kept = _set_aside(home, db)
+                new.replace(db)
+            except OSError:
+                return 4, {
+                    "error": "replace_failed",
+                    "old_restored": _put_back(home, db, kept),
+                    "old_kept_as": kept,
+                }
+            _full_sync(home)
     record["counts"] = built.copied | {"reapplied": built.reapplied}
     return 0, {
         "rebuilt": True,
         "old_readable": built.readable,
         "old_kept_as": kept,
-        "warning": None if built.readable else _UNREADABLE_WARNING,
+        "warning": (
+            "a prior store copy was retained; inspect old_kept_as"
+            if built.readable and kept
+            else None if built.readable else _UNREADABLE_WARNING
+        ),
         "copied": built.copied,
         "reapplied_tombstones": built.reapplied,
         "ingest": dataclasses.asdict(built.stats),

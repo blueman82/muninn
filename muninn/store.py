@@ -19,7 +19,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
-from muninn import platform_io
+from muninn import platform_io, platform_paths
 from muninn.obs_log import log_poller
 from muninn.platform_lock import try_lock
 from muninn.store_migrate import migrate_v1_to_v2, migrate_v2_to_v3
@@ -50,6 +50,8 @@ def data_home(env: Mapping[str, str] = os.environ) -> Path:
     configured = env.get("MUNINN_HOME")
     if configured:
         return Path(configured).expanduser()
+    if os.name == "nt":
+        return platform_paths.windows_base(env) / "data"
     return Path.home() / ".local" / "share" / "muninn"
 
 
@@ -61,6 +63,8 @@ UNREADABLE_PREFIX = "muninn.sqlite.unreadable-"
 # is not importable from the runtime, so install/snapshot.py repeats the
 # string and a test keeps the two equal.
 PRE_UPGRADE_PREFIX = "muninn.sqlite.pre-upgrade-"
+# A Windows publication keeps a durable old copy until replacement succeeds.
+RECOVERY_PREFIX = "muninn.sqlite.recovery-"
 
 
 def db_path(home: Path) -> Path:
@@ -191,6 +195,30 @@ def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
     )
 
 
+def assert_sqlite_private(path: Path) -> None:
+    """Refuse unsafe Windows databases and independently readable sidecars.
+
+    Args:
+        path: Database pathname to check before SQLite opens any file.
+
+    Raises:
+        PermissionError: If an existing database or sidecar is unsafe.
+    """
+    if os.name != "nt":
+        return
+    if not platform_io.is_private(path.parent, directory=True):
+        raise PermissionError("unsafe database directory")
+    for candidate in (
+        path,
+        *(
+            path.with_name(path.name + suffix)
+            for suffix in ("-journal", "-wal", "-shm")
+        ),
+    ):
+        if candidate.exists() and not platform_io.is_private(candidate):
+            raise PermissionError("unsafe database or sidecar")
+
+
 def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
     """Open the store for writing, creating and migrating it.
 
@@ -212,6 +240,7 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
     if sqlite3.sqlite_version_info < (3, 46, 1):
         raise StoreUnavailableError("SQLite 3.46.1 or newer is required")
     _ensure_dir(path.parent)
+    assert_sqlite_private(path)
     fd = platform_io.open_private(path, os.O_CREAT | os.O_RDWR)
     os.close(fd)
     # isolation_level=None: sqlite3's implicit transactions would fight the
@@ -298,6 +327,11 @@ def connect_ro(path: Path) -> sqlite3.Connection:
         StoreUnavailableError: If the store cannot be read or holds another
             schema version.
     """
+    if os.name == "nt" and (
+        not platform_io.is_private(path.parent, directory=True)
+        or not platform_io.is_private(path)
+    ):
+        raise StoreUnavailableError("store access control is unsafe or absent")
     conn = None
     try:
         conn = sqlite3.connect(
@@ -342,6 +376,7 @@ def heal_hot_journal(path: Path, home: Path) -> bool:
     """
     try:
         with writer_lock(home, wait_s=0):
+            assert_sqlite_private(path)
             conn = sqlite3.connect(_uri(path, "rw"), uri=True)
             try:
                 conn.execute("PRAGMA user_version").fetchone()

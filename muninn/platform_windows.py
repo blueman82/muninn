@@ -69,6 +69,12 @@ if sys.platform == "win32":
             [wintypes.LPCWSTR, wintypes.LPCWSTR, _DWORD],
             wintypes.BOOL,
         )
+        _long = _bind(
+            _KERNEL,
+            "GetLongPathNameW",
+            [wintypes.LPCWSTR, wintypes.LPWSTR, _DWORD],
+            _DWORD,
+        )
         _drive = _bind(_KERNEL, "GetDriveTypeW", [wintypes.LPCWSTR], _DWORD)
         _process = _bind(_KERNEL, "GetCurrentProcess", [], _VOID)
         _free = _bind(_KERNEL, "LocalFree", [_VOID], _VOID)
@@ -144,6 +150,14 @@ if sys.platform == "win32":
                 continue
             if found.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
                 raise OSError("reparse paths are refused")
+        # DOS aliases and long names address the same file; bind the expected
+        # long spelling before opening, then compare the actual handle path.
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = _long(str(absolute), buffer, len(buffer))
+        if length and length < len(buffer):
+            return Path(buffer.value)
+        if absolute.parent != absolute:
+            return _local_path(absolute.parent) / absolute.name
         return absolute
 
     def _handle(path: Path, access: int) -> int:
@@ -209,6 +223,7 @@ if sys.platform == "win32":
             raise ctypes.WinError(error)
         try:
             permitted = {_user_sid(), "S-1-5-18", "S-1-5-32-544"}
+            # OWNER RIGHTS is safe only after the actual owner is validated.
             if _sid_text(owner.value) not in permitted or not dacl.value:
                 raise PermissionError("state ownership or DACL is unsafe")
             size = _AclSize()
@@ -222,7 +237,9 @@ if sys.platform == "win32":
                 kind = ctypes.c_ubyte.from_address(ace.value).value
                 if kind == 1:  # a deny ACE cannot broaden access
                     continue
-                if kind != 0 or _sid_text(ace.value + 8) not in permitted:
+                if kind != 0 or _sid_text(ace.value + 8) not in (
+                    permitted | {"S-1-3-4"}
+                ):
                     raise PermissionError("state DACL grants another identity")
         finally:
             _free(descriptor)
@@ -268,7 +285,7 @@ if sys.platform == "win32":
             if os.path.normcase(actual) != os.path.normcase(str(absolute)):
                 raise OSError("path changed while opening")
             if root is not None:
-                base = str(root.absolute())
+                base = str(_local_path(root))
                 if os.path.normcase(os.path.commonpath([base, actual])) != (
                     os.path.normcase(base)
                 ):

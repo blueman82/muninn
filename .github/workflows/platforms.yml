@@ -133,7 +133,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: python3.13 -m tools.check --full
-      - name: Run mandatory native lock and sync checks
+      - name: Run mandatory native runtime safety checks
         if: runner.os == 'Windows'
         shell: python
         run: |
@@ -142,7 +142,9 @@ jobs:
           subprocess.run(
               [sys.executable, '-m', 'unittest', 'tests.test_platform_lock',
                'tests.test_file_sync', 'tests.test_platform_io',
-               'tests.test_platform_windows'], check=True,
+               'tests.test_platform_windows', 'tests.test_windows_runtime',
+               'tests.test_platform_paths', 'tests.test_poller_stop',
+               'tests.test_sqlite_privacy'], check=True,
           )
       - name: Check Windows native API typing
         if: runner.os == 'Windows'
@@ -153,6 +155,4 @@ jobs:
           subprocess.run([sys.executable, '-m', 'pip', 'install', '-r',
                           'requirements-dev.txt'], check=True)
           subprocess.run([sys.executable, '-m', 'pyright', '--pythonplatform',
-                          'Windows', 'muninn/platform_windows.py',
-                          'muninn/platform_io.py', 'muninn/platform_lock.py',
-                          'muninn/file_sync.py'], check=True)
+                          'Windows', 'muninn'], check=True)

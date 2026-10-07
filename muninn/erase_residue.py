@@ -240,8 +240,8 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
 def aside_files(home: Path) -> list[str]:
     """Return the store copies set aside, by absolute path.
 
-    These are the unreadable stores a rebuild kept and any pre-upgrade copy
-    the installer left. Erase cannot scrub them (the first are not valid
+    These are unreadable and recovery stores a rebuild kept, and upgrade
+    copies the installer left. Erase cannot scrub them (the first are not valid
     databases, the second is a frozen copy), so they may still hold erased
     text until the owner removes them.
 
@@ -249,12 +249,15 @@ def aside_files(home: Path) -> list[str]:
         home: Data directory.
 
     Returns:
-        Sorted paths of every ``muninn.sqlite.unreadable-*`` and
-        ``muninn.sqlite.pre-upgrade-*`` file.
+        Sorted paths of unreadable, recovery and pre-upgrade store copies.
     """
     return sorted(
         str(p)
-        for prefix in (store.UNREADABLE_PREFIX, store.PRE_UPGRADE_PREFIX)
+        for prefix in (
+            store.UNREADABLE_PREFIX,
+            store.PRE_UPGRADE_PREFIX,
+            store.RECOVERY_PREFIX,
+        )
         for p in home.glob(f"{prefix}*")
         if p.is_file() and not p.is_symlink()
     )

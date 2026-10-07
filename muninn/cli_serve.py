@@ -14,12 +14,14 @@ import signal
 import sqlite3
 import sys
 import time
+import uuid
 from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
 
-from muninn import ingest, obs, store
+from muninn import ingest, obs, poller_stop, store
 from muninn.cli_core import Env, Record, Result
 from muninn.cli_maint import heartbeat
 from muninn.query.index_age import ALIVE_AT
@@ -50,10 +52,15 @@ class _StopAfterCommit:
     so the poller never leaves a journal behind.
     """
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        requested: Callable[[], bool] | None = None,
+    ) -> None:
         """Wrap ``conn``; no stop is pending yet."""
         self._conn = conn
         self.stop = False
+        self.requested = requested
 
     def __getattr__(self, name: str) -> Any:
         """Delegate everything but ``execute`` to the real connection."""
@@ -62,7 +69,9 @@ class _StopAfterCommit:
     def execute(self, sql: str, *args: Any) -> sqlite3.Cursor:
         """Execute ``sql``, then stop if one was requested and it ended."""
         cursor = self._conn.execute(sql, *args)
-        if self.stop and sql in ("COMMIT", "ROLLBACK"):
+        if sql in ("COMMIT", "ROLLBACK") and (
+            self.stop or (self.requested is not None and self.requested())
+        ):
             raise _ServeStopError
         return cursor
 
@@ -82,6 +91,7 @@ class _Poller:
         self.alive_at = _NEVER  # monotonic time of the last write
         self.beat_failed = False  # logged already in this pass
         self.stop_requested = False  # a stop signal has arrived
+        self.stop_generation = uuid.uuid4().hex
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Stop now if idle, else after the open transaction ends."""
@@ -110,6 +120,11 @@ class _Poller:
             signals += (signal.SIGHUP,)
         for sig in signals:
             signal.signal(sig, self._on_signal)
+        if sys.platform == "win32":
+            obs.write_status(
+                self.home,
+                {"pid": os.getpid(), "stop_generation": self.stop_generation},
+            )
         # Hourly "idle" line, so a silent log still shows the poller alive.
         self.idle_every = max(1, round(3600 / self.interval))
         obs.log_poller(
@@ -120,6 +135,14 @@ class _Poller:
                 "interval_s": self.interval,
             },
         )
+
+    def _requested(self) -> bool:
+        """Remember a native stop request at a transaction boundary."""
+        if sys.platform == "win32" and poller_stop.requested(
+            self.home, os.getpid(), self.stop_generation
+        ):
+            self.stop_requested = True
+        return self.stop_requested
 
     def _alive(self) -> None:
         """Record that a pass is making progress, at most every few seconds.
@@ -167,7 +190,7 @@ class _Poller:
             # The proxy only adds a stop hook around COMMIT/ROLLBACK and
             # forwards every other attribute, so it stands in for the
             # connection.
-            self.conn = _StopAfterCommit(raw)
+            self.conn = _StopAfterCommit(raw, self._requested)
             try:
                 return ingest.ingest(
                     cast(sqlite3.Connection, self.conn),
@@ -229,15 +252,24 @@ class _Poller:
     def run(self) -> Result:
         """Loop until a stop signal arrives; exit 0 with no output."""
         try:
-            while not self.stop_requested:
+            while not self._requested():
                 began = time.monotonic()
                 self.step()
                 if not self.stop_requested:
                     # Sleep the rest of the interval so a slow pass does not
                     # stretch the cadence.
-                    time.sleep(
-                        max(0.0, self.interval - (time.monotonic() - began))
+                    remaining = max(
+                        0.0, self.interval - (time.monotonic() - began)
                     )
+                    if sys.platform == "win32":
+                        self.stop_requested = poller_stop.wait(
+                            self.home,
+                            os.getpid(),
+                            self.stop_generation,
+                            remaining,
+                        )
+                    else:
+                        time.sleep(remaining)
         except _ServeStopError:
             pass
         obs.log_poller(self.home, {"event": "stop", "passes": self.passes})
