@@ -7,7 +7,6 @@ write-ahead ``tombstones.jsonl`` next to the database.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import hmac
 import json
@@ -18,6 +17,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
+from muninn.file_sync import sync_fd
 from muninn.tombstone_key import KEYED_PREFIX, TOMBSTONE_FILE
 
 _PROVIDERS = ("codex", "claude", "cursor")
@@ -234,11 +234,7 @@ def append_tombstones(home: Path, tombstones: list[TombstoneRow]) -> None:
         view = memoryview(payload)
         while view:  # os.write may be short
             view = view[os.write(fd, view) :]
-        try:
-            # fsync alone does not flush the drive cache on macOS.
-            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
-        except (AttributeError, OSError):  # not macOS, or not supported
-            os.fsync(fd)
+        sync_fd(fd)
     finally:
         os.close(fd)
 

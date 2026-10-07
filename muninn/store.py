@@ -206,6 +206,8 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
         StoreUnavailableError: If the journal mode is not 'delete' or the
             file holds another schema version.
     """
+    if sqlite3.sqlite_version_info < (3, 46, 1):
+        raise StoreUnavailableError("SQLite 3.46.1 or newer is required")
     _ensure_dir(path.parent)
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)  # born private
     os.fchmod(fd, 0o600)  # tightened if it already existed

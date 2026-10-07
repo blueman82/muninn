@@ -8,6 +8,7 @@ import plistlib
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -26,7 +27,7 @@ PYRIGHT = ROOT / "pyrightconfig.json"
 
 HOME = "@HOME@"
 SESSION_MATCHER = "startup|resume|clear|compact"
-PYTHON = "/opt/homebrew/bin/python3.13"
+PYTHON = sys.executable
 ENV_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 
@@ -239,13 +240,13 @@ def all_commands() -> Iterator[tuple[str, str]]:
 class CommandContractTest(unittest.TestCase):
     """Every command the files run starts at a known location."""
 
-    def test_every_command_starts_at_home_or_homebrew_python(self) -> None:
+    def test_every_command_starts_at_the_home_placeholder(self) -> None:
         commands = list(all_commands())
         self.assertEqual(len(commands), 5)
         for name, command in commands:
             with self.subTest(file=name, command=command):
                 self.assertTrue(
-                    command.startswith((f"{HOME}/", PYTHON)),
+                    command.startswith(f"{HOME}/"),
                     command,
                 )
 

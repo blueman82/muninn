@@ -30,10 +30,10 @@ jobs:
             check: full gate
           - runner: windows-2022
             architecture: x64
-            check: environment readiness
+            check: native runtime primitives
           - runner: windows-11-arm
             architecture: arm64
-            check: environment readiness
+            check: native runtime primitives
     env:
       PYTHONUTF8: '1'
       PYTHONUNBUFFERED: '1'
@@ -47,6 +47,37 @@ jobs:
         with:
           python-version: '3.13'
           architecture: ${{ matrix.architecture }}
+      - name: Provision supported SQLite on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sqlite_build="$RUNNER_TEMP/muninn-sqlite"
+          mkdir -p "$sqlite_build"
+          curl --fail --silent --show-error --retry 3 \
+            https://sqlite.org/2025/sqlite-amalgamation-3500400.zip \
+            -o "$sqlite_build/source.zip"
+          unzip -q "$sqlite_build/source.zip" -d "$sqlite_build"
+          python3.13 - "$sqlite_build" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          source = Path(sys.argv[1]) / 'sqlite-amalgamation-3500400/sqlite3.c'
+          expected = '9145255e83da6529e70121ee4d7a4c88fe83ca4511da0c9ed13d10842df36782'
+          assert hashlib.sha3_256(source.read_bytes()).hexdigest() == expected
+          PY
+          cc -O2 -fPIC -shared -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA \
+            -Wl,-soname,libsqlite3.so.0 \
+            "$sqlite_build/sqlite-amalgamation-3500400/sqlite3.c" \
+            -o "$sqlite_build/libsqlite3.so.0" -lm -lpthread -ldl
+          echo "LD_LIBRARY_PATH=$sqlite_build" >> "$GITHUB_ENV"
+      - name: Verify provisioned SQLite on Linux
+        if: runner.os == 'Linux'
+        shell: python
+        run: |
+          import sqlite3
+          assert sqlite3.sqlite_version_info == (3, 50, 4), sqlite3.sqlite_version
+          print('Verified SQLite', sqlite3.sqlite_version)
       - name: Verify interpreter and SQLite FTS5 readiness
         shell: python
         run: |
@@ -102,3 +133,13 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: python3.13 -m tools.check --full
+      - name: Run mandatory native lock and sync checks
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run(
+              [sys.executable, '-m', 'unittest', 'tests.test_platform_lock',
+               'tests.test_file_sync'], check=True,
+          )

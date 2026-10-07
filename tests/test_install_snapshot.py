@@ -15,6 +15,7 @@ from install import installer as co
 from install import snapshot as sn
 from install.constants import PRE_UPGRADE_PREFIX
 from muninn import erase_residue, obs, store
+from tests.cli_support import fake_run
 from tests.installer_support import ROOT, World, git, make_store
 
 TS = "20261002T000000Z"
@@ -134,10 +135,11 @@ class UpgradeFlowTests(SnapshotCase):
             co.install(self.ctx, self.w.repo, self.sha2)
         self.assertIn("remove it by hand", "\n".join(self.w.out))
         self.assertEqual(self.record()["snapshot"]["state"], "kept")
-        checks = {
-            c["check"]: c
-            for c in obs.doctor(self.data, {"HOME": "/x"})["checks"]
-        }
+        with mock.patch.object(obs, "run", fake_run()):
+            checks = {
+                c["check"]: c
+                for c in obs.doctor(self.data, {"HOME": "/x"})["checks"]
+            }
         self.assertIs(checks["upgrade_snapshot"]["ok"], False)
         self.assertEqual(checks["upgrade_snapshot"]["level"], "warn")
         self.assertIs(checks["unexpected_files"]["ok"], True)
