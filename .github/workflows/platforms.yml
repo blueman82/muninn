@@ -165,6 +165,57 @@ jobs:
           with Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8') as path:
               path.write(str(tools) + '\n')
           subprocess.run(['git', 'config', 'core.hooksPath', '.githooks'], check=True)
+      - name: Provision trusted native interpreter tree
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          from pathlib import Path
+          from muninn import platform_io
+
+          original = Path(sys.executable)
+          diagnostic = r"""
+          $item = Get-Item -LiteralPath $env:MUNINN_CI_ORIGINAL_PYTHON
+          while ($null -ne $item) {
+              $acl = Get-Acl -LiteralPath $item.FullName
+              $raw = [Security.AccessControl.RawSecurityDescriptor]::new(
+                  $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All))
+              $rules = @($raw.DiscretionaryAcl | ForEach-Object {
+                  @{sid=$_.SecurityIdentifier.Value; mask=$_.AccessMask;
+                    flags=[int]$_.AceFlags; type=[int]$_.AceType}
+              })
+              @{path=$item.FullName; owner=$raw.Owner.Value; rules=$rules} | ConvertTo-Json -Depth 5 -Compress
+              if ($item -is [IO.DirectoryInfo]) { $item=$item.Parent }
+              else { $item=$item.Directory }
+          }
+          """
+          subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
+                          '-Command', diagnostic], check=True, timeout=90,
+                         env=os.environ | {'MUNINN_CI_ORIGINAL_PYTHON': str(original)})
+          destination = Path(tempfile.mkdtemp(prefix='muninn-ci-python-'))
+          platform_io.ensure_private_dir(destination)
+          shutil.copytree(original.parent, destination, dirs_exist_ok=True)
+          platform_io.ensure_private_dir(destination)
+          copied = destination / original.name
+          verification = (
+              'import encodings,json,sqlite3,sys; from pathlib import Path; '
+              'base=Path(sys.argv[1]).resolve(); '
+              'assert Path(sys.prefix).resolve()==base; '
+              'assert Path(encodings.__file__).resolve().is_relative_to(base); '
+              'assert sqlite3.sqlite_version_info>=(3,46,1); '
+              'print(json.dumps({"python":sys.version.split()[0],'
+              '"sqlite":sqlite3.sqlite_version,"private_copy":True}))'
+          )
+          subprocess.run([str(copied), '-I', '-B', '-X', 'utf8', '-c',
+                          verification, str(destination)], check=True, timeout=30)
+          with Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8') as path:
+              path.write(str(destination) + '\n')
+          with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as env:
+              env.write('MUNINN_PYTHON=' + str(copied) + '\n')
       - name: Run mandatory native runtime safety checks
         if: runner.os == 'Windows'
         shell: python

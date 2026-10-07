@@ -83,12 +83,17 @@ function Quote-Argument([string]$Value) {
     return $builder.ToString()
 }
 
-function Python-Info([string]$Candidate) {
+function Assert-Executable([string]$Candidate) {
     $python = Assert-Ordinary $Candidate $false
     Hold-Directories (Split-Path -Parent $python)
     $executable = [MuninnBootstrap.NativeGuard]::OpenMetadata($python)
     $guards.Add($executable)
     Assert-Acl ($executable.GetAccessControl()) 'executable'
+    return $python
+}
+
+function Python-Info([string]$Candidate) {
+    $python = Assert-Executable $Candidate
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $python
     $start.Arguments = '-I -B -X utf8 -c "import sys; print(sys.executable); sys.exit(sys.version_info < (3, 13))"'
@@ -230,7 +235,7 @@ namespace MuninnBootstrap {
             $record.python -isnot [string]) { throw 'Invalid selection' }
         Hold-Directories (Join-Path $lib $record.sha)
         $root = Assert-Private (Join-Path $lib $record.sha) $true
-        $recorded = Assert-Ordinary $record.python $false
+        $recorded = Assert-Executable $record.python
     }
     $python = $null
     if ($env:MUNINN_PYTHON) { $python = Python-Info $env:MUNINN_PYTHON }

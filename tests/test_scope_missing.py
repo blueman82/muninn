@@ -6,7 +6,6 @@ Temp repos and temp dirs only; HOME is patched to a temp dir.
 from __future__ import annotations
 
 import os
-import shutil
 from unittest import mock
 
 from muninn import scope
@@ -21,7 +20,9 @@ class MissingCwdTests(ScopeCase):
         repo = self.tmp / "repo"
         self.make_repo(repo)
         repo_id = scope.scope_id(conn, str(repo))
-        shutil.rmtree(repo / ".git")  # the scope stays known, the dir is plain
+        self.remove_tree(
+            repo / ".git"
+        )  # the scope stays known, the dir is plain
         fresh = repo / "fresh"
         fresh.mkdir()
         self.assertNotEqual(scope.scope_id(conn, str(fresh)), repo_id)
@@ -61,7 +62,7 @@ class MissingCwdTests(ScopeCase):
             wt = self.tmp / "wt"
             self.git("worktree", "add", "-q", "-b", "f", str(wt), cwd=outer)
             wt_id = scope.scope_id(conn, str(wt))
-            shutil.rmtree(wt)
+            self.remove_tree(wt)
             deep = wt / "gone" / "sub"
             self.assertEqual(scope.scope_id(conn, str(deep)), wt_id)
             self.assertEqual(self.row(conn, deep)[2], "prefix")

@@ -136,6 +136,12 @@ if sys.platform == "win32":
                 timeout=90,
             )
 
+            subprocess.run(
+                [str(unvalidated)], env=compile_env, check=True, timeout=30
+            )
+            self.assertEqual(marker.read_text(), "unvalidated")
+            marker.unlink()
+
         def copy_bootstrap(self, bin_dir: Path) -> None:
             """Copy the isolated stable launcher into the synthetic install."""
             for name in ("muninn.cmd", "muninn.ps1"):

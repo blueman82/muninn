@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import unittest
@@ -222,12 +223,15 @@ class SwapFailureTests(StoreCase):
 
     def assert_still_v1(self) -> None:
         """Check the file is the untouched v1 ledger."""
-        raw = sqlite3.connect(self.db)
-        self.addCleanup(raw.close)
-        self.assertEqual(raw.execute("PRAGMA user_version").fetchone()[0], 1)
-        self.assertEqual(rows(raw, "SELECT count(*) FROM knowledge"), [(4,)])
-        cols = [r[1] for r in raw.execute("PRAGMA table_info(knowledge)")]
-        self.assertNotIn("tags", cols)
+        with contextlib.closing(sqlite3.connect(self.db)) as raw:
+            self.assertEqual(
+                raw.execute("PRAGMA user_version").fetchone()[0], 1
+            )
+            self.assertEqual(
+                rows(raw, "SELECT count(*) FROM knowledge"), [(4,)]
+            )
+            cols = [r[1] for r in raw.execute("PRAGMA table_info(knowledge)")]
+            self.assertNotIn("tags", cols)
 
     def test_foreign_keys_restored_after_a_real_mid_swap_failure(self) -> None:
         for before in (1, 0):

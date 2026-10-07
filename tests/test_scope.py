@@ -5,8 +5,8 @@ Temp repos and temp dirs only; HOME is patched to a temp dir.
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
+import stat
 import unittest
 from pathlib import Path
 
@@ -74,7 +74,7 @@ class MatrixTests(ScopeCase):
         key = str(repo)
         with self.subTest("a deleted worktree resolves from the cache"):
             before = scope.scope_id(conn, str(wt))
-            shutil.rmtree(wt)
+            self.remove_tree(wt)
             uncached = scope.resolve_key(str(wt))  # control: no cache, no repo
             self.assertEqual(uncached, (str(wt), "dir", "cwd"))
             self.assertEqual(scope.scope_id(conn, str(wt)), before)
@@ -114,6 +114,7 @@ class MatrixTests(ScopeCase):
         self.make_repo(repo)
         self.git("worktree", "add", "-q", "-b", "f", str(wt), cwd=repo)
         with self.subTest("relative gitdir pointer"):
+            (wt / ".git").chmod(stat.S_IREAD | stat.S_IWRITE)
             (wt / ".git").write_text("gitdir: ../repo/.git/worktrees/wt\n")
             want = (str(repo), "git", "worktree")
             self.assertEqual(scope.resolve_key(str(wt)), want)
