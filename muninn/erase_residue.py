@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from muninn import store
+from muninn import platform_io, store
 from muninn.erase_collect import Target
 
 NEEDLES, NEEDLE_BYTES = 50, 48
@@ -232,8 +232,14 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
     # Empty files cannot hold residue; reading a native locked range can fail
     # even beyond EOF, so avoid that unnecessary read while holding the lock.
     for path in sorted(home.rglob("*")):
-        if path.is_file() and not path.is_symlink() and path.stat().st_size:
-            data = path.read_bytes()
+        if path.is_file() and not path.is_symlink():
+            discovered = path.lstat()
+            if not discovered.st_size:
+                continue
+            with platform_io.open_regular(
+                path, root=home, expected=discovered
+            ) as handle:
+                data = handle.read()
             if any(needle in data for needle in needles):
                 hits.append(path.relative_to(home).as_posix())
     return hits
