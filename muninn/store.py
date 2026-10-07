@@ -215,7 +215,9 @@ def assert_sqlite_private(path: Path) -> None:
             for suffix in ("-journal", "-wal", "-shm")
         ),
     ):
-        if candidate.exists() and not platform_io.is_private(candidate):
+        if os.path.lexists(candidate) and not platform_io.is_private(
+            candidate
+        ):
             raise PermissionError("unsafe database or sidecar")
 
 
@@ -327,11 +329,17 @@ def connect_ro(path: Path) -> sqlite3.Connection:
         StoreUnavailableError: If the store cannot be read or holds another
             schema version.
     """
-    if os.name == "nt" and (
-        not platform_io.is_private(path.parent, directory=True)
-        or not platform_io.is_private(path)
-    ):
-        raise StoreUnavailableError("store access control is unsafe or absent")
+    if os.name == "nt":
+        try:
+            assert_sqlite_private(path)
+        except OSError as exc:
+            raise StoreUnavailableError(
+                "store access control is unsafe or absent"
+            ) from exc
+        if not platform_io.is_private(path):
+            raise StoreUnavailableError(
+                "store access control is unsafe or absent"
+            )
     conn = None
     try:
         conn = sqlite3.connect(

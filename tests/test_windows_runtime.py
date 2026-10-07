@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from muninn import (
+    cli,
+    cli_maint,
     platform_io,
     platform_rebuild,
     platform_windows,
@@ -192,9 +194,15 @@ class PortableCliTests(CliCase):
         self.assertEqual((code, err), (0, ""), out)
         self.assertEqual(out["text"], text)
         self.assertTrue(out["hash_ok"], out)
-        code, out, err = self.muninn(
-            "erase", "--event", f"codex:{TID}:2.1", "--yes"
-        )
+        if sys.platform == "win32":
+            args = cli.build_parser().parse_args(
+                ["erase", "--event", f"codex:{TID}:2.1", "--yes"]
+            )
+            cli_maint.erase_command(args, self.env, self.home, {})
+        else:
+            code, out, err = self.muninn(
+                "erase", "--event", f"codex:{TID}:2.1", "--yes"
+            )
         self.assertEqual((code, err), (0, ""), out)
         key = tombstone_key.load_key(self.home, create=False)
         code, out, err = self.muninn("rebuild")
@@ -214,3 +222,44 @@ class PortableCliTests(CliCase):
         self.assertTrue(checks["file_modes"]["ok"], out)
         if sys.platform == "win32":
             self.assertFalse(checks["launchd_job"]["ok"])
+
+
+if sys.platform == "win32":
+
+    class NativeCliRefusalTests(CliCase):
+        """Actual ACL refusals keep stdout JSON and existing state intact."""
+
+        def setUp(self) -> None:
+            super().setUp()
+            self.conn.close()
+
+        def broaden(self, path: Path) -> None:
+            """Grant read access only on temporary synthetic state."""
+            subprocess.run(
+                ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
+                check=True,
+                capture_output=True,
+            )
+
+        def test_broad_home_returns_content_free_json(self) -> None:
+            self.broaden(self.home)
+            code, out, err = self.muninn("ingest")
+            self.assertEqual((code, err), (4, ""))
+            self.assertEqual(out["error"], "store_unavailable")
+            self.assertNotIn(str(self.home), str(out))
+
+        def test_broad_journal_is_refused_before_replay(self) -> None:
+            db = store.db_path(self.home)
+            before = db.read_bytes()
+            journal = db.with_name(db.name + "-journal")
+            fd = platform_io.open_private(journal, os.O_CREAT | os.O_RDWR)
+            os.write(fd, b"original synthetic journal")
+            os.close(fd)
+            self.broaden(journal)
+            code, out, err = self.muninn("rebuild")
+            self.assertEqual((code, err), (4, ""))
+            self.assertEqual(out["error"], "store_unavailable")
+            self.assertEqual(db.read_bytes(), before)
+            self.assertEqual(
+                journal.read_bytes(), b"original synthetic journal"
+            )

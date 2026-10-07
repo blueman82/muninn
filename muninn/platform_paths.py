@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from collections.abc import Mapping
@@ -49,7 +50,7 @@ def read_selection(base: Path) -> tuple[Path, Path] | None:
         ValueError: If a present manifest, release or interpreter is unsafe.
     """
     lib, manifest = base / "lib", base / "lib" / "selection.json"
-    if not manifest.exists():
+    if not os.path.lexists(manifest):
         return None
     try:
         for directory in (base, lib):

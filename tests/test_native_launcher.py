@@ -58,14 +58,11 @@ if sys.platform == "win32":
             command = subprocess.list2cmdline(
                 [str(self.bin / "muninn.cmd"), *arguments]
             )
+            shell = subprocess.list2cmdline(
+                [os.environ.get("COMSPEC", "cmd.exe")]
+            )
             return subprocess.run(
-                [
-                    os.environ.get("COMSPEC", "cmd.exe"),
-                    "/d",
-                    "/s",
-                    "/c",
-                    command,
-                ],
+                shell + ' /d /s /c "' + command + '"',
                 env=self.env,
                 capture_output=True,
                 text=True,
