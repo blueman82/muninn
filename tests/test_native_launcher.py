@@ -15,7 +15,7 @@ from pathlib import Path
 
 from muninn import platform_io, poller_stop, store
 from tests.ingest_support import ROOT
-from tests.test_bootstrap_guards import compile_marker
+from tests.test_bootstrap_guards import compile_marker, diagnose_bootstrap
 
 if sys.platform == "win32":
 
@@ -30,6 +30,7 @@ if sys.platform == "win32":
             self.bin.mkdir(parents=True)
             for name in ("muninn.cmd", "muninn.ps1"):
                 shutil.copyfile(ROOT / "bin" / name, self.bin / name)
+            diagnose_bootstrap(self.bin)
             package = self.root / "muninn"
             package.mkdir()
             (package / "__init__.py").touch()
@@ -154,7 +155,7 @@ if sys.platform == "win32":
             for record in (
                 {
                     "sha": "a" * 40,
-                    "python": os.path.relpath(sys.executable, ROOT),
+                    "python": "relative-python.exe",
                 },
                 {"SHA": "a" * 40, "python": sys.executable},
                 {"sha": "a" * 40, "Python": sys.executable},

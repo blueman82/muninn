@@ -111,6 +111,7 @@ if sys.platform == "win32":
             """Copy the isolated stable launcher into the synthetic install."""
             for name in ("muninn.cmd", "muninn.ps1"):
                 shutil.copyfile(ROOT / "bin" / name, bin_dir / name)
+            diagnose_bootstrap(bin_dir)
 
         def write_waiting_cli(self, release: Path) -> None:
             """Create a synthetic writer that exposes its guarded lifetime."""
@@ -163,3 +164,16 @@ def compile_marker(
     subprocess.run([str(unvalidated)], env=compile_env, check=True, timeout=30)
     case.assertEqual(marker.read_text(), "unvalidated")
     marker.unlink()
+
+
+def diagnose_bootstrap(bin_dir: Path) -> None:
+    """Expose refusal exceptions only in synthetic launcher copies."""
+    script = bin_dir / "muninn.ps1"
+    source = script.read_text(encoding="utf-8")
+    marker = "    [Console]::Error.WriteLine('muninn: native launcher refused"
+    source = source.replace(
+        marker,
+        "    [Console]::Error.WriteLine($_.Exception.ToString())\n"
+        "    [Console]::Error.WriteLine($_.ScriptStackTrace)\n" + marker,
+    )
+    script.write_text(source, encoding="utf-8")
