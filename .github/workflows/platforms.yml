@@ -141,5 +141,18 @@ jobs:
           import sys
           subprocess.run(
               [sys.executable, '-m', 'unittest', 'tests.test_platform_lock',
-               'tests.test_file_sync'], check=True,
+               'tests.test_file_sync', 'tests.test_platform_io',
+               'tests.test_platform_windows'], check=True,
           )
+      - name: Check Windows native API typing
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'pip', 'install', '-r',
+                          'requirements-dev.txt'], check=True)
+          subprocess.run([sys.executable, '-m', 'pyright', '--pythonplatform',
+                          'Windows', 'muninn/platform_windows.py',
+                          'muninn/platform_io.py', 'muninn/platform_lock.py',
+                          'muninn/file_sync.py'], check=True)

@@ -12,6 +12,7 @@ import contextlib
 import os
 import signal
 import sqlite3
+import sys
 import time
 from argparse import Namespace
 from pathlib import Path
@@ -104,7 +105,10 @@ class _Poller:
         # 0644; the log must be owner-only.
         with contextlib.suppress(FileNotFoundError):  # not run by launchd
             (self.home / "poller.log").chmod(0o600)
-        for sig in (signal.SIGTERM, signal.SIGHUP):
+        signals = (signal.SIGTERM, signal.SIGINT)
+        if sys.platform != "win32":
+            signals += (signal.SIGHUP,)
+        for sig in signals:
             signal.signal(sig, self._on_signal)
         # Hourly "idle" line, so a silent log still shows the poller alive.
         self.idle_every = max(1, round(3600 / self.interval))

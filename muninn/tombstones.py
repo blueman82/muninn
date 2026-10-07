@@ -17,6 +17,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
+from muninn import platform_io
 from muninn.file_sync import sync_fd
 from muninn.tombstone_key import KEYED_PREFIX, TOMBSTONE_FILE
 
@@ -224,13 +225,10 @@ def append_tombstones(home: Path, tombstones: list[TombstoneRow]) -> None:
     )
     # os.open rather than Path.open: the 0600 creation mode and O_APPEND
     # must be atomic with the open so the file is never briefly readable.
-    fd = os.open(
-        home / TOMBSTONE_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
+    fd = platform_io.open_private(
+        home / TOMBSTONE_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND
     )
     try:
-        # The mode argument only applies on creation; tighten a file that an
-        # older version or the user left with looser permissions.
-        os.fchmod(fd, 0o600)
         view = memoryview(payload)
         while view:  # os.write may be short
             view = view[os.write(fd, view) :]

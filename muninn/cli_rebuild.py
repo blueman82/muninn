@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import os
 import sqlite3
 import time
 from argparse import Namespace
@@ -19,7 +18,7 @@ from typing import Any, cast
 
 from muninn import cli_core, erase, ingest, store
 from muninn.cli_core import Env, Record, Result
-from muninn.file_sync import sync_fd
+from muninn.file_sync import sync_path
 
 __all__ = ["REBUILD", "rebuild"]
 
@@ -51,11 +50,7 @@ class _Built:
 
 def _full_sync(path: Path) -> None:
     """Flush ``path`` to the platter, not just to the drive's cache."""
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        sync_fd(fd)
-    finally:
-        os.close(fd)
+    sync_path(path)
 
 
 def _attach_old(conn: sqlite3.Connection, db: Path) -> bool:

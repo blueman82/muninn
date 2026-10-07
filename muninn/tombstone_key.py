@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 
-from muninn import store
+from muninn import platform_io, platform_windows, store
+from muninn.file_sync import sync_fd, sync_path
 
 TOMBSTONE_FILE = "tombstones.jsonl"
 # A line tombstone whose hash starts with this (HMAC-SHA256 of role and
@@ -58,21 +60,35 @@ def _create_key(path: Path) -> bytes:
     Raises:
         TombstoneKeyError: If the winner's file is not a whole key.
     """
+    if sys.platform == "win32":
+        platform_io.ensure_private_dir(path.parent)
     key = os.urandom(KEY_BYTES)
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tombstone.key-")
     try:
-        try:  # mkstemp creates the file 0600
-            os.write(fd, key)
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+        with os.fdopen(fd, "wb") as handle:
+            platform_io.assert_private_fd(handle.fileno())
+            handle.write(key)
+            handle.flush()
+            sync_fd(handle.fileno())
         try:
-            os.link(temp, path)
+            if sys.platform == "win32":
+                platform_windows.publish(Path(temp), path, replace=False)
+            else:
+                os.link(temp, path)
+                sync_path(path.parent)
         except FileExistsError:
-            return _checked(path.read_bytes())
+            return _read_key(path)
     finally:
         Path(temp).unlink(missing_ok=True)
     return key
+
+
+def _read_key(path: Path) -> bytes:
+    """Read only a whole private, regular key file, never through a link."""
+    if sys.platform == "win32":
+        platform_windows.assert_private(path)
+    with platform_io.open_regular(path) as handle:
+        return _checked(handle.read(KEY_BYTES + 1))
 
 
 def load_key(home: Path, *, create: bool = True) -> bytes:
@@ -98,7 +114,7 @@ def load_key(home: Path, *, create: bool = True) -> bytes:
     """
     path = home / KEY_FILE
     try:
-        return _checked(path.read_bytes())
+        return _read_key(path)
     except FileNotFoundError:
         if not create:
             raise TombstoneKeyError("tombstone key is missing") from None
@@ -180,7 +196,7 @@ def key_problem(home: Path) -> str | None:
         None.
     """
     try:
-        _checked((home / KEY_FILE).read_bytes())
+        _read_key(home / KEY_FILE)
     except FileNotFoundError:
         return "missing" if _keyed_in_store(home) else None
     except (TombstoneKeyError, OSError):

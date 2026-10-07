@@ -13,11 +13,12 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
-from muninn import ingest, store, tombstone_key
+from muninn import ingest, platform_io, store, tombstone_key
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_stats import db_space, human_bytes, reread, stats
 from muninn.obs_status import (
@@ -112,9 +113,13 @@ def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
     Returns:
         The completed process; output is captured, never decoded.
     """
-    return subprocess.run(
-        [str(a) for a in argv], capture_output=True, timeout=10, check=False
-    )
+    args = [str(a) for a in argv]
+    try:
+        return subprocess.run(
+            args, capture_output=True, timeout=10, check=False
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(args, 127, b"", b"")
 
 
 def _result(
@@ -153,6 +158,8 @@ def _lock_free(home: Path) -> bool:
 
 def _job() -> JobInfo | None:
     """Return the launchd job's pid and command, or None if not loaded."""
+    if sys.platform == "win32":
+        return None
     r = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
     if r.returncode:
         return None
@@ -186,21 +193,22 @@ def _writer_secure_delete() -> bool:
 
 
 def _data_dir_mode(home: Path) -> CheckResult:
-    """The data directory exists and is private (0700)."""
+    """Check private data-directory permissions or the native Windows ACL."""
     present = home.is_dir()
+    detail = "ACL" if sys.platform == "win32" else oct(_mode(home))
     return _result(
         "data_dir_mode",
-        present and _mode(home) == 0o700,
-        oct(_mode(home)) if present else "absent",
+        present and platform_io.is_private(home, directory=True),
+        detail if present else "absent",
     )
 
 
 def _file_modes(home: Path) -> CheckResult:
-    """No data file is readable by group or others."""
+    """Check owner-only file permissions or private Windows ACLs."""
     loose = [
         n
         for n in _names(home)
-        if (home / n).is_file() and _mode(home / n) & 0o077
+        if (home / n).is_file() and not platform_io.is_private(home / n)
     ]
     return _result("file_modes", not loose, ",".join(loose))
 
@@ -416,6 +424,8 @@ def _tombstone_key(home: Path) -> CheckResult:
 
 def _launchd_job() -> CheckResult:
     """The launchd job is loaded and running."""
+    if sys.platform == "win32":
+        return _result("launchd_job", False, "native scheduler pending")
     job = _job()
     if job is None:
         return _result("launchd_job", False, None)

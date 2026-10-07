@@ -16,6 +16,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+from muninn import platform_io
+
 ROTATE_BYTES = 1024 * 1024
 LINE_BYTES = 1024
 _NUMBERS = frozenset(
@@ -157,7 +159,9 @@ def _append(home: Path, name: str, data: bytes) -> bool:
         if path.exists() and path.stat().st_size + len(data) > ROTATE_BYTES:
             path.replace(home / f"{name}.1")
         # os.open: the 0600 mode and O_APPEND must apply atomically at open.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = platform_io.open_private(
+            path, os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        )
         try:
             os.write(fd, data)
         finally:

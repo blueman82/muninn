@@ -28,6 +28,7 @@ from muninn.ingest_model import (
     PlanOptions,
     Work,
 )
+from muninn.platform_io import open_regular
 
 __all__ = ["discover", "late_forks", "plan_source", "source_id_for"]
 
@@ -168,7 +169,7 @@ def _plan(
         # The cheap path: an unchanged file is never opened, which keeps a
         # pass over a large, mostly idle archive fast.
         return row["id"]
-    first = _first_line(path)
+    first = _first_line(path, st)
     info, base = _identify(name, opts.roots[name], path, first)
     if info is None or first is None:
         # Line 1 incomplete, oversize or not a thread header.
@@ -287,16 +288,18 @@ def _mode(
     return "replace" if changed else "append"
 
 
-def _first_line(path: Path) -> bytes | None:
+def _first_line(
+    path: Path, expected: os.stat_result | None = None
+) -> bytes | None:
     """Return line 1 with its newline, or None while incomplete or oversize."""
-    with path.open("rb") as handle:
+    with open_regular(path, expected=expected) as handle:
         raw = handle.readline(ingest_model.MAX_LINE_BYTES + 1)
     return raw if raw.endswith(b"\n") else None
 
 
 def _hash_at(path: Path, offset: int) -> str | None:
     """Return the hash of the line starting at ``offset``, if complete."""
-    with path.open("rb") as handle:
+    with open_regular(path) as handle:
         handle.seek(offset)
         raw = handle.readline(ingest_model.MAX_LINE_BYTES + 1)
     return classify.record_hash(raw) if raw.endswith(b"\n") else None
