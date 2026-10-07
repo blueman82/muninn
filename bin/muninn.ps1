@@ -53,7 +53,7 @@ function Assert-Acl($acl, [ValidateSet('private', 'ancestor', 'executable')]
         }
     }
     foreach ($ace in $raw.DiscretionaryAcl) {
-        if ($Policy -ne 'private' -and ($ace.AceFlags -band 8)) { continue }
+        if ($Policy -ne 'private' -and ([int]$ace.AceFlags -band 8)) { continue }
         if ($ace.AceType -eq [Security.AccessControl.AceType]::AccessAllowed) {
             $dangerous = 0x100D0040
             if ($Policy -eq 'executable') { $dangerous = $dangerous -bor 0x40000116 }
@@ -280,7 +280,7 @@ namespace MuninnBootstrap {
         foreach ($name in @('python3.13.exe', 'python3.14.exe', 'python.exe')) {
             $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
             if ($command) {
-                $candidate = Assert-InterpreterField $command.Source
+                $candidate = Assert-InterpreterField $command.Path
                 $python = Python-Info $candidate
                 if ($python) { break }
             }
