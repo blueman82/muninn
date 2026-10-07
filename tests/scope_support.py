@@ -28,7 +28,9 @@ class ScopeCase(unittest.TestCase):
         self.tmp = Path(os.path.realpath(tmp.name))  # /var -> /private/var
         self.home = self.tmp / "home"
         self.home.mkdir()
-        env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        env = mock.patch.dict(
+            os.environ, {"HOME": str(self.home), "USERPROFILE": str(self.home)}
+        )
         env.start()
         self.addCleanup(env.stop)
         self.db = self.tmp / "db" / "muninn.sqlite"
@@ -66,6 +68,7 @@ class ScopeCase(unittest.TestCase):
         env = {
             "PATH": os.environ["PATH"],
             "HOME": str(self.home),
+            "USERPROFILE": str(self.home),
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0",
         }

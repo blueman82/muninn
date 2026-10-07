@@ -5,12 +5,13 @@ Every helper works on temp dirs only; nothing here touches a live data dir.
 
 from __future__ import annotations
 
-import select
+import queue
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -208,8 +209,22 @@ class Child:
         """
         stdout, stderr = self.proc.stdout, self.proc.stderr
         assert stdout is not None and stderr is not None
-        ready, _, _ = select.select([stdout], [], [], timeout)
-        line = stdout.readline() if ready else ""
+        received: queue.Queue[str] = queue.Queue()
+
+        def read() -> None:
+            received.put(stdout.readline())
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        try:
+            line = received.get(timeout=timeout)
+        except queue.Empty:
+            line = ""
+        if line.strip() != "ready" and self.proc.poll() is None:
+            self.proc.kill()
+        reader.join(timeout=5)
+        assert not reader.is_alive(), "child readiness reader did not stop"
+
         if line.strip() != "ready":
             if self.proc.poll() is None:
                 self.proc.kill()

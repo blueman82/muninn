@@ -13,10 +13,19 @@ from muninn import platform_windows
 
 def ensure_private_dir(path: Path) -> None:
     """Create a private leaf directory or validate an existing Windows ACL."""
-    path.mkdir(mode=0o700, parents=True, exist_ok=True)
     if sys.platform == "win32":
+        platform_windows.assert_ancestry(path)
+        missing: list[Path] = []
+        current = path
+        while not current.exists():
+            missing.append(current)
+            current = current.parent
+        for directory in reversed(missing):
+            directory.mkdir(mode=0o700, exist_ok=True)
+            platform_windows.assert_private(directory, directory=True)
         platform_windows.assert_private(path, directory=True)
     else:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
         path.chmod(0o700)
 
 

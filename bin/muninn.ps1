@@ -29,8 +29,18 @@ function Assert-Ordinary([string]$Path, [bool]$Directory) {
 function Assert-Private([string]$Path, [bool]$Directory) {
     $full = Assert-Ordinary $Path $Directory
     $acl = Get-Acl -LiteralPath $full
+    Assert-Acl $acl
+    return $full
+}
+
+function Assert-Acl($acl, [ValidateSet('private', 'ancestor', 'executable')]
+                    [string]$Policy = 'private') {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $allowed = @($identity, 'S-1-5-18', 'S-1-5-32-544')
+    if ($Policy -ne 'private') {
+        $service = [Security.Principal.NTAccount]::new('NT SERVICE', 'TrustedInstaller')
+        $allowed += $service.Translate([Security.Principal.SecurityIdentifier]).Value
+    }
     $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
     if ($allowed -notcontains $owner) { throw 'Unsafe owner' }
     $raw = [Security.AccessControl.RawSecurityDescriptor]::new(
@@ -42,16 +52,17 @@ function Assert-Private([string]$Path, [bool]$Directory) {
             throw 'Unknown access rule is refused'
         }
     }
-    $rules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
-    if ($rules.Count -eq 0) { throw 'Absent private access rules' }
-    foreach ($rule in $rules) {
-        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow) {
-            if (($allowed + @('S-1-3-4')) -notcontains $rule.IdentityReference.Value) {
-                throw 'Broader access is refused'
+    foreach ($ace in $raw.DiscretionaryAcl) {
+        if ($Policy -ne 'private' -and ($ace.AceFlags -band 8)) { continue }
+        if ($ace.AceType -eq [Security.AccessControl.AceType]::AccessAllowed) {
+            $dangerous = 0x100D0040
+            if ($Policy -eq 'executable') { $dangerous = $dangerous -bor 0x40000116 }
+            if (($allowed + @('S-1-3-4')) -notcontains $ace.SecurityIdentifier.Value -and
+                ($Policy -eq 'private' -or ($ace.AccessMask -band $dangerous))) {
+                throw 'Unsafe foreign access is refused'
             }
         }
     }
-    return $full
 }
 
 function Quote-Argument([string]$Value) {
@@ -74,6 +85,10 @@ function Quote-Argument([string]$Value) {
 
 function Python-Info([string]$Candidate) {
     $python = Assert-Ordinary $Candidate $false
+    Hold-Directories (Split-Path -Parent $python)
+    $executable = [MuninnBootstrap.NativeGuard]::OpenMetadata($python)
+    $guards.Add($executable)
+    Assert-Acl ($executable.GetAccessControl()) 'executable'
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $python
     $start.Arguments = '-I -B -X utf8 -c "import sys; print(sys.executable); sys.exit(sys.version_info < (3, 13))"'
@@ -82,28 +97,138 @@ function Python-Info([string]$Candidate) {
     $start.RedirectStandardError = $true
     $process = [Diagnostics.Process]::Start($start)
     try {
-        $output = $process.StandardOutput.ReadToEnd()
-        [void]$process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $outputTask = $process.StandardOutput.ReadToEndAsync()
+        $errorTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Python version probe timed out'
+        }
+        $output = $outputTask.GetAwaiter().GetResult()
+        [void]$errorTask.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) { throw 'Python 3.13 or newer is required' }
         return $output.Trim()
     } finally { $process.Dispose() }
 }
 
+$guards = [System.Collections.Generic.List[System.IDisposable]]::new()
+$guarded = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+
+function Hold-Directories([string]$Path) {
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $directory = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($Path))
+    while ($null -ne $directory) {
+        $parts.Insert(0, $directory.FullName)
+        $directory = $directory.Parent
+    }
+    foreach ($part in $parts) {
+        if ($guarded.Add($part)) {
+            $guard = [MuninnBootstrap.NativeGuard]::HoldDirectory($part)
+            $guards.Add($guard)
+            Assert-Acl (Get-Acl -LiteralPath $part) 'ancestor'
+        }
+    }
+}
+
 try {
+    Add-Type -TypeDefinition @'
+// Hold local directory identities during interpreter bootstrap and release use.
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+
+namespace MuninnBootstrap {
+    public static class NativeGuard {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Attributes { public uint Value; public uint Tag; }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(string path, uint access,
+            uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint GetFileType(SafeFileHandle handle);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle,
+            int kind, out Attributes attributes, uint size);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle,
+            StringBuilder value, uint capacity, uint flags);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetLongPathNameW(string path, StringBuilder value,
+            uint capacity);
+
+        private static SafeFileHandle Open(string path, bool directory) {
+            // Omit DELETE sharing so ancestors cannot be renamed during use.
+            var handle = CreateFileW(path, directory ? 0x20080u : 0x80000000u,
+                directory ? 3u : 1u, IntPtr.Zero, 3u, 0x02200000u, IntPtr.Zero);
+            try {
+                if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+                Attributes attributes;
+                if (GetFileType(handle) != 1u ||
+                    !GetFileInformationByHandleEx(handle, 9, out attributes, 8u))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                if ((attributes.Value & 0x400u) != 0 ||
+                    ((attributes.Value & 0x10u) != 0) != directory)
+                    throw new IOException("Unsafe bootstrap object");
+                var expected = new StringBuilder(32768);
+                var actual = new StringBuilder(32768);
+                uint a = GetLongPathNameW(path, expected, 32768u);
+                uint b = GetFinalPathNameByHandleW(handle, actual, 32768u, 0u);
+                if (a == 0 || a >= 32768 || b == 0 || b >= 32768)
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                string resolved = actual.ToString();
+                if (resolved.StartsWith(@"\\?\")) resolved = resolved.Substring(4);
+                if (!String.Equals(expected.ToString().TrimEnd('\\'),
+                    resolved.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("Bootstrap object identity changed");
+                return handle;
+            } catch { handle.Dispose(); throw; }
+        }
+
+        public static SafeFileHandle HoldDirectory(string path) {
+            return Open(path, true);
+        }
+
+        public static FileStream OpenMetadata(string path) {
+            var handle = Open(path, false);
+            try { return new FileStream(handle, FileAccess.Read); }
+            catch { handle.Dispose(); throw; }
+        }
+
+        public static string ReadMetadata(FileStream stream) {
+            var data = new byte[4097];
+            int used = 0;
+            while (used < data.Length) {
+                int count = stream.Read(data, used, data.Length - used);
+                if (count == 0) break;
+                used += count;
+            }
+            if (used > 4096) throw new IOException("Selection is too large");
+            return new UTF8Encoding(false, true).GetString(data, 0, used);
+        }
+    }
+}
+'@
     $root = Split-Path -Parent $PSScriptRoot
     $installed = -not (Test-Path -LiteralPath (Join-Path $root 'muninn/cli.py'))
     $recorded = $null
     if ($installed) {
+        Hold-Directories $root
         $base = Assert-Private $root $true
+        Hold-Directories (Join-Path $base 'lib')
         $lib = Assert-Private (Join-Path $base 'lib') $true
-        $manifest = Assert-Private (Join-Path $lib 'selection.json') $false
-        if ((Get-Item -LiteralPath $manifest).Length -gt 4096) { throw 'Selection is too large' }
-        $record = [IO.File]::ReadAllText($manifest, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        $manifest = Assert-Ordinary (Join-Path $lib 'selection.json') $false
+        $metadata = [MuninnBootstrap.NativeGuard]::OpenMetadata($manifest)
+        $guards.Add($metadata)
+        Assert-Acl ($metadata.GetAccessControl())
+        $record = [MuninnBootstrap.NativeGuard]::ReadMetadata($metadata) | ConvertFrom-Json
         $names = @($record.PSObject.Properties.Name | Sort-Object)
         if (($names -join ',') -ne 'python,sha' -or
             $record.sha -isnot [string] -or $record.sha -cnotmatch '^[0-9a-f]{40}$' -or
             $record.python -isnot [string]) { throw 'Invalid selection' }
+        Hold-Directories (Join-Path $lib $record.sha)
         $root = Assert-Private (Join-Path $lib $record.sha) $true
         $recorded = Assert-Ordinary $record.python $false
     }
@@ -138,4 +263,8 @@ try {
 } catch {
     [Console]::Error.WriteLine('muninn: native launcher refused unsafe selection or unavailable Python')
     exit 127
+} finally {
+    for ($index = $guards.Count - 1; $index -ge 0; $index--) {
+        $guards[$index].Dispose()
+    }
 }

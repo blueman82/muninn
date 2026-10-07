@@ -65,6 +65,7 @@ def requested(home: Path, pid: int, generation: str) -> bool:
         return False
     try:
         with platform_io.open_regular(path, root=home) as handle:
+            platform_io.assert_private_fd(handle.fileno())
             data = handle.read(1025)
         if len(data) > 1024:
             return False

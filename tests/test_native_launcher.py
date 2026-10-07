@@ -67,7 +67,7 @@ if sys.platform == "win32":
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                timeout=30,
+                timeout=90,
             )
 
         def test_exact_roundtrip_quotes_empty_unicode_and_metacharacters(

@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from muninn import platform_io
+from muninn import platform_io, platform_windows
 
 _SELECTION_LIMIT = 4096
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -59,6 +59,7 @@ def read_selection(base: Path) -> tuple[Path, Path] | None:
         if not platform_io.is_private(manifest):
             raise ValueError("unsafe release selection manifest")
         with platform_io.open_regular(manifest, root=lib) as handle:
+            platform_io.assert_private_fd(handle.fileno())
             raw = handle.read(_SELECTION_LIMIT + 1)
         if len(raw) > _SELECTION_LIMIT:
             raise ValueError("release selection manifest is too large")
@@ -70,13 +71,7 @@ def read_selection(base: Path) -> tuple[Path, Path] | None:
         release, interpreter = lib / sha, Path(python)
         if not platform_io.is_private(release, directory=True):
             raise ValueError("unsafe or absent selected release")
-        if not interpreter.is_absolute() or not interpreter.is_file():
-            raise ValueError("recorded interpreter is absent or relative")
-        checked = (
-            interpreter if sys.platform == "win32" else interpreter.resolve()
-        )
-        with platform_io.open_regular(checked):
-            pass
+        _assert_interpreter(interpreter)
         return release, interpreter
     except (OSError, RecursionError) as exc:
         raise ValueError("release selection cannot be validated") from exc
@@ -93,3 +88,14 @@ def _fields(record: dict[str, object]) -> tuple[str, str]:
     ):
         raise ValueError("invalid release selection fields")
     return sha, python
+
+
+def _assert_interpreter(interpreter: Path) -> None:
+    """Require a trusted executable while allowing public reads."""
+    if not interpreter.is_absolute() or not interpreter.is_file():
+        raise ValueError("recorded interpreter is absent or relative")
+    checked = interpreter if sys.platform == "win32" else interpreter.resolve()
+    if sys.platform == "win32":
+        platform_windows.assert_executable(checked)
+    with platform_io.open_regular(checked):
+        pass

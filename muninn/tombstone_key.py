@@ -88,6 +88,7 @@ def _read_key(path: Path) -> bytes:
     if sys.platform == "win32":
         platform_windows.assert_private(path)
     with platform_io.open_regular(path) as handle:
+        platform_io.assert_private_fd(handle.fileno())
         return _checked(handle.read(KEY_BYTES + 1))
 
 

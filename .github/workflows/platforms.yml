@@ -171,13 +171,20 @@ jobs:
         run: |
           import subprocess
           import sys
+          import time
+          started = time.monotonic()
+          subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
+                          '-Command', 'exit 0'], check=True, timeout=90)
+          print('PowerShell cold startup seconds:', round(time.monotonic() - started, 3))
           subprocess.run(
               [sys.executable, '-m', 'unittest', 'tests.test_platform_lock',
                'tests.test_file_sync', 'tests.test_platform_io',
                'tests.test_platform_windows', 'tests.test_windows_runtime',
                'tests.test_platform_paths', 'tests.test_poller_stop',
                'tests.test_sqlite_privacy', 'tests.test_native_tools',
-               'tests.test_native_launcher', 'tests.test_residue_portability'], check=True,
+               'tests.test_native_launcher', 'tests.test_residue_portability',
+               'tests.test_platform_children', 'tests.test_windows_metadata',
+               'tests.test_bootstrap_guards'], check=True,
           )
       - name: Check Windows native API typing
         if: runner.os == 'Windows'
