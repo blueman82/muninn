@@ -229,8 +229,10 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
     if not needles:
         return []
     hits: list[str] = []
+    # Empty files cannot hold residue; reading a native locked range can fail
+    # even beyond EOF, so avoid that unnecessary read while holding the lock.
     for path in sorted(home.rglob("*")):
-        if path.is_file() and not path.is_symlink():
+        if path.is_file() and not path.is_symlink() and path.stat().st_size:
             data = path.read_bytes()
             if any(needle in data for needle in needles):
                 hits.append(path.relative_to(home).as_posix())

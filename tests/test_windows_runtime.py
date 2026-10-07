@@ -9,8 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from muninn import (
-    cli,
-    cli_maint,
+    erase,
     platform_io,
     platform_rebuild,
     platform_windows,
@@ -39,6 +38,22 @@ if sys.platform == "win32":
                 store.connect_rw(db)
             self.assertEqual(db.read_bytes(), before)
             self.assertEqual(journal.read_bytes(), b"original journal")
+
+        def test_empty_locked_file_has_no_residue_without_reading(
+            self,
+        ) -> None:
+            self.write("content", b"synthetic retained canary")
+            with store.writer_lock(self.home, wait_s=0):
+                lock = self.home / "writer.lock"
+                self.assertEqual(lock.stat().st_size, 0)
+                with (
+                    platform_io.open_regular(lock) as handle,
+                    self.assertRaises(PermissionError),
+                ):
+                    handle.read()
+                self.assertEqual(
+                    erase.residue_scan(self.home, [b"canary"]), ["content"]
+                )
 
         def test_append_only_private_descriptor_can_sync(self) -> None:
             path = self.home / "tombstones.jsonl"
@@ -194,15 +209,9 @@ class PortableCliTests(CliCase):
         self.assertEqual((code, err), (0, ""), out)
         self.assertEqual(out["text"], text)
         self.assertTrue(out["hash_ok"], out)
-        if sys.platform == "win32":
-            args = cli.build_parser().parse_args(
-                ["erase", "--event", f"codex:{TID}:2.1", "--yes"]
-            )
-            cli_maint.erase_command(args, self.env, self.home, {})
-        else:
-            code, out, err = self.muninn(
-                "erase", "--event", f"codex:{TID}:2.1", "--yes"
-            )
+        code, out, err = self.muninn(
+            "erase", "--event", f"codex:{TID}:2.1", "--yes"
+        )
         self.assertEqual((code, err), (0, ""), out)
         key = tombstone_key.load_key(self.home, create=False)
         code, out, err = self.muninn("rebuild")

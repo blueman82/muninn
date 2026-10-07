@@ -117,6 +117,21 @@ if sys.platform == "win32":
             self.assertEqual(target.read_bytes(), b"new")
             self.assertFalse(source.exists())
 
+        def test_dangling_file_reparse_never_creates_outside_target(
+            self,
+        ) -> None:
+            target = self.home.parent / "outside-missing"
+            link = self.home / "tombstones.jsonl"
+            link.symlink_to(target)
+            self.assertFalse(link.exists())
+            with self.assertRaises(OSError):
+                platform_io.open_private(
+                    link, os.O_CREAT | os.O_WRONLY | os.O_APPEND
+                )
+            self.assertFalse(target.exists())
+            self.assertTrue(link.is_symlink())
+            link.unlink()
+
         def test_junction_escape_is_refused(self) -> None:
             outside = self.home.parent / "outside"
             outside.mkdir()

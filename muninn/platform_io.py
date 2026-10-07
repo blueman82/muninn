@@ -37,20 +37,13 @@ def open_private(path: Path, flags: int) -> int:
     if flags & os.O_TRUNC:
         raise ValueError("validate private state before truncating it")
     if sys.platform == "win32":
-        platform_windows.assert_private(path.parent, directory=True)
-        if path.exists():
-            platform_windows.assert_private(path)
-        flags |= os.O_BINARY
-    else:
-        flags |= os.O_NOFOLLOW | os.O_NONBLOCK
+        return platform_windows.open_private(path, flags)
+    flags |= os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(path, flags, 0o600)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError("state is not a regular file")
-        if sys.platform == "win32":
-            platform_windows.private_fd(fd)
-        else:
-            os.fchmod(fd, 0o600)
+        os.fchmod(fd, 0o600)
     except BaseException:
         os.close(fd)
         raise

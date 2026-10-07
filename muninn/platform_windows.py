@@ -260,6 +260,56 @@ if sys.platform == "win32":
         _ordinary(handle)
         _private(handle)
 
+    def _checked_path(handle: int, expected: Path) -> str:
+        """Bind an opened handle to its validated canonical pathname."""
+        final = ctypes.create_unicode_buffer(32768)
+        length = _final(handle, final, len(final), 0)
+        if not length or length >= len(final):
+            _raise_last()
+        actual = final.value.removeprefix("\\\\?\\")
+        if os.path.normcase(actual) != os.path.normcase(str(expected)):
+            raise OSError("path changed while opening")
+        return actual
+
+    def open_private(path: Path, flags: int) -> int:
+        """Create or open private state without following its final reparse.
+
+        Args:
+            path: Local state file beneath a validated private directory.
+            flags: Non-truncating creation, access and append flags.
+
+        Returns:
+            Caller-owned binary descriptor, validated before any write.
+
+        Raises:
+            OSError: If identity, ordinary type or privacy cannot be proved.
+        """
+        absolute = _local_path(path)
+        assert_private(absolute.parent, directory=True)
+        access = 0x80000000
+        if flags & (os.O_WRONLY | os.O_RDWR):
+            access |= 0x40000000
+        creation = 3
+        if flags & os.O_CREAT:
+            creation = 1 if flags & os.O_EXCL else 4
+        handle = _create(
+            str(absolute), access, 7, None, creation, 0x02200000, None
+        )
+        if handle == _VOID(-1).value:
+            _raise_last()
+        handle = int(handle)
+        try:
+            _ordinary(handle)
+            _private(handle)
+            _checked_path(handle, absolute)
+            fd = msvcrt.open_osfhandle(
+                handle, os.O_BINARY | (flags & os.O_APPEND)
+            )
+        except BaseException:
+            _close(handle)
+            raise
+        return fd
+
     def open_regular(path: Path, root: Path | None = None) -> int:
         """Open verified raw binary data, retaining descriptor identity.
 
@@ -277,13 +327,7 @@ if sys.platform == "win32":
         handle = _handle(absolute, 0x80000000)
         try:
             _ordinary(handle)
-            final = ctypes.create_unicode_buffer(32768)
-            length = _final(handle, final, len(final), 0)
-            if not length or length >= len(final):
-                _raise_last()
-            actual = final.value.removeprefix("\\\\?\\")
-            if os.path.normcase(actual) != os.path.normcase(str(absolute)):
-                raise OSError("path changed while opening")
+            actual = _checked_path(handle, absolute)
             if root is not None:
                 base = str(_local_path(root))
                 if os.path.normcase(os.path.commonpath([base, actual])) != (
