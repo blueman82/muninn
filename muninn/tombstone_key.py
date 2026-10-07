@@ -135,11 +135,22 @@ def table_has_keyed(conn: sqlite3.Connection) -> bool:
 
 
 def log_has_keyed(home: Path) -> bool:
-    """Whether ``tombstones.jsonl`` holds a keyed content tag."""
+    """Treat unknown history as keyed to forbid missing-key recreation."""
+    path = home / TOMBSTONE_FILE
     try:
-        data = (home / TOMBSTONE_FILE).read_bytes()
-    except OSError:
+        discovered = path.lstat()
+    except FileNotFoundError:
         return False
+    except OSError:
+        return True
+    try:
+        with platform_io.open_regular(
+            path, root=home, expected=discovered
+        ) as handle:
+            platform_io.assert_private_fd(handle.fileno())
+            data = handle.read()
+    except OSError:
+        return True
     return KEYED_PREFIX.encode() in data
 
 

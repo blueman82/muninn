@@ -175,6 +175,8 @@ jobs:
           import sys
           import tempfile
           from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd()))
           from muninn import platform_io
 
           original = Path(sys.executable)
@@ -235,7 +237,7 @@ jobs:
                'tests.test_sqlite_privacy', 'tests.test_native_tools',
                'tests.test_native_launcher', 'tests.test_residue_portability',
                'tests.test_platform_children', 'tests.test_windows_metadata',
-               'tests.test_bootstrap_guards'], check=True,
+               'tests.test_bootstrap_guards', 'tests.test_key_history'], check=True,
           )
       - name: Check Windows native API typing
         if: runner.os == 'Windows'
