@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import tempfile
@@ -11,6 +12,7 @@ import unittest
 from pathlib import Path
 
 from muninn import cli_serve, platform_io, poller_stop, store
+from tests.store_support import Child
 
 GENERATION = "a" * 32
 
@@ -80,3 +82,50 @@ class PollerStopTests(unittest.TestCase):
         self.assertEqual(
             conn.execute("SELECT value FROM test").fetchone(), (1,)
         )
+
+    def test_busy_writer_commits_before_actual_process_exit(self) -> None:
+        child = Child(
+            self,
+            """
+import os, sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from muninn import cli_serve, poller_stop, store
+home, generation = Path(sys.argv[2]), sys.argv[3]
+with store.writer_lock(home):
+    conn = store.connect_rw(store.db_path(home), fullfsync=False)
+    proxy = cli_serve._StopAfterCommit(
+        conn, requested=lambda: poller_stop.requested(
+            home, os.getpid(), generation
+        )
+    )
+    proxy.execute("CREATE TABLE stopped_tx(value INTEGER)")
+    proxy.execute("BEGIN IMMEDIATE")
+    proxy.execute("INSERT INTO stopped_tx VALUES(1)")
+    print("ready", flush=True)
+    deadline = time.monotonic() + 20
+    while not poller_stop.requested(home, os.getpid(), generation):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("stop request did not arrive")
+        time.sleep(0.05)
+    try:
+        proxy.execute("COMMIT")
+    except cli_serve._ServeStopError:
+        pass
+    else:
+        raise RuntimeError("writer did not stop after commit")
+    conn.close()
+""",
+            self.home,
+            GENERATION,
+        )
+        child.wait_ready(timeout=20)
+        poller_stop.request(self.home, child.proc.pid, GENERATION)
+        out, err = child.proc.communicate(timeout=5)
+        self.assertEqual((child.proc.returncode, out, err), (0, "", ""))
+        with contextlib.closing(
+            store.connect_ro(store.db_path(self.home))
+        ) as conn:
+            self.assertEqual(
+                conn.execute("SELECT value FROM stopped_tx").fetchone()[0], 1
+            )

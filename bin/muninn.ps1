@@ -83,6 +83,35 @@ function Quote-Argument([string]$Value) {
     return $builder.ToString()
 }
 
+function Assert-InterpreterField([string]$Path) {
+    if ($Path -notmatch '^[A-Za-z]:\\' -or $Path.Substring(2).Contains(':')) {
+        throw 'A recorded local absolute path is required'
+    }
+    foreach ($part in $Path.Substring(3).Split('\')) {
+        if (-not $part -or $part -match '[. ]$|^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)') {
+            throw 'Ambiguous recorded component'
+        }
+    }
+    $drive = [IO.DriveInfo]::new($Path.Substring(0, 3))
+    if ($drive.DriveType -ne [IO.DriveType]::Fixed) { throw 'Unsafe recorded drive' }
+    $full = [IO.Path]::GetFullPath($Path)
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add($full)
+    $directory = [IO.DirectoryInfo]::new([IO.Path]::GetDirectoryName($full))
+    while ($null -ne $directory) {
+        $parts.Add($directory.FullName)
+        $directory = $directory.Parent
+    }
+    foreach ($part in $parts) {
+        try {
+            $item = Get-Item -LiteralPath $part -Force -ErrorAction Stop
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $item.PSIsContainer -ne ($part -ne $full)) { throw 'Unsafe recorded object' }
+        } catch [System.Management.Automation.ItemNotFoundException] { }
+    }
+    return $full
+}
+
 function Assert-Executable([string]$Candidate) {
     $python = Assert-Ordinary $Candidate $false
     Hold-Directories (Split-Path -Parent $python)
@@ -110,7 +139,7 @@ function Python-Info([string]$Candidate) {
         }
         $output = $outputTask.GetAwaiter().GetResult()
         [void]$errorTask.GetAwaiter().GetResult()
-        if ($process.ExitCode -ne 0) { throw 'Python 3.13 or newer is required' }
+        if ($process.ExitCode -ne 0) { return $null }
         return $output.Trim()
     } finally { $process.Dispose() }
 }
@@ -230,25 +259,34 @@ namespace MuninnBootstrap {
         Assert-Acl ($metadata.GetAccessControl())
         $record = [MuninnBootstrap.NativeGuard]::ReadMetadata($metadata) | ConvertFrom-Json
         $names = @($record.PSObject.Properties.Name | Sort-Object)
-        if (($names -join ',') -ne 'python,sha' -or
+        if (($names -join ',') -cne 'python,sha' -or
             $record.sha -isnot [string] -or $record.sha -cnotmatch '^[0-9a-f]{40}$' -or
             $record.python -isnot [string]) { throw 'Invalid selection' }
         Hold-Directories (Join-Path $lib $record.sha)
         $root = Assert-Private (Join-Path $lib $record.sha) $true
-        $recorded = Assert-Executable $record.python
+        $recorded = Assert-InterpreterField $record.python
     }
     $python = $null
-    if ($env:MUNINN_PYTHON) { $python = Python-Info $env:MUNINN_PYTHON }
-    elseif ($recorded) { $python = Python-Info $recorded }
-    else {
+    $candidates = @()
+    if ($env:MUNINN_PYTHON) { $candidates += Assert-InterpreterField $env:MUNINN_PYTHON }
+    if ($recorded) { $candidates += $recorded }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $python = Python-Info $candidate
+            if ($python) { break }
+        }
+    }
+    if (-not $python) {
         foreach ($name in @('python3.13.exe', 'python3.14.exe', 'python.exe')) {
             $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
             if ($command) {
-                try { $python = Python-Info $command.Source; break } catch { }
+                $candidate = Assert-InterpreterField $command.Source
+                $python = Python-Info $candidate
+                if ($python) { break }
             }
         }
-        if (-not $python) { throw 'No Python 3.13 or newer found; set MUNINN_PYTHON' }
     }
+    if (-not $python) { throw 'No Python 3.13 or newer found; set MUNINN_PYTHON' }
     $program = 'import sys; sys.path.insert(0,sys.argv.pop(1)); from muninn.cli import main; raise SystemExit(main(sys.argv[1:]))'
     if ($installed) {
         $program = 'import os,sys; sys.path.insert(0,sys.argv.pop(1)); from pathlib import Path; from muninn.platform_paths import read_selection; selected=read_selection(Path(sys.argv.pop(1))); assert selected is not None; assert selected[0]==Path(sys.path[0]); from muninn.cli import main; raise SystemExit(main(sys.argv[1:]))'

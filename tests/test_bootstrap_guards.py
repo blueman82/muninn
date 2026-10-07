@@ -48,7 +48,7 @@ if sys.platform == "win32":
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     json.dump({"sha": sha, "python": sys.executable}, handle)
                 unvalidated = Path(temp) / "unvalidated.exe"
-                self.compile_marker(unvalidated, marker)
+                compile_marker(self, unvalidated, marker)
                 forged = Path(temp) / "forged.json"
                 forged.write_text(
                     json.dumps({"sha": sha, "python": str(unvalidated)})
@@ -107,41 +107,6 @@ if sys.platform == "win32":
                             process.kill()
                             process.communicate(timeout=5)
 
-        def compile_marker(self, unvalidated: Path, marker: Path) -> None:
-            """Compile an unvalidated marker executable in the fixture."""
-            compile_env = os.environ | {
-                "MUNINN_TEST_EXE": str(unvalidated),
-                "MUNINN_TEST_MARKER": str(marker),
-            }
-            source = (
-                "using System; using System.IO; public class Marker {"
-                "public static void Main() { File.WriteAllText("
-                "Environment.GetEnvironmentVariable("
-                '"MUNINN_TEST_MARKER"), '
-                '"unvalidated"); }}'
-            )
-            subprocess.run(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-Command",
-                    "Add-Type -TypeDefinition '" + source + "' "
-                    "-OutputAssembly $env:MUNINN_TEST_EXE "
-                    "-OutputType ConsoleApplication",
-                ],
-                check=True,
-                capture_output=True,
-                env=compile_env,
-                timeout=90,
-            )
-
-            subprocess.run(
-                [str(unvalidated)], env=compile_env, check=True, timeout=30
-            )
-            self.assertEqual(marker.read_text(), "unvalidated")
-            marker.unlink()
-
         def copy_bootstrap(self, bin_dir: Path) -> None:
             """Copy the isolated stable launcher into the synthetic install."""
             for name in ("muninn.cmd", "muninn.ps1"):
@@ -162,3 +127,39 @@ if sys.platform == "win32":
                 '    print(json.dumps({"ok": True}))\n    return 0\n',
                 encoding="utf-8",
             )
+
+
+def compile_marker(
+    case: unittest.TestCase, unvalidated: Path, marker: Path
+) -> None:
+    """Compile an unvalidated marker executable in the fixture."""
+    compile_env = os.environ | {
+        "MUNINN_TEST_EXE": str(unvalidated),
+        "MUNINN_TEST_MARKER": str(marker),
+    }
+    source = (
+        "using System; using System.IO; public class Marker {"
+        "public static void Main() { File.WriteAllText("
+        "Environment.GetEnvironmentVariable("
+        '"MUNINN_TEST_MARKER"), '
+        '"unvalidated"); }}'
+    )
+    subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Add-Type -TypeDefinition '" + source + "' "
+            "-OutputAssembly $env:MUNINN_TEST_EXE "
+            "-OutputType ConsoleApplication",
+        ],
+        check=True,
+        capture_output=True,
+        env=compile_env,
+        timeout=90,
+    )
+
+    subprocess.run([str(unvalidated)], env=compile_env, check=True, timeout=30)
+    case.assertEqual(marker.read_text(), "unvalidated")
+    marker.unlink()

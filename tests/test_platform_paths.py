@@ -67,7 +67,6 @@ class SelectionTests(unittest.TestCase):
             [],
             {"sha": "../outside", "python": sys.executable},
             {"sha": SHA, "python": "relative.exe"},
-            {"sha": SHA, "python": str(self.base / "missing.exe")},
             {"sha": SHA, "python": sys.executable, "extra": True},
         ):
             with self.subTest(value=value):
@@ -77,3 +76,12 @@ class SelectionTests(unittest.TestCase):
 
     def test_absent_selection_returns_none(self) -> None:
         self.assertIsNone(platform_paths.read_selection(self.base))
+
+    def test_missing_recorded_interpreter_keeps_valid_release_selection(
+        self,
+    ) -> None:
+        missing = self.base / "missing.exe"
+        self.write({"sha": SHA, "python": str(missing)})
+        self.assertEqual(
+            platform_paths.read_selection(self.base), (self.release, missing)
+        )

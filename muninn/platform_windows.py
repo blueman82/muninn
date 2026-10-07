@@ -279,3 +279,18 @@ if sys.platform == "win32":
             assert_acl(handle, policy="executable")
         finally:
             _close(handle)
+
+    def assert_interpreter_field(path: Path) -> None:
+        """Validate a recorded local path without requiring it to exist."""
+        if not path.is_absolute():
+            raise OSError("recorded interpreter must be absolute")
+        absolute = _local_path(path)
+        for candidate in (absolute, *absolute.parents):
+            if not os.path.lexists(candidate):
+                continue
+            handle = _handle(candidate, 0x80)
+            try:
+                _ordinary(handle, directory=candidate != absolute)
+                _checked_path(handle, candidate)
+            finally:
+                _close(handle)

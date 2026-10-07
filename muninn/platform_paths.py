@@ -44,7 +44,7 @@ def read_selection(base: Path) -> tuple[Path, Path] | None:
 
     Returns:
         Selected confined release and recorded interpreter, or None when
-        no manifest exists. Interpreter links may resolve to their executable.
+        no manifest exists. A missing recorded executable permits fallback.
 
     Raises:
         ValueError: If a present manifest, release or interpreter is unsafe.
@@ -91,11 +91,10 @@ def _fields(record: dict[str, object]) -> tuple[str, str]:
 
 
 def _assert_interpreter(interpreter: Path) -> None:
-    """Require a trusted executable while allowing public reads."""
-    if not interpreter.is_absolute() or not interpreter.is_file():
-        raise ValueError("recorded interpreter is absent or relative")
-    checked = interpreter if sys.platform == "win32" else interpreter.resolve()
+    """Validate recorded syntax independently of runtime selection."""
+    if not interpreter.is_absolute():
+        raise ValueError("recorded interpreter must be absolute")
     if sys.platform == "win32":
-        platform_windows.assert_executable(checked)
-    with platform_io.open_regular(checked):
-        pass
+        platform_windows.assert_interpreter_field(interpreter)
+    elif interpreter.exists() and not interpreter.is_file():
+        raise ValueError("recorded interpreter must be an ordinary file")

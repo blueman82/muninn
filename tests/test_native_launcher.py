@@ -15,6 +15,7 @@ from pathlib import Path
 
 from muninn import platform_io, poller_stop, store
 from tests.ingest_support import ROOT
+from tests.test_bootstrap_guards import compile_marker
 
 if sys.platform == "win32":
 
@@ -87,13 +88,98 @@ if sys.platform == "win32":
             self.assertEqual(done.stderr, "")
             self.assertEqual(json.loads(done.stdout), arguments)
 
-        def test_invalid_explicit_interpreter_refuses_without_stdout(
+        def test_missing_explicit_interpreter_falls_back_to_path(
             self,
         ) -> None:
             self.env["MUNINN_PYTHON"] = str(self.root / "missing.exe")
             done = self.run_cmd(["stats"])
-            self.assertEqual(done.returncode, 127)
-            self.assertEqual(done.stdout, "")
+            self.assertEqual(done.returncode, 17, done.stderr)
+            self.assertEqual(json.loads(done.stdout), ["stats"])
+
+        def install_selection(self, record: dict[str, str]) -> Path:
+            """Install the synthetic receiver in a private pinned release."""
+            lib = self.root / "lib"
+            release = lib / ("a" * 40)
+            for directory in (self.root, lib, release):
+                platform_io.ensure_private_dir(directory)
+            package = release / "muninn"
+            (self.root / "muninn").rename(package)
+            for name in (
+                "platform_paths",
+                "platform_io",
+                "platform_windows",
+                "platform_windows_security",
+            ):
+                shutil.copyfile(
+                    ROOT / "muninn" / (name + ".py"), package / (name + ".py")
+                )
+            manifest = lib / "selection.json"
+            manifest.write_text(json.dumps(record), encoding="utf-8")
+            return manifest
+
+        def test_missing_recorded_interpreter_accepts_valid_override(
+            self,
+        ) -> None:
+            self.install_selection(
+                {"sha": "a" * 40, "python": str(self.root / "missing.exe")}
+            )
+            done = self.run_cmd(["stats"])
+            self.assertEqual(done.returncode, 17, done.stderr)
+            self.assertEqual(json.loads(done.stdout), ["stats"])
+
+        def test_missing_recorded_interpreter_uses_verified_path(self) -> None:
+            self.install_selection(
+                {"sha": "a" * 40, "python": str(self.root / "missing.exe")}
+            )
+            self.env.pop("MUNINN_PYTHON")
+            self.env["PATH"] = (
+                str(Path(sys.executable).parent)
+                + os.pathsep
+                + self.env["PATH"]
+            )
+            done = self.run_cmd(["stats"])
+            self.assertEqual(done.returncode, 17, done.stderr)
+            self.assertEqual(json.loads(done.stdout), ["stats"])
+
+        def test_malformed_record_refuses_before_override_marker_executes(
+            self,
+        ) -> None:
+            manifest = self.install_selection(
+                {"sha": "a" * 40, "python": sys.executable}
+            )
+            executable, marker = self.root / "marker.exe", self.root / "marker"
+            compile_marker(self, executable, marker)
+            self.env["MUNINN_PYTHON"] = str(executable)
+            self.env["MUNINN_TEST_MARKER"] = str(marker)
+            for record in (
+                {
+                    "sha": "a" * 40,
+                    "python": os.path.relpath(sys.executable, ROOT),
+                },
+                {"SHA": "a" * 40, "python": sys.executable},
+                {"sha": "a" * 40, "Python": sys.executable},
+            ):
+                with self.subTest(fields=tuple(record)):
+                    manifest.write_text(json.dumps(record), encoding="utf-8")
+                    done = self.run_cmd(["stats"])
+                    self.assertEqual((done.returncode, done.stdout), (127, ""))
+                    self.assertFalse(marker.exists())
+
+        def test_present_unsafe_override_refuses_without_marker_execution(
+            self,
+        ) -> None:
+            executable, marker = self.root / "marker.exe", self.root / "marker"
+            compile_marker(self, executable, marker)
+            subprocess.run(
+                ["icacls", str(executable), "/grant", "*S-1-1-0:(W)"],
+                check=True,
+                capture_output=True,
+            )
+            self.env["MUNINN_PYTHON"] = str(executable)
+            self.env["MUNINN_TEST_MARKER"] = str(marker)
+            done = self.run_cmd(["stats"])
+            self.assertEqual((done.returncode, done.stdout), (127, ""))
+            self.assertFalse(marker.exists())
 
     class NativeServeTests(unittest.TestCase):
         """The actual writer publishes identity and stops while idle."""
