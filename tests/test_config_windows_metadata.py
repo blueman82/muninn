@@ -26,6 +26,41 @@ def descriptor(
     ) + b"".join(parts)
 
 
+def descriptor_difference(original: bytes, current: bytes) -> dict[str, int]:
+    """Compare native components and layout without exposing descriptor bytes.
+
+    Args:
+        original: Synthetic config descriptor before replacement.
+        current: The same synthetic path's descriptor after publication.
+
+    Returns:
+        Fixed numeric controls, equality, component offsets and lengths.
+
+    Raises:
+        OSError: If either descriptor fails the native component contract.
+    """
+    before, after = security_parts(original), security_parts(current)
+    values = {
+        "owner_equal": int(before[1] == after[1]),
+        "group_equal": int(before[2] == after[2]),
+        "dacl_equal": int(before[3] == after[3]),
+    }
+    for label, raw, parts in (
+        ("original", original, before),
+        ("final", current, after),
+    ):
+        values[label + "_control"] = parts[0]
+        values[label + "_size"] = len(raw)
+        for component, offset, value in zip(
+            ("owner", "group", "dacl"), (4, 8, 16), parts[1:], strict=True
+        ):
+            values[f"{label}_{component}_offset"] = int.from_bytes(
+                raw[offset : offset + 4], "little"
+            )
+            values[f"{label}_{component}_length"] = len(value)
+    return values
+
+
 class SecurityPartsTest(unittest.TestCase):
     """Offsets can vary; owner, group, control and ordered ACL bytes cannot."""
 
@@ -112,3 +147,25 @@ class SecurityPartsTest(unittest.TestCase):
                     ctypes.c_void_p(4),
                 )
             setter.assert_called_once()
+
+    def test_descriptor_difference_reports_numeric_components_and_layout(
+        self,
+    ) -> None:
+        before = descriptor()
+        after = descriptor(reverse=True)
+        values = descriptor_difference(before, after)
+        self.assertEqual(values["owner_equal"], 1)
+        self.assertEqual(values["dacl_equal"], 1)
+        self.assertEqual(values["original_owner_offset"], 20)
+        self.assertEqual(values["final_owner_offset"], 32)
+        self.assertTrue(
+            all(isinstance(value, int) for value in values.values())
+        )
+        self.assertEqual(
+            descriptor_difference(before, descriptor(ace_flags=0))[
+                "dacl_equal"
+            ],
+            0,
+        )
+        with self.assertRaises(OSError):
+            descriptor_difference(before, after[:-1])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from unittest import mock
 
 from install import config_windows, configedit
 from muninn import platform_io
+from tests.test_config_windows_metadata import descriptor_difference
 
 if sys.platform == "win32":
 
@@ -59,9 +61,10 @@ if sys.platform == "win32":
                     path, lambda data: b"after", lambda before, after: None
                 )
                 self.assertEqual(path.read_bytes(), b"after")
+                current = descriptor(path)
                 self.assertTrue(
-                    descriptor(path) == original,
-                    "native security descriptor changed",
+                    current == original,
+                    json.dumps(descriptor_difference(original, current)),
                 )
                 self.assertTrue(platform_io.is_private(path))
 

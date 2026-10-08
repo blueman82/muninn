@@ -10,18 +10,20 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from install import configedit
 from install.context import Ctx, run_real
-from install.provider_paths import hook_invocations, render_pinned
+from install.provider_paths import hook_invocations, powershell, render_pinned
 from install.trust import codex_hooks
 from muninn import ingest, knowledge, obs, platform_io, platform_windows
 from tests.ingest_support import ROOT, TID, line, rollout
 from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
 from tests.provider_native_security import probe
+from tests.provider_native_stderr import classify
 from tests.test_classify import codex_meta, user_msg
 
 _SHA = "a" * 40
@@ -160,55 +162,152 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
                 calls.append(
                     [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
                 )
-    for index, argv in enumerate(calls):
-        write(
-            "provider", "routes", metrics={"route": index, "budget_ms": 5000}
-        )
-        started = time.monotonic()
-        done = subprocess.run(
-            argv,
-            input=payload,
-            env=env,
-            cwd=ctx.home,
-            capture_output=True,
-            timeout=90,
-            check=False,
-        )
-        elapsed = time.monotonic() - started
-        write(
-            "provider",
-            None,
-            metrics={
-                "route": index,
-                "elapsed_ms": round(elapsed * 1000),
-                "budget_ms": 5000,
-                "returncode": done.returncode,
-            },
-        )
-        assert done.returncode == 0, (
-            index,
-            done.returncode,
-            done.stderr.decode(errors="replace"),
-        )
-        assert done.stderr == b"", (index, "unexpected stderr")
-        output = json.loads(done.stdout)
-        assert _WORDS in output["hookSpecificOutput"]["additionalContext"], (
-            index,
-            "missing cited synthetic memory",
-        )
-        assert b"\n" not in done.stdout.rstrip(b"\n"), (
-            index,
-            "noncompact JSON",
-        )
-        results.append(
-            {
-                "route": index,
-                "elapsed_ms": round(elapsed * 1000),
-                "budget_ms": 5000,
-            }
-        )
-        assert elapsed < 5, ("provider_timeout_exceeded", results[-1])
+    try:
+        for index, argv in enumerate(calls):
+            write(
+                "provider",
+                "routes",
+                metrics={"route": index, "budget_ms": 5000},
+            )
+            started = time.monotonic()
+            done = subprocess.run(
+                argv,
+                input=payload,
+                env=env,
+                cwd=ctx.home,
+                capture_output=True,
+                timeout=90,
+                check=False,
+            )
+            elapsed = time.monotonic() - started
+            write(
+                "provider",
+                None,
+                metrics={
+                    "route": index,
+                    "elapsed_ms": round(elapsed * 1000),
+                    "budget_ms": 5000,
+                    "returncode": done.returncode,
+                    **classify(done.stderr),
+                },
+            )
+            results.append(_hook_result(done, elapsed, index))
+    except Exception:
+        # Optional metrics must not replace the actual hook failure.
+        with suppress(OSError, ValueError):
+            write("provider", None, metrics=baselines(env))
+        raise
     return results
+
+
+def _hook_result(
+    done: subprocess.CompletedProcess[bytes], elapsed: float, index: int
+) -> dict[str, int]:
+    """Require actual compact cited output, clean exit and unchanged budget."""
+    assert done.returncode == 0, (index, done.returncode)
+    assert done.stderr == b"", (index, "unexpected stderr")
+    output = json.loads(done.stdout)
+    assert _WORDS in output["hookSpecificOutput"]["additionalContext"], (
+        index,
+        "missing cited synthetic memory",
+    )
+    assert b"\n" not in done.stdout.rstrip(b"\n"), (index, "noncompact JSON")
+    result = {
+        "route": index,
+        "elapsed_ms": round(elapsed * 1000),
+        "budget_ms": 5000,
+    }
+    assert elapsed < 5, ("provider_timeout_exceeded", result)
+    return result
+
+
+def pe_machine(path: Path) -> int:
+    """Read one bounded executable machine code without exporting bytes.
+
+    Args:
+        path: Synthetic executable or previously validated native candidate.
+
+    Returns:
+        The PE COFF machine code.
+
+    Raises:
+        OSError: If the regular file does not contain a bounded PE header.
+    """
+    with platform_io.open_regular(path) as source:
+        header = source.read(64)
+        if len(header) != 64 or header[:2] != b"MZ":
+            raise OSError("native machine header unavailable")
+        offset = int.from_bytes(header[60:64], "little")
+        if not 64 <= offset <= 1048576:
+            raise OSError("native machine header exceeds its bound")
+        source.seek(offset)
+        coff = source.read(6)
+        if len(coff) != 6 or coff[:4] != b"PE\x00\x00":
+            raise OSError("invalid native machine header")
+        return int.from_bytes(coff[4:6], "little")
+
+
+def baselines(env: dict[str, str]) -> dict[str, int]:
+    """Diagnose fresh process costs only after the actual cold hook attempt.
+
+    Args:
+        env: Existing isolated synthetic provider environment.
+
+    Returns:
+        Numeric PE codes, timings and exits; unknown reports a fixed error.
+    """
+    if sys.platform != "win32":
+        return {}
+    metrics: dict[str, int] = {"baseline_error": 0}
+    try:
+        python, shell = Path(sys.executable), Path(powershell())
+        for name, candidate in (("python", python), ("powershell", shell)):
+            platform_windows.assert_executable(candidate)
+            metrics[name + "_pe_machine"] = pe_machine(candidate)
+        commands = (
+            ("python", [str(python), "-I", "-B", "-X", "utf8", "-c", "pass"]),
+            (
+                "powershell",
+                [
+                    str(shell),
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "exit 0",
+                ],
+            ),
+            (
+                "addtype",
+                [
+                    str(shell),
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "Add-Type -TypeDefinition "
+                    "'public class MuninnTimingProbe {}'; exit 0",
+                ],
+            ),
+        )
+        for name, command in commands:
+            started = time.monotonic()
+            try:
+                done = subprocess.run(
+                    command,
+                    env=env,
+                    capture_output=True,
+                    timeout=90,
+                    check=False,
+                )
+                code = done.returncode
+            except subprocess.TimeoutExpired:
+                code = -1
+            metrics[f"baseline_{name}_ms"] = round(
+                (time.monotonic() - started) * 1000
+            )
+            metrics[f"baseline_{name}_returncode"] = code
+    except Exception:
+        metrics["baseline_error"] = 1
+    return metrics
 
 
 def main() -> None:
@@ -228,6 +327,7 @@ def main() -> None:
             metrics = probe(ctx.codex_home / "synthetic-security-probe.json")
             codex = prove_codex(ctx, env, checkpoint)
             timings = prove_hooks(ctx, env)
+            metrics.update(baselines(env))
             write(
                 "provider",
                 "complete",
