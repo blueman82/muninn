@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from muninn.obs_service import (
     canonical_trigger_user,
+    command_names_path,
     disable_task,
     parse_task_query,
     task_matches,
@@ -114,3 +115,18 @@ class DisableTaskTests(unittest.TestCase):
         """A definition without settings is not silently accepted."""
         with self.assertRaises(ValueError):
             disable_task(ET.fromstring(f'<Task xmlns="{_URI}"/>'))
+
+
+class CommandNamesPathTests(unittest.TestCase):
+    """A command line names a release only by an absolute path."""
+
+    def test_literal_and_absolute_tokens_match(self) -> None:
+        """The literal text or an absolute token under the root matches."""
+        root = "/lib/release"
+        self.assertTrue(command_names_path(f"py -I {root}/bin/x", root))
+        self.assertTrue(command_names_path('py "/lib/release/bin/x"', root))
+
+    def test_relative_tokens_never_match(self) -> None:
+        """Flags and relative names are not resolved against the caller."""
+        self.assertFalse(command_names_path("py -I --go release", "/lib/rel"))
+        self.assertFalse(command_names_path("py .", "/"))

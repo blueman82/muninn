@@ -114,11 +114,11 @@ def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
     """
     args = [str(a) for a in argv]
     try:
-        return subprocess.run(
-            args, capture_output=True, timeout=10, check=False
-        )
-    except FileNotFoundError:
-        return subprocess.CompletedProcess(args, 127, b"", b"")
+        # A backstop for a hung tool; a cold PowerShell start can be slow.
+        return subprocess.run(args, capture_output=True, timeout=60)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        code = 127 if isinstance(error, FileNotFoundError) else 124
+        return subprocess.CompletedProcess(args, code, b"", b"")
 
 
 def _result(

@@ -233,6 +233,9 @@ def parse_task_query(raw: bytes) -> ET.Element:
     return ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text))
 
 
+_DRIVE = re.compile(r"[A-Za-z]:[\\/]")
+
+
 def _resolved(path: object) -> str:
     """Resolve a path to its canonical case-folded spelling."""
     return os.path.normcase(os.path.realpath(str(path))).casefold()
@@ -271,6 +274,9 @@ def command_names_path(command: str, path: object) -> bool:
         return True
     root = _resolved(path)
     for token in command.replace('"', " ").split():
+        # A relative token would resolve against this process's directory.
+        if not (Path(token).is_absolute() or _DRIVE.match(token)):
+            continue
         resolved = _resolved(token)
         if resolved == root or resolved.startswith(root + os.sep):
             return True
