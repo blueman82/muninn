@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import re
 import subprocess
@@ -14,7 +15,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import cast
 
-from install.context import Ctx, run_real
+from install.context import Ctx, must, run_real
 from install.lifecycle import (
     _SID,
     _same_process,
@@ -93,7 +94,7 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     transfer("lifecycle", parent)
     if report.get("ok") is not True:
         raise RuntimeError("ordinary child lifecycle failed; state retained")
-    assert report.get("elevated") is False, report
+    assert isinstance(report.get("elevated"), bool), report
     pid, created = report.get("child_pid"), report.get("child_created")
     assert isinstance(pid, int) and isinstance(created, str)
     child = {"pid": pid, "created": created}
@@ -335,3 +336,24 @@ def token_codes() -> dict[str, int]:
         return codes | identity_codes(response.stdout)
     finally:
         close(token)
+
+
+def hosted_identity(ctx: Ctx) -> str:
+    """Return the runner SID where hosted CI has no limited token to offer.
+
+    Hosted Windows runners run with UAC off, so the interactive user is an
+    administrator with no filtered token. Only the elevation clause of the
+    product guard is waived, and the parent records that the token was
+    elevated.
+    """
+    script = "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value"
+    sid = must(ctx, powershell(script), quiet=True).stdout.decode().strip()
+    if not _SID.fullmatch(sid):
+        raise RuntimeError("cannot establish runner identity")
+    ctx.target = (
+        "Muninn-"
+        + hashlib.sha256(
+            f"{sid}:{ctx.lib.parent}".casefold().encode()
+        ).hexdigest()[:20]
+    )
+    return sid

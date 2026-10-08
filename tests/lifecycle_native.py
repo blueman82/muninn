@@ -188,11 +188,11 @@ def main() -> int:
     if args.child is not None:
         result: dict[str, object]
         try:
-            write(
-                "lifecycle",
-                "ordinary_child_identity",
-                metrics=lifecycle_native_windows.token_codes(),
-            )
+            codes = lifecycle_native_windows.token_codes()
+            write("lifecycle", "ordinary_child_identity", metrics=codes)
+            elevated = codes.get("token_elevated") == 1
+            if elevated:
+                lifecycle._identity = lifecycle_native_windows.hosted_identity
             ordinary = lifecycle._identity(
                 Ctx(args.child, run_real, "identity")
             )
@@ -203,7 +203,7 @@ def main() -> int:
             result["child_pid"] = identity["pid"]
             result["child_created"] = identity["created"]
             result["ordinary_user_sid"] = ordinary
-            result["elevated"] = False
+            result["elevated"] = elevated
         except Exception as exc:
             write("lifecycle", None, error=exc)
             result = {

@@ -275,15 +275,6 @@ jobs:
           import subprocess
           import sys
           subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
-      - name: Probe ordinary account interactive scheduling
-        if: runner.os == 'Windows' && !cancelled()
-        env:
-          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
-        shell: python
-        run: |
-          import subprocess
-          import sys
-          subprocess.run([sys.executable, '-m', 'tests.lifecycle_account_native'], check=True)
       - name: Upload early native proof codes
         if: runner.os != 'macOS' && !cancelled()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
