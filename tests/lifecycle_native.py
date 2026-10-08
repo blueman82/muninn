@@ -188,6 +188,7 @@ def main() -> int:
     if args.child is not None:
         result: dict[str, object]
         mismatches = lifecycle_native_windows.record_task_mismatch()
+        bindings = lifecycle_native_windows.record_writer_mismatch()
         try:
             codes = lifecycle_native_windows.token_codes()
             write("lifecycle", "ordinary_child_identity", metrics=codes)
@@ -206,7 +207,10 @@ def main() -> int:
             result["ordinary_user_sid"] = ordinary
             result["elevated"] = elevated
         except Exception as exc:
-            failed = {"task_owned_mismatch": min(mismatches, default=0)}
+            failed = {
+                "task_owned_mismatch": min(mismatches, default=0),
+                "writer_binding_mismatch": min(bindings, default=0),
+            }
             write("lifecycle", None, error=exc, metrics=failed)
             result = {
                 "ok": False,

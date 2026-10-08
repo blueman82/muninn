@@ -14,6 +14,7 @@ from typing import cast
 from install import configedit as ce
 from install.context import Ctx, StepFailedError, job, must, wait
 from install.release_io import write_private
+from install.writer_binding import writer_mismatch
 from muninn import obs_status, platform_io, platform_windows, poller_stop
 from muninn.obs_linux_service import (
     query_unit,
@@ -283,23 +284,16 @@ def _stop_windows(ctx: Ctx) -> None:
         args = definition.findtext(
             "t:Actions/t:Exec/t:Arguments", namespaces=_NS
         )
-        selected = read_selection(ctx.lib.parent)
-        executable, launcher_exe = writer["exe"], launcher["exe"]
-        launcher_command = launcher["cmd"]
         if (
-            selected is None
-            or not isinstance(executable, str)
-            or executable.casefold() != str(selected[1]).casefold()
-            or str(selected[0]) not in found["cmd"]
-            or not isinstance(launcher_exe, str)
-            or not command
-            or launcher_exe.casefold() != command.casefold()
-            or not isinstance(launcher_command, str)
-            or not args
-            or args not in launcher_command
-            or not (
-                {launcher["pid"], launcher["parent"]} & set(_task_engines(ctx))
+            writer_mismatch(
+                read_selection(ctx.lib.parent),
+                writer,
+                launcher,
+                found["cmd"],
+                (command, args),
+                _task_engines(ctx),
             )
+            is not None
         ):
             raise StepFailedError(
                 "writer and launcher do not match the owned task"

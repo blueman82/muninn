@@ -13,7 +13,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from ctypes import wintypes
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from install import lifecycle
 from install.context import Ctx, must, run_real
@@ -376,4 +376,24 @@ def record_task_mismatch() -> list[int]:
         return index is None
 
     lifecycle.task_matches = recording
+    return seen
+
+
+def record_writer_mismatch() -> list[int]:
+    """Make the product writer binding also note which check failed.
+
+    Returns:
+        A list that receives the number of each failing check.
+    """
+    seen: list[int] = []
+    real = lifecycle.writer_mismatch
+
+    def recording(*args: Any) -> int | None:
+        """Pass the product verdict through while keeping the check number."""
+        index = real(*args)
+        if index is not None:
+            seen.append(index)
+        return index
+
+    lifecycle.writer_mismatch = recording
     return seen
