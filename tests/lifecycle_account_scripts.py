@@ -9,6 +9,52 @@ from tests.lifecycle_account_desktop import PROCESS_SOURCE
 from tests.lifecycle_account_desktop import SOURCE as DESKTOP_SOURCE
 from tests.lifecycle_account_privileges import SOURCE
 
+_CHILD_DIAGNOSTICS = r"""
+function Read-ChildJson($path){
+ $stream=[IO.File]::OpenRead($path)
+ $reader=[IO.StreamReader]::new($stream)
+ try {
+  $buffer=[char[]]::new(8193);$count=$reader.ReadBlock($buffer,0,8193)
+  if($count -gt 8192){throw 'child_report_oversized'}
+  return ([string]::new($buffer,0,$count)|ConvertFrom-Json)
+ } finally {$reader.Dispose()}
+}
+function Read-ChildEvidence($base,$report){
+ $report.child_report_seen=0
+ try {
+  $value=Read-ChildJson ([IO.Path]::Combine($base,'child-result.json'))
+  if($value -isnot [pscustomobject] -or $value.phase -isnot [string] -or
+     $value.phase -notin @('account_child_start','account_task_create',
+    'account_task_run','account_task_wait')){throw 'child_phase_invalid'}
+  $code=0
+  if($null -ne $value.winerror){
+   if($value.winerror -isnot [int] -and $value.winerror -isnot [long]){
+    throw 'child_number_invalid'
+   }
+   $code=[int]$value.winerror
+  }
+  $report.phase=$value.phase;$report.child_report_seen=1
+  $report.child_failure_stage=2;$report.child_failure_hresult=$code
+  $report.child_failure_line=0;return
+ } catch {}
+ try {
+  $value=Read-ChildJson ([IO.Path]::Combine($base,'child-failure.json'))
+  if($value -isnot [pscustomobject]){throw 'child_report_invalid'}
+  foreach($key in @('stage','hresult','line')){
+   if($value.$key -isnot [int] -and $value.$key -isnot [long]){
+    throw 'child_number_invalid'
+   }
+  }
+  if($value.stage -notin @(1,3) -or $value.line -lt 0 -or
+     $value.line -gt 4096){throw 'child_stage_invalid'}
+  $report.child_failure_hresult=[int]$value.hresult
+  $report.child_failure_stage=[int]$value.stage
+  $report.child_failure_line=[int]$value.line
+ } catch {}
+}
+"""
+
+
 OWNED = r"""
 function Test-Owned($task,$base){
  [xml]$wanted=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
@@ -182,6 +228,13 @@ try {
   'TMP='+$base+$zero+'WINDIR='+$env:SystemRoot+$zero+$zero
  $environment=[Runtime.InteropServices.Marshal]::StringToHGlobalUni($minimal)
  $report.phase='account_child_start';$report.child_stage=1
+ $parseTokens=$null;$parseErrors=$null
+ [void][Management.Automation.Language.Parser]::ParseFile(
+  ([IO.Path]::Combine($base,'child.ps1')),[ref]$parseTokens,[ref]$parseErrors)
+ $report.child_parse_count=$parseErrors.Count;$report.child_parse_line=0
+ if($parseErrors.Count -gt 0){
+  $report.child_parse_line=$parseErrors[0].Extent.StartLineNumber
+ }
  $launched=[MuninnCiLogon]::CreateProcessWithTokenW($token,0,$exe,$command,
   0x08000400,$environment,$base,[ref]$startup,[ref]$process)
  if(!$launched){
@@ -209,7 +262,10 @@ try {
  }
  $report.child_exit_query_ok=[int]$queried
  $report.child_exit_code=$exitCode
- if($exitCode -ne 0){throw 'ordinary_child_exit_failed'}
+ if($exitCode -ne 0){
+  Read-ChildEvidence $base $report
+  throw 'ordinary_child_exit_failed'
+ }
  $report.child_stage=4
  $child=Join-Path $base 'child-result.json'
  $parsed=Get-Content -LiteralPath $child -Raw|ConvertFrom-Json
@@ -306,6 +362,7 @@ def outer_script(parent: Path) -> str:
         + DESKTOP_SOURCE
         + "\n'@\n"
         + OWNED
+        + _CHILD_DIAGNOSTICS
         + body
         + "\n} catch {"
         "$probeFailure=$_.Exception.GetBaseException();"
@@ -315,3 +372,27 @@ def outer_script(parent: Path) -> str:
         "$report.winerror=[int]$probeFailure.NativeErrorCode};"
         "$report|ConvertTo-Json -Compress;exit 1}"
     )
+
+
+def child_script(parent: Path) -> str:
+    """Retain uncaught child codes while explicitly preserving exit one."""
+    header = (
+        f"$childBase={literal(str(parent))};$childStage=1\n"
+        "trap {try {\n"
+        "$nativeChildFailure=$_.Exception.GetBaseException();"
+        "$line=[int]$_.InvocationInfo.ScriptLineNumber;"
+        "$data='{\"stage\":'+$childStage+',\"hresult\":'+"
+        "[int]$nativeChildFailure.HResult+',\"line\":'+$line+'}';"
+        "$path=[IO.Path]::Combine($childBase,'child-failure.json');"
+        "if(![IO.File]::Exists($path)){[IO.File]::WriteAllText($path,$data)}"
+        "\n} catch {} finally {exit 1}}\n"
+    )
+    body = CHILD.replace(
+        "$name=Split-Path -Leaf $base",
+        "$childStage=2;$name=Split-Path -Leaf $base",
+    ).replace(
+        " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+        " $childStage=3\n"
+        " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+    )
+    return OWNED + header + body

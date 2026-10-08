@@ -163,6 +163,47 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("$quiescent=$false\n $report.child_stage=2", source)
         self.assertNotIn("TerminateProcess", source)
 
+    def test_child_failure_diagnosis_preserves_exit_and_bounded_reports(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = lifecycle_account_scripts.outer_script(Path(temporary))
+            child = lifecycle_account_scripts.child_script(Path(temporary))
+        self.assertLess(
+            source.index("::ParseFile("), source.index("$launched=")
+        )
+        self.assertIn("$report.child_parse_count=$parseErrors.Count", source)
+        self.assertIn("$report.child_parse_line=0", source)
+        query = source.index("$report.child_exit_code=$exitCode")
+        evidence = source.index("Read-ChildEvidence $base $report", query)
+        refuse = source.index("throw 'ordinary_child_exit_failed'", query)
+        self.assertLess(evidence, refuse)
+        self.assertIn("child-result.json", source)
+        self.assertIn("child-failure.json", source)
+        reader = source[source.index("function Read-ChildEvidence") :]
+        self.assertLess(
+            reader.index("child-result.json"),
+            reader.index("child-failure.json"),
+        )
+        self.assertIn(
+            "8192", source[source.index("function Read-ChildJson") :]
+        )
+        self.assertIn("child_report_seen", reader)
+        self.assertIn("child_failure_hresult", reader)
+        self.assertIn("$value -isnot [pscustomobject]", reader)
+        self.assertIn("$value.winerror -isnot [int]", reader)
+        existing = reader[: reader.index("child-failure.json")]
+        self.assertNotIn("scheduler_child_session", existing)
+        self.assertIn("catch {}", reader)
+        self.assertIn("trap {", child)
+        self.assertIn("finally {exit 1}", child)
+        self.assertIn("$childStage=1", child)
+        self.assertIn("$childStage=3", child)
+        self.assertNotIn("Exception.Message", child)
+        self.assertNotIn("ScriptStackTrace", child)
+        self.assertIn("$report.winerror=[int]$_.Exception.HResult", child)
+        self.assertIn("scheduler_instances=-1", child)
+
     def test_nonzero_outer_json_is_recorded_then_original_exit_is_raised(
         self,
     ) -> None:

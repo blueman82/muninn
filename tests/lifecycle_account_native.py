@@ -16,7 +16,7 @@ from install.lifecycle import task_bytes, task_xml
 from muninn import platform_io
 from muninn.obs_service import literal, powershell
 from tests.lifecycle_account_errors import failure_codes, response
-from tests.lifecycle_account_scripts import CHILD, OWNED, outer_script
+from tests.lifecycle_account_scripts import child_script, outer_script
 from tests.native_diagnostics import write
 
 
@@ -93,7 +93,9 @@ def main() -> int:
     parent = Path(temporary.name)
     platform_io.ensure_private_dir(parent)
     (parent / "task.xml").write_bytes(noop_definition(parent))
-    (parent / "child.ps1").write_text(OWNED + CHILD, encoding="utf-8-sig")
+    (parent / "child.ps1").write_text(
+        child_script(parent), encoding="utf-8-sig"
+    )
     (parent / "outer.ps1").write_text(
         outer_script(parent), encoding="utf-8-sig"
     )
