@@ -387,12 +387,20 @@ def child_script(parent: Path) -> str:
         "if(![IO.File]::Exists($path)){[IO.File]::WriteAllText($path,$data)}"
         "\n} catch {} finally {exit 1}}\n"
     )
-    body = CHILD.replace(
-        "$name=Split-Path -Leaf $base",
-        "$childStage=2;$name=Split-Path -Leaf $base",
-    ).replace(
-        " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
-        " $childStage=3\n"
-        " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+    body = (
+        CHILD.replace(
+            "$base=Split-Path -Parent $MyInvocation.MyCommand.Path",
+            "$base=Microsoft.PowerShell.Management\\Split-Path "
+            "-Parent $MyInvocation.MyCommand.Path",
+        )
+        .replace(
+            "$name=Split-Path -Leaf $base",
+            "$childStage=2;$name=Split-Path -Leaf $base",
+        )
+        .replace(
+            " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+            " $childStage=3\n"
+            " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+        )
     )
     return OWNED + header + body

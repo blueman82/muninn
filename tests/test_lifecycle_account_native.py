@@ -32,6 +32,22 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("$user.SID.Value", script)
         self.assertIn("$created -and $quiescent", script)
 
+    def test_child_first_parent_cmdlet_selects_its_builtin_module(
+        self,
+    ) -> None:
+        source = lifecycle_account_scripts.child_script(Path("/synthetic"))
+        qualified = (
+            "$base=Microsoft.PowerShell.Management\\Split-Path "
+            "-Parent $MyInvocation.MyCommand.Path"
+        )
+        self.assertEqual(source.count(qualified), 1)
+        self.assertNotIn(
+            "$base=Split-Path -Parent $MyInvocation.MyCommand.Path", source
+        )
+        self.assertIn("$childStage=2;$name=Split-Path -Leaf $base", source)
+        self.assertNotIn("$env:PSModulePath=", source)
+        self.assertNotIn("Import-Module", source)
+
     def test_noop_definition_keeps_safe_native_task_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             xml = lifecycle_account_native.noop_definition(Path(temporary))

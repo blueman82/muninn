@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import plistlib
+import shutil
 import subprocess
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
-from tests.installer_support import Fake, World, git
+from install import steps_release
+from install.context import StepFailedError
+from install.provider_paths import render_pinned
+from tests.installer_support import ROOT, Fake, World, git
 
 
 class FakeGitBoundaryTests(unittest.TestCase):
@@ -72,3 +77,55 @@ class FixtureLauncherModeTests(unittest.TestCase):
         mode = git(copied.repo, "ls-tree", "HEAD", "bin/muninn").split()[0]
         self.assertEqual(mode, b"100755")
         self.assertEqual(git(copied.repo, "status", "--porcelain"), b"")
+
+
+class FixturePlistPathTests(unittest.TestCase):
+    """The fake Darwin plist follows its real host filesystem spelling."""
+
+    def test_windows_spelling_keeps_placeholder_source_and_is_idempotent(
+        self,
+    ) -> None:
+        relative = "launchd/com.muninn.plist"
+        original = (ROOT / relative).read_bytes()
+
+        def native_path(value: str) -> Path | PureWindowsPath:
+            return PureWindowsPath(value) if value == "@HOME@" else Path(value)
+
+        with patch("tests.installer_support.Path", side_effect=native_path):
+            world = World(self)
+            first = (world.repo / relative).read_bytes()
+            with patch("tests.installer_support.ROOT", world.repo):
+                copied = World(self)
+        expected = (
+            f"{PureWindowsPath('@HOME@') / '.local/lib/muninn'}"
+            "/current/bin/muninn"
+        )
+        self.assertEqual(
+            plistlib.loads(first)["ProgramArguments"][0], expected
+        )
+        self.assertIn(b"@HOME@", first)
+        self.assertEqual((copied.repo / relative).read_bytes(), first)
+        self.assertEqual((ROOT / relative).read_bytes(), original)
+        self.assertEqual(git(world.repo, "status", "--porcelain"), b"")
+
+    def test_real_checker_keeps_exact_target_and_executable_refusals(
+        self,
+    ) -> None:
+        world = World(self)
+        ctx = world.ctx()
+        program = ctx.lib / "current/bin/muninn"
+        program.parent.mkdir(parents=True)
+        shutil.copy2(world.repo / "bin/muninn", program)
+        program.chmod(0o755)
+        relative = "launchd/com.muninn.plist"
+        data = render_pinned(
+            ctx, relative, (world.repo / relative).read_bytes()
+        )
+        steps_release._check_plist(ctx, data)
+        changed = plistlib.loads(data)
+        changed["ProgramArguments"][0] += ".foreign"
+        with self.assertRaises(StepFailedError):
+            steps_release._check_plist(ctx, plistlib.dumps(changed))
+        program.unlink()
+        with self.assertRaises(StepFailedError):
+            steps_release._check_plist(ctx, data)

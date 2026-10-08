@@ -389,6 +389,14 @@ class World:
         for rel in PINNED:
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / rel, self.repo / rel)
+            if rel == "launchd/com.muninn.plist":
+                path = self.repo / rel
+                prefix = str(Path("@HOME@") / ".local/lib/muninn").encode()
+                path.write_bytes(
+                    path.read_bytes().replace(
+                        b"@HOME@/.local/lib/muninn", prefix
+                    )
+                )
             if rel == "bin/muninn":
                 (self.repo / rel).chmod(0o755)
         git(self.repo, "init", "-q")
