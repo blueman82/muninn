@@ -148,3 +148,21 @@ class NativeDiagnosticsTest(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 write("lifecycle", "outer_task_create", metrics={"raw_xml": 1})
+
+    def test_explicit_private_scratch_ignores_broad_runner_directory(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as private,
+            tempfile.TemporaryDirectory() as broad,
+        ):
+            with mock.patch.dict(
+                "os.environ",
+                {"MUNINN_NATIVE_SCRATCH": private, "RUNNER_TEMP": broad},
+            ):
+                write("provider", "fixture_home")
+            leaf = "muninn-native-diagnostics"
+            self.assertTrue(
+                (Path(private) / leaf / "muninn-provider-proof.json").is_file()
+            )
+            self.assertFalse((Path(broad) / leaf).exists())

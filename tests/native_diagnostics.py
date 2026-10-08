@@ -103,7 +103,9 @@ def _safe_field(key: str, value: object) -> bool:
 
 def _publish(artifact: str, values: dict[str, str | int]) -> None:
     """Write validated fields beneath an explicit private CI scratch leaf."""
-    directory = os.environ.get("RUNNER_TEMP")
+    directory = os.environ.get("MUNINN_NATIVE_SCRATCH") or os.environ.get(
+        "RUNNER_TEMP"
+    )
     if not directory:
         return
     leaf = Path(directory) / "muninn-native-diagnostics"
@@ -202,7 +204,9 @@ def write(
         or not all(isinstance(value, int) for value in metrics.values())
     ):
         raise ValueError("unsupported native diagnostic metric")
-    directory = os.environ.get("RUNNER_TEMP")
+    directory = os.environ.get("MUNINN_NATIVE_SCRATCH") or os.environ.get(
+        "RUNNER_TEMP"
+    )
     if not directory:
         return
     path = (

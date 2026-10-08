@@ -9,8 +9,9 @@ import tempfile
 import unittest
 from ctypes import wintypes
 from pathlib import Path
+from unittest import mock
 
-from install import configedit
+from install import config_windows, configedit
 from muninn import platform_io
 
 if sys.platform == "win32":
@@ -58,7 +59,10 @@ if sys.platform == "win32":
                     path, lambda data: b"after", lambda before, after: None
                 )
                 self.assertEqual(path.read_bytes(), b"after")
-                self.assertEqual(descriptor(path), original)
+                self.assertTrue(
+                    descriptor(path) == original,
+                    "native security descriptor changed",
+                )
                 self.assertTrue(platform_io.is_private(path))
 
         def test_unsafe_config_refusal_keeps_bytes_and_acl(self) -> None:
@@ -76,4 +80,53 @@ if sys.platform == "win32":
                         path, lambda data: b"after", lambda before, after: None
                     )
                 self.assertEqual(path.read_bytes(), b"before")
-                self.assertEqual(descriptor(path), original)
+                self.assertTrue(
+                    descriptor(path) == original,
+                    "native security descriptor changed",
+                )
+
+        def test_protected_dacl_and_explicit_aces_are_preserved(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp).resolve() / "settings.json"
+                configedit.atomic_write(path, b"before", 0o600)
+                subprocess.run(
+                    ["icacls.exe", str(path), "/inheritance:d"],
+                    capture_output=True,
+                    check=True,
+                )
+                original = descriptor(path)
+                configedit.edit_file(
+                    path, lambda data: b"after", lambda before, after: None
+                )
+                self.assertEqual(path.read_bytes(), b"after")
+                self.assertTrue(
+                    descriptor(path) == original,
+                    "protected security descriptor changed",
+                )
+
+        def test_metadata_refusal_keeps_original_bytes_and_acl(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp).resolve() / "settings.json"
+                configedit.atomic_write(path, b"before", 0o600)
+                original = descriptor(path)
+                with (
+                    mock.patch.object(
+                        config_windows,
+                        "_restore",
+                        side_effect=PermissionError(
+                            "synthetic metadata refusal"
+                        ),
+                    ),
+                    self.assertRaises(OSError),
+                ):
+                    configedit.edit_file(
+                        path,
+                        lambda data: b"after",
+                        lambda before, after: None,
+                    )
+                self.assertEqual(path.read_bytes(), b"before")
+                self.assertTrue(
+                    descriptor(path) == original,
+                    "refusal changed security descriptor",
+                )
+                self.assertEqual(list(path.parent.iterdir()), [path])

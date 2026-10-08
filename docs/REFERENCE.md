@@ -253,6 +253,8 @@ re-read after a classifier change still shows `poller` `ok` while `index_age_s` 
 `muninn.sqlite-journal` SQLite's rollback journal, allowed by `unexpected_files` but a leftover one fails `unowned_journal`;
 `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). During an upgrade that migrates the schema, `muninn.sqlite.pre-upgrade-<sha>` (mode 0600) exists briefly and is allowed. Anything else fails `unexpected_files`.
 
+On Windows, heartbeat and stop metadata publication retries native access-denied or sharing-violation errors (5/32) for at most one second. A reader held longer causes refusal and retains the previous state.
+
 ## Native provider commands
 
 The installer renders hook JSON with native paths rather than inserting raw paths into JSON text. On Windows, Claude uses a real Windows PowerShell executable with an `args` array; Codex uses its `command_windows` override with an encoded PowerShell command. Both invoke the validated Muninn bootstrap without Git Bash. Their shipped timeout remains five seconds. Changing a hook definition requires the owner's provider approval.
