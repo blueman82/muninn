@@ -248,3 +248,46 @@ class NativeDiagnosticsTest(unittest.TestCase):
                     "ordinary_child_identity",
                     metrics={"token_bytes": 1},
                 )
+
+    def test_ordinary_noop_diagnostic_does_not_replace_lifecycle_failure(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            write(
+                "lifecycle",
+                "ordinary_child_identity",
+                error=PermissionError("not exported"),
+            )
+            leaf = Path(tmp) / "muninn-native-diagnostics"
+            failed = (leaf / "muninn-lifecycle-proof.json").read_bytes()
+            metrics = {
+                "ordinary_child_admin": 0,
+                "scheduler_child_admin": 0,
+                "scheduler_exit": 0,
+                "scheduler_instances": 0,
+                "interactive_recognized": 1,
+                "account_retained": 0,
+            }
+            for phase in (
+                "account_create",
+                "account_logon",
+                "account_child_start",
+                "account_task_create",
+                "account_task_run",
+                "account_task_wait",
+                "account_cleanup",
+            ):
+                write("ordinary", phase, metrics=metrics)
+            data = json.loads(
+                (leaf / "muninn-ordinary-proof.json").read_text()
+            )
+            self.assertEqual(data["phase"], "account_cleanup")
+            self.assertEqual(data["scheduler_child_admin"], 0)
+            self.assertEqual(
+                (leaf / "muninn-lifecycle-proof.json").read_bytes(), failed
+            )
+            with self.assertRaises(ValueError):
+                write("ordinary", "account_create", metrics={"password": 1})

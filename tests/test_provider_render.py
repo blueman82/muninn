@@ -85,3 +85,46 @@ class ProviderRenderTest(unittest.TestCase):
         ordinary = codex_hooks(json.dumps(doc).encode(), platform="linux")
         self.assertEqual(windows[0]["command"], "windows")
         self.assertNotEqual(windows[0]["hash"], ordinary[0]["hash"])
+
+    def test_shared_windows_launcher_suppresses_only_progress_before_interop(
+        self,
+    ) -> None:
+        source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
+        preference = "$ProgressPreference = 'SilentlyContinue'"
+        self.assertTrue(preference in source, "progress preference missing")
+        self.assertLess(source.index(preference), source.index("try {"))
+        self.assertIn("$ErrorActionPreference = 'Stop'", source)
+        self.assertNotIn("$ErrorActionPreference = 'SilentlyContinue'", source)
+        self.assertNotIn("2>$null", source)
+
+    def test_native_guard_uses_compiler_free_exact_pinvoke_signatures(
+        self,
+    ) -> None:
+        source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("Add-Type", source, "per-invocation compiler remains")
+        for requirement in (
+            "DefinePInvokeMethod",
+            "PreserveSig",
+            "SetLastError",
+            "ExactSpelling",
+            "CallingConvention]::Winapi",
+            "CharSet]::Unicode",
+            "CreateFileW",
+            "GetFileType",
+            "GetFileInformationByHandleEx",
+            "GetFinalPathNameByHandleW",
+            "GetLongPathNameW",
+            "SafeFileHandle",
+            "0x20081",
+            "2147483648",
+            "0x02200000",
+            "AllocHGlobal(8)",
+            "FreeHGlobal",
+            "32768",
+            "4097",
+            "$guards[$index].Dispose()",
+        ):
+            self.assertTrue(
+                requirement in source,
+                "native contract missing: " + requirement,
+            )

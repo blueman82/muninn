@@ -1,6 +1,7 @@
 # The bootstrap must check installed selection before running its interpreter.
 # Python repeats this check once the private selected runtime is importable.
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 $Forwarded = @($args)
 $InstallerEntry = $Forwarded.Count -gt 0 -and $Forwarded[0] -ceq '--muninn-installer-entry'
 if ($InstallerEntry) { $Forwarded = @($Forwarded | Select-Object -Skip 1) }
@@ -118,7 +119,7 @@ function Assert-InterpreterField([string]$Path) {
 function Assert-Executable([string]$Candidate) {
     $python = Assert-Ordinary $Candidate $false
     Hold-Directories (Split-Path -Parent $python)
-    $executable = [MuninnBootstrap.NativeGuard]::OpenMetadata($python)
+    $executable = (Open-Metadata $python)
     $guards.Add($executable)
     Assert-Acl ($executable.GetAccessControl()) 'executable'
     return $python
@@ -159,96 +160,115 @@ function Hold-Directories([string]$Path) {
     }
     foreach ($part in $parts) {
         if ($guarded.Add($part)) {
-            $guard = [MuninnBootstrap.NativeGuard]::HoldDirectory($part)
+            $guard = (Open-Native $part $true)
             $guards.Add($guard)
             Assert-Acl (Get-Acl -LiteralPath $part) 'ancestor'
         }
     }
 }
 
-try {
-    Add-Type -TypeDefinition @'
-// Hold local directory identities during interpreter bootstrap and release use.
-using System;
-using System.ComponentModel;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Text;
-using Microsoft.Win32.SafeHandles;
-
-namespace MuninnBootstrap {
-    public static class NativeGuard {
-        [StructLayout(LayoutKind.Sequential)]
-        private struct Attributes { public uint Value; public uint Tag; }
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern SafeFileHandle CreateFileW(string path, uint access,
-            uint share, IntPtr security, uint creation, uint flags, IntPtr template);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern uint GetFileType(SafeFileHandle handle);
-        [DllImport("kernel32.dll", SetLastError = true)]
-        private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle,
-            int kind, out Attributes attributes, uint size);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle,
-            StringBuilder value, uint capacity, uint flags);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        private static extern uint GetLongPathNameW(string path, StringBuilder value,
-            uint capacity);
-
-        private static SafeFileHandle Open(string path, bool directory) {
-            // Omit DELETE sharing so ancestors cannot be renamed during use.
-            // Metadata-only opens do not establish read/delete sharing protection.
-            var handle = CreateFileW(path, directory ? 0x20081u : 0x80000000u,
-                directory ? 3u : 1u, IntPtr.Zero, 3u, 0x02200000u, IntPtr.Zero);
-            try {
-                if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
-                Attributes attributes;
-                if (GetFileType(handle) != 1u ||
-                    !GetFileInformationByHandleEx(handle, 9, out attributes, 8u))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                if ((attributes.Value & 0x400u) != 0 ||
-                    ((attributes.Value & 0x10u) != 0) != directory)
-                    throw new IOException("Unsafe bootstrap object");
-                var expected = new StringBuilder(32768);
-                var actual = new StringBuilder(32768);
-                uint a = GetLongPathNameW(path, expected, 32768u);
-                uint b = GetFinalPathNameByHandleW(handle, actual, 32768u, 0u);
-                if (a == 0 || a >= 32768 || b == 0 || b >= 32768)
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                string resolved = actual.ToString();
-                if (resolved.StartsWith(@"\\?\")) resolved = resolved.Substring(4);
-                if (!String.Equals(expected.ToString().TrimEnd('\\'),
-                    resolved.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                    throw new IOException("Bootstrap object identity changed");
-                return handle;
-            } catch { handle.Dispose(); throw; }
-        }
-
-        public static SafeFileHandle HoldDirectory(string path) {
-            return Open(path, true);
-        }
-
-        public static FileStream OpenMetadata(string path) {
-            var handle = Open(path, false);
-            try { return new FileStream(handle, FileAccess.Read); }
-            catch { handle.Dispose(); throw; }
-        }
-
-        public static string ReadMetadata(FileStream stream) {
-            var data = new byte[4097];
-            int used = 0;
-            while (used < data.Length) {
-                int count = stream.Read(data, used, data.Length - used);
-                if (count == 0) break;
-                used += count;
-            }
-            if (used > 4096) throw new IOException("Selection is too large");
-            return new UTF8Encoding(false, true).GetString(data, 0, used);
-        }
-    }
+function Define-NativeMethod($Builder, [string]$Name, [type]$Result, [type[]]$Parameters) {
+    $method = $Builder.DefinePInvokeMethod($Name, 'kernel32.dll',
+        [Reflection.MethodAttributes]'Public,Static,PinvokeImpl',
+        [Reflection.CallingConventions]::Standard, $Result, $Parameters,
+        [Runtime.InteropServices.CallingConvention]::Winapi,
+        [Runtime.InteropServices.CharSet]::Unicode)
+    $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+    $attribute = [Runtime.InteropServices.DllImportAttribute]
+    $constructor = $attribute.GetConstructor([type[]]@([string]))
+    $fields = [Reflection.FieldInfo[]]@($attribute.GetField('SetLastError'),
+        $attribute.GetField('ExactSpelling'), $attribute.GetField('CharSet'),
+        $attribute.GetField('CallingConvention'))
+    $values = [object[]]@($true, $true, [Runtime.InteropServices.CharSet]::Unicode,
+        [Runtime.InteropServices.CallingConvention]::Winapi)
+    $metadata = [Reflection.Emit.CustomAttributeBuilder]::new(
+        $constructor, [object[]]@('kernel32.dll'), $fields, $values)
+    $method.SetCustomAttribute($metadata)
 }
-'@
+
+function Initialize-Native {
+    # Emit only native signatures; invoking a C# compiler delays cold hooks on ARM.
+    $assembly = [AppDomain]::CurrentDomain.DefineDynamicAssembly(
+        [Reflection.AssemblyName]::new('MuninnBootstrap'),
+        [Reflection.Emit.AssemblyBuilderAccess]::Run)
+    $module = $assembly.DefineDynamicModule('MuninnBootstrap')
+    $builder = $module.DefineType('MuninnBootstrap.Native',
+        [Reflection.TypeAttributes]'Public,Abstract,Sealed')
+    $handle = [Microsoft.Win32.SafeHandles.SafeFileHandle]
+    Define-NativeMethod $builder 'CreateFileW' $handle ([type[]]@(
+        [string], [uint32], [uint32], [IntPtr], [uint32], [uint32], [IntPtr]))
+    Define-NativeMethod $builder 'GetFileType' ([uint32]) ([type[]]@($handle))
+    Define-NativeMethod $builder 'GetFileInformationByHandleEx' ([int32]) ([type[]]@(
+        $handle, [int32], [IntPtr], [uint32]))
+    Define-NativeMethod $builder 'GetFinalPathNameByHandleW' ([uint32]) ([type[]]@(
+        $handle, [Text.StringBuilder], [uint32], [uint32]))
+    Define-NativeMethod $builder 'GetLongPathNameW' ([uint32]) ([type[]]@(
+        [string], [Text.StringBuilder], [uint32]))
+    return $builder.CreateType()
+}
+
+function Open-Native([string]$Path, [bool]$Directory) {
+    # Omit DELETE sharing; directory READ_CONTROL/read access holds ancestry.
+    $access = [uint32]2147483648
+    $share = [uint32]1
+    if ($Directory) { $access = [uint32]0x20081; $share = [uint32]3 }
+    $handle = $native::CreateFileW($Path, $access, $share, [IntPtr]::Zero,
+        [uint32]3, [uint32]0x02200000, [IntPtr]::Zero)
+    try {
+        if ($handle.IsInvalid) {
+            throw [ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+        }
+        $attributes = [Runtime.InteropServices.Marshal]::AllocHGlobal(8)
+        try {
+            if ($native::GetFileType($handle) -ne 1 -or
+                $native::GetFileInformationByHandleEx($handle, 9, $attributes, 8) -eq 0) {
+                throw [ComponentModel.Win32Exception]::new(
+                    [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+            }
+            $flags = [Runtime.InteropServices.Marshal]::ReadInt32($attributes)
+            if (($flags -band 0x400) -ne 0 -or (($flags -band 0x10) -ne 0) -ne $Directory) {
+                throw 'Unsafe bootstrap object'
+            }
+        } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($attributes) }
+        $expected = [Text.StringBuilder]::new(32768)
+        $actual = [Text.StringBuilder]::new(32768)
+        $a = $native::GetLongPathNameW($Path, $expected, 32768)
+        $b = $native::GetFinalPathNameByHandleW($handle, $actual, 32768, 0)
+        if ($a -eq 0 -or $a -ge 32768 -or $b -eq 0 -or $b -ge 32768) {
+            throw [ComponentModel.Win32Exception]::new(
+                [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+        }
+        $resolved = $actual.ToString()
+        if ($resolved.StartsWith('\\?\')) { $resolved = $resolved.Substring(4) }
+        if (-not [string]::Equals($expected.ToString().TrimEnd('\'),
+            $resolved.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Bootstrap object identity changed'
+        }
+        return $handle
+    } catch { $handle.Dispose(); throw }
+}
+
+function Open-Metadata([string]$Path) {
+    $handle = Open-Native $Path $false
+    try { return [IO.FileStream]::new($handle, [IO.FileAccess]::Read) }
+    catch { $handle.Dispose(); throw }
+}
+
+function Read-Metadata([IO.FileStream]$Stream) {
+    $data = [byte[]]::new(4097)
+    $used = 0
+    while ($used -lt $data.Length) {
+        $count = $Stream.Read($data, $used, $data.Length - $used)
+        if ($count -eq 0) { break }
+        $used += $count
+    }
+    if ($used -gt 4096) { throw 'Selection is too large' }
+    return [Text.UTF8Encoding]::new($false, $true).GetString($data, 0, $used)
+}
+
+try {
+    $native = Initialize-Native
     $root = Split-Path -Parent $PSScriptRoot
     $installed = -not (Test-Path -LiteralPath (Join-Path $root 'muninn/cli.py'))
     $recorded = $null
@@ -258,10 +278,10 @@ namespace MuninnBootstrap {
         Hold-Directories (Join-Path $base 'lib')
         $lib = Assert-Private (Join-Path $base 'lib') $true
         $manifest = Assert-Ordinary (Join-Path $lib 'selection.json') $false
-        $metadata = [MuninnBootstrap.NativeGuard]::OpenMetadata($manifest)
+        $metadata = (Open-Metadata $manifest)
         $guards.Add($metadata)
         Assert-Acl ($metadata.GetAccessControl())
-        $record = [MuninnBootstrap.NativeGuard]::ReadMetadata($metadata) | ConvertFrom-Json
+        $record = (Read-Metadata $metadata) | ConvertFrom-Json
         $names = @($record.PSObject.Properties.Name | Sort-Object)
         if (($names -join ',') -cne 'python,sha' -or
             $record.sha -isnot [string] -or $record.sha -cnotmatch '^[0-9a-f]{40}$' -or

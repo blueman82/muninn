@@ -12,9 +12,17 @@ from muninn.file_sync import sync_fd
 from muninn.platform_io import ensure_private_dir, open_private, open_regular
 
 _ROOT = Path(__file__).resolve().parents[1]
+_ARTIFACTS = frozenset(("provider", "lifecycle", "ordinary"))
 _PHASES = frozenset(
     (
         "initial",
+        "account_create",
+        "account_logon",
+        "account_child_start",
+        "account_task_create",
+        "account_task_run",
+        "account_task_wait",
+        "account_cleanup",
         "fixture_home",
         "fixture_data",
         "fixture_lib",
@@ -81,6 +89,12 @@ _METRICS = frozenset(
         "baseline_addtype_ms",
         "baseline_addtype_returncode",
         "baseline_error",
+        "ordinary_child_admin",
+        "scheduler_child_admin",
+        "scheduler_exit",
+        "scheduler_instances",
+        "interactive_recognized",
+        "account_retained",
         "xml_utf8_hresult",
         "xml_utf16_hresult",
         "xml_omitted_hresult",
@@ -175,10 +189,10 @@ def transfer(artifact: str, directory: Path) -> None:
     """Export only validated child phase, code, count and source fields.
 
     Args:
-        artifact: Either provider or lifecycle proof.
+        artifact: Provider, lifecycle or isolated ordinary-account proof.
         directory: Child's explicit CI scratch directory.
     """
-    if artifact not in {"provider", "lifecycle"}:
+    if artifact not in _ARTIFACTS:
         raise ValueError("unsupported native diagnostic artifact")
     path = (
         directory
@@ -245,7 +259,7 @@ def write(
     """Persist only fixed diagnostic fields in the explicit CI scratch dir.
 
     Args:
-        artifact: Either provider or lifecycle proof.
+        artifact: Provider, lifecycle or isolated ordinary-account proof.
         phase: Fixed phase code; None retains the previous actual stage.
         error: Failure whose message, locals and arbitrary paths stay private.
         metrics: Explicit numeric route, timing, status or hook counts.
@@ -254,7 +268,7 @@ def write(
     Raises:
         ValueError: If a caller supplies an unsupported phase or metric.
     """
-    if artifact not in {"provider", "lifecycle"} or (
+    if artifact not in _ARTIFACTS or (
         phase is not None and phase not in _PHASES
     ):
         raise ValueError("unsupported native diagnostic phase")

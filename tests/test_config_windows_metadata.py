@@ -26,6 +26,78 @@ def descriptor(
     ) + b"".join(parts)
 
 
+def _acl(raw: bytes) -> tuple[tuple[int, ...], list[bytes], bytes]:
+    """Validate at most sixteen ordinary ACEs without exporting their SIDs."""
+    if len(raw) < 8:
+        raise OSError("truncated synthetic ACL")
+    header = struct.unpack("<BBHHH", raw[:8])
+    if header[2] != len(raw) or header[3] > 16:
+        raise OSError("unsupported synthetic ACL size")
+    entries: list[bytes] = []
+    offset = 8
+    for _ in range(header[3]):
+        if offset + 16 > len(raw):
+            raise OSError("truncated synthetic ACE")
+        kind, _, size = struct.unpack("<BBH", raw[offset : offset + 4])
+        if kind not in (0, 1) or size < 16 or offset + size > len(raw):
+            raise OSError("unsupported synthetic ACE")
+        entry = raw[offset : offset + size]
+        sid_size = 8 + 4 * entry[9]
+        if entry[8] != 1 or entry[9] > 15 or 8 + sid_size > size:
+            raise OSError("invalid synthetic ACE SID")
+        entries.append(entry)
+        offset += size
+    return header, entries, raw[offset:]
+
+
+def acl_difference(original: bytes, current: bytes) -> dict[str, int]:
+    """Compare ACL headers and ordered ACE fields with numeric codes.
+
+    Args:
+        original: Validated original synthetic descriptor's DACL component.
+        current: Same synthetic config's DACL after publication.
+
+    Returns:
+        Header fields, at most sixteen ordered ACE fields and SID equality.
+
+    Raises:
+        OSError: If a component has unsupported or truncated ACEs.
+    """
+    before, before_entries, before_tail = _acl(original)
+    after, after_entries, after_tail = _acl(current)
+    values: dict[str, int] = {}
+    for label, header, tail in (
+        ("original", before, before_tail),
+        ("final", after, after_tail),
+    ):
+        for field, value in zip(
+            ("revision", "reserved1", "size", "count", "reserved2"),
+            header,
+            strict=True,
+        ):
+            values[f"{label}_acl_{field}"] = value
+        values[f"{label}_acl_free_size"] = len(tail)
+    values["acl_free_equal"] = int(before_tail == after_tail)
+    for index, (first, second) in enumerate(
+        zip(before_entries, after_entries, strict=False)
+    ):
+        for label, entry in (("original", first), ("final", second)):
+            for field, value in zip(
+                ("type", "flags", "size", "mask"),
+                struct.unpack("<BBHI", entry[:8]),
+                strict=True,
+            ):
+                values[f"ace_{index}_{label}_{field}"] = value
+        first_end, second_end = 16 + 4 * first[9], 16 + 4 * second[9]
+        values[f"ace_{index}_sid_equal"] = int(
+            first[8:first_end] == second[8:second_end]
+        )
+        values[f"ace_{index}_padding_equal"] = int(
+            first[first_end:] == second[second_end:]
+        )
+    return values
+
+
 def descriptor_difference(original: bytes, current: bytes) -> dict[str, int]:
     """Compare native components and layout without exposing descriptor bytes.
 
@@ -58,6 +130,7 @@ def descriptor_difference(original: bytes, current: bytes) -> dict[str, int]:
                 raw[offset : offset + 4], "little"
             )
             values[f"{label}_{component}_length"] = len(value)
+    values.update(acl_difference(before[3], after[3]))
     return values
 
 
@@ -169,3 +242,33 @@ class SecurityPartsTest(unittest.TestCase):
         )
         with self.assertRaises(OSError):
             descriptor_difference(before, after[:-1])
+
+    def test_acl_difference_identifies_reserved_flags_mask_and_sid(
+        self,
+    ) -> None:
+        original = security_parts(descriptor())[3]
+        changed = bytearray(original)
+        changed[1] = 3
+        changed[9] = 0
+        changed[12:16] = (0x10000000).to_bytes(4, "little")
+        changed[-1] ^= 1
+        values = acl_difference(original, bytes(changed))
+        self.assertEqual(values["original_acl_reserved1"], 0)
+        self.assertEqual(values["final_acl_reserved1"], 3)
+        self.assertEqual(values["ace_0_original_flags"], 0x10)
+        self.assertEqual(values["ace_0_final_flags"], 0)
+        self.assertEqual(values["ace_0_final_mask"], 0x10000000)
+        self.assertEqual(values["ace_0_sid_equal"], 0)
+        self.assertTrue(
+            all(isinstance(value, int) for value in values.values())
+        )
+
+    def test_acl_difference_bounds_entries_and_invalid_sizes(self) -> None:
+        original = security_parts(descriptor())[3]
+        too_many = bytearray(original)
+        too_many[4:6] = (17).to_bytes(2, "little")
+        invalid = bytearray(original)
+        invalid[10:12] = (4).to_bytes(2, "little")
+        for changed in (bytes(too_many), bytes(invalid), original[:-1]):
+            with self.assertRaises(OSError):
+                acl_difference(original, changed)
