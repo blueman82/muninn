@@ -23,12 +23,20 @@ function Copy-ChildCodes($value,$report){
  $codes=@{}
  foreach($key in @('child_module_readable','child_module_hresult',
                   'child_error_category','child_command_type',
-                  'child_exception_kind','child_body_hresult','child_body_line')){
+                  'child_exception_kind','child_body_hresult','child_body_line',
+                  'task_principal_sid_equal','task_principal_logon_type',
+                  'task_principal_run_level')){
   if($null -eq $value.$key){continue}
   if($value.$key -isnot [int] -and $value.$key -isnot [long]){
    throw 'child_number_invalid'
   }
   $number=[int]$value.$key
+  if(($key -eq 'task_principal_sid_equal' -and $number -notin @(0,1)) -or
+     ($key -eq 'task_principal_logon_type' -and
+      ($number -lt 0 -or $number -gt 6)) -or
+     ($key -eq 'task_principal_run_level' -and $number -notin @(0,1))){
+   throw 'child_number_invalid'
+  }
   if($key -eq 'child_body_line' -and
      ($number -lt 0 -or $number -gt 4096)){throw 'child_number_invalid'}
   if($key -eq 'child_module_readable' -and $number -notin @(-1,0,1)){

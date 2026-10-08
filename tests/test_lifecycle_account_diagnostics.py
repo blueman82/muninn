@@ -10,7 +10,11 @@ import unittest
 from pathlib import Path
 
 from muninn.obs_service import literal, powershell
-from tests import lifecycle_account_child, lifecycle_account_scripts
+from tests import (
+    lifecycle_account_child,
+    lifecycle_account_native,
+    lifecycle_account_scripts,
+)
 
 
 class AccountDiagnosticTests(unittest.TestCase):
@@ -289,3 +293,105 @@ foreach($json in $invalid){
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {"refused": 8})
+
+    def test_principal_observations_precede_unchanged_guard(self) -> None:
+        child = lifecycle_account_child.child_script(Path("/synthetic"))
+        parent = lifecycle_account_scripts._CHILD_DIAGNOSTICS
+        guard = (
+            " if($definition.Principal.UserId -ne $identity.User.Value -or\n"
+            "    $definition.Principal.LogonType -ne 3 -or\n"
+            "    $definition.Principal.RunLevel -ne 0){throw "
+            "'task_identity_mismatch'}"
+        )
+        start = child.index(" try {\n  $principalUser=")
+        capture = child[start : child.index(guard)]
+        self.assertLess(child.index("$definition.XmlText="), start)
+        self.assertEqual(child.count(guard), 1)
+        self.assertEqual(capture.count("catch {}"), 3)
+        for key in (
+            "task_principal_sid_equal",
+            "task_principal_logon_type",
+            "task_principal_run_level",
+        ):
+            self.assertIn(f"$report.{key}=", capture)
+            self.assertIn(f"'{key}'", parent)
+        self.assertNotIn("$definition.Principal.UserId=", capture)
+        self.assertNotIn("Translate", capture)
+
+    def test_native_principal_readback_and_atomic_numeric_bounds(self) -> None:
+        child = lifecycle_account_child.child_script(Path("/synthetic"))
+        start = child.index(" try {\n  $principalUser=")
+        capture = child[
+            start : child.index(" if($definition.Principal.UserId", start)
+        ]
+        if sys.platform != "win32":
+            return
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            (base / "task.xml").write_bytes(
+                lifecycle_account_native.noop_definition(base)
+            )
+            source = (
+                lifecycle_account_scripts._CHILD_DIAGNOSTICS
+                + f"$base={literal(temporary)};"
+                + r"""
+$ErrorActionPreference='Stop';$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+$service=New-Object -ComObject Schedule.Service;$service.Connect()
+$definition=$service.NewTask(0)
+$inputXml=[IO.File]::ReadAllText(([IO.Path]::Combine($base,'task.xml')))
+$definition.XmlText=$inputXml.Replace('@SID@',$identity.User.Value)
+$before=$definition.XmlText;$report=@{}
+"""
+                + capture
+                + r"""
+if($report.task_principal_sid_equal -ne
+   [int]($definition.Principal.UserId -eq $identity.User.Value) -or
+   $report.task_principal_logon_type -ne
+   [int]$definition.Principal.LogonType -or
+   $report.task_principal_run_level -ne [int]$definition.Principal.RunLevel -or
+   $definition.XmlText -ne $before){throw 'principal_observation_changed'}
+$report.phase='account_child_start';$report.winerror=-2146233087
+[IO.File]::WriteAllText(([IO.Path]::Combine($base,'child-result.json')),
+ ($report|ConvertTo-Json -Compress))
+$projected=@{};Read-ChildEvidence $base $projected
+if($projected.child_report_seen -ne 1){throw 'principal_report_missing'}
+foreach($key in @('task_principal_sid_equal','task_principal_logon_type',
+                 'task_principal_run_level')){
+ if($projected[$key] -ne $report[$key]){throw 'principal_projection_changed'}
+}
+$valid=0;$refused=0
+foreach($entry in @(@('task_principal_sid_equal',1),
+                   @('task_principal_logon_type',6),
+                   @('task_principal_run_level',1))){
+ foreach($number in @(0,$entry[1])){
+  $fields=@{};$fields[$entry[0]]=$number;$target=@{}
+  Copy-ChildCodes ([pscustomobject]$fields) $target
+  if($target[$entry[0]] -ne $number){throw 'principal_boundary_failed'}
+  $valid++
+ }
+ foreach($number in @(-1,($entry[1]+1),'1',$true)){
+  $fields=@{child_module_readable=1};$fields[$entry[0]]=$number
+  $target=@{sentinel=7};$rejected=$false
+  try{Copy-ChildCodes ([pscustomobject]$fields) $target}catch{$rejected=$true}
+  if(!$rejected -or $target.Count -ne 1 -or $target.sentinel -ne 7){
+   throw 'principal_invalid_or_partial_update'
+  }
+  $refused++
+ }
+}
+$definition=$null;$report=@{}
+"""
+                + capture
+                + r"""
+if($report.Count -ne 0){throw 'unknown_principal_observation_exported'}
+'{"observed":3,"valid":6,"refused":12,"unknown":0}'
+"""
+            )
+            result = subprocess.run(
+                powershell(source), capture_output=True, text=True, timeout=30
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {"observed": 3, "valid": 6, "refused": 12, "unknown": 0},
+        )
