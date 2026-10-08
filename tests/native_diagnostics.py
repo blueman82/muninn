@@ -60,9 +60,24 @@ _METRICS = frozenset(
         "codex_hooks",
         "hresult",
         "inner_hresult",
+        "xml_utf8_hresult",
+        "xml_utf16_hresult",
+        "xml_omitted_hresult",
     )
 )
-_CODES = frozenset(("errno", "winerror", "cause_winerror", "error_line"))
+_SECURITY_CODES = frozenset(
+    (
+        "control_before",
+        "control_after",
+        "owner_equal",
+        "group_equal",
+        "dacl_equal",
+    )
+)
+_CODES = (
+    frozenset(("errno", "winerror", "cause_winerror", "error_line"))
+    | _SECURITY_CODES
+)
 
 
 def _previous(path: Path) -> dict[str, str | int]:
@@ -146,6 +161,13 @@ def _error_fields(error: Exception) -> dict[str, str | int]:
             continue
         if prefix:
             values["cause_type"] = type(current).__name__
+        values.update(
+            {
+                key: value
+                for key in _SECURITY_CODES
+                if isinstance(value := getattr(current, key, None), int)
+            }
+        )
         code = getattr(current, "winerror", None)
         if isinstance(code, int):
             values[prefix + "winerror"] = code

@@ -74,6 +74,35 @@ if sys.platform == "win32":
     _close.restype = wintypes.BOOL
 
 
+class SecurityMismatchError(PermissionError):
+    """Refuse changed native metadata while exposing only numeric codes."""
+
+    def __init__(
+        self,
+        component: str,
+        before: tuple[int, bytes, bytes, bytes],
+        after: tuple[int, bytes, bytes, bytes],
+    ) -> None:
+        """Capture controls and exact component equality without raw bytes.
+
+        Args:
+            component: Fixed control, owner, group or DACL failure code.
+            before: Original descriptor-bound security components.
+            after: Empty sibling's descriptor-bound security components.
+
+        Raises:
+            ValueError: If the component code is unsupported.
+        """
+        if component not in {"control", "owner", "group", "dacl"}:
+            raise ValueError("unsupported config security component")
+        super().__init__("config security differs: " + component)
+        self.control_before = before[0]
+        self.control_after = after[0]
+        self.owner_equal = int(before[1] == after[1])
+        self.group_equal = int(before[2] == after[2])
+        self.dacl_equal = int(before[3] == after[3])
+
+
 def security_parts(raw: bytes) -> tuple[int, bytes, bytes, bytes]:
     """Validate self-relative owner, group, control and ordered DACL bytes.
 
@@ -146,7 +175,7 @@ def _restore(
             ("control", "owner", "group", "dacl"), wanted, got, strict=True
         ):
             if before != after:
-                raise PermissionError("config security differs: " + code)
+                raise SecurityMismatchError(code, wanted, got)
     finally:
         _free(actual)
 

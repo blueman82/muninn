@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from install.config_windows import SecurityMismatchError, security_parts
 from tests.native_diagnostics import transfer, write
+from tests.test_config_windows_metadata import descriptor
 
 
 class NativeDiagnosticsTest(unittest.TestCase):
@@ -166,3 +168,53 @@ class NativeDiagnosticsTest(unittest.TestCase):
                 (Path(private) / leaf / "muninn-provider-proof.json").is_file()
             )
             self.assertFalse((Path(broad) / leaf).exists())
+
+    def test_native_security_mismatch_exports_only_numeric_codes(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            error = SecurityMismatchError(
+                "control",
+                security_parts(descriptor()),
+                security_parts(descriptor(flags=0x8004)),
+            )
+            write("provider", "codex_render", error=error)
+            data = json.loads(
+                (
+                    Path(tmp)
+                    / "muninn-native-diagnostics"
+                    / "muninn-provider-proof.json"
+                ).read_text()
+            )
+            self.assertEqual(data["control_before"], 0x8404)
+            self.assertEqual(data["control_after"], 0x8004)
+            self.assertEqual(
+                [
+                    data[key]
+                    for key in ("owner_equal", "group_equal", "dacl_equal")
+                ],
+                [1, 1, 1],
+            )
+            self.assertNotIn("config security differs", json.dumps(data))
+
+    def test_xml_declaration_probe_exports_numeric_hresult_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            codes = {
+                "xml_utf8_hresult": -2147216615,
+                "xml_utf16_hresult": 0,
+                "xml_omitted_hresult": 0,
+            }
+            write("lifecycle", "outer_task_create", metrics=codes)
+            data = json.loads(
+                (
+                    Path(tmp)
+                    / "muninn-native-diagnostics"
+                    / "muninn-lifecycle-proof.json"
+                ).read_text()
+            )
+            for key, value in codes.items():
+                self.assertEqual(data[key], value)

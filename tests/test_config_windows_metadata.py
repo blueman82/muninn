@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 import unittest
 
-from install.config_windows import security_parts
+from install.config_windows import SecurityMismatchError, security_parts
 
 
 def descriptor(
@@ -43,3 +43,17 @@ class SecurityPartsTest(unittest.TestCase):
         for value in (bytes(raw), descriptor()[:-1], b"\x00" * 20):
             with self.assertRaises(OSError):
                 security_parts(value)
+
+    def test_mismatch_holds_only_fixed_control_and_equality_codes(
+        self,
+    ) -> None:
+        before = security_parts(descriptor())
+        after = security_parts(descriptor(flags=0x8004))
+        error = SecurityMismatchError("control", before, after)
+        self.assertIsInstance(error, PermissionError)
+        self.assertEqual(error.control_before, 0x8404)
+        self.assertEqual(error.control_after, 0x8004)
+        self.assertEqual(
+            (error.owner_equal, error.group_equal, error.dacl_equal), (1, 1, 1)
+        )
+        self.assertEqual(str(error), "config security differs: control")
