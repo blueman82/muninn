@@ -6,7 +6,6 @@ crash rollback, plus rollout files that continue one long thread.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import subprocess
 import sys
@@ -15,6 +14,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import classify, ingest, store
+from tests.hook_nonregular import nonregular
 from tests.ingest_support import (
     BASE,
     HOLD_LOCK,
@@ -156,11 +156,29 @@ class TombstoneAndReplayTests(IngestCase):
         other = self.tmp / "elsewhere.jsonl"
         other.write_bytes(b"".join(map(line, primary("thr-link"))))
         (real.parent / "rollout-x-thr-link.jsonl").symlink_to(other)
-        os.mkfifo(real.parent / "rollout-fifo.jsonl")
         (real.parent / "rollout-dir.jsonl").mkdir()
         linked = self.roots["codex-sessions"] / "2027"
-        linked.symlink_to(self.tmp / "codex")  # a symlinked directory
-        stats = self.run_ingest()
+        linked.symlink_to(self.tmp / "codex", target_is_directory=True)
+        with nonregular(real.parent / "rollout-fifo.jsonl") as pipe:
+            if sys.platform == "win32":
+                code = (
+                    "import sys;sys.path.insert(0,sys.argv[1]);"
+                    "from pathlib import Path;"
+                    "from muninn.ingest_plan import read_head;"
+                    "\ntry: read_head(Path(sys.argv[2]))"
+                    "\nexcept OSError: print('refused')"
+                    "\nelse: raise SystemExit(1)"
+                )
+                done = subprocess.run(
+                    [sys.executable, "-I", "-B", "-c", code, str(ROOT), pipe],
+                    capture_output=True,
+                    timeout=5,
+                    check=True,
+                )
+                self.assertEqual(
+                    (done.stdout.strip(), done.stderr), (b"refused", b"")
+                )
+            stats = self.run_ingest()
         self.assertEqual(stats.files_seen, 1)
         threads = [
             r[0] for r in self.conn.execute("SELECT thread_id FROM source")

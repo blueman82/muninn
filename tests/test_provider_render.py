@@ -145,3 +145,18 @@ class ProviderRenderTest(unittest.TestCase):
         self.assertNotIn("Import-Module", source)
         self.assertNotIn("PSModuleAutoLoadingPreference", source)
         self.assertNotIn("PSModulePath", source)
+
+    def test_first_ancestor_acl_cmdlet_keeps_its_native_guard(self) -> None:
+        source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
+        command = (
+            "            Assert-Acl (Microsoft.PowerShell.Security\\Get-Acl"
+            " -LiteralPath $part) 'ancestor'"
+        )
+        self.assertEqual(source.count(command), 1)
+        self.assertLess(
+            source.index("$guards.Add($guard)"), source.index(command)
+        )
+        self.assertIn("    $acl = Get-Acl -LiteralPath $full", source)
+        self.assertNotIn("Import-Module", source)
+        self.assertNotIn("PSModuleAutoLoadingPreference", source)
+        self.assertNotIn("PSModulePath", source)

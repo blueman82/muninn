@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import time
 import unittest
 from argparse import Namespace
@@ -14,7 +15,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-from muninn import cli_serve, ingest, obs, store
+from muninn import cli_serve, ingest, obs, poller_stop, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CliCase
 
@@ -48,8 +49,8 @@ class ServeAliveTests(CliCase):
     def no_sleep(self) -> Any:
         """Make ``serve`` fail if it sleeps, without patching ``time``.
 
-        Only the name ``time`` inside ``cli_serve`` is replaced, so the
-        global ``time.sleep`` that unittest and other threads use is intact.
+        POSIX replaces only the poller's time reference. Windows checks
+        the real matching request through its bounded native wait instead.
 
         Returns:
             A context manager for the stand-in.
@@ -61,15 +62,41 @@ class ServeAliveTests(CliCase):
         stand_in = SimpleNamespace(
             sleep=refuse, monotonic=time.monotonic, time=time.time
         )
-        return mock.patch.object(cli_serve, "time", stand_in)
+        if sys.platform != "win32":
+            return mock.patch.object(cli_serve, "time", stand_in)
+        real_wait = poller_stop.wait
+
+        def requested_wait(
+            home: Path, pid: int, generation: str, seconds: float
+        ) -> bool:
+            began = time.monotonic()
+            stopped = real_wait(home, pid, generation, min(seconds, 1.0))
+            self.assertTrue(stopped, "kept running after the stop")
+            self.assertLess(time.monotonic() - began, 1.0)
+            return stopped
+
+        return mock.patch.object(poller_stop, "wait", requested_wait)
 
     def keep_signal_handlers(self) -> None:
-        """Put the process's SIGTERM and SIGHUP handlers back after the test.
-
-        ``serve`` installs its own and this test process outlives it.
-        """
-        for sig in (signal.SIGTERM, signal.SIGHUP):
+        """Restore every handler installed by the real native poller."""
+        signals = (signal.SIGTERM, signal.SIGINT)
+        if sys.platform != "win32":
+            signals += (signal.SIGHUP,)
+        for sig in signals:
             self.addCleanup(signal.signal, sig, signal.getsignal(sig))
+
+    def request_stop(self) -> None:
+        """Use real POSIX signals or a matching private Windows generation."""
+        if sys.platform == "win32":
+            status = self.status()
+            generation = status["stop_generation"]
+            self.assertIsInstance(generation, str)
+            poller_stop.request(self.home, os.getpid(), str(generation))
+            self.assertTrue(
+                poller_stop.requested(self.home, os.getpid(), str(generation))
+            )
+        else:
+            os.kill(os.getpid(), signal.SIGTERM)
 
     def serve_one_pass(
         self,
@@ -93,16 +120,32 @@ class ServeAliveTests(CliCase):
                 cli_serve.time, "sleep", side_effect=KeyboardInterrupt
             ),
             mock.patch.object(
+                poller_stop, "wait", side_effect=KeyboardInterrupt
+            ),
+            mock.patch.object(
                 cli_serve.time, "monotonic", side_effect=lambda: self.clock[0]
             ),
             self.assertRaises(KeyboardInterrupt),
         ):
             cli_serve.serve(Namespace(interval=60.0), self.env, self.home, {})
 
+    def test_every_registered_native_handler_is_preserved(self) -> None:
+        with (
+            mock.patch.object(self, "addCleanup") as cleanup,
+            mock.patch(
+                "tests.test_serve_alive.sys", SimpleNamespace(platform="win32")
+            ),
+        ):
+            self.keep_signal_handlers()
+        self.assertEqual(
+            [call.args[1] for call in cleanup.call_args_list],
+            [signal.SIGTERM, signal.SIGINT],
+        )
+
     def test_a_stop_arriving_just_after_a_status_write_still_stops(
         self,
     ) -> None:
-        """SIGTERM right after the rename must stop the poller, not pass."""
+        """A stop after native publication must prevent another pass."""
         real_replace = Path.replace
         fired: list[int] = []
 
@@ -110,8 +153,14 @@ class ServeAliveTests(CliCase):
             moved = real_replace(src, dst)
             if not fired and dst.name == "status.json":
                 fired.append(1)
-                os.kill(os.getpid(), signal.SIGTERM)  # the poller's handler
+                self.request_stop()
             return moved
+
+        def write_then_stop(home: Path, fields: dict[str, object]) -> None:
+            REAL_WRITE_STATUS(home, fields)
+            if not fired:
+                fired.append(1)
+                self.request_stop()
 
         def fake(
             conn: object,
@@ -126,7 +175,11 @@ class ServeAliveTests(CliCase):
         self.keep_signal_handlers()
         with (
             mock.patch.object(cli_serve.ingest, "ingest", fake),
-            mock.patch.object(Path, "replace", replace_then_sigterm),
+            (
+                mock.patch.object(Path, "replace", replace_then_sigterm)
+                if sys.platform != "win32"
+                else mock.patch.object(obs, "write_status", write_then_stop)
+            ),
             self.no_sleep(),
         ):
             result = cli_serve.serve(
@@ -139,14 +192,14 @@ class ServeAliveTests(CliCase):
         """Pinned: the pass is counted, its log line may be lost, exit 0.
 
         The heartbeat is the record of a finished pass; the log line is
-        news for a human. A stop in between ends the poller cleanly rather
-        than finishing a line, so the log shows ``stop`` with no ``pass``.
+        news for a human. POSIX signals interrupt before that line; a
+        Windows request is observed at the next boundary after the line.
         """
         real_heartbeat = cli_serve.heartbeat
 
         def heartbeat_then_sigterm(*args: Any, **kwargs: Any) -> None:
             real_heartbeat(*args, **kwargs)
-            os.kill(os.getpid(), signal.SIGTERM)  # the poller's handler
+            self.request_stop()
 
         self.keep_signal_handlers()
         with (
@@ -165,7 +218,12 @@ class ServeAliveTests(CliCase):
         self.assertEqual(self.status()["passes"], 1)
         lines = (self.home / "poller.log").read_text().splitlines()
         events = [json.loads(x)["event"] for x in lines]
-        self.assertEqual(events, ["start", "stop"])
+        expected = (
+            ["start", "pass", "stop"]
+            if sys.platform == "win32"
+            else ["start", "stop"]
+        )
+        self.assertEqual(events, expected)
 
     def test_a_stop_noted_mid_transaction_survives_a_silent_rollback(
         self,
@@ -174,7 +232,7 @@ class ServeAliveTests(CliCase):
 
         def fake(conn: Any, roots: object, **_: Any) -> ingest.PassStats:
             conn.execute("BEGIN IMMEDIATE")
-            os.kill(os.getpid(), signal.SIGTERM)  # handler sees the txn
+            self.request_stop()
             conn.rollback()  # ends it without going through execute()
             return ingest.PassStats()
 

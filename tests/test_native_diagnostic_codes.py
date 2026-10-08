@@ -138,3 +138,29 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
                     "account_child_start",
                     metrics={"child_handle": 1},
                 )
+
+    def test_child_failure_codes_refuse_script_and_report_bodies(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            metrics = {
+                "child_parse_count": 0,
+                "child_parse_line": 0,
+                "child_report_seen": 1,
+                "child_failure_stage": 2,
+                "child_failure_hresult": -2146233087,
+                "child_failure_line": 9,
+            }
+            write("ordinary", "account_child_start", metrics=metrics)
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            data = json.loads(path.read_text())
+            for key, value in metrics.items():
+                self.assertEqual(data[key], value)
+            for key in ("child_script", "child_report", "child_exception"):
+                with self.assertRaises(ValueError):
+                    write("ordinary", "account_child_start", metrics={key: 1})

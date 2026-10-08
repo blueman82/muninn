@@ -162,7 +162,7 @@ function Hold-Directories([string]$Path) {
         if ($guarded.Add($part)) {
             $guard = (Open-Native $part $true)
             $guards.Add($guard)
-            Assert-Acl (Get-Acl -LiteralPath $part) 'ancestor'
+            Assert-Acl (Microsoft.PowerShell.Security\Get-Acl -LiteralPath $part) 'ancestor'
         }
     }
 }
