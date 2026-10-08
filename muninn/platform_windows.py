@@ -234,19 +234,29 @@ if sys.platform == "win32":
         return fd
 
     def publish(
-        source: Path, target: Path, *, replace: bool, retry_move: bool = False
+        source: Path,
+        target: Path,
+        *,
+        replace: bool,
+        retry_move: bool = False,
+        directory: bool = False,
     ) -> None:
-        """Move a complete private file without copy/delete fallback.
+        """Move complete private state without copy/delete fallback.
 
         Args:
-            source: Complete synced file, in the target's directory.
+            source: Complete synced file or directory beside the target.
             target: Published pathname.
             replace: Allow replacing an existing destination when True.
             retry_move: Retry native metadata sharing failures for one second.
+            directory: Require a directory with nonreplacing immediate move.
 
         Raises:
             OSError: If paths, identity, ACLs or native publication fail.
+            ValueError: If directory replacement or retry is requested.
+            FileExistsError: If a directory destination already exists.
         """
+        if directory and (replace or retry_move):
+            raise ValueError("directory publication cannot replace or retry")
         deadline = time.monotonic() + 1
         initial_source: tuple[int, int] | None = None
         initial_target: tuple[int, int] | None = None
@@ -256,10 +266,12 @@ if sys.platform == "win32":
             target = _local_path(target)
             if source.parent != target.parent:
                 raise OSError("publication must stay in one directory")
-            assert_private(source)
+            assert_private(source, directory=directory)
             assert_private(target.parent, directory=True)
             if target.exists():
-                assert_private(target)
+                assert_private(target, directory=directory)
+                if directory:
+                    raise FileExistsError("publication target already exists")
             if retry_move:
                 source_info = source.stat()
                 target_info = target.stat() if target.exists() else None

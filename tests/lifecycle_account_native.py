@@ -15,6 +15,7 @@ from install.context import Ctx, run_real
 from install.lifecycle import task_bytes, task_xml
 from muninn import platform_io
 from muninn.obs_service import literal, powershell
+from tests.lifecycle_account_privileges import SOURCE
 from tests.native_diagnostics import write
 
 _API = r"""
@@ -145,6 +146,10 @@ $report=@{phase='account_create';account_retained=0}
 $created=$false;$quiescent=$true;$token=[IntPtr]::Zero
 $process=New-Object MuninnCiLogon+Process
 try {
+ $caller=[Security.Principal.WindowsIdentity]::GetCurrent()
+ try {$privileges=[MuninnCiPrivileges]::Read($caller.Token)}
+ finally {$caller.Dispose()}
+ foreach($key in $privileges.Keys){$report[$key]=$privileges[$key]}
  $password=[Guid]::NewGuid().ToString('N')+'aA7!'
  $secure=ConvertTo-SecureString -String $password -AsPlainText -Force
  $user=New-LocalUser -Name $name -Password $secure -AccountNeverExpires
@@ -203,6 +208,7 @@ try {
  $child=Join-Path $base 'child-result.json'
  $parsed=Get-Content -LiteralPath $child -Raw|ConvertFrom-Json
  $report=@{phase=[string]$parsed.phase;account_retained=1}
+ foreach($key in $privileges.Keys){$report[$key]=$privileges[$key]}
  foreach($key in @('ordinary_child_admin','scheduler_child_admin',
   'scheduler_exit','scheduler_instances','interactive_recognized')){
   if($null -eq $parsed.$key){throw 'ordinary_child_report_invalid'}
@@ -258,6 +264,7 @@ def outer_script(parent: Path) -> str:
         "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
         "Add-Type -TypeDefinition @'\n"
         + _API
+        + SOURCE
         + "\n'@\n"
         + _OWNED
         + _OUTER.replace("@BASE@", literal(str(parent)))

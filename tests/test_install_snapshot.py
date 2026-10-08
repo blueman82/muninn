@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import sqlite3
 import unittest
 from contextlib import closing
@@ -14,7 +15,7 @@ from unittest import mock
 from install import installer as co
 from install import snapshot as sn
 from install.constants import PRE_UPGRADE_PREFIX
-from muninn import erase_residue, obs, store
+from muninn import erase_residue, obs, platform_io, store
 from tests.cli_support import fake_run
 from tests.installer_support import ROOT, World, git, make_store
 
@@ -95,6 +96,17 @@ class UpgradeFlowTests(SnapshotCase):
         self.assertEqual(self.snap.stat().st_mode & 0o777, 0o600)
         self.assertEqual(rows(self.snap), rows(self.store))
 
+    def test_existing_private_snapshot_is_never_overwritten(self) -> None:
+        self.snap.write_bytes(b"unknown prior snapshot")
+        before = self.store.read_bytes()
+        with self.assertRaises(co.StepFailedError):
+            sn.snapshot_store(
+                self.ctx, {"sha": self.sha2, "schema_to": 2, "steps": []}
+            )
+        self.assertEqual(self.snap.read_bytes(), b"unknown prior snapshot")
+        self.assertEqual(self.store.read_bytes(), before)
+        self.assertFalse(self.snap.with_suffix(".tmp").exists())
+
     def test_no_copy_when_the_versions_match(self) -> None:
         make_store(self.data, store.SCHEMA_VERSION)
         with mock.patch.object(sn, "_copy") as copy:
@@ -161,22 +173,51 @@ class RollbackTests(SnapshotCase):
         )
 
     def test_failed_verify_restores_the_v1_store(self) -> None:
-        fake = self.w.fake
-        fake.doctor = 1
-        real = fake._migrate
-
-        def crash_mid_write() -> None:
-            real()
-            (self.data / "muninn.sqlite-journal").write_bytes(b"stale")
-
-        with (
-            mock.patch.object(fake, "_migrate", crash_mid_write),
-            self.assertRaises(co.StepFailedError),
-        ):
+        self.w.fake.doctor = 1
+        with self.assertRaises(co.StepFailedError):
             co.install(self.ctx, self.w.repo, self.sha2)
         self.check_back_on_v1()
         self.assertEqual(self.record()["snapshot"]["state"], "restored")
         self.assertEqual(self.record()["outcome"], "rolled_back")
+
+    def test_residual_journal_retains_both_stores_and_release_selection(
+        self,
+    ) -> None:
+        fake = self.w.fake
+        fake.doctor = 1
+        real = fake._migrate
+        migrated: list[bytes] = []
+        prior_calls = len(fake.calls)
+
+        def crash_mid_write() -> None:
+            real()
+            migrated.append(self.store.read_bytes())
+            journal = self.data / "muninn.sqlite-journal"
+            fd = platform_io.open_private(
+                journal, os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            )
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(b"stale")
+
+        with (
+            mock.patch.object(fake, "_migrate", crash_mid_write),
+            self.assertRaisesRegex(OSError, "residual SQLite"),
+        ):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertEqual(self.store.read_bytes(), migrated[0])
+        self.assertEqual(rows(self.snap), (1, ["t", "row"]))
+        self.assertEqual(
+            (self.data / "muninn.sqlite-journal").read_bytes(), b"stale"
+        )
+        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
+        self.assertTrue((self.lib / self.first).is_dir())
+        self.assertTrue((self.lib / self.sha2).is_dir())
+        self.assertFalse(
+            any(
+                call[:2] == ["launchctl", "bootstrap"]
+                for call in fake.calls[prior_calls:]
+            )
+        )
 
     def test_failed_restart_restores_the_v1_store(self) -> None:
         self.w.fake.heartbeat = False

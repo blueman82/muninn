@@ -16,7 +16,11 @@ from install import installer, lifecycle
 from install.context import Ctx, run_real
 from muninn import obs, obs_status, platform_io, tombstone_key
 from muninn.obs_service import parse_process, process_command, service_status
-from tests import lifecycle_native_linux, lifecycle_native_windows
+from tests import (
+    lifecycle_native_doctor,
+    lifecycle_native_linux,
+    lifecycle_native_windows,
+)
 from tests.native_diagnostics import write
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,7 +51,14 @@ def exercise(parent: Path) -> dict[str, object]:
         .strip()
     )
     messages: list[str] = []
-    ctx = Ctx(home, run_real, "native-fresh", fresh=True, say=messages.append)
+
+    ctx = Ctx(
+        home,
+        lifecycle_native_doctor.run,
+        "native-fresh",
+        fresh=True,
+        say=messages.append,
+    )
     started = time.monotonic()
     write("lifecycle", "fresh_install")
     installer.install(ctx, ROOT, sha)

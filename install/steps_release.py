@@ -119,7 +119,7 @@ def pin(ctx: Ctx, rec: Record) -> None:
     if dest.exists():
         # Re-pinning the same commit: keep the old copy until prune.
         dest.rename(ctx.lib / f"{sha}.superseded-{ctx.ts}")
-    publish(tmp, dest, replace=False)
+    publish(tmp, dest, replace=False, directory=True)
     if ctx.platform == "win32":
         platform_io.ensure_private_dir(ctx.muninn.parent)
         for name in (
