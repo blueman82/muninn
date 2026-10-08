@@ -168,6 +168,38 @@ class VendorUnitTests(unittest.TestCase):
                     )
                 )
 
+    def test_windows_vendor_fixture_checks_acl_not_posix_write_bits(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "vendor.target"
+            source.write_bytes(b"[Unit]\n")
+            source.chmod(0o666)
+            with (
+                mock.patch.object(
+                    lifecycle_native_linux.sys, "platform", "win32"
+                ),
+                mock.patch.object(
+                    lifecycle_native_linux.platform_io,
+                    "is_private",
+                    return_value=True,
+                ) as private,
+            ):
+                lifecycle_native_linux.ordinary_vendor(source)
+            private.assert_called_once_with(source)
+            with (
+                mock.patch.object(
+                    lifecycle_native_linux.sys, "platform", "win32"
+                ),
+                mock.patch.object(
+                    lifecycle_native_linux.platform_io,
+                    "is_private",
+                    return_value=False,
+                ),
+                self.assertRaises(PermissionError),
+            ):
+                lifecycle_native_linux.ordinary_vendor(source)
+
 
 class XmlEncodingProbeTests(unittest.TestCase):
     """Compare encoding declarations without registering any task."""

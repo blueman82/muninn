@@ -36,3 +36,11 @@ Native Windows interpreter fields require a fixed local `.exe` path, checked
 before the version probe. Batch and script candidates are refused before any
 execution, preventing recursive wrapper probes. A missing recorded `.exe`
 continues to use the validated runtime fallback.
+
+
+The Linux bootstrap records its validated loaded directory SHA before imports.
+The writer alone publishes `writer_install_sha` with its PID; a manual ingest
+can update the ordinary selected-release heartbeat without relabeling the
+writer. Doctor requires the exact owned unit, no drop-ins, the actual native
+interpreter and arguments, and this loaded SHA. Rollback renders the service
+again from the restored release and interpreter selections before starting it.

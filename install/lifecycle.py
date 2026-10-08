@@ -13,9 +13,14 @@ from typing import cast
 
 from install import configedit as ce
 from install.context import Ctx, StepFailedError, job, must, wait
-from install.lifecycle_commands import arguments
 from install.release_io import write_private
 from muninn import obs_status, platform_io, platform_windows, poller_stop
+from muninn.obs_linux_service import (
+    query_unit,
+    read_unit,
+    selection,
+    unit_matches,
+)
 from muninn.obs_service import (
     literal,
     parse_process,
@@ -23,6 +28,7 @@ from muninn.obs_service import (
     process_command,
     task_matches,
 )
+from muninn.obs_service_commands import render_unit
 from muninn.platform_paths import read_selection
 
 _NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
@@ -30,20 +36,8 @@ _NS = {"t": _NAMESPACE}
 _SID = re.compile(r"S-1-\d+(?:-\d+){1,15}\Z")
 
 
-def _unit_quote(value: str) -> str:
-    """Quote unit values, preventing specifier and environment expansion."""
-    return json.dumps(value.replace("%", "%%"), ensure_ascii=False)
-
-
 def linux_unit(ctx: Ctx, python: Path, release: Path) -> str:
     """Render a user unit whose stop cannot terminate an open transaction."""
-    command = " ".join(
-        _unit_quote(value)
-        for value in [
-            str(python),
-            *arguments(release, ctx.data, "serve", "--interval", "60"),
-        ]
-    )
     env = {
         "HOME": str(ctx.home),
         "MUNINN_HOME": str(ctx.data),
@@ -52,18 +46,7 @@ def linux_unit(ctx: Ctx, python: Path, release: Path) -> str:
     }
     if library := os.environ.get("LD_LIBRARY_PATH"):
         env["LD_LIBRARY_PATH"] = library
-    environment = "\n".join(
-        f"Environment={_unit_quote(f'{key}={value}')}"
-        for key, value in env.items()
-    )
-    return (
-        "[Unit]\nDescription=Muninn private poller\n[Service]\nType=simple\n"
-        f"ExecStart=:{command}\n{environment}\nUMask=0077\n"
-        "UnsetEnvironment=MUNINN_ROOTS MUNINN_CURSOR_DB\n"
-        "Restart=on-failure\nRestartSec=5\nTimeoutStopSec=infinity\n"
-        "SendSIGKILL=no\nStandardOutput=null\nStandardError=null\n"
-        "[Install]\nWantedBy=default.target\n"
-    )
+    return render_unit(python, release, ctx.data, env)
 
 
 def task_xml(ctx: Ctx, sid: str, python: Path, release: Path) -> bytes:
@@ -139,18 +122,41 @@ def _identity(ctx: Ctx) -> str:
     return sid
 
 
+def _linux_owned(ctx: Ctx) -> None:
+    """Require the retained private unit and unchanged native registration."""
+    current, python, _ = selection(ctx.home)
+    registration = query_unit(ctx.run)
+    if (
+        registration["FragmentPath"] != str(ctx.plist)
+        or registration["DropInPaths"]
+    ):
+        raise StepFailedError("the user service registration is not owned")
+    if not unit_matches(
+        read_unit(ctx.plist),
+        python,
+        current,
+        ctx.data,
+        {
+            "HOME": str(ctx.home),
+            "MUNINN_HOME": str(ctx.data),
+            "CODEX_HOME": str(ctx.codex_home),
+            "CLAUDE_CONFIG_DIR": str(ctx.settings.parent),
+        },
+    ):
+        raise StepFailedError("the user service definition is not owned")
+
+
 def preflight_service(ctx: Ctx) -> None:
     """Refuse unavailable or unsafe native lifecycle before any mutation."""
     if ctx.platform == "linux":
         must(ctx, ["systemctl", "--user", "show-environment"], quiet=True)
-        if (
-            ctx.plist.exists()
-            and "Description=Muninn private poller"
-            not in ctx.plist.read_text()
-        ):
-            raise StepFailedError(
-                "the user service name belongs to another service"
-            )
+        if ctx.plist.exists():
+            try:
+                _linux_owned(ctx)
+            except (OSError, ValueError) as exc:
+                raise StepFailedError(
+                    "cannot validate the owned user service"
+                ) from exc
     elif ctx.platform == "win32":
         _identity(ctx)
         if sys.platform == "win32":

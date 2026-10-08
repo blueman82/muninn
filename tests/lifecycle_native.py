@@ -15,11 +15,22 @@ from pathlib import Path
 from install import installer, lifecycle
 from install.context import Ctx, run_real
 from muninn import obs_status, platform_io, tombstone_key
-from muninn.obs_service import parse_process, process_command
+from muninn.obs_service import parse_process, process_command, service_status
 from tests import lifecycle_native_linux, lifecycle_native_windows
 from tests.native_diagnostics import write
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def assert_service(ctx: Ctx, sha: str) -> None:
+    """Require a real Linux service identity and its immutable loaded SHA."""
+    if sys.platform == "linux":
+        status = obs_status.read_status(ctx.data)
+        assert status.get("writer_install_sha") == sha
+        assert service_status(ctx.data, {"HOME": str(ctx.home)}, run_real) == (
+            True,
+            status["pid"],
+        )
 
 
 def exercise(parent: Path) -> dict[str, object]:
@@ -50,6 +61,7 @@ def exercise(parent: Path) -> dict[str, object]:
         library = Path(os.environ["LD_LIBRARY_PATH"]) / "libsqlite3.so.0"
         maps = Path(f"/proc/{first['pid']}/maps").read_text()
         assert str(library.resolve()) in maps, "writer SQLite environment"
+    assert_service(ctx, sha)
     key = tombstone_key.load_key(ctx.data)
     write("lifecycle", "fresh_stop")
     lifecycle.stop(ctx)
@@ -66,6 +78,7 @@ def exercise(parent: Path) -> dict[str, object]:
     after = obs_status.read_status(ctx.data)
     assert after["pid"] == after_job["pid"]
     assert after["pid"] != first["pid"], (first["pid"], after["pid"])
+    assert_service(upgraded, sha)
     if sys.platform == "win32":
         assert after["stop_generation"] != first["stop_generation"]
     assert tombstone_key.load_key(ctx.data, create=False) == key

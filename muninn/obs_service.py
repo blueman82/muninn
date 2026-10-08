@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-from muninn import platform_io
+from muninn import obs_linux_service, platform_io
 from muninn.obs_status import read_status
 from muninn.platform_paths import read_selection, windows_base
 
@@ -186,26 +186,7 @@ def _linux_status(
     metadata = _private_json(lib / "service.json")
     if metadata != {"backend": "systemd", "id": "muninn.service"}:
         return None, "service_metadata_unknown"
-    response = run(
-        [
-            "systemctl",
-            "--user",
-            "show",
-            "muninn.service",
-            "--property=MainPID",
-            "--value",
-        ]
-    )
-    if response.returncode or not response.stdout.strip().isdigit():
-        return None, "service_query_failed"
-    pid = int(response.stdout.strip())
-    status = read_status(home)
-    if not pid or status.get("pid") != pid:
-        return False, "writer_identity_mismatch"
-    command = run(["ps", "-ww", "-o", "command=", "-p", str(pid)])
-    if command.returncode or str(lib).encode() not in command.stdout:
-        return False, "writer_release_mismatch"
-    return True, pid
+    return obs_linux_service.inspect(home, env, run)
 
 
 def release_leftovers(env: Mapping[str, str]) -> list[str]:

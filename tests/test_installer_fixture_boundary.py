@@ -1,0 +1,56 @@
+"""Real git effects in installer fakes remain inside one owned fixture."""
+
+from __future__ import annotations
+
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from tests.installer_support import Fake
+
+
+class FakeGitBoundaryTests(unittest.TestCase):
+    """Normalize native path spellings without broadening the fixture root."""
+
+    def test_outside_and_similar_prefix_repositories_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            owned = parent / "owned"
+            home = owned / "home"
+            home.mkdir(parents=True)
+            outside = parent / "owned-other" / "repo"
+            outside.mkdir(parents=True)
+            fake = Fake(home)
+            with (
+                patch("tests.installer_support.subprocess.run") as run,
+                self.assertRaises(AssertionError),
+            ):
+                fake._git(["-C", str(outside), "rev-parse", "HEAD"], {}, None)
+            run.assert_not_called()
+
+    def test_owned_absolute_repo_ignores_global_temp_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            home, repo = parent / "home", parent / "repo"
+            home.mkdir()
+            repo.mkdir()
+            fake = Fake(home)
+            with (
+                patch(
+                    "tests.installer_support.tempfile.gettempdir",
+                    return_value="/unrelated/temp",
+                ),
+                patch(
+                    "tests.installer_support.subprocess.run",
+                    return_value=subprocess.CompletedProcess(
+                        ["git"], 0, b"sha"
+                    ),
+                ) as run,
+            ):
+                result = fake._git(
+                    ["-C", str(repo), "rev-parse", "HEAD"], {}, None
+                )
+            self.assertEqual(result.stdout, b"sha")
+            run.assert_called_once()

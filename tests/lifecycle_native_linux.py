@@ -40,9 +40,7 @@ def copy_vendor_units(source: Path, destination: Path) -> None:
         OSError: If a required ordinary read-only unit is unavailable.
     """
     for name in _VENDOR_UNITS:
-        info = (source / name).lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022:
-            raise PermissionError("ordinary read-only vendor unit required")
+        ordinary_vendor(source / name)
     platform_io.ensure_private_dir(destination)
     for name in _VENDOR_UNITS:
         fd = platform_io.open_private(
@@ -50,6 +48,18 @@ def copy_vendor_units(source: Path, destination: Path) -> None:
         )
         with os.fdopen(fd, "wb") as output:
             output.write((source / name).read_bytes())
+
+
+def ordinary_vendor(path: Path) -> None:
+    """Require an ordinary source with native permission metadata."""
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode):
+        raise PermissionError("ordinary vendor unit required")
+    if sys.platform == "win32":
+        if not platform_io.is_private(path):
+            raise PermissionError("private vendor fixture required")
+    elif info.st_mode & 0o022:
+        raise PermissionError("read-only vendor unit required")
 
 
 @contextlib.contextmanager

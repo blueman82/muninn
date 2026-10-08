@@ -23,7 +23,7 @@ from install.constants import GIT_ENV, PRE_UPGRADE_PREFIX, STORE_FILE
 from install.context import Ctx, StepFailedError, dry, job, must, wait
 from install.record import Record
 from install.release_io import publish
-from muninn import file_sync, platform_io, store
+from muninn import file_sync, obs_linux_service, platform_io, store
 from muninn.platform_paths import read_selection
 
 SCHEMA_FILE = "muninn/store_schema.py"
@@ -263,8 +263,8 @@ def start_again(ctx: Ctx) -> None:
             from_selection = lifecycle_selection(ctx)
             lifecycle.start(ctx, from_selection[1], from_selection[0])
         else:
-            must(ctx, ["systemctl", "--user", "enable", ctx.target])
-            must(ctx, ["systemctl", "--user", "start", ctx.target])
+            current, python, _ = obs_linux_service.selection(ctx.home)
+            lifecycle.start(ctx, python, current)
     else:
         must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     wait(ctx, functools.partial(_running, ctx), 30, "job has no live PID")

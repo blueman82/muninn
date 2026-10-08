@@ -189,7 +189,9 @@ class Fake:
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
         """Run real git, refusing any repository outside the temp dir."""
-        assert args[0] == "-C" and tempfile.gettempdir() in args[1], args
+        assert args[0] == "-C" and Path(args[1]).resolve(
+            strict=True
+        ).is_relative_to(self.home.parent.resolve(strict=True)), args
         r = subprocess.run(["git", *args], capture_output=True, env=env)
         return done(r.stdout, r.returncode)
 

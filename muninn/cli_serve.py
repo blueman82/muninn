@@ -120,11 +120,14 @@ class _Poller:
             signals += (signal.SIGHUP,)
         for sig in signals:
             signal.signal(sig, self._on_signal)
-        if sys.platform == "win32":
-            obs.write_status(
-                self.home,
-                {"pid": os.getpid(), "stop_generation": self.stop_generation},
-            )
+        obs.write_status(
+            self.home,
+            {
+                "pid": os.getpid(),
+                "stop_generation": self.stop_generation,
+                "writer_install_sha": obs.install_sha(self.env),
+            },
+        )
         # Hourly "idle" line, so a silent log still shows the poller alive.
         self.idle_every = max(1, round(3600 / self.interval))
         obs.log_poller(
@@ -160,7 +163,12 @@ class _Poller:
         # poller would then go stale with no word why: log it, once a pass.
         try:
             obs.write_status(
-                self.home, {ALIVE_AT: time.time(), "pid": os.getpid()}
+                self.home,
+                {
+                    ALIVE_AT: time.time(),
+                    "pid": os.getpid(),
+                    "writer_install_sha": obs.install_sha(self.env),
+                },
             )
         except OSError as exc:
             if not self.beat_failed:
@@ -333,7 +341,8 @@ def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     _quiet_streams(home)
     poller = _Poller(home, env, a.interval)
     try:
-        poller.prepare()
+        with contextlib.suppress(_ServeStopError):
+            poller.prepare()
         return poller.run()
     except Exception as exc:
         # Class name only, like the pass errors above.  Neither write may
