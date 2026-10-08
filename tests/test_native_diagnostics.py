@@ -71,22 +71,21 @@ class NativeDiagnosticsTest(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
         ):
-            write(
-                "lifecycle", "fresh_install", error=RuntimeError("not logged")
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-lifecycle-proof.json"
             )
+            for phase in ("busy_stop", "crash_restart", "rollback_upgrade"):
+                write("lifecycle", phase, error=RuntimeError("not logged"))
+                self.assertEqual(json.loads(path.read_text())["phase"], phase)
             write(
                 "lifecycle",
                 "complete",
                 metrics={"hooks_count": 4},
                 completed=True,
             )
-            data = json.loads(
-                (
-                    Path(tmp)
-                    / "muninn-native-diagnostics"
-                    / "muninn-lifecycle-proof.json"
-                ).read_text()
-            )
+            data = json.loads(path.read_text())
             self.assertEqual(
                 data,
                 {"phase": "complete", "status": "passed", "hooks_count": 4},
@@ -347,6 +346,11 @@ class NativeDiagnosticsTest(unittest.TestCase):
                     "interpreter",
                     "cli",
                     "total",
+                    "first_open",
+                    "first_acl_enter",
+                    "first_identity",
+                    "first_translate",
+                    "first_acl_exit",
                 )
             }
             write(
@@ -369,3 +373,31 @@ class NativeDiagnosticsTest(unittest.TestCase):
             ):
                 with self.assertRaises(ValueError):
                     write("ordinary", "account_child_start", metrics={key: 1})
+
+    def test_ordinary_bootstrap_codes_do_not_export_captured_stderr(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            metrics = {
+                "outer_returncode": 1,
+                "outer_compile_code": 1009,
+                "outer_parser_error": 0,
+            }
+            write("ordinary", "account_create", metrics=metrics)
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            data = json.loads(path.read_text())
+            for key, value in metrics.items():
+                self.assertEqual(data[key], value)
+            with self.assertRaises(ValueError):
+                write(
+                    "ordinary",
+                    "account_create",
+                    metrics={"captured_stderr": 1},
+                )

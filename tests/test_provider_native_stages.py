@@ -35,6 +35,9 @@ class LauncherStagesTest(unittest.TestCase):
             "cli",
         ):
             self.assertIn("stage_" + name + "_ms", result)
+        for name in ("open", "acl_enter", "identity", "translate", "acl_exit"):
+            field = "stage_first_" + name + "_ms"
+            self.assertEqual(result.count("Contains('" + field + "')"), 1)
         self.assertIn("exit $code", result)
         self.assertIn("$guards[$index].Dispose()", result)
         self.assertNotIn("Add-Type", result)
@@ -49,6 +52,11 @@ class LauncherStagesTest(unittest.TestCase):
             "stage_selection_ms": 3,
             "stage_interpreter_ms": 4,
             "stage_cli_ms": 5,
+            "stage_first_open_ms": 1,
+            "stage_first_acl_enter_ms": 1,
+            "stage_first_identity_ms": 1,
+            "stage_first_translate_ms": 1,
+            "stage_first_acl_exit_ms": 1,
         }
         raw = b"__MUNINN_STAGE__" + json.dumps(values).encode() + b"\n"
         self.assertEqual(parse_stages(raw), values)
@@ -86,6 +94,11 @@ class LauncherStagesTest(unittest.TestCase):
                     "selection",
                     "interpreter",
                     "cli",
+                    "first_open",
+                    "first_acl_enter",
+                    "first_identity",
+                    "first_translate",
+                    "first_acl_exit",
                 )
             }
             with (

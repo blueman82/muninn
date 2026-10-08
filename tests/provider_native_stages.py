@@ -28,7 +28,42 @@ _MARKERS = (
     ),
     ("    $code = $process.ExitCode", "cli"),
 )
-_KEYS = frozenset("stage_" + name + "_ms" for _, name in _MARKERS)
+_FIRST_MARKERS = (
+    ("            $guard = (Open-Native $part $true)", "open"),
+    ("                    [string]$Policy = 'private') {", "acl_enter"),
+    (
+        "    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()"
+        ".User.Value",
+        "identity",
+    ),
+    (
+        "        $allowed += $service.Translate("
+        "[Security.Principal.SecurityIdentifier]).Value",
+        "translate",
+    ),
+)
+_KEYS = (
+    frozenset("stage_" + name + "_ms" for _, name in _MARKERS)
+    | frozenset("stage_first_" + name + "_ms" for _, name in _FIRST_MARKERS)
+    | {"stage_first_acl_exit_ms"}
+)
+
+
+def _first_marker(name: str) -> str:
+    """Record the first invocation only without evaluating a guard twice.
+
+    Args:
+        name: Fixed diagnostic stage identifier.
+
+    Returns:
+        Numeric stopwatch capture conditional on the key being absent.
+    """
+    field = "stage_first_" + name + "_ms"
+    return (
+        "if (-not $diagnosticTimes.Contains('" + field + "')) { "
+        "$diagnosticTimes['" + field + "'] = "
+        "$diagnosticClock.ElapsedMilliseconds }"
+    )
 
 
 def timed_launcher(source: str) -> str:
@@ -58,6 +93,16 @@ def timed_launcher(source: str) -> str:
             + "_ms'] = $diagnosticClock.ElapsedMilliseconds",
             1,
         )
+    for anchor, name in _FIRST_MARKERS:
+        if result.count(anchor) != 1:
+            raise ValueError("unknown first native guard boundary")
+        result = result.replace(anchor, anchor + "\n" + _first_marker(name), 1)
+    anchor = "\n}\n\nfunction Quote-Argument("
+    if result.count(anchor) != 1:
+        raise ValueError("unknown first native ACL exit boundary")
+    result = result.replace(
+        anchor, "\n" + _first_marker("acl_exit") + anchor, 1
+    )
     anchor = "    exit $code"
     if result.count(anchor) != 1:
         raise ValueError("unknown native launcher exit boundary")
