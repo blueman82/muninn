@@ -27,6 +27,12 @@ from muninn.obs_service import literal, powershell
 from tests.native_diagnostics import transfer, write
 
 
+def _timed_out(parent: Path) -> RuntimeError:
+    """Export the child's partial proof, then describe the timeout."""
+    transfer("lifecycle", parent)
+    return RuntimeError("ordinary child timed out; tasks and state retained")
+
+
 def run_child(parent: Path, root: Path) -> dict[str, object]:
     """Create one scoped filtered-token task and await its terminal result."""
     identity = _grant_synthetic_access(parent)
@@ -84,9 +90,7 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     result = parent / "result.json"
     while not result.exists():
         if time.monotonic() >= deadline:
-            raise RuntimeError(
-                "ordinary child timed out; tasks and state retained"
-            )
+            raise _timed_out(parent)
         time.sleep(1)
     raw: object = json.loads(result.read_text())
     assert isinstance(raw, dict)
