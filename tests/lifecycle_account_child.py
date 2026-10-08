@@ -27,7 +27,7 @@ try {
  $definition=$service.NewTask(0)
  $definition.XmlText=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
  try {
-  $principalUser=$definition.Principal.UserId
+  $principalUser=Get-TaskSid $definition.Principal.UserId
   if($null -ne $principalUser){
    $report.task_principal_sid_equal=[int](
     $principalUser -eq $identity.User.Value)
@@ -45,7 +45,7 @@ try {
    $report.task_principal_run_level=[int]$principalLevel
   }
  } catch {}
- if($definition.Principal.UserId -ne $identity.User.Value -or
+ if((Get-TaskSid $definition.Principal.UserId) -ne $identity.User.Value -or
     $definition.Principal.LogonType -ne 3 -or
     $definition.Principal.RunLevel -ne 0){throw 'task_identity_mismatch'}
  $report.phase='account_task_create'

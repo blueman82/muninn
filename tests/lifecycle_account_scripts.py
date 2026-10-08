@@ -94,6 +94,16 @@ function Read-ChildEvidence($base,$report){
 
 
 OWNED = r"""
+function Get-TaskSid($user){
+ try {
+  if($null -eq $user -or $user -eq ''){return $null}
+  if($user -match '^S-1-'){
+   return [Security.Principal.SecurityIdentifier]::new($user).Value
+  }
+  return [Security.Principal.NTAccount]::new($user).Translate(
+   [Security.Principal.SecurityIdentifier]).Value
+ } catch {return $null}
+}
 function Test-Owned($task,$base){
  [xml]$wanted=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
  [xml]$actual=$task.Xml
@@ -116,9 +126,13 @@ function Test-Owned($task,$base){
   $xpath='/t:Task/t:'+($path.Replace('/','/t:'))
   $a=$actual.SelectSingleNode($xpath,$ns)
   $w=$wanted.SelectSingleNode($xpath,$ns)
-  if($null -eq $a -or $null -eq $w -or $a.InnerText -ne $w.InnerText){
-   return $false
+  if($null -eq $a -or $null -eq $w){return $false}
+  $same=$a.InnerText -eq $w.InnerText
+  if(!$same -and $path -like '*UserId'){
+   $sid=Get-TaskSid $a.InnerText
+   $same=$null -ne $sid -and $sid -eq (Get-TaskSid $w.InnerText)
   }
+  if(!$same){return $false}
  }
  return $actual.SelectSingleNode('/t:Task/t:Actions',$ns).Context -eq
         $wanted.SelectSingleNode('/t:Task/t:Actions',$ns).Context

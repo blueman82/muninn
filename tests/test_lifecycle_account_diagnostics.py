@@ -298,7 +298,8 @@ foreach($json in $invalid){
         child = lifecycle_account_child.child_script(Path("/synthetic"))
         parent = lifecycle_account_scripts._CHILD_DIAGNOSTICS
         guard = (
-            " if($definition.Principal.UserId -ne $identity.User.Value -or\n"
+            " if((Get-TaskSid $definition.Principal.UserId) -ne "
+            "$identity.User.Value -or\n"
             "    $definition.Principal.LogonType -ne 3 -or\n"
             "    $definition.Principal.RunLevel -ne 0){throw "
             "'task_identity_mismatch'}"
@@ -316,14 +317,11 @@ foreach($json in $invalid){
             self.assertIn(f"$report.{key}=", capture)
             self.assertIn(f"'{key}'", parent)
         self.assertNotIn("$definition.Principal.UserId=", capture)
-        self.assertNotIn("Translate", capture)
 
     def test_native_principal_readback_and_atomic_numeric_bounds(self) -> None:
         child = lifecycle_account_child.child_script(Path("/synthetic"))
         start = child.index(" try {\n  $principalUser=")
-        capture = child[
-            start : child.index(" if($definition.Principal.UserId", start)
-        ]
+        capture = child[start : child.index(" if((Get-TaskSid", start)]
         if sys.platform != "win32":
             return
         with tempfile.TemporaryDirectory() as temporary:
@@ -345,7 +343,8 @@ $before=$definition.XmlText;$report=@{}
                 + capture
                 + r"""
 if($report.task_principal_sid_equal -ne
-   [int]($definition.Principal.UserId -eq $identity.User.Value) -or
+   [int]((Get-TaskSid $definition.Principal.UserId) -eq
+   $identity.User.Value) -or
    $report.task_principal_logon_type -ne
    [int]$definition.Principal.LogonType -or
    $report.task_principal_run_level -ne [int]$definition.Principal.RunLevel -or
