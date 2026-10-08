@@ -183,9 +183,10 @@ def _windows_status(
         platform_io.assert_private_fd(handle.fileno())
         expected = ET.fromstring(handle.read(16385))
     queried = run(["schtasks.exe", "/Query", "/TN", identifier, "/XML"])
-    if queried.returncode or not task_matches(
-        expected, parse_task_query(queried.stdout)
-    ):
+    stored = None if queried.returncode else parse_task_query(queried.stdout)
+    if stored is not None:
+        canonical_trigger_user(stored, run)
+    if stored is None or not task_matches(expected, stored):
         return False, "task_definition_mismatch"
     status = read_status(home)
     pid = status.get("pid")
@@ -231,6 +232,34 @@ def parse_task_query(raw: bytes) -> ET.Element:
         except UnicodeDecodeError:
             text = raw.decode("cp1252")
     return ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text))
+
+
+def canonical_trigger_user(
+    actual: ET.Element,
+    run: Callable[[Sequence[str]], subprocess.CompletedProcess[bytes]],
+) -> None:
+    """Rewrite a logon trigger's account name to the SID it resolves to.
+
+    The scheduler may report the trigger user by name while the principal
+    keeps the SID, so ownership compares the resolved SIDs instead.
+
+    Args:
+        actual: The stored definition, edited in place.
+        run: Command runner for the account lookup.
+    """
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    node = actual.find("t:Triggers/t:LogonTrigger/t:UserId", ns)
+    if node is None or not node.text or node.text.startswith("S-1-"):
+        return
+    script = (
+        "$ErrorActionPreference='Stop';"
+        f"[Security.Principal.NTAccount]::new({literal(node.text)})"
+        ".Translate([Security.Principal.SecurityIdentifier]).Value"
+    )
+    resolved = run(powershell(script))
+    sid = resolved.stdout.decode(errors="replace").strip()
+    if not resolved.returncode and sid.startswith("S-1-"):
+        node.text = sid
 
 
 def _linux_status(

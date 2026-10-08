@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import subprocess
 import unittest
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 
-from muninn.obs_service import parse_task_query, task_matches
+from muninn.obs_service import (
+    canonical_trigger_user,
+    parse_task_query,
+    task_matches,
+)
 
 _BODY = '<Task><Principals><Principal id="User"/></Principals></Task>'
+_URI = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 _DECLARATION = '<?xml version="1.0" encoding="UTF-16"?>'
 
 
@@ -51,3 +58,37 @@ class ParseTaskQueryTests(unittest.TestCase):
         self.assertFalse(
             task_matches(ET.fromstring(other), ET.fromstring(stored))
         )
+
+
+class CanonicalTriggerUserTests(unittest.TestCase):
+    """A trigger user reported by name is compared by its resolved SID."""
+
+    _XML = (
+        f'<Task xmlns="{_URI}"><Triggers><LogonTrigger>'
+        "<UserId>HOST\\u</UserId></LogonTrigger></Triggers></Task>"
+    )
+
+    def test_name_becomes_sid_and_failures_leave_it(self) -> None:
+        """Only a successful SID answer rewrites the stored name."""
+        for code, out, wanted in (
+            (0, b"S-1-5-21-1-2-3-1001\r\n", "S-1-5-21-1-2-3-1001"),
+            (1, b"", "HOST\\u"),
+            (0, b"garbage", "HOST\\u"),
+        ):
+
+            def run(
+                command: Sequence[str],
+                code: int = code,
+                out: bytes = out,
+            ) -> subprocess.CompletedProcess[bytes]:
+                """Answer the lookup with a fixed result."""
+                return subprocess.CompletedProcess(command, code, out, b"")
+
+            root = ET.fromstring(self._XML)
+            canonical_trigger_user(root, run)
+            self.assertEqual(
+                root.findtext(
+                    "t:Triggers/t:LogonTrigger/t:UserId", None, {"t": _URI}
+                ),
+                wanted,
+            )

@@ -23,6 +23,7 @@ from muninn.obs_linux_service import (
     unit_matches,
 )
 from muninn.obs_service import (
+    canonical_trigger_user,
     literal,
     parse_process,
     parse_task_query,
@@ -199,6 +200,7 @@ def _task_owned(ctx: Ctx) -> ET.Element:
         ctx, ["schtasks.exe", "/Query", "/TN", ctx.target, "/XML"], quiet=True
     )
     actual = parse_task_query(result.stdout)
+    canonical_trigger_user(actual, ctx.run)
     if not task_matches(expected, actual):
         raise StepFailedError(
             "registered task definition is not the owned poller"
