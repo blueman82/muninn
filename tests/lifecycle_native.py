@@ -14,7 +14,7 @@ from pathlib import Path
 
 from install import installer, lifecycle
 from install.context import Ctx, run_real
-from muninn import obs_status, platform_io, tombstone_key
+from muninn import obs, obs_status, platform_io, tombstone_key
 from muninn.obs_service import parse_process, process_command, service_status
 from tests import lifecycle_native_linux, lifecycle_native_windows
 from tests.native_diagnostics import write
@@ -27,7 +27,7 @@ def assert_service(ctx: Ctx, sha: str) -> None:
     if sys.platform == "linux":
         status = obs_status.read_status(ctx.data)
         assert status.get("writer_install_sha") == sha
-        assert service_status(ctx.data, {"HOME": str(ctx.home)}, run_real) == (
+        assert service_status(ctx.data, {"HOME": str(ctx.home)}, obs.run) == (
             True,
             status["pid"],
         )

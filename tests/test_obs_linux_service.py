@@ -39,7 +39,10 @@ class LinuxServiceTests(unittest.TestCase):
             ("SendSIGKILL=no", "SendSIGKILL=yes"),
             ("TimeoutStopSec=infinity", "TimeoutStopSec=1"),
             ("Restart=on-failure", "Restart=always"),
-            (str(self.python), "/foreign/python"),
+            (
+                obs_service_commands.unit_quote(str(self.python)),
+                obs_service_commands.unit_quote("/foreign/python"),
+            ),
             ("UMask=0077", "UMask=0022"),
             ("[Service]\nType=simple", "Type=simple\n[Service]"),
         ):
@@ -141,6 +144,7 @@ class LinuxServiceTests(unittest.TestCase):
             def run(
                 command: Sequence[object],
             ) -> subprocess.CompletedProcess[bytes]:
+                self.assertIn("--all", command)
                 return subprocess.CompletedProcess(
                     [str(value) for value in command], 0, response
                 )

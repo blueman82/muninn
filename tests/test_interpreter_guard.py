@@ -14,6 +14,14 @@ from tests.ingest_support import ROOT
 class InterpreterGuardContractTests(unittest.TestCase):
     """Keep the source guard on the shared interpreter-selection boundary."""
 
+    def test_cmd_facade_pins_system_powershell(self) -> None:
+        source = (ROOT / "bin/muninn.cmd").read_text(encoding="utf-8")
+        self.assertIn(
+            '"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"',
+            source,
+        )
+        self.assertNotIn("\npowershell.exe ", source)
+
     def test_powershell_field_checks_exe_before_probe(self) -> None:
         source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
         field = source.split("function Assert-InterpreterField", 1)[1].split(

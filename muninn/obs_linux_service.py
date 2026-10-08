@@ -143,6 +143,7 @@ def query_unit(
             "systemctl",
             "--user",
             "show",
+            "--all",
             "muninn.service",
             "--property=" + ",".join(_PROPERTIES),
         ]

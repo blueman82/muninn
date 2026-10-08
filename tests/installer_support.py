@@ -389,8 +389,11 @@ class World:
         for rel in PINNED:
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / rel, self.repo / rel)
+            if rel == "bin/muninn":
+                (self.repo / rel).chmod(0o755)
         git(self.repo, "init", "-q")
         git(self.repo, "add", "-A")
+        git(self.repo, "update-index", "--chmod=+x", "bin/muninn")
         git(self.repo, "commit", "-qm", "new")
         self.sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
         h = self.home

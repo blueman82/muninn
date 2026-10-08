@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.installer_support import Fake
+from tests.installer_support import Fake, World, git
 
 
 class FakeGitBoundaryTests(unittest.TestCase):
@@ -54,3 +54,21 @@ class FakeGitBoundaryTests(unittest.TestCase):
                 )
             self.assertEqual(result.stdout, b"sha")
             run.assert_called_once()
+
+
+class FixtureLauncherModeTests(unittest.TestCase):
+    """Git records launcher executability independently of host file modes."""
+
+    def test_fixture_records_executable_launcher_from_nonexecuting_copy(
+        self,
+    ) -> None:
+        world = World(self)
+        launcher = world.repo / "bin/muninn"
+        launcher.chmod(0o600)
+        git(world.repo, "update-index", "--chmod=-x", "bin/muninn")
+        git(world.repo, "commit", "-qm", "nonexecuting source")
+        with patch("tests.installer_support.ROOT", world.repo):
+            copied = World(self)
+        mode = git(copied.repo, "ls-tree", "HEAD", "bin/muninn").split()[0]
+        self.assertEqual(mode, b"100755")
+        self.assertEqual(git(copied.repo, "status", "--porcelain"), b"")
