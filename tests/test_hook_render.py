@@ -7,14 +7,14 @@ root.
 from __future__ import annotations
 
 import json
-import os
 import re
-from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+from unittest import mock
 
 from muninn import hook, hook_frame
 from tests import test_classify as tc
 from tests import test_knowledge as tk
+from tests.hook_nonregular import nonregular
 from tests.hook_support import (
     AKIA,
     CLOSE,
@@ -161,8 +161,8 @@ class RenderTests(HookCase):
         folder.mkdir()
         self.assertIsNone(hook._first_record(str(folder)))  # not a file
         fifo = self.tmp / "pipe"
-        os.mkfifo(fifo)
-        self.assertIsNone(hook._first_record(str(fifo)))
+        with nonregular(fifo) as native_pipe:
+            self.assertIsNone(hook._first_record(native_pipe))
         meta = tc.subagent_meta("thr-big")
         meta["payload"]["base_instructions"] = {
             "text": "z" * (1024 * 1024 + 10)
@@ -182,11 +182,9 @@ class RenderTests(HookCase):
 
     def test_first_record_ignores_a_fifo_even_with_a_writer(self) -> None:
         fifo = self.tmp / "live-pipe"
-        os.mkfifo(fifo)
-        fd = os.open(fifo, os.O_RDWR)  # both ends open: a read would work
-        self.addCleanup(os.close, fd)
-        os.write(fd, json.dumps(tc.subagent_meta("thr-p")).encode() + b"\n")
-        self.assertIsNone(hook._first_record(str(fifo)))
+        data = json.dumps(tc.subagent_meta("thr-p")).encode() + b"\n"
+        with nonregular(fifo, data) as native_pipe:
+            self.assertIsNone(hook._first_record(native_pipe))
         self.assertIsNone(hook._first_record("a\0b"))  # not a path
 
     def test_first_record_line_cap_is_exact(self) -> None:
@@ -205,20 +203,21 @@ class RenderTests(HookCase):
         small = self.tmp / "small.jsonl"
         small.write_text(json.dumps(tc.subagent_meta("thr-s")) + "\n")
 
-        def open_fds() -> int:
-            """Count this process's open file descriptors.
+        opened: list[BinaryIO] = []
+        real_open = hook.open_regular
 
-            Returns:
-                The number of entries in ``/dev/fd``.
-            """
-            return len(list(Path("/dev/fd").iterdir()))
+        def tracking_open(*args: Any, **kwargs: Any) -> BinaryIO:
+            handle = real_open(*args, **kwargs)
+            opened.append(handle)
+            return handle
 
-        before = open_fds()
-        for _ in range(25):
-            hook._first_record(str(small))  # read
-            hook._first_record(str(self.tmp))  # refused after the open
-            hook._first_record(str(self.tmp / "missing"))  # never opened
-        self.assertEqual(open_fds(), before)
+        with mock.patch.object(hook, "open_regular", tracking_open):
+            for _ in range(25):
+                hook._first_record(str(small))
+                hook._first_record(str(self.tmp))
+                hook._first_record(str(self.tmp / "missing"))
+        self.assertEqual(len(opened), 25)
+        self.assertTrue(all(handle.closed for handle in opened))
 
     def test_scope_label_in_the_header_and_its_fallback(self) -> None:
         self.add()

@@ -14,11 +14,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from install.config_windows import replacement
 from install.errors import RacedError, RefusedError
 from install.tomledit import (
     get_section,
@@ -28,6 +30,9 @@ from install.tomledit import (
     scan_named,
     toml_check,
 )
+from muninn import platform_windows
+from muninn.file_sync import sync_fd, sync_path
+from muninn.platform_io import assert_private_fd, open_regular
 
 __all__ = [
     "JsonPath",
@@ -45,6 +50,7 @@ __all__ = [
     "load_json",
     "parse_section",
     "put_section",
+    "read_file",
     "scan_named",
     "toml_check",
 ]
@@ -53,17 +59,45 @@ JsonPath = tuple[str, ...]
 
 
 def _read(path: Path) -> bytes:
-    """Read a file; a seam so tests can simulate a concurrent writer."""
-    return path.read_bytes()
+    """Read a verified original; retain a seam for concurrent-writer tests."""
+    with open_regular(path, expected=path.lstat()) as source:
+        assert_private_fd(source.fileno())
+        if sys.platform != "win32":
+            status = os.fstat(source.fileno())
+            if status.st_uid != os.getuid() or status.st_mode & 0o022:
+                raise OSError(
+                    "provider config ownership or permissions are unsafe"
+                )
+        return source.read()
+
+
+def read_file(path: Path) -> bytes:
+    """Read provider config through verified identity and access controls.
+
+    Args:
+        path: Existing ordinary provider config.
+
+    Returns:
+        File bytes, without following a replaced or unsafe original.
+
+    Raises:
+        OSError: If ownership, privacy, identity or file type is unsafe.
+    """
+    return _read(path)
 
 
 def _fsync_dir(path: Path) -> None:
-    """Flush a directory entry so a completed rename survives a crash."""
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    """Flush a POSIX directory; Windows publication itself is write-through."""
+    if sys.platform != "win32":
+        sync_path(path)
+
+
+def _publish(source: Path, target: Path) -> None:
+    """Publish without delete-first or cross-volume copy fallbacks."""
+    if sys.platform == "win32":
+        platform_windows.publish(source, target, replace=True)
+    else:
+        source.replace(target)
 
 
 def _write_temp(path: Path, data: bytes, mode: int) -> Path:
@@ -81,13 +115,22 @@ def _write_temp(path: Path, data: bytes, mode: int) -> Path:
     Returns:
         The temp file's path.
     """
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    if sys.platform == "win32":
+        platform_windows.assert_ancestry(path)
+        platform_windows.assert_private(path.parent, directory=True)
+    if sys.platform == "win32" and path.exists():
+        fd, temporary = replacement(path)
+        tmp = str(temporary)
+    else:
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as f:
-            os.fchmod(f.fileno(), mode)
+            if sys.platform != "win32":
+                os.fchmod(f.fileno(), mode)
+            assert_private_fd(f.fileno())
             f.write(data)
             f.flush()
-            os.fsync(f.fileno())
+            sync_fd(f.fileno())
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
@@ -104,7 +147,7 @@ def atomic_write(path: Path, data: bytes, mode: int) -> None:
     """
     tmp = _write_temp(path, data, mode)
     try:
-        tmp.replace(path)
+        _publish(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
     _fsync_dir(path.parent)
@@ -149,7 +192,7 @@ def edit_file(
             # the providers take no lock we could share.
             if _read(path) != before:
                 continue
-            tmp.replace(path)
+            _publish(tmp, path)
         finally:
             tmp.unlink(missing_ok=True)
         _fsync_dir(path.parent)

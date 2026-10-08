@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -37,6 +38,34 @@ HINT = "`muninn open <ref> --context 3`"
 Q = "alphaterm betaterm gammaterm deltaterm"
 LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "muninn"
 HOOKS_JSON = LAUNCHER.parent.parent / "integrations/codex/hooks/hooks.json"
+
+
+def launcher_args(*arguments: str) -> list[str]:
+    """Keep POSIX launcher coverage and use isolated Python for Windows cases.
+
+    Args:
+        *arguments: Exact CLI arguments for a behavioral hook test.
+
+    Returns:
+        An executable vector; native bootstrap contracts have separate tests.
+    """
+    if sys.platform != "win32":
+        return [str(LAUNCHER), *arguments]
+    program = (
+        "import sys; sys.path.insert(0,sys.argv.pop(1)); "
+        "from muninn.cli import main; raise SystemExit(main(sys.argv[1:]))"
+    )
+    return [
+        sys.executable,
+        "-I",
+        "-B",
+        "-X",
+        "utf8",
+        "-c",
+        program,
+        str(LAUNCHER.parent.parent),
+        *arguments,
+    ]
 
 
 def notice(code: str, event: str = "SessionStart") -> dict[str, object]:
@@ -275,7 +304,7 @@ class HookCliCase(tcli.CliCase):
         """
         body = json.dumps(payload).encode() if raw is None else raw
         return subprocess.run(
-            [str(LAUNCHER), "hook", event, "--provider", provider],
+            launcher_args("hook", event, "--provider", provider),
             input=body,
             capture_output=True,
             env=self.env | (env or {}),

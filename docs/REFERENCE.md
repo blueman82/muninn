@@ -16,7 +16,7 @@ compact JSON). Apart from `serve` and the hooks, every answer also carries these
 writer holds the lock, retry); 4 store unavailable, a crashed writer's hot journal, or a missing or damaged `tombstone.key` (`error` `tombstone_key`).
 `muninn --version` prints `muninn <version>`.
 
-**Environment:** `MUNINN_HOME` data dir (default `~/.local/share/muninn`); `MUNINN_ROOTS` JSON map of
+**Environment:** `MUNINN_HOME` data dir (default `~/.local/share/muninn` on macOS/Linux or `%LOCALAPPDATA%/Muninn/data` on Windows); `MUNINN_CURSOR_DB` optional native absolute path to Cursor's `state.vscdb`; `CODEX_HOME` and `CLAUDE_CONFIG_DIR` select provider homes (default `.codex`/`.claude` beneath `USERPROFILE` on Windows, `HOME` elsewhere); `MUNINN_ROOTS` JSON map of
 provider root name to path (tests); `MUNINN_PYTHON` interpreter for `bin/muninn`; `MUNINN_PRETTY=1` indent;
 `MUNINN_NO_CALLLOG=1` no `calls.jsonl` line; `MUNINN_HOOK_DISABLE=1` hooks print `{}`; `CLAUDE_CODE_SESSION_ID`,
 `CODEX_SESSION_ID`, `CODEX_THREAD_ID` identify the calling session, which search leaves out unless told not to.
@@ -139,7 +139,7 @@ with a `memory unavailable (store_unavailable)` notice) in that window. `muninn 
 
 | Command | What it does |
 |---|---|
-| `muninn ingest [--full]` | catch up with Claude and Codex provider transcripts now; `--full` rescans everything and imports Cursor history from `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` when present. Cursor data is read-only and is not polled. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `unreadable_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
+| `muninn ingest [--full]` | catch up with Claude and Codex provider transcripts now; `--full` rescans everything and imports Cursor history from `MUNINN_CURSOR_DB` when supplied, or `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` on macOS. Windows and Linux require an explicit database path; no layout is guessed. Cursor data is read-only and is not polled. Answer `ingest`: `files_seen`, `files_changed`, `events_added`, `events_removed`, `skipped_files`, `unreadable_files`, `skipped_lines`, `failed`, `errors`, `missing`, `duration_s` |
 | `muninn serve [--interval S]` | the launchd poller loop (default 60 s); prints nothing |
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
@@ -207,7 +207,8 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `upgrade_snapshot` | warn | no pre-upgrade copy of the store is left in the data dir | names of leftover `muninn.sqlite.pre-upgrade-*` files |
 | `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
 | `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
-| `launchd_job` | error | the launchd job is loaded with a live process | its pid |
+| `launchd_job` | error | on macOS, the launchd job is loaded with a live process | its pid |
+| `managed_service` | error | on Linux/Windows, the managed user service/task is owned and its heartbeat identifies the actual writer; unavailable inspection reports `null`, never success | constant code and process id |
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `roots_present` | info | always | names of provider roots that do not exist |
 
@@ -251,3 +252,11 @@ re-read after a classifier change still shows `poller` `ok` while `index_age_s` 
 `poller.log` and `poller.log.1` poller events (rotated likewise; the plist sends launchd's own stdout and stderr to `/dev/null`, and a poller whose plist still sends them to the log silences them itself, so nothing reaches the log except allowlisted lines; launchd restarts the poller on any exit, a clean stop included, so only `launchctl bootout` keeps it down); `tombstones.jsonl` erase records; `tombstone.key` (exactly 32 random bytes, mode 0600, created whole the first time an erase needs it and never by a dry run, survives `rebuild`, never logged) the key that makes the content tombstones in `tombstones.jsonl` HMAC-SHA256 tags (`ev2:`) instead of plain hashes, so an erased short text cannot be confirmed by guessing. A new key is never made while keyed tombstones exist, because it would stop them matching: if the file is missing or damaged then, `ingest`, `rebuild` and `erase` exit 4 with `tombstone_key` and `doctor` fails `tombstone_key`; restore the file from a backup; `muninn.sqlite.unreadable-<UTC timestamp>` a store `rebuild` set aside because it could not be read. `erase` cannot scrub it (it is not a readable database), so it may still hold erased text: `erase` names every such file in `aside_files` with the exact command in `aside_remove` (`rm -- <path>`), and `doctor` warns (`aside_files`) while one exists. Nothing deletes it for you; salvage what you need, then run that command;
 `muninn.sqlite-journal` SQLite's rollback journal, allowed by `unexpected_files` but a leftover one fails `unowned_journal`;
 `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). During an upgrade that migrates the schema, `muninn.sqlite.pre-upgrade-<sha>` (mode 0600) exists briefly and is allowed. Anything else fails `unexpected_files`.
+
+## Native provider commands
+
+The installer renders hook JSON with native paths rather than inserting raw paths into JSON text. On Windows, Claude uses a real Windows PowerShell executable with an `args` array; Codex uses its `command_windows` override with an encoded PowerShell command. Both invoke the validated Muninn bootstrap without Git Bash. Their shipped timeout remains five seconds. Changing a hook definition requires the owner's provider approval.
+
+Windows installer calls prefer a trusted `codex.exe` on `PATH`. An official npm `codex.cmd` installation is dispatched through its existing `node_modules/@openai/codex/bin/codex.js` with a real `node.exe`; arguments are passed directly. Other shim layouts require putting native `codex.exe` on `PATH`. Unsafe executables or provider configs are refused.
+
+Repository scopes use local native filesystem paths. Foreign-platform absolute paths and Windows UNC paths resolve to `unknown` without probing the network; existing scope ids are retained. Copy network-hosted inputs locally before indexing.

@@ -7,9 +7,11 @@ import os
 import queue
 import subprocess
 import threading
+import time
 from typing import IO, Any, cast
 
 from install.context import Ctx
+from install.provider_paths import codex_argv
 
 
 def _call(
@@ -37,13 +39,20 @@ def _call(
     payload = {"id": msg_id, "method": method, "params": params}
     stdin.write(json.dumps(payload).encode() + b"\n")
     stdin.flush()
+    deadline = time.monotonic() + timeout
     while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise queue.Empty
         try:
-            msg = json.loads(lines.get(timeout=timeout))
+            msg = json.loads(lines.get(timeout=remaining))
         except ValueError:
             continue  # the server may log non-JSON lines; skip them
-        if msg.get("id") == msg_id:
-            return msg
+        if (
+            isinstance(msg, dict)
+            and cast(dict[str, Any], msg).get("id") == msg_id
+        ):
+            return cast(dict[str, Any], msg)
 
 
 def codex_probe(ctx: Ctx, timeout: float = 60) -> list[dict[str, Any]]:
@@ -62,9 +71,14 @@ def codex_probe(ctx: Ctx, timeout: float = 60) -> list[dict[str, Any]]:
         KeyError: If a reply lacks ``result``, ``data`` or ``hooks``.
         subprocess.TimeoutExpired: If the server will not exit when closed.
     """
-    env = dict(os.environ, CODEX_HOME=str(ctx.codex_home))
+    env = dict(
+        os.environ,
+        CODEX_HOME=str(ctx.codex_home),
+        HOME=str(ctx.home),
+        USERPROFILE=str(ctx.home),
+    )
     p = subprocess.Popen(
-        ["codex", "app-server"],
+        codex_argv(ctx, "app-server"),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -88,4 +102,6 @@ def codex_probe(ctx: Ctx, timeout: float = 60) -> list[dict[str, Any]]:
     finally:
         p.terminate()
         p.wait(timeout=10)
+        stdin.close()
+        stdout.close()
     return [h for entry in result["data"] for h in entry["hooks"]]

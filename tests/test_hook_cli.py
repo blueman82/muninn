@@ -21,9 +21,9 @@ from tests import test_classify as tc
 from tests import test_cli as tcli
 from tests.hook_support import (
     HOOKS_JSON,
-    LAUNCHER,
     USAGE,
     HookCliCase,
+    launcher_args,
 )
 
 
@@ -50,7 +50,7 @@ class HookCommandTests(HookCliCase):
         ):
             with self.subTest(event, provider=provider):
                 done = subprocess.run(
-                    [str(LAUNCHER), "hook", event, "--provider", provider],
+                    launcher_args("hook", event, "--provider", provider),
                     input=b"{}",
                     capture_output=True,
                     env=env,
@@ -62,7 +62,7 @@ class HookCommandTests(HookCliCase):
         for command in commands:  # the registered command lines themselves
             argv = shlex.split(command)
             self.assertEqual(argv[1], "hook")
-            argv[0] = str(LAUNCHER)
+            argv = launcher_args(*argv[1:])
             done = subprocess.run(
                 argv, input=b"{}", capture_output=True, env=env
             )
@@ -80,7 +80,7 @@ class HookCommandTests(HookCliCase):
         ):
             with self.subTest(argv):
                 done = subprocess.run(
-                    [str(LAUNCHER), "hook", *argv],
+                    launcher_args("hook", *argv),
                     input=b"{}",
                     capture_output=True,
                     env=self.env,
@@ -90,13 +90,7 @@ class HookCommandTests(HookCliCase):
 
     def test_unknown_extra_flags_are_ignored_not_fatal(self) -> None:
         done = subprocess.run(
-            [
-                str(LAUNCHER),
-                "hook",
-                "session-start",
-                "--provider=claude",
-                "--x",
-            ],
+            launcher_args("hook", "session-start", "--provider=claude", "--x"),
             input=b"{}",
             capture_output=True,
             env=self.env,
@@ -147,7 +141,7 @@ class HookCliEdgeTests(HookCliCase):
         ):
             with self.subTest(argv):
                 done = subprocess.run(
-                    [str(LAUNCHER), "hook", *argv],
+                    launcher_args("hook", *argv),
                     input=b"{}",
                     capture_output=True,
                     env=self.env,

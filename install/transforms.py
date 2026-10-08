@@ -25,8 +25,23 @@ from install.trust import TrustedHook
 
 def ours(group: Mapping[str, Any]) -> bool:
     """Say whether a settings hook group runs muninn."""
-    cmds = " ".join(h.get("command", "") for h in group.get("hooks", []))
-    return "/.local/bin/muninn hook" in cmds
+    for handler in group.get("hooks", []):
+        command = handler.get("command", "")
+        if "/.local/bin/muninn" in command and " hook " in command:
+            return True
+        arguments = handler.get("args", [])
+        if (
+            any(
+                str(argument)
+                .replace("\\", "/")
+                .casefold()
+                .endswith("/muninn/bin/muninn.ps1")
+                for argument in arguments
+            )
+            and "hook" in arguments
+        ):
+            return True
+    return False
 
 
 def claude_paths(obj: Mapping[str, Any]) -> list[ce.JsonPath]:

@@ -192,7 +192,7 @@ def _subagent(payload: Mapping[str, object], provider: str) -> bool:
         if provider == "codex":
             info = _CLASSIFY.codex_thread(first)
         else:
-            info = _CLASSIFY.claude_thread(path, first)
+            info = _CLASSIFY.claude_thread(Path(path).as_posix(), first)
     except ValueError:
         return False
     return info.thread_class in ("subagent", "reviewer")
