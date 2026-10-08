@@ -259,4 +259,6 @@ The installer renders hook JSON with native paths rather than inserting raw path
 
 Windows installer calls prefer a trusted `codex.exe` on `PATH`. An official npm `codex.cmd` installation is dispatched through its existing `node_modules/@openai/codex/bin/codex.js` with a real `node.exe`; arguments are passed directly. Other shim layouts require putting native `codex.exe` on `PATH`. Unsafe executables or provider configs are refused.
 
+Automatic Codex hook trust requires a successful version command: `codex-cli 0.159.2` on Windows, or `codex-cli 0.159.2`/`codex-cli 0.159.3` on macOS and Linux. The selected CLI files and version must remain unchanged from discovery through the check before trust is written. Otherwise, the installer leaves trust to the owner in `/hooks`.
+
 Repository scopes use local native filesystem paths. Foreign-platform absolute paths and Windows UNC paths resolve to `unknown` without probing the network; existing scope ids are retained. Copy network-hosted inputs locally before indexing.

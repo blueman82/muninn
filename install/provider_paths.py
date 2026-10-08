@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import shlex
@@ -17,6 +18,7 @@ from install.context import Ctx
 from install.transforms import ours
 from install.trust import codex_hooks
 from muninn import platform_windows
+from muninn.platform_io import open_regular
 
 _VERBS = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
 
@@ -166,3 +168,36 @@ def _windows_executable(path: Path) -> None:
     if sys.platform != "win32":
         raise OSError("Windows executable validation requires Windows")
     platform_windows.assert_executable(path)
+
+
+def codex_identity(ctx: Ctx) -> tuple[str, ...]:
+    """Return opaque descriptor-bound identities of the selected CLI files.
+
+    Args:
+        ctx: Native executable or official npm dispatch selection.
+
+    Returns:
+        Content, filesystem identity and resolved path hashes per CLI file.
+
+    Raises:
+        OSError: If a chosen file is unsafe, missing or changed identity.
+    """
+    identities: list[str] = []
+    for argument in codex_argv(ctx):
+        candidate = Path(shutil.which(argument) or argument).resolve(
+            strict=True
+        )
+        with open_regular(candidate, expected=candidate.lstat()) as source:
+            status = os.fstat(source.fileno())
+            metadata = (
+                status.st_dev,
+                status.st_ino,
+                status.st_size,
+                status.st_mtime_ns,
+            )
+            digest = hashlib.sha256(os.fsencode(candidate))
+            digest.update(str(metadata).encode())
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+            identities.append(digest.hexdigest())
+    return tuple(identities)
