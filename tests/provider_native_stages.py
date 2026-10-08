@@ -27,6 +27,23 @@ _MARKERS = (
         "installed",
     ),
     ("        Hold-Directories $root", "ancestry"),
+    ("        $base = Assert-Private $root $true", "selection_base"),
+    (
+        "        Assert-Acl ($metadata.GetAccessControl())",
+        "selection_metadata",
+    ),
+    (
+        "        $record = (Read-Metadata $metadata) | ConvertFrom-Json",
+        "selection_json",
+    ),
+    (
+        "        $names = @($record.PSObject.Properties.Name | Sort-Object)",
+        "selection_fields",
+    ),
+    (
+        "        $root = Assert-Private (Join-Path $lib $record.sha) $true",
+        "selection_release",
+    ),
     (
         "        $recorded = Assert-InterpreterField $record.python",
         "selection",
@@ -39,6 +56,11 @@ _MARKERS = (
     ("    $code = $process.ExitCode", "cli"),
 )
 _FIRST_MARKERS = (
+    (
+        "    $drive = New-Object IO.DriveInfo ($full.Substring(0, 3))",
+        "ordinary_drive",
+    ),
+    ("    $item = Get-Item -LiteralPath $full -Force", "ordinary_item"),
     ("function Hold-Directories([string]$Path) {", "hold_enter"),
     ("            $guard = (Open-Native $part $true)", "open"),
     ("                    [string]$Policy = 'private') {", "acl_enter"),
@@ -54,6 +76,10 @@ _FIRST_MARKERS = (
     ),
 )
 _OPEN_MARKERS = (
+    (
+        "    $drive = New-Object IO.DriveInfo ($full.Substring(0, 3))",
+        "ordinary_before_drive",
+    ),
     ("        Hold-Directories $root", "before_hold"),
     ("            $guard = (Open-Native $part $true)", "before_open"),
     (
