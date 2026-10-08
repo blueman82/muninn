@@ -217,6 +217,8 @@ def main() -> int:
                 "new_job_flags": jobs[0],
                 "doctor_output_length": doctor[0],
                 "doctor_output_first_byte": doctor[1],
+                "doctor_exit_status": doctor[2],
+                "doctor_error_length": doctor[3],
                 "step_failure_id": zlib.crc32(str(exc).encode()) & 0x7FFFFFFF,
             }
             write("lifecycle", None, error=exc, metrics=failed)

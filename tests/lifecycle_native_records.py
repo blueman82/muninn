@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import subprocess
 import types
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -76,17 +78,33 @@ def record_new_job() -> list[int]:
 
 
 def record_doctor_output() -> list[int]:
-    """Make verify note the size and first byte of the doctor output.
+    """Make verify note what the installed doctor command returned.
 
     Returns:
-        A two-item list: the output length and its first byte.
+        Four numbers: the parsed output length and first byte, then the
+        doctor process exit status and the length of its error output.
     """
-    seen = [0, 0]
+    seen = [0, 0, -1, 0]
+    real = subprocess.run
 
     def loads(raw: bytes) -> Any:
         """Parse like json.loads, keeping the length and first byte."""
-        seen[:] = [min(len(raw), 65535), raw[0] if raw else 0]
+        seen[:2] = [min(len(raw), 65535), raw[0] if raw else 0]
         return json.loads(raw)
 
-    verify.json = types.SimpleNamespace(loads=loads)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        """Run for real, noting the result of the doctor launcher call."""
+        result = real(*args, **kwargs)
+        argv = args[0] if args else kwargs.get("args")
+        if isinstance(argv, list) and "-EncodedCommand" in argv:
+            script = base64.b64decode(argv[-1]).decode("utf-16-le")
+            if "ZG9jdG9y" in script:
+                seen[2:] = [
+                    min(abs(result.returncode), 65535),
+                    min(len(result.stderr or b""), 65535),
+                ]
+        return result
+
+    subprocess.run = run
+    verify.json = types.SimpleNamespace(loads=loads, dumps=json.dumps)
     return seen
