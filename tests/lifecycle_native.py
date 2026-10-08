@@ -21,6 +21,7 @@ from tests import (
     lifecycle_native_doctor,
     lifecycle_native_entry,
     lifecycle_native_linux,
+    lifecycle_native_records,
     lifecycle_native_rollback,
     lifecycle_native_windows,
     lifecycle_native_writer,
@@ -188,9 +189,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.child is not None:
         result: dict[str, object]
-        mismatches = lifecycle_native_windows.record_task_mismatch()
-        bindings = lifecycle_native_windows.record_writer_mismatch()
-        jobs = lifecycle_native_windows.record_new_job()
+        mismatches = lifecycle_native_records.record_task_mismatch()
+        bindings = lifecycle_native_records.record_writer_mismatch()
+        jobs = lifecycle_native_records.record_new_job()
+        doctor = lifecycle_native_records.record_doctor_output()
         try:
             codes = lifecycle_native_windows.token_codes()
             write("lifecycle", "ordinary_child_identity", metrics=codes)
@@ -213,6 +215,8 @@ def main() -> int:
                 "task_owned_mismatch": min(mismatches, default=0),
                 "writer_binding_mismatch": min(bindings, default=0),
                 "new_job_flags": jobs[0],
+                "doctor_output_length": doctor[0],
+                "doctor_output_first_byte": doctor[1],
                 "step_failure_id": zlib.crc32(str(exc).encode()) & 0x7FFFFFFF,
             }
             write("lifecycle", None, error=exc, metrics=failed)

@@ -6,6 +6,7 @@ run records ``ok: null`` and never fails the install.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -170,13 +171,15 @@ def verify(ctx: Ctx, rec: Record) -> None:
     r = ctx.run(command(ctx, "doctor"), env=installed_env(ctx))
     check("doctor", r.returncode == 0)
     if ctx.platform != "darwin":
-        report = json.loads(r.stdout)
+        health: dict[str, Any] = {}
+        with contextlib.suppress(ValueError):
+            health = json.loads(r.stdout)
         check(
             "managed_service_verified",
             any(
                 entry.get("check") == "managed_service"
                 and entry.get("ok") is True
-                for entry in report.get("checks", [])
+                for entry in health.get("checks", [])
             ),
         )
     report = json.dumps({"checks": checks}, indent=1).encode()

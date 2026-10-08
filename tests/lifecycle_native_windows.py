@@ -13,9 +13,8 @@ import uuid
 import xml.etree.ElementTree as ET
 from ctypes import wintypes
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
-from install import lifecycle, steps_release
 from install.context import Ctx, must, run_real
 from install.lifecycle import (
     _SID,
@@ -24,7 +23,7 @@ from install.lifecycle import (
     task_bytes,
     task_xml,
 )
-from muninn.obs_service import literal, powershell, task_mismatch
+from muninn.obs_service import literal, powershell
 from tests.native_diagnostics import transfer, write
 
 
@@ -358,66 +357,3 @@ def hosted_identity(ctx: Ctx) -> str:
         ).hexdigest()[:20]
     )
     return sid
-
-
-def record_task_mismatch() -> list[int]:
-    """Make the product ownership check also note which check failed.
-
-    Returns:
-        A list that receives the number of each failing check.
-    """
-    seen: list[int] = []
-
-    def recording(expected: ET.Element, actual: ET.Element) -> bool:
-        """Report the product verdict while keeping only the check number."""
-        index = task_mismatch(expected, actual)
-        if index is not None:
-            seen.append(index)
-        return index is None
-
-    lifecycle.task_matches = recording
-    return seen
-
-
-def record_writer_mismatch() -> list[int]:
-    """Make the product writer binding also note which check failed.
-
-    Returns:
-        A list that receives the number of each failing check.
-    """
-    seen: list[int] = []
-    real = lifecycle.writer_mismatch
-
-    def recording(*args: Any) -> int | None:
-        """Pass the product verdict through while keeping the check number."""
-        index = real(*args)
-        if index is not None:
-            seen.append(index)
-        return index
-
-    lifecycle.writer_mismatch = recording
-    return seen
-
-
-def record_new_job() -> list[int]:
-    """Make the new-job wait also note what the job lookup last showed.
-
-    Returns:
-        A one-item list holding bit 1 for a job, 2 for a live pid and 4 for
-        a job running from the new release.
-    """
-    seen = [0]
-    real = steps_release.is_new
-
-    def recording(ctx: Ctx, job: Any) -> bool:
-        """Pass the product verdict through while keeping three flags."""
-        verdict = real(ctx, job)
-        seen[0] = (
-            (1 if job else 0)
-            | (2 if job and job["pid"] else 0)
-            | (4 if verdict else 0)
-        )
-        return verdict
-
-    steps_release.is_new = recording
-    return seen

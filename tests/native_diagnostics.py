@@ -170,6 +170,8 @@ _METRICS = frozenset(
         "writer_binding_mismatch",
         "step_failure_id",
         "new_job_flags",
+        "doctor_output_length",
+        "doctor_output_first_byte",
         "task_last_result",
         "task_state",
         "child_failure_line",
@@ -214,6 +216,8 @@ _METRIC_BOUNDS = {
     "writer_binding_mismatch": (0, 16),
     "step_failure_id": (0, 2147483647),
     "new_job_flags": (0, 7),
+    "doctor_output_length": (0, 65535),
+    "doctor_output_first_byte": (0, 255),
     "task_last_result": (-2147483648, 2147483647),
     "task_state": (0, 4),
 }
