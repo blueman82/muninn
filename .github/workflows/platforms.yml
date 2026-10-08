@@ -114,6 +114,22 @@ jobs:
               + '```json\n' + json.dumps(result, indent=2) + '\n```\n',
               encoding='utf-8',
           )
+      - name: Create private native proof scratch
+        id: native_scratch
+        if: runner.os != 'macOS'
+        shell: python
+        run: |
+          import os
+          import tempfile
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+          from muninn import platform_io
+
+          root = Path(tempfile.mkdtemp(prefix='muninn-native-proof-')).resolve()
+          platform_io.ensure_private_dir(root)
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write('root=' + str(root) + '\n')
       - name: Install full gate tools
         if: runner.os != 'Windows'
         shell: bash
@@ -131,11 +147,15 @@ jobs:
           git config core.hooksPath .githooks
       - name: Run real isolated Linux lifecycle
         if: runner.os == 'Linux'
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
         shell: bash
         run: |
-          sudo systemd-run --scope --quiet --property=Delegate=yes \
-            --uid="$(id -u)" --gid="$(id -g)" \
+          sudo systemd-run --pipe --wait --collect --quiet --property=Delegate=yes \
+            --property=SendSIGKILL=no --property=TimeoutStopSec=infinity \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
             env PATH="$PATH" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
+            RUNNER_TEMP="$RUNNER_TEMP" MUNINN_NATIVE_SCRATCH="$MUNINN_NATIVE_SCRATCH" \
             dbus-run-session -- python3.13 -m tests.lifecycle_native
       - name: Install native gate tools
         if: runner.os == 'Windows'
@@ -224,6 +244,8 @@ jobs:
               env.write('MUNINN_PYTHON=' + str(copied) + '\n')
       - name: Run real ordinary Windows lifecycle
         if: runner.os == 'Windows' && !cancelled()
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
         shell: python
         run: |
           import subprocess
@@ -239,6 +261,8 @@ jobs:
           subprocess.run([sys.executable, '-m', 'tests.provider_native_setup'], check=True)
       - name: Run actual Codex and rendered provider routes
         if: runner.os != 'macOS' && !cancelled() && steps.provider_setup.outcome == 'success'
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
         shell: python
         run: |
           import subprocess
@@ -250,8 +274,8 @@ jobs:
         with:
           name: native-proof-codes-${{ matrix.runner }}
           path: |
-            ${{ runner.temp }}/muninn-native-diagnostics/muninn-lifecycle-proof.json
-            ${{ runner.temp }}/muninn-native-diagnostics/muninn-provider-proof.json
+            ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-lifecycle-proof.json
+            ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-provider-proof.json
           if-no-files-found: error
           retention-days: 1
       - name: Run mandatory native runtime safety checks

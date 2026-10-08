@@ -21,3 +21,11 @@ elevated Windows invocation, an unavailable Linux user bus, and unsafe provider
 config therefore create no installer directory or log. Existing log descriptors
 and their private parent are checked before append, without repairing unsafe
 ownership or permissions. Native log creation uses the private-file primitive.
+
+Native metadata publication uses validated MoveFileExW with write-through.
+Windows can refuse replacement while a delete-shared reader remains open.
+Stop and status JSON may retry only native sharing/access errors 5 and 32 for
+at most one second; each attempt revalidates private objects and retains their
+identities. Validation errors and other native errors refuse immediately.
+A reader held beyond that bound leaves the previous complete state intact;
+its close permits publication. This makes no power-loss durability claim.

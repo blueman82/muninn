@@ -379,8 +379,9 @@ class World:
         )
         identity.start()
         tc.addCleanup(identity.stop)
-        tmp = Path(tempfile.mkdtemp(prefix="inst-")).resolve()
-        tc.addCleanup(shutil.rmtree, tmp)
+        temporary = tempfile.TemporaryDirectory(prefix="inst-")
+        tc.addCleanup(temporary.cleanup)
+        tmp = Path(temporary.name).resolve()
         self.home, self.repo = tmp / "home", tmp / "repo"
         self.out: list[str] = []
         for rel in PINNED:

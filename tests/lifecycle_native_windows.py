@@ -34,7 +34,8 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     command.text = sys.executable
     code = (
         "import os,sys;root=sys.argv.pop(1);"
-        "os.environ['RUNNER_TEMP']=sys.argv.pop(1);sys.path.insert(0,root);"
+        "scratch=sys.argv.pop(1);os.environ['RUNNER_TEMP']=scratch;"
+        "os.environ['MUNINN_NATIVE_SCRATCH']=scratch;sys.path.insert(0,root);"
         "from tests.lifecycle_native import main;raise SystemExit(main())"
     )
     args = [

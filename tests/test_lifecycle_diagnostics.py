@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -73,3 +74,38 @@ class LifecycleDiagnosticTests(unittest.TestCase):
         self.assertEqual(
             codes, {"hresult": -2146233087, "inner_hresult": -2147216616}
         )
+
+
+class DelegationTests(unittest.TestCase):
+    """The isolated manager requires an ordinary user owned cgroup."""
+
+    def test_current_owner_and_escape_refusal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            group = root / "synthetic.service"
+            group.mkdir()
+            owner = group.stat().st_uid
+            self.assertEqual(
+                lifecycle_native_linux.cgroup_owner(
+                    b"0::/synthetic.service\n", root, owner
+                ),
+                owner,
+            )
+            for record in (b"0::/../escape\n", b"1:cpu:/legacy\n"):
+                with self.assertRaises(RuntimeError):
+                    lifecycle_native_linux.cgroup_owner(record, root, owner)
+            with self.assertRaises(PermissionError):
+                lifecycle_native_linux.cgroup_owner(
+                    b"0::/synthetic.service\n", root, owner + 1
+                )
+
+    def test_ci_service_forwards_diagnostic_root(self) -> None:
+        workflow = (
+            Path(__file__).resolve().parents[1]
+            / ".github/workflows/platforms.yml"
+        ).read_text()
+        self.assertIn("--pipe --wait --collect", workflow)
+        self.assertIn("MUNINN_NATIVE_SCRATCH=", workflow)
+        self.assertNotIn("systemd-run --scope", workflow)
+        self.assertIn("--property=SendSIGKILL=no", workflow)
+        self.assertIn("--property=TimeoutStopSec=infinity", workflow)

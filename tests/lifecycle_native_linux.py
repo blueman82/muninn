@@ -132,6 +132,33 @@ def journal_codes(data: bytes) -> list[dict[str, str | int]]:
     return result
 
 
+def cgroup_owner(cgroup: bytes, root: Path, uid: int) -> int:
+    """Require an ordinary user's delegated unified cgroup before startup.
+
+    Args:
+        cgroup: Kernel membership record for this process.
+        root: Native cgroup filesystem root.
+        uid: Expected ordinary process owner.
+
+    Returns:
+        Verified owner id.
+
+    Raises:
+        RuntimeError: If membership is not a confined unified cgroup.
+        PermissionError: If its directory is not owned by this user.
+    """
+    records = cgroup.decode().splitlines()
+    if len(records) != 1 or not records[0].startswith("0::/"):
+        raise RuntimeError("unified cgroup membership is required")
+    relative = Path(records[0][4:])
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError("confined cgroup membership is required")
+    directory = root / relative
+    if not directory.is_dir() or directory.stat().st_uid != uid:
+        raise PermissionError("ordinary user does not own delegated cgroup")
+    return uid
+
+
 def startup(runtime: Path, executable: str) -> None:
     """Emit native startup identity and counts without arbitrary output."""
     if sys.platform != "linux":
@@ -140,6 +167,7 @@ def startup(runtime: Path, executable: str) -> None:
         [executable, "--version"], capture_output=True, timeout=5
     )
     cgroup = Path("/proc/self/cgroup").read_bytes()
+    owner = cgroup_owner(cgroup, Path("/sys/fs/cgroup"), os.getuid())
     print(
         json.dumps(
             {
@@ -153,6 +181,7 @@ def startup(runtime: Path, executable: str) -> None:
                 "systemd_booted": Path("/run/systemd/system").is_dir(),
                 "cgroup_id": hashlib.sha256(cgroup).hexdigest(),
                 "cgroup_count": len(cgroup.splitlines()),
+                "cgroup_owner": owner,
             }
         ),
         flush=True,

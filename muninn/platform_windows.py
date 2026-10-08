@@ -10,6 +10,7 @@ import ctypes
 import os
 import stat
 import sys
+import time
 from ctypes import wintypes
 from pathlib import Path
 from typing import Any
@@ -232,27 +233,59 @@ if sys.platform == "win32":
             raise
         return fd
 
-    def publish(source: Path, target: Path, *, replace: bool) -> None:
-        """Move a complete private file on disk without copy/delete fallback.
+    def publish(
+        source: Path, target: Path, *, replace: bool, retry_move: bool = False
+    ) -> None:
+        """Move a complete private file without copy/delete fallback.
 
         Args:
             source: Complete synced file, in the target's directory.
             target: Published pathname.
             replace: Allow replacing an existing destination when True.
+            retry_move: Retry native metadata sharing failures for one second.
 
         Raises:
-            OSError: If paths, ACLs or native publication fail.
+            OSError: If paths, identity, ACLs or native publication fail.
         """
-        source = _local_path(source)
-        target = _local_path(target)
-        if source.parent != target.parent:
-            raise OSError("publication must stay in one directory")
-        assert_private(source)
-        assert_private(target.parent, directory=True)
-        if target.exists():
-            assert_private(target)
-        if not _move(str(source), str(target), 8 | int(replace)):
-            _raise_last()
+        deadline = time.monotonic() + 1
+        initial_source: tuple[int, int] | None = None
+        initial_target: tuple[int, int] | None = None
+        first = True
+        while True:
+            source = _local_path(source)
+            target = _local_path(target)
+            if source.parent != target.parent:
+                raise OSError("publication must stay in one directory")
+            assert_private(source)
+            assert_private(target.parent, directory=True)
+            if target.exists():
+                assert_private(target)
+            if retry_move:
+                source_info = source.stat()
+                target_info = target.stat() if target.exists() else None
+                source_id = (source_info.st_dev, source_info.st_ino)
+                target_id = (
+                    (target_info.st_dev, target_info.st_ino)
+                    if target_info is not None
+                    else None
+                )
+                if not first and (
+                    source_id != initial_source or target_id != initial_target
+                ):
+                    raise OSError("publication identity changed")
+                initial_source, initial_target = source_id, target_id
+                first = False
+            if _move(str(source), str(target), 8 | int(replace)):
+                return
+            error = ctypes.WinError(ctypes.get_last_error())
+            remaining = deadline - time.monotonic()
+            if (
+                not retry_move
+                or error.winerror not in (5, 32)
+                or remaining <= 0
+            ):
+                raise error
+            time.sleep(min(0.01, remaining))
 
     def assert_ancestry(path: Path) -> None:
         """Refuse replaceable ancestors before creating private state."""

@@ -100,7 +100,9 @@ def write_json_atomic(path: Path, obj: object) -> None:
             handle.flush()
             file_sync.sync_fd(handle.fileno())
         if os.name == "nt":
-            platform_windows.publish(Path(tmp), path, replace=True)
+            platform_windows.publish(
+                Path(tmp), path, replace=True, retry_move=True
+            )
         else:
             Path(tmp).replace(path)
     except BaseException:
