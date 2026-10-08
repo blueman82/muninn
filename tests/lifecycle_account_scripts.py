@@ -25,7 +25,7 @@ function Copy-ChildCodes($value,$report){
                   'child_error_category','child_command_type',
                   'child_exception_kind','child_body_hresult','child_body_line',
                   'task_principal_sid_equal','task_principal_logon_type',
-                  'task_principal_run_level','task_owned_mismatch')){
+                  'task_principal_run_level','task_owned_mismatch','task_last_result','task_state')){
   if($null -eq $value.$key){continue}
   if($value.$key -isnot [int] -and $value.$key -isnot [long]){
    throw 'child_number_invalid'
@@ -36,7 +36,8 @@ function Copy-ChildCodes($value,$report){
       ($number -lt 0 -or $number -gt 6)) -or
      ($key -eq 'task_principal_run_level' -and $number -notin @(0,1)) -or
      ($key -eq 'task_owned_mismatch' -and
-      ($number -lt 0 -or $number -gt 32))){
+      ($number -lt 0 -or $number -gt 32)) -or
+     ($key -eq 'task_state' -and ($number -lt 0 -or $number -gt 4))){
    throw 'child_number_invalid'
   }
   if($key -eq 'child_body_line' -and

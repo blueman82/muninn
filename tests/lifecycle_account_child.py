@@ -61,7 +61,13 @@ try {
  $result=Join-Path $base 'task-result.json'
  while(!(Test-Path -LiteralPath $result) -or
        $task.GetInstances(0).Count -ne 0){
-  if([DateTime]::UtcNow -gt $deadline){throw 'task_execution_unproven'}
+  if([DateTime]::UtcNow -gt $deadline){
+   try {
+    $report.task_last_result=[int]$task.LastTaskResult
+    $report.task_state=[int]$task.State
+   } catch {}
+   throw 'task_execution_unproven'
+  }
   Start-Sleep -Milliseconds 100
  }
  $scheduled=Get-Content -LiteralPath $result -Raw|ConvertFrom-Json

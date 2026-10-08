@@ -167,6 +167,8 @@ _METRICS = frozenset(
         "task_principal_logon_type",
         "task_principal_run_level",
         "task_owned_mismatch",
+        "task_last_result",
+        "task_state",
         "child_failure_line",
         "private_desktop_created",
         "token_session",
@@ -206,6 +208,8 @@ _METRIC_BOUNDS = {
     "task_principal_logon_type": (0, 6),
     "task_principal_run_level": (0, 1),
     "task_owned_mismatch": (0, 32),
+    "task_last_result": (-2147483648, 2147483647),
+    "task_state": (0, 4),
 }
 _SECURITY_CODES = frozenset(
     (
