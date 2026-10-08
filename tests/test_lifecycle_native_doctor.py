@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import stat
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from tests import lifecycle_native_doctor
 from tests.lifecycle_native_doctor import codes
 
 
@@ -83,3 +86,29 @@ class NativeDoctorCodesTests(unittest.TestCase):
         self.assertEqual(report["query_errno"], 13)
         self.assertEqual(report["inspect_code"], "unknown")
         self.assertNotIn("credential", json.dumps(report))
+
+
+class InterpreterMetadataTests(unittest.TestCase):
+    """Private diagnostic metadata never exports executable or user paths."""
+
+    def test_regular_and_write_masks_are_numeric_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            executable = home / "python"
+            executable.write_bytes(b"not executed")
+            executable.chmod(0o775)
+            metadata = executable.stat()
+            with patch.object(Path, "readlink", return_value=executable):
+                report = lifecycle_native_doctor.interpreter_codes(
+                    home, metadata.st_uid
+                )
+        self.assertEqual(
+            report["interpreter_regular"], int(stat.S_ISREG(metadata.st_mode))
+        )
+        self.assertEqual(
+            report["interpreter_write_mask"],
+            stat.S_IMODE(metadata.st_mode) & 0o022,
+        )
+        self.assertEqual(report["interpreter_owner_trusted"], 1)
+        self.assertTrue(all(type(value) is int for value in report.values()))
+        self.assertNotIn(temporary, json.dumps(report))

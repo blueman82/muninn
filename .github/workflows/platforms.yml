@@ -130,6 +130,13 @@ jobs:
           platform_io.ensure_private_dir(root)
           with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
               output.write('root=' + str(root) + '\n')
+      - name: Provision private Linux proof interpreter when required
+        id: native_python
+        if: runner.os == 'Linux' && !cancelled()
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
+        shell: bash
+        run: python3.13 -m tests.lifecycle_native_python
       - name: Install full gate tools
         if: runner.os != 'Windows'
         shell: bash
@@ -156,7 +163,7 @@ jobs:
             --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
             env PATH="$PATH" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
             RUNNER_TEMP="$RUNNER_TEMP" MUNINN_NATIVE_SCRATCH="$MUNINN_NATIVE_SCRATCH" \
-            dbus-run-session -- python3.13 -m tests.lifecycle_native
+            dbus-run-session -- "${{ steps.native_python.outputs.executable }}" -m tests.lifecycle_native
       - name: Install native gate tools
         if: runner.os == 'Windows'
         shell: python

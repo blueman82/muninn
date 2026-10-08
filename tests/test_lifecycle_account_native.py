@@ -21,7 +21,7 @@ class AccountSpikeTests(unittest.TestCase):
             script = lifecycle_account_native.outer_script(parent)
         self.assertIn("LogonUserW", script)
         self.assertIn("2,0", script)
-        self.assertIn("CreateProcessAsUserW", script)
+        self.assertIn("CreateProcessWithTokenW", script)
         self.assertIn("WaitForSingleObject", script)
         self.assertIn("$password=$null", script)
         self.assertIn("SetAccessRuleProtection($true,$false)", script)
@@ -56,14 +56,24 @@ class AccountSpikeTests(unittest.TestCase):
             "scheduler_instances": 0,
             "interactive_recognized": 1,
             "account_retained": 0,
+            "desktop_restored": 1,
+            "private_desktop_created": 1,
         }
-        lifecycle_account_native.check_result(passed)
+        sessions = {
+            "caller_session": 0,
+            "token_session": 0,
+            "ordinary_child_session": 0,
+            "scheduler_child_session": 0,
+        }
+        lifecycle_account_native.check_result({**passed, **sessions})
         with self.assertRaises(ValueError):
-            lifecycle_account_native.check_result({**passed, "winerror": 1314})
+            lifecycle_account_native.check_result(
+                {**passed, **sessions, "winerror": 1314}
+            )
         for key in passed:
             with self.subTest(key=key), self.assertRaises(ValueError):
                 lifecycle_account_native.check_result(
-                    {**passed, key: passed[key] + 1}
+                    {**passed, **sessions, key: passed[key] + 1}
                 )
 
     def test_ps5_and_independent_cleanup_checks_are_required(self) -> None:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -49,6 +51,21 @@ def failure_codes(stage: str, error: Exception) -> dict[str, str | int]:
     return result
 
 
+def interpreter_codes(user: Path, uid: int) -> dict[str, int]:
+    """Inspect only the refused synthetic executable's ordinary mode fields."""
+    executable = (user / ".local/lib/muninn/python").readlink()
+    metadata = executable.stat()
+    return {
+        "interpreter_regular": int(stat.S_ISREG(metadata.st_mode)),
+        "interpreter_write_mask": stat.S_IMODE(metadata.st_mode) & 0o022,
+        "interpreter_owner_trusted": int(metadata.st_uid in (uid, 0)),
+        "interpreter_parent_write_mask": stat.S_IMODE(
+            executable.parent.stat().st_mode
+        )
+        & 0o022,
+    }
+
+
 def codes(
     home: Path,
     env: Mapping[str, str],
@@ -92,6 +109,18 @@ def codes(
         report["inspect_code"] = detail if detail in _CODES else "unknown"
     except (OSError, ValueError) as exc:
         report.update(failure_codes("inspect", exc))
+        if (
+            sys.platform == "linux"
+            and str(exc) == "recorded_interpreter_unsafe"
+        ):
+            try:
+                report.update(
+                    interpreter_codes(Path(env["HOME"]), os.getuid())
+                )
+            except OSError as metadata_error:
+                report.update(
+                    failure_codes("interpreter_metadata", metadata_error)
+                )
     return report
 
 

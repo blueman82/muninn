@@ -15,40 +15,10 @@ from install.context import Ctx, run_real
 from install.lifecycle import task_bytes, task_xml
 from muninn import platform_io
 from muninn.obs_service import literal, powershell
+from tests.lifecycle_account_desktop import PROCESS_SOURCE
+from tests.lifecycle_account_desktop import SOURCE as DESKTOP_SOURCE
 from tests.lifecycle_account_privileges import SOURCE
 from tests.native_diagnostics import write
-
-_API = r"""
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public static class MuninnCiLogon {
- [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
- public struct Startup {
-  public int cb; public string reserved, desktop, title;
-  public int x,y,xSize,ySize,xChars,yChars,fill,flags;
-  public short show,reservedSize;
-  public IntPtr reservedBytes,input,output,error;
- }
- [StructLayout(LayoutKind.Sequential)]
- public struct Process {public IntPtr process,thread; public int pid,tid;}
- [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
- public static extern bool LogonUserW(
-  string user,string domain,string password,
-  int type,int provider,out IntPtr token);
- [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
- public static extern bool CreateProcessAsUserW(IntPtr token,string executable,
-  StringBuilder command,IntPtr processAttributes,IntPtr threadAttributes,
-  bool inherit,int flags,IntPtr env,string cwd,ref Startup startup,
-  out Process process);
- [DllImport("kernel32.dll",SetLastError=true)]
- public static extern int WaitForSingleObject(IntPtr handle,int milliseconds);
- [DllImport("kernel32.dll",SetLastError=true)]
- public static extern bool GetExitCodeProcess(IntPtr process,out int code);
- [DllImport("kernel32.dll",SetLastError=true)]
- public static extern bool CloseHandle(IntPtr handle);
-}
-"""
 
 _OWNED = r"""
 function Test-Owned($task,$base){
@@ -94,6 +64,7 @@ try {
  $principal=[Security.Principal.WindowsPrincipal]::new($identity)
  $admin=[Security.Principal.WindowsBuiltInRole]::Administrator
  $report.ordinary_child_admin=[int]$principal.IsInRole($admin)
+ $report.ordinary_child_session=[Diagnostics.Process]::GetCurrentProcess().SessionId
  if($report.ordinary_child_admin -ne 0){throw 'ordinary_identity_required'}
  $service=New-Object -ComObject Schedule.Service;$service.Connect()
  $folder=$service.GetFolder('\')
@@ -121,6 +92,10 @@ try {
   throw 'scheduled_identity_mismatch'
  }
  $report.scheduler_child_admin=[int]$scheduled.admin
+ $report.scheduler_child_session=[int]$scheduled.session
+ if($report.scheduler_child_session -ne $report.ordinary_child_session){
+  throw 'scheduled_session_mismatch'
+ }
  $report.scheduler_exit=[int]$task.LastTaskResult
  $report.scheduler_instances=[int]$task.GetInstances(0).Count
  if($report.scheduler_child_admin -ne 0 -or $report.scheduler_exit -ne 0){
@@ -145,11 +120,17 @@ $base=@BASE@;$name='mn-'+[Guid]::NewGuid().ToString('N').Substring(0,15)
 $report=@{phase='account_create';account_retained=0}
 $created=$false;$quiescent=$true;$token=[IntPtr]::Zero
 $process=New-Object MuninnCiLogon+Process
+$environment=[IntPtr]::Zero
 try {
  $caller=[Security.Principal.WindowsIdentity]::GetCurrent()
- try {$privileges=[MuninnCiPrivileges]::Read($caller.Token)}
+ try {$privileges=[MuninnCiPrivileges]::Read($caller.Token);
+      $callerSid=$caller.User.Value}
  finally {$caller.Dispose()}
  foreach($key in $privileges.Keys){$report[$key]=$privileges[$key]}
+ if($privileges['caller_impersonate_present'] -ne 1){
+  throw 'already_held_impersonation_required'
+ }
+ $report.caller_session=[Diagnostics.Process]::GetCurrentProcess().SessionId
  $password=[Guid]::NewGuid().ToString('N')+'aA7!'
  $secure=ConvertTo-SecureString -String $password -AsPlainText -Force
  $user=New-LocalUser -Name $name -Password $secure -AccountNeverExpires
@@ -185,16 +166,25 @@ try {
  $password=$null;$secure.Dispose()
  $startup=New-Object MuninnCiLogon+Startup
  $startup.cb=[Runtime.InteropServices.Marshal]::SizeOf($startup)
- $startup.desktop=''
+ $quiescent=$false
+ try {$startup.desktop=[MuninnCiDesktop]::Prepare($user.SID.Value,$callerSid)}
+ finally {$report.desktop_restored=[int][MuninnCiDesktop]::Restored}
+ if(![MuninnCiDesktop]::Restored){throw 'desktop_restore_unproven'}
+ $quiescent=$true;$report.private_desktop_created=1
+ $report.token_session=[MuninnCiDesktop]::Session($token)
  $relative='System32\WindowsPowerShell\v1.0\powershell.exe'
  $exe=Join-Path $env:SystemRoot $relative
  $childArgs=' -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '
  $command=[Text.StringBuilder]::new('"'+$exe+'"'+$childArgs+'"'+
   (Join-Path $base 'child.ps1')+'"')
+ if($command.Length -gt 1024){throw 'native_command_too_large'}
+ $zero=[char]0
+ $minimal='SystemRoot='+$env:SystemRoot+$zero+'TEMP='+$base+$zero+
+  'TMP='+$base+$zero+'WINDIR='+$env:SystemRoot+$zero+$zero
+ $environment=[Runtime.InteropServices.Marshal]::StringToHGlobalUni($minimal)
  $report.phase='account_child_start'
- if(![MuninnCiLogon]::CreateProcessAsUserW($token,$exe,$command,
-  [IntPtr]::Zero,[IntPtr]::Zero,$false,0x08000000,[IntPtr]::Zero,$base,
-  [ref]$startup,[ref]$process)){
+ if(![MuninnCiLogon]::CreateProcessWithTokenW($token,0,$exe,$command,
+  0x08000400,$environment,$base,[ref]$startup,[ref]$process)){
   $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
   throw [ComponentModel.Win32Exception]::new($code)
  }
@@ -207,14 +197,18 @@ try {
     $exitCode -ne 0){throw 'ordinary_child_exit_failed'}
  $child=Join-Path $base 'child-result.json'
  $parsed=Get-Content -LiteralPath $child -Raw|ConvertFrom-Json
- $report=@{phase=[string]$parsed.phase;account_retained=1}
+ $report.phase=[string]$parsed.phase
  foreach($key in $privileges.Keys){$report[$key]=$privileges[$key]}
  foreach($key in @('ordinary_child_admin','scheduler_child_admin',
-  'scheduler_exit','scheduler_instances','interactive_recognized')){
+  'scheduler_exit','scheduler_instances','interactive_recognized',
+  'ordinary_child_session','scheduler_child_session')){
   if($null -eq $parsed.$key){throw 'ordinary_child_report_invalid'}
   $report[$key]=[int]$parsed.$key
  }
  if($null -ne $parsed.winerror){$report.winerror=[int]$parsed.winerror}
+ if($report.ordinary_child_session -ne $report.caller_session){
+  throw 'ordinary_session_mismatch'
+ }
  $service=New-Object -ComObject Schedule.Service;$service.Connect()
  $folder=$service.GetFolder('\')
  try {$owned=$folder.GetTask((Split-Path -Leaf $base))}
@@ -231,9 +225,10 @@ try {
  if($report.scheduler_instances -lt 0){throw 'scheduler_instances_unknown'}
  $quiescent=$report.scheduler_instances -eq 0
 } catch {
- $report.winerror=[int]$_.Exception.HResult
- if($_.Exception -is [ComponentModel.Win32Exception]){
-  $report.winerror=[int]$_.Exception.NativeErrorCode
+ $error=$_.Exception.GetBaseException()
+ $report.winerror=[int]$error.HResult
+ if($error -is [ComponentModel.Win32Exception]){
+  $report.winerror=[int]$error.NativeErrorCode
  }
 } finally {
  $password=$null
@@ -242,6 +237,13 @@ try {
  }
  if($process.process -ne [IntPtr]::Zero){
   [void][MuninnCiLogon]::CloseHandle($process.process)
+ }
+ if($environment -ne [IntPtr]::Zero){
+  [Runtime.InteropServices.Marshal]::FreeHGlobal($environment)
+ }
+ if($quiescent -and [MuninnCiDesktop]::Restored){
+  try {[MuninnCiDesktop]::CloseOwned()}
+  catch {$quiescent=$false;$report.winerror=$_.Exception.HResult}
  }
  if($created -and $quiescent){
   try {
@@ -263,8 +265,9 @@ def outer_script(parent: Path) -> str:
     return (
         "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
         "Add-Type -TypeDefinition @'\n"
-        + _API
+        + PROCESS_SOURCE
         + SOURCE
+        + DESKTOP_SOURCE
         + "\n'@\n"
         + _OWNED
         + _OUTER.replace("@BASE@", literal(str(parent)))
@@ -289,7 +292,8 @@ def noop_definition(parent: Path) -> bytes:
         "$p=[Security.Principal.WindowsPrincipal]::new($i);"
         "$a=[Security.Principal.WindowsBuiltInRole]::Administrator;"
         "$r=@{sid=$i.User.Value;admin=[int]$p.IsInRole($a);pid=$PID;"
-        "created=[Diagnostics.Process]::GetCurrentProcess().StartTime.Ticks};"
+        "created=[Diagnostics.Process]::GetCurrentProcess().StartTime.Ticks;"
+        "session=[Diagnostics.Process]::GetCurrentProcess().SessionId};"
         f"[IO.File]::WriteAllText(({destination}),"
         "($r|ConvertTo-Json -Compress))"
     )
@@ -307,12 +311,30 @@ def check_result(report: Mapping[str, object]) -> None:
         "scheduler_instances": 0,
         "interactive_recognized": 1,
         "account_retained": 0,
+        "desktop_restored": 1,
+        "private_desktop_created": 1,
     }
     if "winerror" in report or any(
         type(report.get(key)) is not int or report[key] != value
         for key, value in wanted.items()
     ):
         raise ValueError("ordinary_interactive_topology_unproven")
+    sessions = (
+        "caller_session",
+        "token_session",
+        "ordinary_child_session",
+        "scheduler_child_session",
+    )
+    for key in sessions:
+        value = report.get(key)
+        if type(value) is not int or value < 0:
+            raise ValueError("ordinary_session_evidence_unproven")
+    if (
+        report["ordinary_child_session"] != report["caller_session"]
+        or report["scheduler_child_session"]
+        != report["ordinary_child_session"]
+    ):
+        raise ValueError("ordinary_session_identity_mismatch")
 
 
 def main() -> int:

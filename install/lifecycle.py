@@ -18,6 +18,7 @@ from muninn import obs_status, platform_io, platform_windows, poller_stop
 from muninn.obs_linux_service import (
     query_unit,
     read_unit,
+    require_interpreter,
     selection,
     unit_matches,
 )
@@ -146,9 +147,23 @@ def _linux_owned(ctx: Ctx) -> None:
         raise StepFailedError("the user service definition is not owned")
 
 
+def _linux_interpreter(path: Path) -> None:
+    """Translate native executable refusal into the installer error contract.
+
+    Raises:
+        StepFailedError: If the selected executable cannot be trusted.
+    """
+    try:
+        require_interpreter(path)
+    except (OSError, ValueError) as exc:
+        raise StepFailedError("unsafe Linux interpreter") from exc
+
+
 def preflight_service(ctx: Ctx) -> None:
     """Refuse unavailable or unsafe native lifecycle before any mutation."""
     if ctx.platform == "linux":
+        if sys.platform == "linux":
+            _linux_interpreter(Path(sys.executable))
         must(ctx, ["systemctl", "--user", "show-environment"], quiet=True)
         if ctx.plist.exists():
             try:
@@ -342,6 +357,8 @@ def stop(ctx: Ctx) -> None:
 
 def start(ctx: Ctx, python: Path, release: Path) -> None:
     """Publish and start an owned native per-user service definition."""
+    if ctx.platform == "linux" and sys.platform == "linux":
+        _linux_interpreter(python)
     backend = "systemd" if ctx.platform == "linux" else "task_scheduler"
     if ctx.platform == "win32":
         _identity(ctx)

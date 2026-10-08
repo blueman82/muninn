@@ -88,12 +88,23 @@ def selection(home: Path) -> tuple[Path, Path, str]:
     python = python_link.readlink()
     if not python.is_absolute():
         raise ValueError("recorded_interpreter_invalid")
-    if (
-        not stat.S_ISREG(python.stat().st_mode)
-        or python.stat().st_mode & 0o022
-    ):
-        raise ValueError("recorded_interpreter_unsafe")
+    require_interpreter(python)
     return current, python, root.name
+
+
+def require_interpreter(path: Path) -> None:
+    """Require the same ordinary nonwritable executable used by inspection.
+
+    Args:
+        path: Selected or recorded interpreter pathname.
+
+    Raises:
+        ValueError: If the file is not ordinary or permits foreign writes.
+        OSError: If the candidate cannot be inspected.
+    """
+    metadata = path.stat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o022:
+        raise ValueError("recorded_interpreter_unsafe")
 
 
 def proc_read(path: Path, limit: int) -> bytes:
