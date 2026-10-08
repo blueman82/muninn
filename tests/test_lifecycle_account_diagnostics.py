@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
-from muninn.obs_service import powershell
+from muninn.obs_service import literal, powershell
 from tests import lifecycle_account_child, lifecycle_account_scripts
 
 
@@ -173,3 +174,118 @@ foreach($fields in $invalid){
             json.loads(result.stdout),
             {"captured": 1, "valid": 6, "refused": 8},
         )
+
+    def test_normal_failed_report_keeps_body_codes_before_required_fields(
+        self,
+    ) -> None:
+        child = lifecycle_account_child.child_script(Path("/synthetic"))
+        parent = lifecycle_account_scripts.outer_script(Path("/synthetic"))
+        for key, variable in (
+            ("child_body_hresult", "$childBodyHResult"),
+            ("child_body_line", "$childBodyLine"),
+        ):
+            assigned = child.index(f"$report.{key}={variable}")
+            self.assertLess(child.index("$originalBodyError=$_"), assigned)
+            self.assertLess(assigned, child.index("$childReportPath="))
+        normal = parent[parent.index("$parsed=Get-Content") :]
+        guard = (
+            "if($null -ne $parsed.winerror){Read-ChildEvidence $base $report}"
+        )
+        self.assertIn(guard, normal)
+        self.assertLess(normal.index(guard), normal.index("$privileges.Keys"))
+        self.assertLess(normal.index(guard), normal.index("$parsed.$key"))
+        if sys.platform != "win32":
+            return
+        start = normal.index("$report.phase=")
+        end = normal.index("if($null -ne $parsed.winerror){$report.winerror=")
+        branch = normal[start:end]
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            path = base / "child-result.json"
+            value = {
+                "phase": "account_child_start",
+                "winerror": -2147024891,
+                "child_body_hresult": -2147024891,
+                "child_body_line": 108,
+                "ordinary_child_admin": 0,
+                "scheduler_child_admin": 1,
+                "scheduler_exit": -1,
+                "scheduler_instances": -1,
+                "interactive_recognized": 0,
+                "ordinary_child_session": 2,
+            }
+            path.write_text(json.dumps(value), encoding="utf-8")
+            prefix = (
+                lifecycle_account_scripts._CHILD_DIAGNOSTICS
+                + "$ErrorActionPreference='Stop';$privileges=@{};"
+                + f"$base={literal(str(base))};"
+                + "$report=@{};$refused=$false;"
+                + "$parsed=Read-ChildJson ([IO.Path]::Combine("
+                + "$base,'child-result.json'));try{\n"
+            )
+            source = prefix + branch + r"""
+}catch{$refused=$true}
+if(!$refused -or $report.child_body_hresult -ne -2147024891 -or
+   $report.child_body_line -ne 108 -or $report.child_report_seen -ne 1 -or
+   $report.child_failure_hresult -ne -2147024891){
+ throw 'original_report_lost_before_refusal'
+}
+'{"retained":2,"refused":1}'
+"""
+            result = subprocess.run(
+                powershell(source), capture_output=True, text=True, timeout=30
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout), {"retained": 2, "refused": 1}
+        )
+
+    def test_native_invalid_normal_reports_do_not_partly_project_codes(
+        self,
+    ) -> None:
+        child = lifecycle_account_child.child_script(Path("/synthetic"))
+        self.assertIn("$report.child_body_hresult=$childBodyHResult", child)
+        if sys.platform != "win32":
+            return
+        invalid = (
+            ("child_body_hresult", 2147483648),
+            ("child_body_hresult", -2147483649),
+            ("child_body_hresult", "1"),
+            ("child_body_hresult", True),
+            ("child_body_line", -1),
+            ("child_body_line", 4097),
+            ("child_body_line", "1"),
+            ("child_body_line", True),
+        )
+        payloads = ",".join(
+            literal(
+                json.dumps(
+                    {
+                        "phase": "account_child_start",
+                        "child_module_readable": 1,
+                        key: value,
+                    }
+                )
+            )
+            for key, value in invalid
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            source = (
+                lifecycle_account_scripts._CHILD_DIAGNOSTICS
+                + f"$base={literal(temporary)};$invalid=@({payloads});"
+                + r"""
+$ErrorActionPreference='Stop'
+foreach($json in $invalid){
+ [IO.File]::WriteAllText(([IO.Path]::Combine($base,'child-result.json')),$json)
+ $report=@{sentinel=7};Read-ChildEvidence $base $report
+ if($report.Count -ne 2 -or $report.sentinel -ne 7 -or
+    $report.child_report_seen -ne 0){throw 'invalid_report_partly_projected'}
+}
+'{"refused":8}'
+"""
+            )
+            result = subprocess.run(
+                powershell(source), capture_output=True, text=True, timeout=30
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"refused": 8})

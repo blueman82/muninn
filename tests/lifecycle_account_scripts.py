@@ -241,6 +241,7 @@ try {
  $child=Join-Path $base 'child-result.json'
  $parsed=Get-Content -LiteralPath $child -Raw|ConvertFrom-Json
  $report.phase=[string]$parsed.phase
+ if($null -ne $parsed.winerror){Read-ChildEvidence $base $report}
  foreach($key in $privileges.Keys){$report[$key]=$privileges[$key]}
  foreach($key in @('ordinary_child_admin','scheduler_child_admin',
   'scheduler_exit','scheduler_instances','interactive_recognized',

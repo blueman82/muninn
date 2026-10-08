@@ -65,6 +65,8 @@ try {
   $childBodyHResult=[int]$originalBodyError.Exception.GetBaseException().HResult
   $childBodyLine=[int]$originalBodyError.InvocationInfo.ScriptLineNumber
  } catch {}
+ $report.child_body_hresult=$childBodyHResult
+ $report.child_body_line=$childBodyLine
 } finally {
  if($null -ne $task){
   try {$report.scheduler_instances=[int]$task.GetInstances(0).Count}
