@@ -26,7 +26,11 @@ class TypedEraseTests(EraseCase):
         self.write(rollout("thr-keep"), primary("thr-keep"))
         self.run_ingest()
         self.k1 = self.knowledge("zq9 plan text", [(TID, 2, 1, "q one")])
+        project = self.count(
+            "SELECT scope_id FROM knowledge WHERE id = ?", self.k1
+        )
         loop = loop_scope_id(self.conn, "run-7", create=True)
+        self.assertNotEqual(project, loop)
         self.conn.execute(
             "UPDATE knowledge SET tags = ?, confidence = 'observed',"
             " valid_until = ?, sensitivity = 'restricted', scope_id = ?"
@@ -35,8 +39,8 @@ class TypedEraseTests(EraseCase):
         )
         self.k2 = self.knowledge("other entry", [("thr-keep", 2, 1, "q one")])
         self.conn.execute(
-            "UPDATE knowledge SET contradicts = ? WHERE id = ?",
-            (self.k1, self.k2),
+            "UPDATE knowledge SET contradicts = ?, scope_id = ? WHERE id = ?",
+            (self.k1, project, self.k2),
         )
 
     def everything(self) -> str:

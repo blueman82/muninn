@@ -5,11 +5,19 @@ Synthetic provider trees and a temp MUNINN_HOME only.
 
 from __future__ import annotations
 
+import base64
+import os
+import shlex
+import subprocess
+import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+from install.provider_paths import powershell
 from muninn import (
     cli,
+    erase,
     knowledge,
     knowledge_push,
     tombstone_key,
@@ -123,7 +131,82 @@ class AsideFileTests(EraseCase):
         for dry in (True, False):
             out = self.erase(session=PARENT, dry_run=dry)
             self.assertEqual(out["aside_files"], [str(self.home / ASIDE)])
-            self.assertEqual(out["aside_remove"], f"rm -- {self.home / ASIDE}")
+            path = str(self.home / ASIDE)
+            expected = (
+                "Remove-Item -LiteralPath @('" + path.replace("'", "''") + "')"
+                if sys.platform == "win32"
+                else "rm -- " + shlex.quote(path)
+            )
+            self.assertEqual(out["aside_remove"], expected)
+
+    def test_windows_command_quotes_every_single_delimiter(self) -> None:
+        path = "C:/synthetic/a'\u2018\u2019\u201a\u201b[] café $(); end"
+        with mock.patch.object(erase, "os", SimpleNamespace(name="nt")):
+            got = erase._aside_remove([path])
+            self.assertIsNone(erase._aside_remove([]))
+        self.assertEqual(
+            got,
+            "Remove-Item -LiteralPath @('C:/synthetic/a''"
+            "\u2018\u2018\u2019\u2019\u201a\u201a\u201b\u201b"
+            "[] café $(); end')",
+        )
+
+    def test_reported_command_removes_only_literal_synthetic_asides(
+        self,
+    ) -> None:
+        suffixes = (
+            "-a'[Z] café $()",
+            "-b\u2018\u2019\u201a\u201b; Write-Output INJECTED; #",
+        )
+        targets = [self.home / (ASIDE + suffix) for suffix in suffixes]
+        for target in targets:
+            target.write_bytes(b"synthetic old store")
+        transcript = self.tmp / "synthetic-transcript.jsonl"
+        transcript.write_bytes(b"CANARY-TRANSCRIPT-UNCHANGED")
+        out = self.erase(session=PARENT, dry_run=True)
+        expected_files = sorted(str(p) for p in targets)
+        self.assertEqual(out["aside_files"], expected_files)
+        command = out["aside_remove"]
+        self.assertIsInstance(command, str)
+        assert isinstance(command, str)
+        decoy = self.home / (ASIDE + "-a'Z café $()")
+        decoy.write_bytes(b"wildcard decoy")
+        marker = self.home / "INJECTED"
+        marker.write_bytes(b"injection marker unchanged")
+        if sys.platform == "win32":
+            encoded = base64.b64encode(command.encode("utf-16-le")).decode(
+                "ascii"
+            )
+            argv = [
+                powershell(),
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                encoded,
+            ]
+        else:
+            self.assertEqual(
+                shlex.split(command), ["rm", "--", *expected_files]
+            )
+            argv = ["/bin/sh", "-c", command]
+        env = os.environ | {
+            "HOME": str(self.tmp),
+            "USERPROFILE": str(self.tmp),
+            "CODEX_HOME": str(self.tmp / "codex"),
+            "MUNINN_HOME": str(self.home),
+        }
+        got = subprocess.run(
+            argv, cwd=self.home, env=env, capture_output=True, timeout=30
+        )
+        self.assertEqual(
+            (got.returncode, got.stdout, got.stderr), (0, b"", b"")
+        )
+        self.assertTrue(all(not target.exists() for target in targets))
+        self.assertEqual(decoy.read_bytes(), b"wildcard decoy")
+        self.assertEqual(marker.read_bytes(), b"injection marker unchanged")
+        self.assertEqual(
+            transcript.read_bytes(), b"CANARY-TRANSCRIPT-UNCHANGED"
+        )
 
     def test_no_aside_file_means_no_command(self) -> None:
         out = self.erase(session=PARENT, dry_run=True)
