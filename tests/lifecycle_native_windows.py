@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import cast
 
 from install.context import Ctx, run_real
-from install.lifecycle import _same_process, _task_engines, task_xml
+from install.lifecycle import (
+    _same_process,
+    _task_engines,
+    task_bytes,
+    task_xml,
+)
 from muninn.obs_service import literal, powershell
 from tests.native_diagnostics import transfer, write
 
@@ -59,9 +64,7 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     assert restart is not None
     settings.remove(restart)
     xml = parent / "outer.xml"
-    xml.write_bytes(
-        ET.tostring(definition, encoding="utf-8", xml_declaration=True)
-    )
+    xml.write_bytes(task_bytes(definition))
     name = "Muninn-CI-" + uuid.uuid4().hex
     ctx.target = name
     write("lifecycle", "outer_task_create")

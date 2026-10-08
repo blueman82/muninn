@@ -102,7 +102,12 @@ def task_xml(ctx: Ctx, sid: str, python: Path, release: Path) -> bytes:
     action_argv = task_action(ctx, python)
     ET.SubElement(action, "Command").text = action_argv[0]
     ET.SubElement(action, "Arguments").text = " ".join(action_argv[1:])
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return task_bytes(root)
+
+
+def task_bytes(definition: ET.Element) -> bytes:
+    """Serialize task XML with a BOM and declaration matching COM strings."""
+    return ET.tostring(definition, encoding="utf-16", xml_declaration=True)
 
 
 def _identity(ctx: Ctx) -> str:
@@ -236,7 +241,7 @@ def _stop_windows(ctx: Ctx) -> None:
     enabled = definition.find("t:Settings/t:Enabled", _NS)
     assert enabled is not None
     enabled.text = "false"
-    write_private(ctx.plist, ET.tostring(definition, encoding="utf-8"))
+    write_private(ctx.plist, task_bytes(definition))
     found = job(ctx)
     if found and (pid := found["pid"]):
         writer = parse_process(

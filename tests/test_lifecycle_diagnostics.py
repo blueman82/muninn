@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import subprocess
@@ -11,7 +12,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests import lifecycle_native_linux, lifecycle_native_windows
+from tests import (
+    lifecycle_native,
+    lifecycle_native_linux,
+    lifecycle_native_windows,
+)
 
 
 class LifecycleDiagnosticTests(unittest.TestCase):
@@ -265,3 +270,45 @@ class ManagerCleanupTests(unittest.TestCase):
         self.assertTrue(
             dict(os.environ) == before, "startup changed caller environment"
         )
+
+
+class NativeHarnessCleanupTests(unittest.TestCase):
+    """A cleanup failure cannot publish a completed native acceptance proof."""
+
+    def test_cleanup_refusal_preserves_failure_and_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "native"
+            parent.mkdir()
+            with (
+                mock.patch.object(lifecycle_native.sys, "argv", ["native"]),
+                mock.patch.object(lifecycle_native.sys, "platform", "linux"),
+                mock.patch.object(
+                    lifecycle_native.tempfile,
+                    "mkdtemp",
+                    return_value=str(parent),
+                ),
+                mock.patch.object(lifecycle_native, "refused_main"),
+                mock.patch.object(
+                    lifecycle_native, "exercise", return_value={}
+                ),
+                mock.patch.object(
+                    lifecycle_native_linux,
+                    "manager",
+                    return_value=contextlib.nullcontext(),
+                ),
+                mock.patch(
+                    "shutil.rmtree",
+                    side_effect=PermissionError("owned cleanup refused"),
+                ),
+                mock.patch.object(lifecycle_native, "write") as write,
+                mock.patch("builtins.print"),
+                self.assertRaises(PermissionError),
+            ):
+                lifecycle_native.main()
+            self.assertTrue(parent.exists())
+            self.assertFalse(
+                any(
+                    call.kwargs.get("completed")
+                    for call in write.call_args_list
+                )
+            )

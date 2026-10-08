@@ -6,7 +6,6 @@ import argparse
 import dataclasses
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -171,7 +170,10 @@ def main() -> int:
             json.dumps(result), encoding="utf-8"
         )
         return 0 if result["ok"] else 1
-    parent = Path(tempfile.mkdtemp(prefix="muninn-native-life-"))
+    temporary = tempfile.TemporaryDirectory(
+        prefix="muninn-native-life-", delete=False
+    )
+    parent = Path(temporary.name)
     try:
         refused_main(parent)
         if sys.platform == "win32":
@@ -183,13 +185,13 @@ def main() -> int:
                 result = exercise(parent)
         else:
             raise RuntimeError("native lifecycle requires Windows or Linux")
+        temporary.cleanup()
     except Exception as exc:
         write("lifecycle", None, error=exc)
         print(json.dumps({"retained_state": str(parent), "pid": os.getpid()}))
         raise
     write("lifecycle", "complete", completed=True)
     print(json.dumps(result))
-    shutil.rmtree(parent)
     return 0
 
 

@@ -77,7 +77,14 @@ class LifecycleDefinitionTests(unittest.TestCase):
         assert command is not None and arguments is not None
         self.assertTrue(command.endswith("powershell.exe"))
         self.assertIn("-EncodedCommand", arguments)
-        self.assertNotIn("Password", xml.decode())
+        self.assertNotIn("Password", xml.decode("utf-16"))
+
+    def test_task_xml_has_consistent_utf16_declaration_and_bom(self) -> None:
+        ctx = Ctx(Path("/synthetic/home"), run_real, "test", platform="win32")
+        xml = task_xml(ctx, "S-1-5-21-123", Path("/python"), Path("/release"))
+        self.assertIn(xml[:2], (b"\xff\xfe", b"\xfe\xff"))
+        self.assertIn("encoding='utf-16'", xml.decode("utf-16"))
+        self.assertEqual(ET.fromstring(xml).tag.rsplit("}", 1)[-1], "Task")
 
     def test_task_definition_changes_refuse_ownership(self) -> None:
         ctx = Ctx(Path("/synthetic/home"), run_real, "test", platform="win32")
