@@ -27,7 +27,7 @@ from muninn.platform_paths import read_selection
 
 _NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
 _NS = {"t": _NAMESPACE}
-_SID = re.compile(r"S-1-5-21-(?:\d+-){3}\d+\Z")
+_SID = re.compile(r"S-1-\d+(?:-\d+){1,15}\Z")
 
 
 def _unit_quote(value: str) -> str:

@@ -12,3 +12,21 @@ qualifies, print how to set `MUNINN_PYTHON` and exit 127.
 **Consequences.** The version floor is 3.13, the only version the code is tested on. The link is resolved once, at install
 time, and recorded in `install-record.json`. A Homebrew upgrade that moves the Python breaks the link until the next
 `--upgrade`; the PATH fallback then covers interactive use but not the launchd job.
+
+
+## Native Windows and Linux extension (2026-10-08)
+
+Windows records the interpreter in the exact private `lib/selection.json`
+manifest beside one pinned release. The stable runtime `muninn.cmd` invokes
+`muninn.ps1`; that launcher checks selection, private ancestry and held handles
+before importing selected code. Interpreter precedence remains explicit
+`MUNINN_PYTHON`, recorded Python, then the first trusted Python 3.13+ on PATH.
+A missing old path permits fallback; an unsafe present candidate refuses before
+execution. No machine-specific interpreter path is embedded in the wrapper.
+
+Managed services use the interpreter validated by the installer: the Windows
+Task Scheduler action invokes the same stable PowerShell launcher with the
+recorded interpreter; Linux invokes that interpreter with a pinned bootstrap
+that validates private state before imports. Upgrade repairs the recorded
+interpreter/action. The action definition alone does not establish later
+integrity of Python dependencies.

@@ -19,3 +19,36 @@ pass `--repo` and `--sha`. A wrong choice is easy to make and an upgrade deletes
 - The owner runs `bin/muninn-install`; agents run only `--check` and `--status`.
 - The wrapper's mode detection reads the `current` link and the data directory, so a layout change in `install/` must change
   the wrapper and `tests/test_install_wrapper.py` together.
+
+
+## Native maintenance boundary (2026-10-08)
+
+Windows source checkouts provide dedicated `.cmd` and `.ps1` install/uninstall
+wrappers. They forward through the runtime launcher's validation using a
+reserved first-argument installer entry marker and preserve arguments and exit
+codes. Only the runtime `.cmd`/`.ps1` pair is installed in the stable private
+bin directory. Maintenance commands remain source-checkout commands, as the
+POSIX installer is: a pinned archive contains no checkout Git metadata, and
+running destructive maintenance inside its held release guards would prevent
+safe pruning/removal. No guard is dropped to bypass that protection.
+
+Fresh and upgrade are the only modes. Explicit synthetic Windows homes resolve
+their own AppData/Local/Muninn tree; inherited LOCALAPPDATA is used only when
+`--home` is omitted. Runtime MUNINN_HOME remains authoritative. `--check` writes
+no state, config, log, selection or task/unit definition. Real CLI uninstall
+retains data by default; agents invoke only `--dry-run`.
+
+Linux requires a working per-user systemd manager/user bus before mutation;
+Windows requires an ordinary interactive user token and an owned per-user Task
+Scheduler definition with LeastPrivilege. The installer does not configure
+linger, administrator services, passwords or elevated tasks. Stop disables
+automatic launches before requesting graceful exit. Windows binds the actual
+writer generation and launcher creation identities to the owned action and
+running task engine; both processes and all task instances must exit. Linux
+uses unbounded systemd stop with no SIGKILL fallback. A bounded installer wait
+that expires refuses restoration/config undo/pruning and retains private state.
+
+Native upgrades quiesce before snapshot/publication. SQLite snapshots and
+selection publication use atomic replacement without deleting the live file
+first; uncertain copies remain private. The durable HMAC tombstone key is never
+recreated over existing private history and is unchanged by snapshot restore.

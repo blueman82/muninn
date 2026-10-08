@@ -184,7 +184,6 @@ FRESH_STEPS: tuple[Step, ...] = (
     codex,
     verify,
     prune,
-    quiesce,
 )
 # The copy comes before pin: nothing may change if it cannot be made.
 UPGRADE_STEPS: tuple[Step, ...] = (
@@ -195,7 +194,6 @@ UPGRADE_STEPS: tuple[Step, ...] = (
     restart,
     verify,
     prune,
-    quiesce,
 )
 
 

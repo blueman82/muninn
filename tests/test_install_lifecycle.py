@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from install import installer
 from install.context import Ctx, run_real
-from install.lifecycle import linux_unit, task_xml
+from install.lifecycle import _identity, linux_unit, task_xml
 from muninn.obs_service import task_matches
 
 
@@ -93,3 +97,39 @@ class LifecycleDefinitionTests(unittest.TestCase):
                 assert field is not None
                 field.text = "unexpected"
                 self.assertFalse(task_matches(expected, actual))
+
+    def test_actual_current_sid_supports_local_and_azure_forms(self) -> None:
+        for sid in ("S-1-5-21-1-2-3-1001", "S-1-12-1-1-2-3-4"):
+            with self.subTest(sid=sid):
+
+                def run(
+                    argv: Sequence[str | Path],
+                    env: Mapping[str, str] | None = None,
+                    input: bytes | None = None,
+                    *,
+                    current_sid: str = sid,
+                ) -> subprocess.CompletedProcess[bytes]:
+                    return subprocess.CompletedProcess(
+                        argv,
+                        0,
+                        json.dumps(
+                            {"sid": current_sid, "elevated": False}
+                        ).encode(),
+                    )
+
+                ctx = Ctx(
+                    Path("/synthetic/home"), run, "sid", platform="win32"
+                )
+                self.assertEqual(_identity(ctx), sid)
+                self.assertTrue(ctx.target.startswith("Muninn-"))
+
+    def test_successful_install_finishes_with_service_running(self) -> None:
+        fresh = [step.__name__ for step in installer.FRESH_STEPS]
+        upgrade = [step.__name__ for step in installer.UPGRADE_STEPS]
+        self.assertNotIn("quiesce", fresh)
+        self.assertEqual(upgrade.count("quiesce"), 1)
+        self.assertLess(
+            upgrade.index("quiesce"), upgrade.index("snapshot_store")
+        )
+        self.assertEqual(fresh[-1], "prune")
+        self.assertEqual(upgrade[-1], "prune")

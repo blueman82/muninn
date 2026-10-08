@@ -114,7 +114,10 @@ class StatsDoctorTests(CliCase):
         Returns:
             Exit code, parsed JSON and stderr of the call.
         """
-        with mock.patch.object(cli.obs, "run", run or fake_run()):
+        with (
+            mock.patch.object(cli.obs, "run", run or fake_run()),
+            mock.patch.object(cli.obs.sys, "platform", "darwin"),
+        ):
             return self.muninn("doctor", *extra)
 
     def checks(self, out: dict[str, Any]) -> dict[str, bool]:

@@ -222,8 +222,30 @@ jobs:
               path.write(str(destination) + '\n')
           with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as env:
               env.write('MUNINN_PYTHON=' + str(copied) + '\n')
+      - name: Run real ordinary Windows lifecycle
+        if: runner.os == 'Windows' && !cancelled()
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.lifecycle_native'], check=True)
+      - name: Provision pinned Codex native proof
+        id: provider_setup
+        if: runner.os != 'macOS' && !cancelled()
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.provider_native_setup'], check=True)
+      - name: Run actual Codex and rendered provider routes
+        if: runner.os != 'macOS' && !cancelled() && steps.provider_setup.outcome == 'success'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
       - name: Run mandatory native runtime safety checks
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         shell: python
         run: |
           import subprocess
@@ -243,29 +265,8 @@ jobs:
                'tests.test_platform_children', 'tests.test_windows_metadata',
                'tests.test_bootstrap_guards', 'tests.test_key_history'], check=True,
           )
-      - name: Run real ordinary Windows lifecycle
-        if: runner.os == 'Windows'
-        shell: python
-        run: |
-          import subprocess
-          import sys
-          subprocess.run([sys.executable, '-m', 'tests.lifecycle_native'], check=True)
-      - name: Provision pinned Codex native proof
-        if: runner.os != 'macOS'
-        shell: python
-        run: |
-          import subprocess
-          import sys
-          subprocess.run([sys.executable, '-m', 'tests.provider_native_setup'], check=True)
-      - name: Run actual Codex and rendered provider routes
-        if: runner.os != 'macOS'
-        shell: python
-        run: |
-          import subprocess
-          import sys
-          subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
       - name: Run focused installer and provider checks
-        if: runner.os != 'macOS'
+        if: runner.os != 'macOS' && !cancelled()
         shell: python
         run: |
           import subprocess
@@ -277,6 +278,7 @@ jobs:
               'tests.test_install_dry_run', 'tests.test_uninstall',
               'tests.test_native_install_entry', 'tests.test_provider_paths',
               'tests.test_provider_render', 'tests.test_provider_codex_command',
+              'tests.test_provider_trust_version',
               'tests.test_configedit', 'tests.test_configedit_security',
               'tests.test_configedit_windows', 'tests.test_hook',
               'tests.test_hook_render', 'tests.test_hook_cli',
@@ -284,7 +286,7 @@ jobs:
               'tests.test_integrations',
           ], check=True)
       - name: Check Windows native API typing
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !cancelled()
         shell: python
         run: |
           import subprocess

@@ -18,6 +18,7 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from install import configedit as ce
 from install import installer as co
@@ -372,6 +373,12 @@ class World:
         Args:
             tc: The running test; owns the temp dir's lifetime.
         """
+        identity = mock.patch(
+            "install.steps_config.codex_identity",
+            return_value=("synthetic-codex-candidate",),
+        )
+        identity.start()
+        tc.addCleanup(identity.stop)
         tmp = Path(tempfile.mkdtemp(prefix="inst-")).resolve()
         tc.addCleanup(shutil.rmtree, tmp)
         self.home, self.repo = tmp / "home", tmp / "repo"

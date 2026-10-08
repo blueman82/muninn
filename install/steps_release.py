@@ -125,10 +125,6 @@ def pin(ctx: Ctx, rec: Record) -> None:
         for name in (
             "muninn.cmd",
             "muninn.ps1",
-            "muninn-install.cmd",
-            "muninn-install.ps1",
-            "muninn-uninstall.cmd",
-            "muninn-uninstall.ps1",
         ):
             write_private(
                 ctx.muninn.parent / name, (dest / "bin" / name).read_bytes()

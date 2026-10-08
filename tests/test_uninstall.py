@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import io
 import json
 import os
@@ -203,11 +204,19 @@ class RefusalTest(UninstallCase):
             The exit status and everything it printed.
         """
         self.addCleanup(os.umask, os.umask(PRIVATE_UMASK))
-        env = {"HOME": str(self.w.home)}
+        env = {
+            "HOME": str(self.w.home),
+            "USERPROFILE": str(self.w.home),
+            "CODEX_HOME": str(self.w.home / ".codex"),
+            "CLAUDE_CONFIG_DIR": str(self.w.home / ".claude"),
+        }
         out = io.StringIO()
         with (
             mock.patch.dict(os.environ, env),
             mock.patch.object(un, "run_real", self.w.fake.run),
+            mock.patch.object(
+                un, "Ctx", functools.partial(co.Ctx, platform="darwin")
+            ),
             contextlib.redirect_stdout(out),
         ):
             rc = un.main(argv)

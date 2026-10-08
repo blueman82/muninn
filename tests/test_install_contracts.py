@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
@@ -58,6 +59,7 @@ class CliTest(unittest.TestCase):
             for argv in (base, [*base, "--fresh", "--home", tmp]):
                 with self.subTest(argv=argv):
                     with (
+                        mock.patch.object(co.sys, "platform", "darwin"),
                         contextlib.redirect_stderr(io.StringIO()),
                         self.assertRaises(SystemExit) as cm,
                     ):

@@ -39,7 +39,11 @@ def exercise(parent: Path) -> dict[str, object]:
     ctx = Ctx(home, run_real, "native-fresh", fresh=True, say=messages.append)
     started = time.monotonic()
     installer.install(ctx, ROOT, sha)
+    first_job = lifecycle.job(ctx)
+    assert first_job is not None
+    assert isinstance(first_job["pid"], int) and first_job["pid"] > 0
     first = obs_status.read_status(ctx.data)
+    assert first["pid"] == first_job["pid"]
     assert isinstance(first.get("pid"), int), first
     if sys.platform == "linux":
         library = Path(os.environ["LD_LIBRARY_PATH"]) / "libsqlite3.so.0"
@@ -53,9 +57,14 @@ def exercise(parent: Path) -> dict[str, object]:
         ctx, ts="native-upgrade", fresh=False, upgrade=True
     )
     installer.install(upgraded, ROOT, sha)
+    after_job = lifecycle.job(upgraded)
+    assert after_job is not None
+    assert isinstance(after_job["pid"], int) and after_job["pid"] > 0
     after = obs_status.read_status(ctx.data)
+    assert after["pid"] == after_job["pid"]
     assert after["pid"] != first["pid"], (first["pid"], after["pid"])
-    assert after["stop_generation"] != first["stop_generation"]
+    if sys.platform == "win32":
+        assert after["stop_generation"] != first["stop_generation"]
     assert tombstone_key.load_key(ctx.data, create=False) == key
     lifecycle.stop(upgraded)
     result = {

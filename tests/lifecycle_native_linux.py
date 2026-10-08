@@ -43,7 +43,13 @@ def manager(parent: Path) -> Generator[None]:
     os.environ.update(updates)
     log = (parent / "manager.log").open("wb")
     process = subprocess.Popen(
-        ["systemd", "--user", "--unit=default.target"],
+        [
+            "systemd",
+            "--user",
+            "--unit=default.target",
+            "--log-target=console",
+            "--log-level=debug",
+        ],
         stdout=log,
         stderr=subprocess.STDOUT,
     )
@@ -56,7 +62,7 @@ def manager(parent: Path) -> Generator[None]:
         ).returncode:
             if process.poll() is not None or time.monotonic() >= deadline:
                 raise RuntimeError(
-                    "isolated user manager unavailable: "
+                    f"isolated user manager exit={process.poll()}: "
                     + (parent / "manager.log").read_text()
                 )
             time.sleep(0.1)
