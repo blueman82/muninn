@@ -163,6 +163,9 @@ _METRICS = frozenset(
         "child_exception_kind",
         "child_body_hresult",
         "child_body_line",
+        "task_principal_sid_equal",
+        "task_principal_logon_type",
+        "task_principal_run_level",
         "child_failure_line",
         "private_desktop_created",
         "token_session",
@@ -198,6 +201,9 @@ _METRIC_BOUNDS = {
     "child_exception_kind": (-1, 5),
     "child_body_hresult": (-2147483648, 2147483647),
     "child_body_line": (0, 4096),
+    "task_principal_sid_equal": (0, 1),
+    "task_principal_logon_type": (0, 6),
+    "task_principal_run_level": (0, 1),
 }
 _SECURITY_CODES = frozenset(
     (

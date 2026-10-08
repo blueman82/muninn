@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.native_diagnostics import write
+from tests.native_diagnostics import _safe_field, write
 
 
 class NativeDiagnosticCodesTest(unittest.TestCase):
@@ -261,5 +261,42 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
                             metrics={key: value},
                         )
             for key in ("child_body_message", "child_body_source"):
+                with self.assertRaises(ValueError):
+                    write("ordinary", "account_child_start", metrics={key: 1})
+
+    def test_task_principal_observations_are_bounded_codes(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            cases = (
+                ("task_principal_sid_equal", 1),
+                ("task_principal_logon_type", 6),
+                ("task_principal_run_level", 1),
+            )
+            for key, maximum in cases:
+                for value in (0, maximum):
+                    write(
+                        "ordinary", "account_child_start", metrics={key: value}
+                    )
+                    self.assertEqual(json.loads(path.read_text())[key], value)
+                for value in (-1, maximum + 1, True):
+                    with self.assertRaises(ValueError):
+                        write(
+                            "ordinary",
+                            "account_child_start",
+                            metrics={key: value},
+                        )
+                self.assertFalse(_safe_field(key, "1"))
+            for key in (
+                "task_principal_sid",
+                "task_principal_name",
+                "task_xml",
+            ):
                 with self.assertRaises(ValueError):
                     write("ordinary", "account_child_start", metrics={key: 1})
