@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -109,3 +111,157 @@ class DelegationTests(unittest.TestCase):
         self.assertNotIn("systemd-run --scope", workflow)
         self.assertIn("--property=SendSIGKILL=no", workflow)
         self.assertIn("--property=TimeoutStopSec=infinity", workflow)
+
+
+class VendorUnitTests(unittest.TestCase):
+    """Copy only the finite standard dependency chain into private CI state."""
+
+    def test_missing_required_unit_has_no_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            destination = root / "vendor"
+            with self.assertRaises(FileNotFoundError):
+                lifecycle_native_linux.copy_vendor_units(source, destination)
+            self.assertFalse(destination.exists())
+
+    def test_copy_set_excludes_ambient_wants_and_keeps_private_files(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            names = (
+                "basic.target",
+                "sockets.target",
+                "timers.target",
+                "paths.target",
+                "shutdown.target",
+                "exit.target",
+                "systemd-exit.service",
+            )
+            for name in names:
+                (source / name).write_bytes(b"[Unit]\nDescription=Synthetic\n")
+            ambient = source / "default.target.wants"
+            ambient.mkdir()
+            (ambient / "foreign.service").write_bytes(b"private credential")
+            destination = root / "vendor"
+            lifecycle_native_linux.copy_vendor_units(source, destination)
+            self.assertEqual(
+                {p.name for p in destination.iterdir()}, set(names)
+            )
+            for name in names:
+                self.assertEqual(
+                    (destination / name).read_bytes(),
+                    (source / name).read_bytes(),
+                )
+                self.assertTrue(
+                    lifecycle_native_linux.platform_io.is_private(
+                        destination / name
+                    )
+                )
+
+
+class XmlEncodingProbeTests(unittest.TestCase):
+    """Compare encoding declarations without registering any task."""
+
+    def test_variant_result_codes_are_preserved(self) -> None:
+        codes = {
+            "hresult": -1,
+            "inner_hresult": -1,
+            "xml_utf8_hresult": -1,
+            "xml_utf16_hresult": 0,
+            "xml_omitted_hresult": 0,
+        }
+        result = subprocess.CompletedProcess(
+            [], 0, json.dumps(codes).encode(), b""
+        )
+        with mock.patch.object(
+            lifecycle_native_windows.subprocess, "run", return_value=result
+        ) as run:
+            self.assertEqual(
+                lifecycle_native_windows.xml_validation_codes(
+                    Path("synthetic.xml")
+                ),
+                codes,
+            )
+        argv = run.call_args.args[0]
+        script = base64.b64decode(argv[-1]).decode("utf-16-le")
+        self.assertIn(r"^<\?xml[^>]*>\s*", script)
+        self.assertNotIn(r"^<\\?xml", script)
+
+    def test_invalid_original_never_registers_task(self) -> None:
+        with (
+            mock.patch.object(
+                lifecycle_native_windows,
+                "xml_validation_codes",
+                return_value={"hresult": -1},
+            ),
+            mock.patch.object(lifecycle_native_windows, "write"),
+            mock.patch.object(
+                lifecycle_native_windows.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, b"", b""),
+            ) as run,
+            self.assertRaises(RuntimeError),
+        ):
+            lifecycle_native_windows._create_task(
+                "synthetic", Path("synthetic.xml")
+            )
+        run.assert_not_called()
+
+
+class ManagerCleanupTests(unittest.TestCase):
+    """Cleanup failures preserve the original native lifecycle refusal."""
+
+    def test_cleanup_error_preserves_primary_failure(self) -> None:
+        process: mock.Mock = mock.Mock(pid=123)
+        error = RuntimeError("synthetic cleanup refusal")
+        with (
+            mock.patch.object(
+                lifecycle_native_linux, "stop_manager", side_effect=error
+            ),
+            mock.patch.object(lifecycle_native_linux, "write"),
+            mock.patch("builtins.print"),
+        ):
+            lifecycle_native_linux.finish_manager(
+                process, ValueError("original failure")
+            )
+
+    def test_cleanup_error_without_primary_is_still_failure(self) -> None:
+        process: mock.Mock = mock.Mock(pid=123)
+        error = RuntimeError("synthetic cleanup refusal")
+        with (
+            mock.patch.object(
+                lifecycle_native_linux, "stop_manager", side_effect=error
+            ),
+            mock.patch.object(lifecycle_native_linux, "write"),
+            mock.patch("builtins.print"),
+            self.assertRaisesRegex(RuntimeError, "synthetic cleanup refusal"),
+        ):
+            lifecycle_native_linux.finish_manager(process, None)
+
+    def test_startup_failure_restores_environment(self) -> None:
+        before = dict(os.environ)
+        with (
+            mock.patch.object(lifecycle_native_linux.sys, "platform", "linux"),
+            mock.patch.object(
+                lifecycle_native_linux,
+                "manager_environment",
+                return_value={"XDG_RUNTIME_DIR": "/synthetic-runtime"},
+            ),
+            mock.patch.object(
+                lifecycle_native_linux.shutil, "which", return_value="systemd"
+            ),
+            mock.patch.object(
+                lifecycle_native_linux, "startup", side_effect=RuntimeError
+            ),
+            self.assertRaises(RuntimeError),
+            lifecycle_native_linux.manager(Path("/synthetic")),
+        ):
+            self.fail("startup refusal cannot yield")
+        self.assertTrue(
+            dict(os.environ) == before, "startup changed caller environment"
+        )

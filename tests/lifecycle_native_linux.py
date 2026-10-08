@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -15,6 +16,40 @@ from collections.abc import Generator
 from pathlib import Path
 
 from muninn import platform_io
+from tests.native_diagnostics import write
+
+_VENDOR_UNITS = (
+    "basic.target",
+    "sockets.target",
+    "timers.target",
+    "paths.target",
+    "shutdown.target",
+    "exit.target",
+    "systemd-exit.service",
+)
+
+
+def copy_vendor_units(source: Path, destination: Path) -> None:
+    """Copy only the required standard user-unit chain into private CI state.
+
+    Args:
+        source: Distribution systemd user-unit directory.
+        destination: Private isolated unit directory without ambient wants.
+
+    Raises:
+        OSError: If a required ordinary read-only unit is unavailable.
+    """
+    for name in _VENDOR_UNITS:
+        info = (source / name).lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022:
+            raise PermissionError("ordinary read-only vendor unit required")
+    platform_io.ensure_private_dir(destination)
+    for name in _VENDOR_UNITS:
+        fd = platform_io.open_private(
+            destination / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        )
+        with os.fdopen(fd, "wb") as output:
+            output.write((source / name).read_bytes())
 
 
 @contextlib.contextmanager
@@ -32,74 +67,197 @@ def manager(parent: Path) -> Generator[None]:
     """
     if sys.platform != "linux":
         raise RuntimeError("isolated manager requires native Linux")
-    home, runtime = parent / "home", parent / "runtime"
-    units = home / ".config/systemd/user"
-    for path in (home, runtime, units):
-        platform_io.ensure_private_dir(path)
-    (units / "default.target").write_text(
-        "[Unit]\nDescription=Synthetic isolated test session\n"
-    )
-    updates = {
-        "HOME": str(home),
-        "XDG_RUNTIME_DIR": str(runtime),
-        "XDG_CONFIG_HOME": str(home / ".config"),
-        "XDG_DATA_HOME": str(home / ".local/share"),
-        "SYSTEMD_UNIT_PATH": str(units),
-        "SYSTEMD_LOG_TARGET": "journal",
-        "SYSTEMD_LOG_LEVEL": "debug",
-        "SYSTEMD_LOG_LOCATION": "1",
-    }
+    updates = manager_environment(parent)
+    runtime = Path(updates["XDG_RUNTIME_DIR"])
     original = {key: os.environ.get(key) for key in updates}
     os.environ.update(updates)
-    executable = shutil.which("systemd")
-    if executable is None:
-        raise RuntimeError("systemd executable is unavailable")
-    startup(runtime, executable)
-    started = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-    log = (parent / "manager.log").open("wb")
-    process = subprocess.Popen(
-        [
-            executable,
-            "--user",
-            "--unit=default.target",
-            "--log-target=journal",
-            "--log-level=debug",
-        ],
-        stdout=log,
-        stderr=subprocess.STDOUT,
-    )
     try:
-        deadline = time.monotonic() + 20
-        while subprocess.run(
-            ["systemctl", "--user", "show-environment"],
-            capture_output=True,
-            timeout=5,
-        ).returncode:
-            if process.poll() is not None or time.monotonic() >= deadline:
-                journal_status = failure(
-                    parent, process.pid, process.poll(), started
-                )
-                raise RuntimeError(
-                    f"isolated user manager exit={process.poll()}; "
-                    f"journal_status={journal_status}"
-                )
-            time.sleep(0.1)
-        yield
-    finally:
-        if process.poll() is None:
-            subprocess.run(
-                ["systemctl", "--user", "exit"],
+        executable = shutil.which("systemd")
+        if executable is None:
+            raise RuntimeError("systemd executable is unavailable")
+        startup(runtime, executable)
+        started = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+        log = (parent / "manager.log").open("wb")
+        process = subprocess.Popen(
+            [
+                executable,
+                "--user",
+                "--unit=default.target",
+                "--log-target=journal",
+                "--log-level=debug",
+            ],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        primary: Exception | None = None
+        try:
+            deadline = time.monotonic() + 20
+            while subprocess.run(
+                ["systemctl", "--user", "show-environment"],
                 capture_output=True,
-                timeout=30,
-                check=True,
-            )
-            process.wait(timeout=30)
-        log.close()
+                timeout=5,
+            ).returncode:
+                if process.poll() is not None or time.monotonic() >= deadline:
+                    journal_status = failure(
+                        parent, process.pid, process.poll(), started
+                    )
+                    raise RuntimeError(
+                        f"isolated user manager exit={process.poll()}; "
+                        f"journal_status={journal_status}"
+                    )
+                time.sleep(0.1)
+            yield
+        except Exception as exc:
+            primary = exc
+            write("lifecycle", None, error=exc)
+            try:
+                failure(parent, process.pid, process.poll(), started)
+                print(json.dumps(service_codes()), flush=True)
+            except Exception as diagnostic_error:
+                print(
+                    json.dumps(
+                        {
+                            "code": "diagnostic_failed",
+                            "error_type": type(diagnostic_error).__name__,
+                        }
+                    ),
+                    flush=True,
+                )
+            raise
+        finally:
+            try:
+                finish_manager(process, primary)
+            finally:
+                log.close()
+    finally:
         for key, value in original.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def manager_environment(parent: Path) -> dict[str, str]:
+    """Prepare private paths and the finite distribution user-unit chain."""
+    home, runtime = parent / "home", parent / "runtime"
+    units = home / ".config/systemd/user"
+    for path in (home, runtime, units):
+        platform_io.ensure_private_dir(path)
+    vendor = parent / "vendor-units"
+    sources = (Path("/usr/lib/systemd/user"), Path("/lib/systemd/user"))
+    source = next(
+        (
+            p
+            for p in sources
+            if all((p / name).is_file() for name in _VENDOR_UNITS)
+        ),
+        None,
+    )
+    if source is None:
+        raise FileNotFoundError("required distribution user units unavailable")
+    copy_vendor_units(source, vendor)
+    (units / "default.target").write_text(
+        "[Unit]\nDescription=Synthetic isolated test session\n"
+    )
+    return {
+        "HOME": str(home),
+        "XDG_RUNTIME_DIR": str(runtime),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "XDG_DATA_HOME": str(home / ".local/share"),
+        "SYSTEMD_UNIT_PATH": str(units) + ":" + str(vendor),
+        "SYSTEMD_LOG_TARGET": "journal",
+        "SYSTEMD_LOG_LEVEL": "debug",
+        "SYSTEMD_LOG_LOCATION": "1",
+    }
+
+
+def finish_manager(
+    process: subprocess.Popen[bytes], primary: Exception | None
+) -> None:
+    """Retain an earlier lifecycle failure if safe manager exit also fails."""
+    try:
+        stop_manager(process)
+    except Exception as exc:
+        write("lifecycle", None, error=exc)
+        print(
+            json.dumps(
+                {
+                    "code": "manager_cleanup_failed",
+                    "error_type": type(exc).__name__,
+                    "pid": process.pid,
+                    "alive": process.poll() is None,
+                }
+            ),
+            flush=True,
+        )
+        if primary is None:
+            raise
+
+
+def stop_manager(process: subprocess.Popen[bytes]) -> None:
+    """Request the owned user manager's standard exit and await real exit."""
+    if process.poll() is not None:
+        return
+    result = subprocess.run(
+        ["systemctl", "--user", "exit"], capture_output=True, timeout=30
+    )
+    print(
+        json.dumps(
+            {
+                "code": "manager_exit",
+                "returncode": result.returncode,
+                "pid": process.pid,
+                "alive": process.poll() is None,
+            }
+        ),
+        flush=True,
+    )
+    result.check_returncode()
+    process.wait(timeout=30)
+
+
+def service_codes() -> dict[str, str | int]:
+    """Read only fixed state codes for the synthetic Muninn unit."""
+    result = subprocess.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            "muninn.service",
+            "--property=LoadState,ActiveState,Result,MainPID",
+        ],
+        capture_output=True,
+        timeout=5,
+    )
+    codes: dict[str, str | int] = {
+        "code": "synthetic_service_state",
+        "returncode": result.returncode,
+    }
+    allowed = {
+        "loaded",
+        "not-found",
+        "error",
+        "masked",
+        "active",
+        "inactive",
+        "failed",
+        "activating",
+        "deactivating",
+        "success",
+        "exit-code",
+        "signal",
+        "timeout",
+        "dependency",
+        "resources",
+        "start-limit-hit",
+    }
+    for line in result.stdout.decode("utf-8", errors="replace").splitlines():
+        key, _, value = line.partition("=")
+        if key == "MainPID" and value.isdigit() and len(value) < 11:
+            codes[key] = int(value)
+        elif key in {"LoadState", "ActiveState", "Result"}:
+            codes[key] = value if value in allowed else "unknown"
+    return codes
 
 
 def journal_codes(data: bytes) -> list[dict[str, str | int]]:

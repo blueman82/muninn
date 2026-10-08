@@ -165,6 +165,10 @@ def registration_codes(data: bytes) -> dict[str, str | int]:
 
 def _create_task(name: str, xml: Path) -> None:
     """Register the synthetic task, reporting only fixed refusal codes."""
+    codes = xml_validation_codes(xml)
+    write("lifecycle", None, metrics=codes)
+    if codes.get("hresult") != 0:
+        raise RuntimeError("original task XML validation refused")
     created_task = subprocess.run(
         ["schtasks.exe", "/Create", "/TN", name, "/XML", str(xml), "/F"],
         capture_output=True,
@@ -190,14 +194,22 @@ def xml_validation_codes(xml: Path) -> dict[str, int]:
     """Validate the exact XML in COM, exposing only numeric failure results."""
     script = (
         "$ErrorActionPreference='Stop';"
-        "try{$s=New-Object -ComObject Schedule.Service;$s.Connect();"
-        "$t=$s.NewTask(0);"
-        f"$t.XmlText=[IO.File]::ReadAllText({literal(str(xml))});"
-        "@{hresult=0;inner_hresult=0}|ConvertTo-Json -Compress}"
-        "catch{$e=$_.Exception;$hr=[int]$e.HResult;"
+        "$s=New-Object -ComObject Schedule.Service;"
+        "$s.Connect();"
+        f"$raw=[IO.File]::ReadAllText({literal(str(xml))});"
+        "$body=$raw -replace '^<\\?xml[^>]*>\\s*','';"
+        "$variants=[ordered]@{hresult=$raw;"
+        'xml_utf8_hresult=(\'<?xml version="1.0" encoding="utf-8"?>\'+$body);'
+        'xml_utf16_hresult=(\'<?xml version="1.0" '
+        'encoding="utf-16"?>\'+$body);'
+        "xml_omitted_hresult=$body};$codes=@{};"
+        "foreach($key in $variants.Keys){"
+        "try{$t=$s.NewTask(0);$t.XmlText=$variants[$key];$codes[$key]=0}"
+        "catch{$e=$_.Exception;"
         "while($null -ne $e.InnerException){$e=$e.InnerException};"
-        "@{hresult=$hr;inner_hresult=[int]$e.HResult}|"
-        "ConvertTo-Json -Compress}"
+        "$codes[$key]=[int]$e.HResult}};"
+        "$codes['inner_hresult']=$codes['hresult'];"
+        "$codes|ConvertTo-Json -Compress"
     )
     result = subprocess.run(
         powershell(script), capture_output=True, timeout=30
@@ -211,7 +223,14 @@ def xml_validation_codes(xml: Path) -> dict[str, int]:
     return {
         key: code
         for key, code in value.items()
-        if key in {"hresult", "inner_hresult"}
+        if key
+        in {
+            "hresult",
+            "inner_hresult",
+            "xml_utf8_hresult",
+            "xml_utf16_hresult",
+            "xml_omitted_hresult",
+        }
         and isinstance(code, int)
         and not isinstance(code, bool)
     }
