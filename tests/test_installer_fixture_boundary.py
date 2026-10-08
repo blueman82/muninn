@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import plistlib
+import shlex
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
-from install import rollback, steps_release
-from install.context import StepFailedError
+from install import preflight, rollback, steps_release, uninstall
+from install.context import Ctx, StepFailedError, run_real
 from install.provider_paths import render_pinned
 from tests import installer_fakes
 from tests.installer_support import ROOT, Fake, World, git
@@ -142,11 +145,29 @@ class FixtureLinkModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             home.mkdir()
+            original_ownership = uninstall._is_ours
             with patch(
                 "tests.installer_fakes.sys",
                 SimpleNamespace(platform="win32"),
             ):
                 installer_fakes.register(self, home)
+            self.assertIsNot(preflight.render_pinned, render_pinned)
+            self.assertIsNot(steps_release.render_pinned, render_pinned)
+            self.assertIsNot(uninstall._is_ours, original_ownership)
+            ctx = Ctx(home, run_real, "synthetic", platform="darwin")
+            relative = "integrations/claude/settings-hooks.json"
+            source = (ROOT / relative).read_bytes()
+            for rendering in (
+                preflight.render_pinned,
+                steps_release.render_pinned,
+            ):
+                rendered = rendering(ctx, relative, source)
+                self.assertEqual(uninstall.drop_hooks(rendered), b"{}\n")
+                native = Ctx(home, run_real, "synthetic", platform="win32")
+                self.assertEqual(
+                    rendering(native, relative, source),
+                    render_pinned(native, relative, source),
+                )
             link = home / ".local/lib/muninn/current"
             for name in ("old", "new"):
                 target = link.parent / name
@@ -210,3 +231,171 @@ class FixtureLinkModelTests(unittest.TestCase):
                 installer_fakes.relink(home, link, "new", "1")
             self.assertEqual(pending.read_text(), "unknown")
             self.assertFalse(link.exists())
+
+
+class FixtureUninstallBoundaryTests(unittest.TestCase):
+    """Fake Darwin commands and links retain their exact World boundary."""
+
+    def test_windows_shell_spelling_changes_only_the_exact_owned_prefix(
+        self,
+    ) -> None:
+        home = cast(Path, PureWindowsPath("C:/synthetic home"))
+        command = home / ".local/bin/muninn"
+        ctx = cast(
+            Ctx, SimpleNamespace(home=home, muninn=command, platform="darwin")
+        )
+        prefix = shlex.quote(str(command))
+        owned = prefix + " hook session-start --provider claude"
+        foreign = prefix + "-other hook session-start --provider claude"
+        doc = {
+            "untouched": "synthetic metadata",
+            "hooks": {
+                "SessionStart": [
+                    {"hooks": [{"command": owned}, {"command": foreign}]}
+                ]
+            },
+        }
+        data = json.dumps(doc).encode()
+        with patch("tests.installer_fakes.render_pinned", return_value=data):
+            result = installer_fakes.render_hooks(
+                home, ctx, "integrations/claude/settings-hooks.json", b"source"
+            )
+            for platform in ("win32", "linux"):
+                ctx.platform = platform
+                self.assertEqual(
+                    installer_fakes.render_hooks(
+                        home,
+                        ctx,
+                        "integrations/claude/settings-hooks.json",
+                        b"source",
+                    ),
+                    data,
+                )
+            ctx.platform = "darwin"
+            self.assertEqual(
+                installer_fakes.render_hooks(
+                    home.parent,
+                    ctx,
+                    "integrations/claude/settings-hooks.json",
+                    b"source",
+                ),
+                data,
+            )
+            self.assertEqual(
+                installer_fakes.render_hooks(
+                    home, ctx, "unrelated.json", b"source"
+                ),
+                data,
+            )
+        self.assertEqual(json.loads(result)["untouched"], "synthetic metadata")
+        handlers = json.loads(result)["hooks"]["SessionStart"][0]["hooks"]
+        self.assertEqual(
+            handlers[0]["command"],
+            shlex.quote(command.as_posix())
+            + " hook session-start --provider claude",
+        )
+        self.assertEqual(handlers[1]["command"], foreign)
+
+    def test_owned_link_uses_actual_targets_and_rejects_foreign_prefix_escape(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "owned"
+            home.mkdir()
+            ctx = Ctx(home, run_real, "synthetic", platform="darwin")
+            ctx.muninn.parent.mkdir(parents=True)
+            ctx.lib.mkdir(parents=True)
+            target = ctx.lib / "release/bin/muninn"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"owned")
+            ctx.muninn.symlink_to(target)
+            self.assertTrue(installer_fakes.owns_link(home, ctx))
+            alias = home.with_name("home-alias")
+            alias.symlink_to(home, target_is_directory=True)
+            alias_ctx = Ctx(alias, run_real, "synthetic", platform="darwin")
+            self.assertFalse(installer_fakes.owns_link(alias, alias_ctx))
+            self.assertEqual(target.read_bytes(), b"owned")
+            ctx.muninn.unlink()
+            for foreign in (
+                home / "foreign",
+                ctx.lib.with_name("muninn-other") / "muninn",
+            ):
+                foreign.parent.mkdir(parents=True, exist_ok=True)
+                foreign.write_bytes(b"foreign")
+                ctx.muninn.symlink_to(foreign)
+                self.assertFalse(installer_fakes.owns_link(home, ctx))
+                self.assertEqual(foreign.read_bytes(), b"foreign")
+                ctx.muninn.unlink()
+            ctx.muninn.write_bytes(b"regular")
+            self.assertFalse(installer_fakes.owns_link(home, ctx))
+            ctx.muninn.unlink()
+            ctx.muninn.parent.rmdir()
+            outside = home.parent / "outside"
+            outside.mkdir()
+            ctx.muninn.parent.symlink_to(outside, target_is_directory=True)
+            ctx.muninn.symlink_to(target)
+            self.assertFalse(installer_fakes.owns_link(home, ctx))
+            self.assertEqual(target.read_bytes(), b"owned")
+
+    def test_posix_registration_keeps_rendering_and_ownership_primitives(
+        self,
+    ) -> None:
+        original = (
+            preflight.render_pinned,
+            steps_release.render_pinned,
+            uninstall._is_ours,
+        )
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch(
+                "tests.installer_fakes.sys", SimpleNamespace(platform="darwin")
+            ),
+        ):
+            installer_fakes.register(self, Path(temporary))
+        self.assertEqual(
+            (
+                preflight.render_pinned,
+                steps_release.render_pinned,
+                uninstall._is_ours,
+            ),
+            original,
+        )
+
+    def test_context_namespace_and_escaped_library_never_become_owned(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "owned"
+            home.mkdir()
+            ctx = Ctx(home, run_real, "synthetic", platform="darwin")
+            ctx.muninn.parent.mkdir(parents=True)
+            ctx.lib.parent.mkdir(parents=True)
+            outside = home.parent / "outside"
+            outside.mkdir()
+            marker = outside / "marker"
+            marker.write_bytes(b"foreign")
+            ctx.lib.symlink_to(outside, target_is_directory=True)
+            ctx.muninn.symlink_to(marker)
+            self.assertFalse(installer_fakes.owns_link(home, ctx))
+            self.assertEqual(marker.read_bytes(), b"foreign")
+            with patch(
+                "tests.installer_fakes.original_is_ours", return_value=False
+            ) as original:
+                ctx.platform = "win32"
+                self.assertFalse(installer_fakes.owns_link(home, ctx))
+                original.assert_called_once_with(ctx)
+            ctx.platform = "darwin"
+            ctx.muninn = home / "foreign-command"
+            with patch(
+                "tests.installer_fakes.render_pinned",
+                return_value=b"unchanged",
+            ):
+                self.assertEqual(
+                    installer_fakes.render_hooks(
+                        home,
+                        ctx,
+                        "integrations/codex/hooks/hooks.json",
+                        b"source",
+                    ),
+                    b"unchanged",
+                )

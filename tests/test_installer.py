@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -63,7 +64,8 @@ class FreshInstallTest(unittest.TestCase):
         (group,) = s["hooks"]["SessionStart"]
         self.assertEqual(
             group["hooks"][0]["command"],
-            f"{h}/.local/bin/muninn hook session-start --provider claude",
+            shlex.quote((h / ".local/bin/muninn").as_posix())
+            + " hook session-start --provider claude",
         )
         text = (h / ".codex/config.toml").read_text()
         self.assertEqual(

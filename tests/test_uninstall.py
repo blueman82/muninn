@@ -18,6 +18,7 @@ from install.constants import PRE_UPGRADE_PREFIX, PRIVATE_UMASK
 from install.context import StepFailedError
 from install.errors import RefusedError
 from tests.installer_support import World, snapshot
+from tests.store_support import assert_private
 
 OWNER_GROUP = {"hooks": [{"type": "command", "command": "/usr/bin/true"}]}
 
@@ -80,7 +81,7 @@ class UninstallTest(UninstallCase):
         self.assertTrue(
             (self.c.removed / self.c.data.name / "recall.off").exists()
         )
-        self.assertEqual(self.c.removed.stat().st_mode & 0o777, 0o700)
+        assert_private(self, self.c.removed, directory=True)
         self.assertFalse(self.c.data.exists())
 
     def test_a_leftover_pre_upgrade_copy_goes_with_the_data(self) -> None:
@@ -139,7 +140,8 @@ class UninstallTest(UninstallCase):
         mine.write_text("#!/bin/sh\n")
         self.c.muninn.symlink_to(mine)
         self.run_uninstall()
-        self.assertEqual(self.c.muninn.readlink(), mine)
+        self.assertTrue(self.c.muninn.samefile(mine))
+        self.assertEqual(mine.read_text(), "#!/bin/sh\n")
 
     def test_a_link_into_a_dir_sharing_our_prefix_is_left_alone(self) -> None:
         self.c.muninn.unlink()
@@ -147,7 +149,11 @@ class UninstallTest(UninstallCase):
         other.mkdir()
         self.c.muninn.symlink_to(other / "muninn")
         self.run_uninstall()
-        self.assertEqual(self.c.muninn.readlink(), other / "muninn")
+        self.assertEqual(
+            self.c.muninn.resolve(strict=False),
+            (other / "muninn").resolve(strict=False),
+        )
+        self.assertTrue(self.c.muninn.is_symlink())
 
     def test_a_regular_file_at_the_link_path_is_left_alone(self) -> None:
         self.c.muninn.unlink()

@@ -53,7 +53,17 @@ class AccountSpikeTests(unittest.TestCase):
         )
         self.assertIn("$childStage=2;$name=Split-Path -Leaf $base", source)
         self.assertNotIn("$env:PSModulePath=", source)
-        self.assertNotIn("Import-Module", source)
+        imported = (
+            "Microsoft.PowerShell.Core\\Import-Module -Name $manifest "
+            "-ErrorAction Stop"
+        )
+        self.assertEqual(source.count(imported), 1)
+        self.assertLess(
+            source.index("$moduleStream.Dispose()"), source.index(imported)
+        )
+        self.assertLess(source.index(imported), source.index(qualified))
+        for flag in ("-Force", "-Verbose", "-PassThru", "-AsCustomObject"):
+            self.assertNotIn(flag, source)
 
     def test_child_module_observations_keep_the_original_call_and_exit(
         self,
@@ -70,7 +80,7 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("CategoryInfo.Category", child)
         self.assertIn("InvocationInfo.MyCommand.CommandType", child)
         self.assertIn("finally {exit 1}", child)
-        self.assertNotIn("Import-Module", child)
+        self.assertEqual(child.count("Import-Module"), 1)
         self.assertNotIn("$env:PSModulePath=", child)
         self.assertNotIn("Exception.Message", child)
         for key in (
@@ -101,6 +111,18 @@ class AccountSpikeTests(unittest.TestCase):
                 + lifecycle_account_scripts._CHILD_DIAGNOSTICS
                 + r"""
 $ErrorActionPreference='Stop';$observed=@()
+$manifest=[IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management',
+ 'Microsoft.PowerShell.Management.psd1')
+Microsoft.PowerShell.Core\Import-Module -Name $manifest -ErrorAction Stop
+$childPath=[IO.Path]::Combine($PSHOME,'child.ps1')
+$actualParent=Microsoft.PowerShell.Management\Split-Path -Parent $childPath
+if($actualParent -ne $PSHOME){throw 'parent_failed'}
+$missing=[IO.Path]::Combine([IO.Path]::GetTempPath(),
+ [Guid]::NewGuid().ToString()+'.psd1')
+$importRefused=$false
+try{Microsoft.PowerShell.Core\Import-Module -Name $missing -ErrorAction Stop}
+catch{$importRefused=$true}
+if(!$importRefused){throw 'missing_module_not_refused'}
 $types=@([UnauthorizedAccessException],[Security.SecurityException],
  [Runtime.InteropServices.COMException],[ComponentModel.Win32Exception],
  [Management.Automation.RuntimeException])

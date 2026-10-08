@@ -143,6 +143,8 @@ def child_script(parent: Path) -> str:
     body = (
         CHILD.replace(
             "$base=Split-Path -Parent $MyInvocation.MyCommand.Path",
+            "Microsoft.PowerShell.Core\\Import-Module -Name $manifest "
+            "-ErrorAction Stop\n"
             "$base=Microsoft.PowerShell.Management\\Split-Path "
             "-Parent $MyInvocation.MyCommand.Path",
         )
