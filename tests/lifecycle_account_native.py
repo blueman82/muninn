@@ -17,6 +17,7 @@ from muninn import platform_io
 from muninn.obs_service import literal, powershell
 from tests.lifecycle_account_desktop import PROCESS_SOURCE
 from tests.lifecycle_account_desktop import SOURCE as DESKTOP_SOURCE
+from tests.lifecycle_account_errors import failure_codes
 from tests.lifecycle_account_privileges import SOURCE
 from tests.native_diagnostics import write
 
@@ -394,7 +395,12 @@ def main() -> int:
         )
         check_result(report)
     except Exception as exc:
-        write("ordinary", None, error=exc)
+        metrics = (
+            failure_codes(exc.returncode, exc.stderr or b"")
+            if isinstance(exc, subprocess.CalledProcessError)
+            else {}
+        )
+        write("ordinary", None, error=exc, metrics=metrics)
         print(json.dumps({"retained_state": str(parent)}))
         raise
     temporary.cleanup()

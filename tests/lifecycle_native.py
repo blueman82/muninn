@@ -19,7 +19,9 @@ from muninn.obs_service import parse_process, process_command, service_status
 from tests import (
     lifecycle_native_doctor,
     lifecycle_native_linux,
+    lifecycle_native_rollback,
     lifecycle_native_windows,
+    lifecycle_native_writer,
 )
 from tests.native_diagnostics import write
 
@@ -30,6 +32,9 @@ def assert_service(ctx: Ctx, sha: str) -> None:
     """Require a real Linux service identity and its immutable loaded SHA."""
     if sys.platform == "linux":
         status = obs_status.read_status(ctx.data)
+        library = Path(os.environ["LD_LIBRARY_PATH"]) / "libsqlite3.so.0"
+        maps = Path(f"/proc/{status['pid']}/maps").read_text()
+        assert str(library.resolve()) in maps, "writer SQLite environment"
         assert status.get("writer_install_sha") == sha
         assert service_status(ctx.data, {"HOME": str(ctx.home)}, obs.run) == (
             True,
@@ -68,19 +73,18 @@ def exercise(parent: Path) -> dict[str, object]:
     first = obs_status.read_status(ctx.data)
     assert first["pid"] == first_job["pid"]
     assert isinstance(first.get("pid"), int), first
-    if sys.platform == "linux":
-        library = Path(os.environ["LD_LIBRARY_PATH"]) / "libsqlite3.so.0"
-        maps = Path(f"/proc/{first['pid']}/maps").read_text()
-        assert str(library.resolve()) in maps, "writer SQLite environment"
     assert_service(ctx, sha)
     key = tombstone_key.load_key(ctx.data)
     write("lifecycle", "fresh_stop")
     lifecycle.stop(ctx)
     stopped = lifecycle.job(ctx)
     assert stopped is None or not stopped["pid"]
+    if sys.platform == "linux":
+        lifecycle_native_writer.busy_stop(ctx)
     upgraded = dataclasses.replace(
         ctx, ts="native-upgrade", fresh=False, upgrade=True
     )
+    upgraded_started = time.time()
     write("lifecycle", "upgrade_install")
     installer.install(upgraded, ROOT, sha)
     after_job = lifecycle.job(upgraded)
@@ -94,7 +98,11 @@ def exercise(parent: Path) -> dict[str, object]:
         assert after["stop_generation"] != first["stop_generation"]
     assert tombstone_key.load_key(ctx.data, create=False) == key
     write("lifecycle", "upgrade_stop")
-    lifecycle.stop(upgraded)
+    if sys.platform == "linux":
+        lifecycle_native_writer.crash_restart(upgraded, upgraded_started)
+        lifecycle_native_rollback.rollback(upgraded, ROOT)
+    else:
+        lifecycle.stop(upgraded)
     result = {
         "sha": sha,
         "platform": sys.platform,
@@ -102,6 +110,9 @@ def exercise(parent: Path) -> dict[str, object]:
         "upgrade": True,
         "graceful_stop": True,
         "key_retained": True,
+        "managed_busy_commit": sys.platform == "linux",
+        "managed_crash_restart": sys.platform == "linux",
+        "migration_rollback": sys.platform == "linux",
         "native_seconds": round(time.monotonic() - started, 3),
     }
     if sys.platform == "win32":
