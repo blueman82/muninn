@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -149,7 +150,7 @@ def _windows_status(
         expected = ET.fromstring(handle.read(16385))
     queried = run(["schtasks.exe", "/Query", "/TN", identifier, "/XML"])
     if queried.returncode or not task_matches(
-        expected, ET.fromstring(queried.stdout)
+        expected, parse_task_query(queried.stdout)
     ):
         return False, "task_definition_mismatch"
     status = read_status(home)
@@ -174,6 +175,28 @@ def _windows_status(
     ):
         return False, "writer_release_mismatch"
     return True, pid
+
+
+def parse_task_query(raw: bytes) -> ET.Element:
+    """Parse ``schtasks /Query /XML`` output whatever its real encoding.
+
+    The tool declares UTF-16 but writes console-code-page bytes when piped,
+    so the declaration is dropped and the bytes decoded by their own marks.
+
+    Args:
+        raw: The raw standard output of the query.
+
+    Returns:
+        The root element of the task definition.
+    """
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        text = raw.decode("utf-16")
+    else:
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252")
+    return ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text))
 
 
 def _linux_status(

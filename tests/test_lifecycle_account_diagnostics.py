@@ -331,6 +331,7 @@ foreach($json in $invalid){
             )
             source = (
                 lifecycle_account_scripts._CHILD_DIAGNOSTICS
+                + lifecycle_account_scripts.OWNED
                 + f"$base={literal(temporary)};"
                 + r"""
 $ErrorActionPreference='Stop';$identity=[Security.Principal.WindowsIdentity]::GetCurrent()

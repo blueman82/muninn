@@ -25,6 +25,7 @@ from muninn.obs_linux_service import (
 from muninn.obs_service import (
     literal,
     parse_process,
+    parse_task_query,
     powershell,
     process_command,
     task_matches,
@@ -179,12 +180,9 @@ def preflight_service(ctx: Ctx) -> None:
             platform_windows.assert_executable(Path(sys.executable))
         if ctx.plist.exists():
             _task_owned(ctx)
-        elif (
-            ctx.run(
-                ["schtasks.exe", "/Query", "/TN", ctx.target, "/XML"]
-            ).returncode
-            == 0
-        ):
+        elif not ctx.run(
+            ["schtasks.exe", "/Query", "/TN", ctx.target, "/XML"]
+        ).returncode:
             raise StepFailedError(
                 "the task name already exists without private ownership"
             )
@@ -200,7 +198,7 @@ def _task_owned(ctx: Ctx) -> ET.Element:
     result = must(
         ctx, ["schtasks.exe", "/Query", "/TN", ctx.target, "/XML"], quiet=True
     )
-    actual = ET.fromstring(result.stdout)
+    actual = parse_task_query(result.stdout)
     if not task_matches(expected, actual):
         raise StepFailedError(
             "registered task definition is not the owned poller"
