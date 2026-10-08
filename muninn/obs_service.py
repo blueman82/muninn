@@ -234,6 +234,27 @@ def parse_task_query(raw: bytes) -> ET.Element:
     return ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text))
 
 
+def disable_task(definition: ET.Element) -> None:
+    """Mark a stored definition disabled, adding the element if omitted.
+
+    The scheduler leaves out ``Enabled`` while a task holds its default.
+
+    Args:
+        definition: The stored definition, edited in place.
+
+    Raises:
+        ValueError: If the definition has no settings.
+    """
+    ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
+    settings = definition.find("t:Settings", ns)
+    if settings is None:
+        raise ValueError("task definition has no settings")
+    enabled = settings.find("t:Enabled", ns)
+    if enabled is None:
+        enabled = ET.SubElement(settings, f"{{{ns['t']}}}Enabled")
+    enabled.text = "false"
+
+
 def canonical_trigger_user(
     actual: ET.Element,
     run: Callable[[Sequence[str]], subprocess.CompletedProcess[bytes]],

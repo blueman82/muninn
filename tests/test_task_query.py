@@ -9,6 +9,7 @@ from collections.abc import Sequence
 
 from muninn.obs_service import (
     canonical_trigger_user,
+    disable_task,
     parse_task_query,
     task_matches,
 )
@@ -92,3 +93,24 @@ class CanonicalTriggerUserTests(unittest.TestCase):
                 ),
                 wanted,
             )
+
+
+class DisableTaskTests(unittest.TestCase):
+    """Disabling works whether or not the scheduler kept the element."""
+
+    def test_omitted_and_present_enabled_become_false(self) -> None:
+        """An omitted default is added; a present one is rewritten."""
+        for inner in ("", "<Enabled>true</Enabled>"):
+            root = ET.fromstring(
+                f'<Task xmlns="{_URI}"><Settings>{inner}</Settings></Task>'
+            )
+            disable_task(root)
+            self.assertEqual(
+                root.findtext("t:Settings/t:Enabled", None, {"t": _URI}),
+                "false",
+            )
+
+    def test_missing_settings_is_refused(self) -> None:
+        """A definition without settings is not silently accepted."""
+        with self.assertRaises(ValueError):
+            disable_task(ET.fromstring(f'<Task xmlns="{_URI}"/>'))

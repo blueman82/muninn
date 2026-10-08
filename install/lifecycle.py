@@ -24,6 +24,7 @@ from muninn.obs_linux_service import (
 )
 from muninn.obs_service import (
     canonical_trigger_user,
+    disable_task,
     literal,
     parse_process,
     parse_task_query,
@@ -259,9 +260,7 @@ def _stop_windows(ctx: Ctx) -> None:
         ["schtasks.exe", "/Change", "/TN", ctx.target, "/DISABLE"],
         quiet=True,
     )
-    enabled = definition.find("t:Settings/t:Enabled", _NS)
-    assert enabled is not None
-    enabled.text = "false"
+    disable_task(definition)
     write_private(ctx.plist, task_bytes(definition))
     found = job(ctx)
     if found and (pid := found["pid"]):
