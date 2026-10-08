@@ -120,6 +120,49 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("ConvertTo-Json -Compress;exit 1", source)
         self.assertNotIn("$report.message", source)
 
+    def test_child_seams_keep_native_errors_and_refusals(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = lifecycle_account_scripts.outer_script(Path(temporary))
+        stages = [
+            source.index(f"$report.child_stage={value}")
+            for value in range(1, 6)
+        ]
+        self.assertEqual(stages, sorted(stages))
+        launch = source.index(
+            "$launched=[MuninnCiLogon]::CreateProcessWithTokenW"
+        )
+        failure = source.index("if(!$launched)", launch)
+        last_error = source.index("GetLastWin32Error()", failure)
+        launch_metric = source.index(
+            "$report.child_launch_ok=[int]$launched", failure
+        )
+        self.assertLess(stages[0], launch)
+        self.assertLess(last_error, launch_metric)
+        wait = source.index("$wait=[MuninnCiLogon]::WaitForSingleObject")
+        self.assertLess(stages[1], wait)
+        self.assertIn("($process.process,60000)", source[wait:])
+        wait_error = source.index("GetLastWin32Error()", wait)
+        wait_metric = source.index("$report.child_wait_result=$wait", wait)
+        self.assertLess(wait_error, wait_metric)
+        self.assertIn("if($wait -eq -1)", source[wait:wait_metric])
+        self.assertIn("if($wait -ne 0)", source[wait_metric:])
+        self.assertIn("throw 'ordinary_child_exit_unproven'", source)
+        query = source.index("$queried=[MuninnCiLogon]::GetExitCodeProcess")
+        self.assertLess(stages[2], query)
+        query_error = source.index("GetLastWin32Error()", query)
+        query_metric = source.index(
+            "$report.child_exit_query_ok=[int]$queried", query
+        )
+        self.assertLess(query_error, query_metric)
+        self.assertIn("$report.child_exit_code=$exitCode", source[query:])
+        self.assertIn("if($exitCode -ne 0)", source[query:])
+        self.assertIn("throw 'ordinary_child_exit_failed'", source)
+        child_report = source.index("$child=Join-Path")
+        self.assertLess(stages[3], child_report)
+        self.assertLess(stages[4], source.index("Test-Owned $owned $base"))
+        self.assertIn("$quiescent=$false\n $report.child_stage=2", source)
+        self.assertNotIn("TerminateProcess", source)
+
     def test_nonzero_outer_json_is_recorded_then_original_exit_is_raised(
         self,
     ) -> None:

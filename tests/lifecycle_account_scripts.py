@@ -181,19 +181,36 @@ try {
  $minimal='SystemRoot='+$env:SystemRoot+$zero+'TEMP='+$base+$zero+
   'TMP='+$base+$zero+'WINDIR='+$env:SystemRoot+$zero+$zero
  $environment=[Runtime.InteropServices.Marshal]::StringToHGlobalUni($minimal)
- $report.phase='account_child_start'
- if(![MuninnCiLogon]::CreateProcessWithTokenW($token,0,$exe,$command,
-  0x08000400,$environment,$base,[ref]$startup,[ref]$process)){
+ $report.phase='account_child_start';$report.child_stage=1
+ $launched=[MuninnCiLogon]::CreateProcessWithTokenW($token,0,$exe,$command,
+  0x08000400,$environment,$base,[ref]$startup,[ref]$process)
+ if(!$launched){
   $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  $report.child_launch_ok=[int]$launched
   throw [ComponentModel.Win32Exception]::new($code)
  }
+ $report.child_launch_ok=[int]$launched
  $quiescent=$false
- if([MuninnCiLogon]::WaitForSingleObject($process.process,60000) -ne 0){
-  throw 'ordinary_child_exit_unproven'
+ $report.child_stage=2
+ $wait=[MuninnCiLogon]::WaitForSingleObject($process.process,60000)
+ if($wait -eq -1){
+  $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  $report.child_wait_result=$wait
+  throw [ComponentModel.Win32Exception]::new($code)
  }
- $exitCode=0
- if(![MuninnCiLogon]::GetExitCodeProcess($process.process,[ref]$exitCode) -or
-    $exitCode -ne 0){throw 'ordinary_child_exit_failed'}
+ $report.child_wait_result=$wait
+ if($wait -ne 0){throw 'ordinary_child_exit_unproven'}
+ $report.child_stage=3;$exitCode=0
+ $queried=[MuninnCiLogon]::GetExitCodeProcess($process.process,[ref]$exitCode)
+ if(!$queried){
+  $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  $report.child_exit_query_ok=[int]$queried
+  throw [ComponentModel.Win32Exception]::new($code)
+ }
+ $report.child_exit_query_ok=[int]$queried
+ $report.child_exit_code=$exitCode
+ if($exitCode -ne 0){throw 'ordinary_child_exit_failed'}
+ $report.child_stage=4
  $child=Join-Path $base 'child-result.json'
  $parsed=Get-Content -LiteralPath $child -Raw|ConvertFrom-Json
  $report.phase=[string]$parsed.phase
@@ -208,6 +225,7 @@ try {
  if($report.ordinary_child_session -ne $report.caller_session){
   throw 'ordinary_session_mismatch'
  }
+ $report.child_stage=5
  $service=New-Object -ComObject Schedule.Service;$service.Connect()
  $folder=$service.GetFolder('\')
  try {$owned=$folder.GetTask((Split-Path -Leaf $base))}
