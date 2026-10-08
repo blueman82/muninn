@@ -149,6 +149,15 @@ class MachineCodesTest(unittest.TestCase):
                 [], 0, b"{}", b"synthetic stderr"
             )
 
+        def stages(
+            ctx: Ctx,
+            env: dict[str, str],
+            argv: str | list[str],
+            payload: bytes,
+        ) -> dict[str, int]:
+            events.append("stages")
+            return {}
+
         def isolation(env: dict[str, str]) -> dict[str, int]:
             events.append("emitter")
             return {}
@@ -166,6 +175,9 @@ class MachineCodesTest(unittest.TestCase):
                     side_effect=failed_route,
                 ),
                 mock.patch(
+                    "tests.provider_native.launcher_stages", side_effect=stages
+                ),
+                mock.patch(
                     "tests.provider_native.emitter_baseline",
                     side_effect=isolation,
                 ),
@@ -174,7 +186,7 @@ class MachineCodesTest(unittest.TestCase):
                 self.assertRaisesRegex(AssertionError, "unexpected stderr"),
             ):
                 prove_hooks(ctx, {})
-        self.assertEqual(events, ["route", "emitter"])
+        self.assertEqual(events, ["route", "stages", "emitter"])
 
     def test_non_windows_emitter_isolation_does_not_start_a_process(
         self,

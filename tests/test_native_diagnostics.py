@@ -323,3 +323,49 @@ class NativeDiagnosticsTest(unittest.TestCase):
                     "account_child_start",
                     metrics={"token_privilege_bytes": 1},
                 )
+
+    def test_private_desktop_session_metrics_are_numeric_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            metrics = {
+                "desktop_restored": 1,
+                "private_desktop_created": 1,
+                "token_session": 2,
+                "caller_session": 2,
+                "ordinary_child_session": 2,
+                "scheduler_child_session": 2,
+            }
+            write("ordinary", "account_child_start", metrics=metrics)
+            stages = {
+                "stage_" + name + "_ms": 1
+                for name in (
+                    "initialize",
+                    "ancestry",
+                    "selection",
+                    "interpreter",
+                    "cli",
+                    "total",
+                )
+            }
+            write(
+                "provider",
+                "routes",
+                metrics={**stages, "stage_returncode": 0, "stage_error": 0},
+            )
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            data = json.loads(path.read_text())
+            for key, value in metrics.items():
+                self.assertEqual(data[key], value)
+            for key in (
+                "desktop_name",
+                "window_station",
+                "token_session_bytes",
+            ):
+                with self.assertRaises(ValueError):
+                    write("ordinary", "account_child_start", metrics={key: 1})

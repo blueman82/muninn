@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import struct
 import unittest
+from ctypes import wintypes
 from unittest import mock
 
 from install import config_windows
@@ -196,9 +197,8 @@ class SecurityPartsTest(unittest.TestCase):
         with (
             mock.patch("install.config_windows.sys.platform", "win32"),
             mock.patch.object(
-                config_windows, "_get", return_value=0, create=True
+                config_windows, "_read", return_value=security_parts(original)
             ),
-            mock.patch.object(config_windows, "_free", create=True),
             mock.patch.object(
                 config_windows, "_set", return_value=0, create=True
             ) as setter,
@@ -221,16 +221,15 @@ class SecurityPartsTest(unittest.TestCase):
         with (
             mock.patch("install.config_windows.sys.platform", "win32"),
             mock.patch.object(
-                config_windows, "_get", return_value=0, create=True
+                config_windows, "_read", return_value=security_parts(changed)
             ),
-            mock.patch.object(config_windows, "_free", create=True),
             mock.patch.object(
                 config_windows, "_set", return_value=0, create=True
             ) as setter,
             mock.patch.object(
                 config_windows,
                 "_descriptor_bytes",
-                side_effect=[original, changed, changed],
+                return_value=original,
             ),
         ):
             with self.assertRaises(SecurityMismatchError):
@@ -314,3 +313,110 @@ class SecurityPartsTest(unittest.TestCase):
         self.assertTrue(
             all(isinstance(value, int) for value in values.values())
         )
+
+
+class BoundRawDescriptorTest(unittest.TestCase):
+    """Read raw security from the retained source handle before mutation."""
+
+    def test_raw_read_uses_bound_handle_and_validates_returned_components(
+        self,
+    ) -> None:
+        original = descriptor(flags=0x8004, ace_flags=0)
+        calls: list[tuple[int, int, int]] = []
+
+        def query(
+            handle: int,
+            information: int,
+            buffer: ctypes.Array[ctypes.c_char] | None,
+            length: int,
+            needed: ctypes.c_void_p,
+        ) -> int:
+            calls.append((handle, information, length))
+            ctypes.cast(
+                needed, ctypes.POINTER(wintypes.DWORD)
+            ).contents.value = len(original)
+            if buffer is None:
+                return 0
+            ctypes.memmove(buffer, original, len(original))
+            return 1
+
+        with (
+            mock.patch("install.config_windows.sys.platform", "win32"),
+            mock.patch.object(
+                config_windows, "_query", side_effect=query, create=True
+            ),
+            mock.patch.object(
+                ctypes, "get_last_error", return_value=122, create=True
+            ),
+        ):
+            self.assertEqual(config_windows._raw_descriptor(77), original)
+            self.assertEqual(
+                config_windows._read(77), security_parts(original)
+            )
+        self.assertEqual(calls, [(77, 7, 0), (77, 7, len(original))] * 2)
+
+    def test_raw_query_refuses_outside_windows(self) -> None:
+        with (
+            mock.patch("install.config_windows.sys.platform", "darwin"),
+            self.assertRaises(OSError),
+        ):
+            config_windows._raw_descriptor(77)
+
+    def test_raw_query_refuses_native_errors_and_invalid_sizes(self) -> None:
+        for first_size, first_error, second_size, success in (
+            (72, 5, 72, 1),
+            (19, 122, 19, 1),
+            (1048577, 122, 1048577, 1),
+            (72, 122, 73, 1),
+            (72, 122, 19, 1),
+            (72, 122, 72, 0),
+        ):
+            with self.subTest(
+                first_size=first_size,
+                first_error=first_error,
+                second_size=second_size,
+                success=success,
+            ):
+
+                def query(
+                    handle: int,
+                    information: int,
+                    buffer: ctypes.Array[ctypes.c_char] | None,
+                    length: int,
+                    needed: ctypes.c_void_p,
+                    case: tuple[int, int, int] = (
+                        first_size,
+                        second_size,
+                        success,
+                    ),
+                ) -> int:
+                    initial, returned, result = case
+                    size = initial if buffer is None else returned
+                    ctypes.cast(
+                        needed, ctypes.POINTER(wintypes.DWORD)
+                    ).contents.value = size
+                    return 0 if buffer is None else result
+
+                with (
+                    mock.patch("install.config_windows.sys.platform", "win32"),
+                    mock.patch.object(
+                        config_windows,
+                        "_query",
+                        side_effect=query,
+                        create=True,
+                    ),
+                    mock.patch.object(
+                        ctypes,
+                        "get_last_error",
+                        return_value=first_error,
+                        create=True,
+                    ),
+                    mock.patch.object(
+                        ctypes,
+                        "WinError",
+                        return_value=OSError(5, "native refused"),
+                        create=True,
+                    ),
+                    self.assertRaises(OSError),
+                ):
+                    config_windows._raw_descriptor(77)

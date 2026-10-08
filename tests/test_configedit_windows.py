@@ -142,6 +142,30 @@ if sys.platform == "win32":
                 )
                 self.assertTrue(platform_io.is_private(path))
 
+        def test_bound_raw_descriptor_matches_path_before_mutation(
+            self,
+        ) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp).resolve() / "settings.json"
+                configedit.atomic_write(path, b"before", 0o600)
+                for protected in (False, True):
+                    if protected:
+                        subprocess.run(
+                            ["icacls.exe", str(path), "/inheritance:d"],
+                            capture_output=True,
+                            check=True,
+                        )
+                    original = descriptor(path)
+                    with platform_io.open_regular(path) as source:
+                        raw = config_windows._raw_descriptor(
+                            msvcrt.get_osfhandle(source.fileno())
+                        )
+                    self.assertTrue(
+                        raw == original,
+                        json.dumps(descriptor_difference(original, raw)),
+                    )
+                    self.assertEqual(path.read_bytes(), b"before")
+
         def test_unsafe_config_refusal_keeps_bytes_and_acl(self) -> None:
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp).resolve() / "settings.json"

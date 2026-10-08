@@ -29,18 +29,29 @@ if sys.platform == "win32":
             ("inherit", wintypes.BOOL),
         ]
 
-    _get = _SECURITY.GetSecurityInfo
-    _get.argtypes = [
+    _query = _SECURITY.GetKernelObjectSecurity
+    _query.argtypes = [
         ctypes.c_void_p,
-        ctypes.c_int,
         wintypes.DWORD,
         ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_void_p),
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
     ]
-    _get.restype = wintypes.DWORD
+    _query.restype = wintypes.BOOL
+    _owner = _SECURITY.GetSecurityDescriptorOwner
+    _owner.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _owner.restype = wintypes.BOOL
+    _group = _SECURITY.GetSecurityDescriptorGroup
+    _group.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    _group.restype = wintypes.BOOL
+    _dacl = _SECURITY.GetSecurityDescriptorDacl
+    _dacl.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+    ]
+    _dacl.restype = wintypes.BOOL
     _set = _SECURITY.SetSecurityInfo
     _set.argtypes = [
         ctypes.c_void_p,
@@ -66,9 +77,6 @@ if sys.platform == "win32":
         ctypes.c_void_p,
     ]
     _create.restype = ctypes.c_void_p
-    _free = _KERNEL.LocalFree
-    _free.argtypes = [ctypes.c_void_p]
-    _free.restype = ctypes.c_void_p
     _close = _KERNEL.CloseHandle
     _close.argtypes = [ctypes.c_void_p]
     _close.restype = wintypes.BOOL
@@ -148,20 +156,76 @@ def _descriptor_bytes(descriptor: ctypes.c_void_p) -> bytes:
     return ctypes.string_at(descriptor, length)
 
 
-def _read(handle: int) -> tuple[int, bytes, bytes, bytes]:
-    """Read exact security components from an already validated handle."""
+def _raw_descriptor(handle: int) -> bytes:
+    """Read validated raw self-relative security from the retained handle.
+
+    Args:
+        handle: Already validated regular source or empty sibling handle.
+
+    Returns:
+        Descriptor bytes returned for the retained native handle.
+
+    Raises:
+        OSError: If unavailable, malformed or outside the bounded size.
+        WinError: If the native query fails.
+    """
     if sys.platform != "win32":
         raise OSError("native config security is Windows-only")
-    descriptor = ctypes.c_void_p()
-    error = _get(
-        handle, 1, 7, None, None, None, None, ctypes.byref(descriptor)
-    )
-    if error:
-        raise ctypes.WinError(error)
-    try:
-        return security_parts(_descriptor_bytes(descriptor))
-    finally:
-        _free(descriptor)
+    required = wintypes.DWORD()
+    result = _query(handle, 7, None, 0, ctypes.byref(required))
+    error = ctypes.get_last_error()
+    if result or error != 122:
+        raise OSError("native config descriptor size query refused")
+    if not 20 <= required.value <= 1048576:
+        raise OSError("invalid config security descriptor size")
+    buffer = ctypes.create_string_buffer(required.value)
+    if not _query(handle, 7, buffer, len(buffer), ctypes.byref(required)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not 20 <= required.value <= len(buffer):
+        raise OSError("invalid returned config descriptor size")
+    raw = buffer.raw[: required.value]
+    security_parts(raw)
+    return raw
+
+
+def _read(handle: int) -> tuple[int, bytes, bytes, bytes]:
+    """Read exact security components from an already validated handle."""
+    return security_parts(_raw_descriptor(handle))
+
+
+def _components(
+    descriptor: ctypes.c_void_p,
+) -> tuple[ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]:
+    """Get supported component pointers into the retained raw descriptor.
+
+    Args:
+        descriptor: Validated buffer held through native creation and restore.
+
+    Returns:
+        Non-null owner, group and DACL pointers into the same retained buffer.
+
+    Raises:
+        OSError: If unsupported or a component is missing.
+        WinError: If a native component accessor fails.
+    """
+    if sys.platform != "win32":
+        raise OSError("native config security is Windows-only")
+    owner, group, dacl = (ctypes.c_void_p() for _ in range(3))
+    defaulted, present = wintypes.BOOL(), wintypes.BOOL()
+    if not _owner(descriptor, ctypes.byref(owner), ctypes.byref(defaulted)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not _group(descriptor, ctypes.byref(group), ctypes.byref(defaulted)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not _dacl(
+        descriptor,
+        ctypes.byref(present),
+        ctypes.byref(dacl),
+        ctypes.byref(defaulted),
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    if not present.value or not all((owner.value, group.value, dacl.value)):
+        raise OSError("missing native config security component")
+    return owner, group, dacl
 
 
 def _restore(
@@ -208,58 +272,42 @@ def replacement(path: Path) -> tuple[int, Path]:
         raise OSError("native ACL replacement is Windows-only")
     platform_windows.assert_ancestry(path.parent)
     platform_windows.assert_private(path.parent, directory=True)
-    owner, group, dacl, descriptor = (ctypes.c_void_p() for _ in range(4))
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}")
     with open_regular(path, expected=path.lstat()) as source:
         assert_private_fd(source.fileno())
-        result = _get(
-            msvcrt.get_osfhandle(source.fileno()),
-            1,
+        raw = _raw_descriptor(msvcrt.get_osfhandle(source.fileno()))
+        buffer = ctypes.create_string_buffer(raw)
+        descriptor = ctypes.c_void_p(ctypes.addressof(buffer))
+        owner, group, dacl = _components(descriptor)
+        attributes = _Attributes(ctypes.sizeof(_Attributes), descriptor, False)
+        handle = _create(
+            str(tmp),
+            0xC00C0000,
             7,
-            ctypes.byref(owner),
-            ctypes.byref(group),
-            ctypes.byref(dacl),
+            ctypes.byref(attributes),
+            1,
+            0x02200000,
             None,
-            ctypes.byref(descriptor),
         )
-        if result:
-            raise ctypes.WinError(result)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
         try:
-            attributes = _Attributes(
-                ctypes.sizeof(_Attributes), descriptor, False
-            )
-            handle = _create(
-                str(tmp),
-                0xC00C0000,
-                7,
-                ctypes.byref(attributes),
-                1,
-                0x02200000,
-                None,
-            )
-            if handle == ctypes.c_void_p(-1).value:
-                raise ctypes.WinError(ctypes.get_last_error())
-            try:
-                fd = msvcrt.open_osfhandle(
-                    int(handle), os.O_BINARY | os.O_RDWR
-                )
-            except BaseException:
-                _close(handle)
-                tmp.unlink(missing_ok=True)
-                raise
-            try:
-                assert_private_fd(fd)
-                if os.fstat(fd).st_size:
-                    raise OSError("config replacement is not empty")
-                with open_regular(tmp, expected=os.fstat(fd)):
-                    pass
-                _restore(int(handle), owner, group, dacl, descriptor)
-            except BaseException:
-                os.close(fd)
-                tmp.unlink(missing_ok=True)
-                raise
-        finally:
-            _free(descriptor)
+            fd = msvcrt.open_osfhandle(int(handle), os.O_BINARY | os.O_RDWR)
+        except BaseException:
+            _close(handle)
+            tmp.unlink(missing_ok=True)
+            raise
+        try:
+            assert_private_fd(fd)
+            if os.fstat(fd).st_size:
+                raise OSError("config replacement is not empty")
+            with open_regular(tmp, expected=os.fstat(fd)):
+                pass
+            _restore(int(handle), owner, group, dacl, descriptor)
+        except BaseException:
+            os.close(fd)
+            tmp.unlink(missing_ok=True)
+            raise
     try:
         assert_private_fd(fd)
         with open_regular(tmp, expected=os.fstat(fd)):

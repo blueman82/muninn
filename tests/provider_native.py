@@ -23,6 +23,7 @@ from tests.ingest_support import ROOT, TID, line, rollout
 from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
 from tests.provider_native_security import probe
+from tests.provider_native_stages import launcher_stages
 from tests.provider_native_stderr import classify
 from tests.test_classify import codex_meta, user_msg
 
@@ -162,6 +163,7 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
                 calls.append(
                     [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
                 )
+    argv: str | list[str] = []
     try:
         for index, argv in enumerate(calls):
             write(
@@ -198,7 +200,11 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
             write(
                 "provider",
                 None,
-                metrics={**emitter_baseline(env), **baselines(env)},
+                metrics={
+                    **launcher_stages(ctx, env, argv, payload),
+                    **emitter_baseline(env),
+                    **baselines(env),
+                },
             )
         raise
     return results
