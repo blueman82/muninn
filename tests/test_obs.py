@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import obs
+from muninn import obs, store
 from muninn.query.index_age import ALIVE_AT
 from tests.store_support import assert_private, public_read
 
@@ -196,13 +196,35 @@ class StatusTests(ObsCase):
 
     def test_install_sha(self) -> None:
         home = Path(tempfile.mkdtemp(dir=self.home))
-        self.assertIsNone(obs.install_sha({"HOME": str(home)}))
-        lib = home / ".local/lib/muninn"
-        (lib / "abc1234").mkdir(parents=True)
-        (lib / "current").symlink_to(lib / "abc1234")
-        self.assertEqual(obs.install_sha({"HOME": str(home)}), "abc1234")
-        env = {"HOME": str(home), "MUNINN_INSTALL_SHA": "fff0000"}
-        self.assertEqual(obs.install_sha(env), "fff0000")
+        env = {"HOME": str(home), "USERPROFILE": str(home)}
+        self.assertIsNone(obs.install_sha(env))
+        if sys.platform == "win32":
+            sha = "a" * 40
+            base = home / "AppData" / "Local" / "Muninn"
+            lib = base / "lib"
+            store.ensure_private_dir(lib / sha)
+            interpreter = base / "absent-python.exe"
+            self.assertFalse(interpreter.exists())
+            manifest = lib / "selection.json"
+            store.write_json_atomic(
+                manifest, {"sha": sha, "python": str(interpreter)}
+            )
+            original = manifest.read_bytes()
+            self.assertEqual(obs.install_sha(env), sha)
+            with public_read(self, manifest):
+                self.assertIsNone(obs.install_sha(env))
+                self.assertEqual(manifest.read_bytes(), original)
+            self.assertEqual(obs.install_sha(env), sha)
+            self.assertFalse(interpreter.exists())
+            assert_private(self, manifest)
+        else:
+            lib = home / ".local/lib/muninn"
+            (lib / "abc1234").mkdir(parents=True)
+            (lib / "current").symlink_to(lib / "abc1234")
+            self.assertEqual(obs.install_sha(env), "abc1234")
+        self.assertEqual(
+            obs.install_sha(env | {"MUNINN_INSTALL_SHA": "fff0000"}), "fff0000"
+        )
 
     def test_poller_freshness(self) -> None:
         now = time.time()

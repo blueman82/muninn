@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import NoReturn
 from unittest import mock
 
-from muninn import platform_io, store
+from muninn import platform_io, platform_windows, store
 from tests import store_support
 from tests.store_support import (
     HOLD_LOCK,
@@ -35,7 +35,11 @@ class PathTests(StoreCase):
     """Data dir resolution and atomic private file writes."""
 
     def test_data_home_env_default_and_expansion(self) -> None:
-        default = Path.home() / ".local" / "share" / "muninn"
+        default = (
+            Path.home() / "AppData" / "Local" / "Muninn" / "data"
+            if sys.platform == "win32"
+            else Path.home() / ".local" / "share" / "muninn"
+        )
         self.assertEqual(
             store.data_home({"MUNINN_HOME": "/x/y"}), Path("/x/y")
         )
@@ -127,40 +131,88 @@ class PathTests(StoreCase):
             ["blocked", "status.json"],
         )
 
-    def test_an_interrupt_before_the_rename_leaves_no_temp_file(self) -> None:
+    def test_an_interrupt_before_publication_leaves_no_temp_file(self) -> None:
         target = self.tmp / "status.json"
         store.write_json_atomic(target, {"old": True})
+        calls: list[Path] = []
 
         def interrupt(src: Path, dst: Path) -> NoReturn:
+            calls.append(dst)
             raise KeyboardInterrupt
 
-        with (
-            mock.patch.object(Path, "replace", interrupt),
-            self.assertRaises(KeyboardInterrupt),
-        ):
+        if sys.platform == "win32":
+
+            def native(
+                src: Path,
+                dst: Path,
+                *,
+                replace: bool,
+                retry_move: bool = False,
+                directory: bool = False,
+            ) -> NoReturn:
+                self.assertTrue(replace)
+                self.assertTrue(retry_move)
+                self.assertFalse(directory)
+                assert_private(self, src)
+                interrupt(src, dst)
+
+            patch = mock.patch.object(platform_windows, "publish", native)
+        else:
+            patch = mock.patch.object(Path, "replace", interrupt)
+        with patch, self.assertRaises(KeyboardInterrupt):
             store.write_json_atomic(target, {"new": True})
+        self.assertEqual(calls, [target])
         self.assertEqual(json.loads(target.read_text()), {"old": True})
         self.assertEqual(
             sorted(p.name for p in self.tmp.iterdir()), ["status.json"]
         )
+        assert_private(self, target)
 
-    def test_an_interrupt_after_the_rename_is_not_masked(self) -> None:
+    def test_an_interrupt_after_publication_is_not_masked(self) -> None:
         target = self.tmp / "status.json"
+        calls: list[Path] = []
         real_replace = Path.replace
 
         def replace_then_interrupt(src: Path, dst: Path) -> NoReturn:
             real_replace(src, dst)
-            raise KeyboardInterrupt  # a signal handler firing just after
+            calls.append(dst)
+            raise KeyboardInterrupt
 
-        with (
-            mock.patch.object(Path, "replace", replace_then_interrupt),
-            self.assertRaises(KeyboardInterrupt),
-        ):
+        if sys.platform == "win32":
+            real_publish = platform_windows.publish
+
+            def native(
+                src: Path,
+                dst: Path,
+                *,
+                replace: bool,
+                retry_move: bool = False,
+                directory: bool = False,
+            ) -> NoReturn:
+                self.assertTrue(replace)
+                self.assertTrue(retry_move)
+                self.assertFalse(directory)
+                real_publish(
+                    src,
+                    dst,
+                    replace=replace,
+                    retry_move=retry_move,
+                    directory=directory,
+                )
+                calls.append(dst)
+                raise KeyboardInterrupt
+
+            patch = mock.patch.object(platform_windows, "publish", native)
+        else:
+            patch = mock.patch.object(Path, "replace", replace_then_interrupt)
+        with patch, self.assertRaises(KeyboardInterrupt):
             store.write_json_atomic(target, {"ok": True})
+        self.assertEqual(calls, [target])
         self.assertEqual(json.loads(target.read_text()), {"ok": True})
         self.assertEqual(
             sorted(p.name for p in self.tmp.iterdir()), ["status.json"]
         )
+        assert_private(self, target)
 
 
 class ReaderTests(StoreCase):

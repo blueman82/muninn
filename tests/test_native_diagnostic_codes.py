@@ -198,3 +198,33 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
             for key in ("child_module_name", "child_error_body"):
                 with self.assertRaises(ValueError):
                     write("ordinary", "account_child_start", metrics={key: 1})
+
+    def test_child_exception_kind_is_a_fixed_numeric_code(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            for value in range(-1, 6):
+                write(
+                    "ordinary",
+                    "account_child_start",
+                    metrics={"child_exception_kind": value},
+                )
+                self.assertEqual(
+                    json.loads(path.read_text())["child_exception_kind"], value
+                )
+            for value in (-2, 6, True):
+                with self.assertRaises(ValueError):
+                    write(
+                        "ordinary",
+                        "account_child_start",
+                        metrics={"child_exception_kind": value},
+                    )
+            for key in ("child_exception_name", "child_exception_body"):
+                with self.assertRaises(ValueError):
+                    write("ordinary", "account_child_start", metrics={key: 1})

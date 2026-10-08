@@ -160,6 +160,7 @@ _METRICS = frozenset(
         "child_report_seen",
         "child_failure_stage",
         "child_failure_hresult",
+        "child_exception_kind",
         "child_failure_line",
         "private_desktop_created",
         "token_session",
@@ -225,7 +226,10 @@ def _previous(path: Path) -> dict[str, str | int]:
 def _safe_field(key: str, value: object) -> bool:
     """Accept only explicit scalar fields when exporting a child artifact."""
     if key in _METRICS | _CODES:
-        return isinstance(value, int)
+        return isinstance(value, int) and (
+            key != "child_exception_kind"
+            or (type(value) is int and -1 <= value <= 5)
+        )
     if not isinstance(value, str):
         return False
     if key == "phase":
@@ -349,7 +353,7 @@ def write(
         raise ValueError("unsupported native diagnostic phase")
     if metrics is not None and (
         not set(metrics) <= _METRICS
-        or not all(isinstance(value, int) for value in metrics.values())
+        or not all(_safe_field(key, value) for key, value in metrics.items())
     ):
         raise ValueError("unsupported native diagnostic metric")
     directory = os.environ.get("MUNINN_NATIVE_SCRATCH") or os.environ.get(
