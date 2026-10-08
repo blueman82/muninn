@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import shutil
@@ -16,6 +17,30 @@ from muninn import platform_io
 from tests.ingest_support import ROOT
 
 if sys.platform == "win32":
+
+    def delete_access_error(path: Path) -> int:
+        """Request real directory DELETE access and return its refusal code."""
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel.CreateFileW
+        create.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+        ]
+        create.restype = ctypes.c_void_p
+        close = kernel.CloseHandle
+        close.argtypes = [ctypes.c_void_p]
+        close.restype = ctypes.c_int
+        handle = create(str(path), 0x10000, 7, None, 3, 0x02200000, None)
+        if handle == ctypes.c_void_p(-1).value:
+            return ctypes.get_last_error()
+        if not close(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return 0
 
     class BootstrapGuardTests(unittest.TestCase):
         """Hold installed identities for an actual cmd-to-Python lifetime."""
@@ -84,9 +109,7 @@ if sys.platform == "win32":
                     self.assertTrue(
                         ready.exists(), "native bootstrap did not start"
                     )
-                    for path in (ancestor, base, lib, release):
-                        with self.assertRaises(OSError):
-                            path.rename(path.with_name(path.name + "-swapped"))
+                    codes = self.assert_guarded((ancestor, base, lib, release))
                     with self.assertRaises(OSError):
                         forged.replace(manifest)
                     self.assertFalse(marker.exists())
@@ -98,6 +121,16 @@ if sys.platform == "win32":
                     out, err = process.communicate(timeout=20)
                     self.assertEqual((process.returncode, err), (0, b""))
                     self.assertEqual(json.loads(out), {"ok": True})
+                    self.assert_released((ancestor, base, lib, release))
+                    print(
+                        json.dumps(
+                            {
+                                "delete_open_winerror": 32,
+                                "rename_winerrors": sorted(codes),
+                                "guards_released": True,
+                            }
+                        )
+                    )
                 finally:
                     stop.touch()
                     if process.poll() is None:
@@ -106,6 +139,35 @@ if sys.platform == "win32":
                         except subprocess.TimeoutExpired:
                             process.kill()
                             process.communicate(timeout=5)
+
+        def assert_guarded(self, paths: tuple[Path, ...]) -> set[int]:
+            """Check DELETE and rename refusal with unchanged identities."""
+            codes: set[int] = set()
+            for path in paths:
+                before = path.stat()
+                target = path.with_name(path.name + "-swapped")
+                self.assertEqual(delete_access_error(path), 32, path.name)
+                with self.assertRaises(OSError, msg=path.name) as refused:
+                    path.rename(target)
+                code = getattr(refused.exception, "winerror", None)
+                self.assertIn(code, (5, 32))
+                assert isinstance(code, int)
+                codes.add(code)
+                after = path.stat()
+                self.assertEqual(
+                    (before.st_dev, before.st_ino),
+                    (after.st_dev, after.st_ino),
+                )
+                self.assertFalse(target.exists())
+            return codes
+
+        def assert_released(self, paths: tuple[Path, ...]) -> None:
+            """Require guards to release DELETE and rename after child exit."""
+            for path in paths:
+                self.assertEqual(delete_access_error(path), 0)
+                moved = path.with_name(path.name + "-closed")
+                path.rename(moved)
+                moved.rename(path)
 
         def copy_bootstrap(self, bin_dir: Path) -> None:
             """Copy the isolated stable launcher into the synthetic install."""
@@ -131,7 +193,11 @@ if sys.platform == "win32":
 
 
 def compile_marker(
-    case: unittest.TestCase, unvalidated: Path, marker: Path
+    case: unittest.TestCase,
+    unvalidated: Path,
+    marker: Path,
+    *,
+    exit_code: int = 0,
 ) -> None:
     """Compile an unvalidated marker executable in the fixture."""
     compile_env = os.environ | {
@@ -143,7 +209,9 @@ def compile_marker(
         "public static void Main() { File.WriteAllText("
         "Environment.GetEnvironmentVariable("
         '"MUNINN_TEST_MARKER"), '
-        '"unvalidated"); }}'
+        '"unvalidated"); '
+        f"Environment.Exit({exit_code});"
+        " }}"
     )
     subprocess.run(
         [
@@ -161,7 +229,8 @@ def compile_marker(
         timeout=90,
     )
 
-    subprocess.run([str(unvalidated)], env=compile_env, check=True, timeout=30)
+    done = subprocess.run([str(unvalidated)], env=compile_env, timeout=30)
+    case.assertEqual(done.returncode, exit_code)
     case.assertEqual(marker.read_text(), "unvalidated")
     marker.unlink()
 

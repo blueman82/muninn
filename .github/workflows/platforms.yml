@@ -17,7 +17,7 @@ jobs:
   platforms:
     name: ${{ matrix.runner }} / ${{ matrix.check }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

@@ -195,7 +195,8 @@ namespace MuninnBootstrap {
 
         private static SafeFileHandle Open(string path, bool directory) {
             // Omit DELETE sharing so ancestors cannot be renamed during use.
-            var handle = CreateFileW(path, directory ? 0x20080u : 0x80000000u,
+            // Metadata-only opens do not establish read/delete sharing protection.
+            var handle = CreateFileW(path, directory ? 0x20081u : 0x80000000u,
                 directory ? 3u : 1u, IntPtr.Zero, 3u, 0x02200000u, IntPtr.Zero);
             try {
                 if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -278,12 +279,13 @@ namespace MuninnBootstrap {
     }
     if (-not $python) {
         foreach ($name in @('python3.13.exe', 'python3.14.exe', 'python.exe')) {
-            $command = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
-            if ($command) {
+            $commands = @(Get-Command $name -CommandType Application -All -ErrorAction SilentlyContinue)
+            foreach ($command in $commands) {
                 $candidate = Assert-InterpreterField $command.Path
                 $python = Python-Info $candidate
                 if ($python) { break }
             }
+            if ($python) { break }
         }
     }
     if (-not $python) { throw 'No Python 3.13 or newer found; set MUNINN_PYTHON' }

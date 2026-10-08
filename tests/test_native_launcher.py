@@ -145,6 +145,58 @@ if sys.platform == "win32":
             self.assertEqual(done.stderr, "")
             self.assertEqual(json.loads(done.stdout), ["stats"])
 
+        def path_candidate(
+            self, name: str, marker: Path, *, exit_code: int = 0
+        ) -> Path:
+            """Build a proven marker application at one private PATH entry."""
+            directory = self.root / name
+            platform_io.ensure_private_dir(directory)
+            executable = directory / "python.exe"
+            compile_marker(self, executable, marker, exit_code=exit_code)
+            return directory
+
+        def test_safe_nonqualifying_path_probe_uses_later_python(self) -> None:
+            marker = self.root / "first-probe-marker"
+            first = self.path_candidate("first", marker, exit_code=1)
+            self.env.pop("MUNINN_PYTHON")
+            self.env["MUNINN_TEST_MARKER"] = str(marker)
+            self.env["PATH"] = os.pathsep.join(
+                [
+                    str(first),
+                    str(Path(sys.executable).parent),
+                    self.env["PATH"],
+                ]
+            )
+            done = self.run_cmd(["stats"])
+            self.assertEqual((done.returncode, done.stderr), (17, ""))
+            self.assertEqual(json.loads(done.stdout), ["stats"])
+            self.assertEqual(marker.read_text(), "unvalidated")
+
+        def test_unsafe_first_path_refuses_before_any_candidate_executes(
+            self,
+        ) -> None:
+            marker = self.root / "probe-marker"
+            first = self.path_candidate("unsafe-first", marker)
+            later = self.path_candidate("later", marker)
+            subprocess.run(
+                [
+                    "icacls",
+                    str(first / "python.exe"),
+                    "/grant",
+                    "*S-1-1-0:(W)",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            self.env.pop("MUNINN_PYTHON")
+            self.env["MUNINN_TEST_MARKER"] = str(marker)
+            self.env["PATH"] = os.pathsep.join(
+                [str(first), str(later), self.env["PATH"]]
+            )
+            done = self.run_cmd(["stats"])
+            self.assertEqual((done.returncode, done.stdout), (127, ""))
+            self.assertFalse(marker.exists())
+
         def test_malformed_record_refuses_before_override_marker_executes(
             self,
         ) -> None:
