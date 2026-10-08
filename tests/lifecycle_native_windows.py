@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import re
 import subprocess
@@ -9,11 +10,13 @@ import sys
 import time
 import uuid
 import xml.etree.ElementTree as ET
+from ctypes import wintypes
 from pathlib import Path
 from typing import cast
 
 from install.context import Ctx, run_real
 from install.lifecycle import (
+    _SID,
     _same_process,
     _task_engines,
     task_bytes,
@@ -237,3 +240,98 @@ def xml_validation_codes(xml: Path) -> dict[str, int]:
         and isinstance(code, int)
         and not isinstance(code, bool)
     }
+
+
+def identity_codes(data: bytes) -> dict[str, int]:
+    """Reduce the current identity response to SID shape and admin count."""
+    value: object = json.loads(data)
+    if not isinstance(value, dict) or not isinstance(
+        value.get("elevated"), bool
+    ):
+        raise ValueError("identity probe shape unavailable")
+    sid = value.get("sid")
+    return {
+        "sid_valid": int(
+            isinstance(sid, str) and _SID.fullmatch(sid) is not None
+        ),
+        "admin_member": int(value["elevated"]),
+    }
+
+
+def token_codes() -> dict[str, int]:
+    """Inspect this child token without changing privileges or launching it."""
+    if sys.platform != "win32":
+        raise OSError("native token probe requires Windows")
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    current = kernel.GetCurrentProcess
+    current.argtypes, current.restype = [], ctypes.c_void_p
+    close = kernel.CloseHandle
+    close.argtypes, close.restype = [ctypes.c_void_p], wintypes.BOOL
+    opened = security.OpenProcessToken
+    opened.argtypes = [
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    opened.restype = wintypes.BOOL
+    query = security.GetTokenInformation
+    query.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    query.restype = wintypes.BOOL
+    token = ctypes.c_void_p()
+    if not opened(current(), 8, ctypes.byref(token)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        codes: dict[str, int] = {}
+        size = wintypes.DWORD()
+        for key, information in (
+            ("elevation_type", 18),
+            ("token_elevated", 20),
+        ):
+            value = wintypes.DWORD()
+            if not query(
+                token,
+                information,
+                ctypes.byref(value),
+                ctypes.sizeof(value),
+                ctypes.byref(size),
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            codes[key] = int(value.value)
+        linked = ctypes.c_void_p()
+        available = bool(
+            query(
+                token,
+                19,
+                ctypes.byref(linked),
+                ctypes.sizeof(linked),
+                ctypes.byref(size),
+            )
+        )
+        codes["linked_token_available"] = int(available)
+        codes["linked_token_error"] = (
+            0 if available else ctypes.get_last_error()
+        )
+        if available and linked.value:
+            close(linked)
+        response = subprocess.run(
+            powershell(
+                "$i=[Security.Principal.WindowsIdentity]::GetCurrent();"
+                "$p=[Security.Principal.WindowsPrincipal]::new($i);"
+                "$a=[Security.Principal.WindowsBuiltInRole]::Administrator;"
+                "@{sid=$i.User.Value;elevated=$p.IsInRole($a)}"
+                "|ConvertTo-Json -Compress"
+            ),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        return codes | identity_codes(response.stdout)
+    finally:
+        close(token)

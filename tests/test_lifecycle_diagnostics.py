@@ -312,3 +312,29 @@ class NativeHarnessCleanupTests(unittest.TestCase):
                     for call in write.call_args_list
                 )
             )
+
+
+class OrdinaryTokenDiagnosticTests(unittest.TestCase):
+    """Only identity shape and privilege counters leave the synthetic child."""
+
+    def test_identity_exports_shape_and_admin_count_only(self) -> None:
+        value = lifecycle_native_windows.identity_codes(
+            b'{"sid":"S-1-5-21-1-2-3-1001","elevated":true,"text":"private"}'
+        )
+        self.assertEqual(value, {"sid_valid": 1, "admin_member": 1})
+        self.assertNotIn("S-1", json.dumps(value))
+        self.assertEqual(
+            lifecycle_native_windows.identity_codes(
+                b'{"sid":"private transcript","elevated":false}'
+            ),
+            {"sid_valid": 0, "admin_member": 0},
+        )
+
+    def test_native_token_probe_refuses_other_platforms(self) -> None:
+        with (
+            mock.patch.object(
+                lifecycle_native_windows.sys, "platform", "darwin"
+            ),
+            self.assertRaises(OSError),
+        ):
+            lifecycle_native_windows.token_codes()

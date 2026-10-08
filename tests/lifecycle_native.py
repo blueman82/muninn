@@ -145,7 +145,11 @@ def main() -> int:
     if args.child is not None:
         result: dict[str, object]
         try:
-            write("lifecycle", "ordinary_child_identity")
+            write(
+                "lifecycle",
+                "ordinary_child_identity",
+                metrics=lifecycle_native_windows.token_codes(),
+            )
             ordinary = lifecycle._identity(
                 Ctx(args.child, run_real, "identity")
             )
