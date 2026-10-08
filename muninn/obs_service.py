@@ -66,6 +66,16 @@ def parse_process(data: bytes) -> dict[str, object]:
     return record
 
 
+# The scheduler leaves out elements that hold their schema default when it
+# stores a definition, so a missing element means that default value.
+_TASK_DEFAULTS = {
+    "t:Principals/t:Principal/t:RunLevel": "LeastPrivilege",
+    "t:Settings/t:MultipleInstancesPolicy": "IgnoreNew",
+    "t:Settings/t:Enabled": "true",
+    "t:Triggers/t:LogonTrigger/t:Enabled": "true",
+}
+
+
 def task_matches(expected: ET.Element, actual: ET.Element) -> bool:
     """Require one owned user principal and one safe action with exact args."""
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
@@ -102,8 +112,8 @@ def task_matches(expected: ET.Element, actual: ET.Element) -> bool:
     ):
         return False
     return all(
-        actual.findtext(path, namespaces=ns)
-        == expected.findtext(path, namespaces=ns)
+        actual.findtext(path, _TASK_DEFAULTS.get(path), ns)
+        == expected.findtext(path, _TASK_DEFAULTS.get(path), ns)
         for path in fields
     )
 
