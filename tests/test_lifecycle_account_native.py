@@ -11,7 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from tests import lifecycle_account_native, lifecycle_account_scripts
+from tests import (
+    lifecycle_account_child,
+    lifecycle_account_native,
+    lifecycle_account_scripts,
+)
 
 
 class AccountSpikeTests(unittest.TestCase):
@@ -35,7 +39,7 @@ class AccountSpikeTests(unittest.TestCase):
     def test_child_first_parent_cmdlet_selects_its_builtin_module(
         self,
     ) -> None:
-        source = lifecycle_account_scripts.child_script(Path("/synthetic"))
+        source = lifecycle_account_child.child_script(Path("/synthetic"))
         qualified = (
             "$base=Microsoft.PowerShell.Management\\Split-Path "
             "-Parent $MyInvocation.MyCommand.Path"
@@ -47,6 +51,35 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("$childStage=2;$name=Split-Path -Leaf $base", source)
         self.assertNotIn("$env:PSModulePath=", source)
         self.assertNotIn("Import-Module", source)
+
+    def test_child_module_observations_keep_the_original_call_and_exit(
+        self,
+    ) -> None:
+        child = lifecycle_account_child.child_script(Path("/synthetic"))
+        parent = lifecycle_account_scripts.outer_script(Path("/synthetic"))
+        opened = child.index("[IO.File]::OpenRead")
+        called = child.index("Microsoft.PowerShell.Management\\Split-Path")
+        self.assertLess(opened, called)
+        self.assertIn("Microsoft.PowerShell.Management.psd1", child)
+        self.assertIn("$moduleStream.ReadByte()", child)
+        self.assertIn("$moduleStream.Dispose()", child)
+        self.assertIn("$originalChildError=$_", child)
+        self.assertIn("CategoryInfo.Category", child)
+        self.assertIn("InvocationInfo.MyCommand.CommandType", child)
+        self.assertIn("finally {exit 1}", child)
+        self.assertNotIn("Import-Module", child)
+        self.assertNotIn("$env:PSModulePath=", child)
+        self.assertNotIn("Exception.Message", child)
+        for key in (
+            "child_module_readable",
+            "child_module_hresult",
+            "child_error_category",
+            "child_command_type",
+        ):
+            self.assertIn(key, child)
+            self.assertIn(key, parent)
+        self.assertEqual(parent.count("Copy-ChildCodes $value $report"), 2)
+        self.assertIn("[Enum]::IsDefined", parent)
 
     def test_noop_definition_keeps_safe_native_task_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,7 +217,7 @@ class AccountSpikeTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = lifecycle_account_scripts.outer_script(Path(temporary))
-            child = lifecycle_account_scripts.child_script(Path(temporary))
+            child = lifecycle_account_child.child_script(Path(temporary))
         self.assertLess(
             source.index("::ParseFile("), source.index("$launched=")
         )

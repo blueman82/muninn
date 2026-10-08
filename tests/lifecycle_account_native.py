@@ -15,8 +15,9 @@ from install.context import Ctx, run_real
 from install.lifecycle import task_bytes, task_xml
 from muninn import platform_io
 from muninn.obs_service import literal, powershell
+from tests.lifecycle_account_child import child_script
 from tests.lifecycle_account_errors import failure_codes, response
-from tests.lifecycle_account_scripts import child_script, outer_script
+from tests.lifecycle_account_scripts import outer_script
 from tests.native_diagnostics import write
 
 

@@ -19,6 +19,29 @@ function Read-ChildJson($path){
   return ([string]::new($buffer,0,$count)|ConvertFrom-Json)
  } finally {$reader.Dispose()}
 }
+function Copy-ChildCodes($value,$report){
+ $codes=@{}
+ foreach($key in @('child_module_readable','child_module_hresult',
+                  'child_error_category','child_command_type')){
+  if($null -eq $value.$key){continue}
+  if($value.$key -isnot [int] -and $value.$key -isnot [long]){
+   throw 'child_number_invalid'
+  }
+  $number=[int]$value.$key
+  if($key -eq 'child_module_readable' -and $number -notin @(-1,0,1)){
+   throw 'child_number_invalid'
+  }
+  if($number -ne -1 -and
+     (($key -eq 'child_error_category' -and ![Enum]::IsDefined(
+      [Management.Automation.ErrorCategory],$number)) -or
+      ($key -eq 'child_command_type' -and ![Enum]::IsDefined(
+      [Management.Automation.CommandTypes],$number)))){
+   throw 'child_enum_invalid'
+  }
+  $codes[$key]=$number
+ }
+ foreach($key in $codes.Keys){$report[$key]=$codes[$key]}
+}
 function Read-ChildEvidence($base,$report){
  $report.child_report_seen=0
  try {
@@ -33,6 +56,7 @@ function Read-ChildEvidence($base,$report){
    }
    $code=[int]$value.winerror
   }
+  Copy-ChildCodes $value $report
   $report.phase=$value.phase;$report.child_report_seen=1
   $report.child_failure_stage=2;$report.child_failure_hresult=$code
   $report.child_failure_line=0;return
@@ -47,6 +71,7 @@ function Read-ChildEvidence($base,$report){
   }
   if($value.stage -notin @(1,3) -or $value.line -lt 0 -or
      $value.line -gt 4096){throw 'child_stage_invalid'}
+  Copy-ChildCodes $value $report
   $report.child_failure_hresult=[int]$value.hresult
   $report.child_failure_stage=[int]$value.stage
   $report.child_failure_line=[int]$value.line
@@ -87,67 +112,6 @@ function Test-Owned($task,$base){
 }
 """
 
-CHILD = r"""
-$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
-$base=Split-Path -Parent $MyInvocation.MyCommand.Path
-$report=@{phase='account_child_start';ordinary_child_admin=1;
- scheduler_child_admin=1;scheduler_exit=-1;scheduler_instances=-1;
- interactive_recognized=0;account_retained=1}
-$name=Split-Path -Leaf $base;$task=$null;$service=$null
-try {
- $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
- $principal=[Security.Principal.WindowsPrincipal]::new($identity)
- $admin=[Security.Principal.WindowsBuiltInRole]::Administrator
- $report.ordinary_child_admin=[int]$principal.IsInRole($admin)
- $report.ordinary_child_session=[Diagnostics.Process]::GetCurrentProcess().SessionId
- if($report.ordinary_child_admin -ne 0){throw 'ordinary_identity_required'}
- $service=New-Object -ComObject Schedule.Service;$service.Connect()
- $folder=$service.GetFolder('\')
- $definition=$service.NewTask(0)
- $definition.XmlText=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
- if($definition.Principal.UserId -ne $identity.User.Value -or
-    $definition.Principal.LogonType -ne 3 -or
-    $definition.Principal.RunLevel -ne 0){throw 'task_identity_mismatch'}
- $report.phase='account_task_create'
- $task=$folder.RegisterTaskDefinition($name,$definition,2,$null,$null,3,$null)
- [IO.File]::WriteAllText((Join-Path $base 'registered.xml'),$task.Xml)
- if(!(Test-Owned $task $base)){throw 'task_definition_mismatch'}
- $report.phase='account_task_run';$running=$task.Run($null)
- $report.phase='account_task_wait'
- $deadline=[DateTime]::UtcNow.AddSeconds(30)
- $result=Join-Path $base 'task-result.json'
- while(!(Test-Path -LiteralPath $result) -or
-       $task.GetInstances(0).Count -ne 0){
-  if([DateTime]::UtcNow -gt $deadline){throw 'task_execution_unproven'}
-  Start-Sleep -Milliseconds 100
- }
- $scheduled=Get-Content -LiteralPath $result -Raw|ConvertFrom-Json
- if($scheduled.sid -ne $identity.User.Value -or $scheduled.pid -eq $PID -or
-    $scheduled.created -le 0){
-  throw 'scheduled_identity_mismatch'
- }
- $report.scheduler_child_admin=[int]$scheduled.admin
- $report.scheduler_child_session=[int]$scheduled.session
- if($report.scheduler_child_session -ne $report.ordinary_child_session){
-  throw 'scheduled_session_mismatch'
- }
- $report.scheduler_exit=[int]$task.LastTaskResult
- $report.scheduler_instances=[int]$task.GetInstances(0).Count
- if($report.scheduler_child_admin -ne 0 -or $report.scheduler_exit -ne 0){
-  throw 'scheduled_ordinary_execution_required'
- }
- $report.interactive_recognized=1
-} catch {
- $report.winerror=[int]$_.Exception.HResult
-} finally {
- if($null -ne $task){
-  try {$report.scheduler_instances=[int]$task.GetInstances(0).Count}
-  catch {$report.scheduler_instances=-1}
- }
- [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),
-  ($report|ConvertTo-Json -Compress))
-}
-"""
 
 _OUTER = r"""
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
@@ -372,35 +336,3 @@ def outer_script(parent: Path) -> str:
         "$report.winerror=[int]$probeFailure.NativeErrorCode};"
         "$report|ConvertTo-Json -Compress;exit 1}"
     )
-
-
-def child_script(parent: Path) -> str:
-    """Retain uncaught child codes while explicitly preserving exit one."""
-    header = (
-        f"$childBase={literal(str(parent))};$childStage=1\n"
-        "trap {try {\n"
-        "$nativeChildFailure=$_.Exception.GetBaseException();"
-        "$line=[int]$_.InvocationInfo.ScriptLineNumber;"
-        "$data='{\"stage\":'+$childStage+',\"hresult\":'+"
-        "[int]$nativeChildFailure.HResult+',\"line\":'+$line+'}';"
-        "$path=[IO.Path]::Combine($childBase,'child-failure.json');"
-        "if(![IO.File]::Exists($path)){[IO.File]::WriteAllText($path,$data)}"
-        "\n} catch {} finally {exit 1}}\n"
-    )
-    body = (
-        CHILD.replace(
-            "$base=Split-Path -Parent $MyInvocation.MyCommand.Path",
-            "$base=Microsoft.PowerShell.Management\\Split-Path "
-            "-Parent $MyInvocation.MyCommand.Path",
-        )
-        .replace(
-            "$name=Split-Path -Leaf $base",
-            "$childStage=2;$name=Split-Path -Leaf $base",
-        )
-        .replace(
-            " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
-            " $childStage=3\n"
-            " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
-        )
-    )
-    return OWNED + header + body
