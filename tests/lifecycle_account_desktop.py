@@ -69,6 +69,7 @@ public static class MuninnCiDesktop {
  public static bool Restored=true;
  public static bool StationRestoreOk,DesktopRestoreOk;
  public static bool StationIdentityOk,DesktopIdentityOk;
+ public static bool DesktopIdentityBefore,DesktopRestoreCalled;
  public static int StationRestoreError,DesktopRestoreError;
  static void Required(bool valid) {
   if(!valid) throw new System.ComponentModel.Win32Exception(
@@ -77,7 +78,8 @@ public static class MuninnCiDesktop {
  public static string Prepare(string account,string caller) {
   const int CWF_CREATE_ONLY=1;
   IntPtr originalStation=GetProcessWindowStation();
-  IntPtr originalDesktop=GetThreadDesktop(GetCurrentThreadId());
+  int originalThread=GetCurrentThreadId();
+  IntPtr originalDesktop=GetThreadDesktop(originalThread);
   Required(originalStation!=IntPtr.Zero && originalDesktop!=IntPtr.Zero);
   string stationName="mn-"+Guid.NewGuid().ToString("N");
   string desktopName="mn-"+Guid.NewGuid().ToString("N");
@@ -102,10 +104,18 @@ public static class MuninnCiDesktop {
    } finally {
     StationRestoreOk=SetProcessWindowStation(originalStation);
     StationRestoreError=StationRestoreOk ? 0 : Marshal.GetLastWin32Error();
-    DesktopRestoreOk=SetThreadDesktop(originalDesktop);
-    DesktopRestoreError=DesktopRestoreOk ? 0 : Marshal.GetLastWin32Error();
+    DesktopIdentityBefore=StationRestoreOk &&
+     GetProcessWindowStation()==originalStation &&
+     originalDesktop!=IntPtr.Zero &&
+     GetThreadDesktop(originalThread)==originalDesktop;
+    DesktopRestoreCalled=!DesktopIdentityBefore;
+    DesktopRestoreOk=DesktopIdentityBefore;DesktopRestoreError=0;
+    if(DesktopRestoreCalled) {
+     DesktopRestoreOk=SetThreadDesktop(originalDesktop);
+     DesktopRestoreError=DesktopRestoreOk ? 0 : Marshal.GetLastWin32Error();
+    }
     StationIdentityOk=GetProcessWindowStation()==originalStation;
-    DesktopIdentityOk=GetThreadDesktop(GetCurrentThreadId())==originalDesktop;
+    DesktopIdentityOk=GetThreadDesktop(originalThread)==originalDesktop;
     Restored=StationRestoreOk && DesktopRestoreOk &&
      StationIdentityOk && DesktopIdentityOk;
    }

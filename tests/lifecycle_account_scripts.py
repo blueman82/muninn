@@ -165,6 +165,8 @@ try {
   $report.desktop_restore_error=[int][MuninnCiDesktop]::DesktopRestoreError
   $report.station_identity_ok=[int][MuninnCiDesktop]::StationIdentityOk
   $report.desktop_identity_ok=[int][MuninnCiDesktop]::DesktopIdentityOk
+  $report.desktop_identity_before=[int][MuninnCiDesktop]::DesktopIdentityBefore
+  $report.desktop_restore_called=[int][MuninnCiDesktop]::DesktopRestoreCalled
  }
  if(![MuninnCiDesktop]::Restored){throw 'desktop_restore_unproven'}
  $quiescent=$true;$report.private_desktop_created=1

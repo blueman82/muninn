@@ -128,3 +128,68 @@ class PrivateDesktopResultTests(unittest.TestCase):
             "desktop_identity_ok",
         ):
             self.assertIn("$report." + field, script)
+
+    def test_redundant_setter_skips_only_verified_original_binding(
+        self,
+    ) -> None:
+        script = outer_script(Path("/synthetic"))
+        original = script.index("int originalThread=GetCurrentThreadId()")
+        before = script.index("DesktopIdentityBefore=StationRestoreOk &&")
+        conditional = script.index("if(DesktopRestoreCalled)")
+        setter = script.index(
+            "DesktopRestoreOk=SetThreadDesktop(originalDesktop)"
+        )
+        final = script.index(
+            "DesktopIdentityOk=GetThreadDesktop(originalThread)==originalDesktop"
+        )
+        self.assertLess(original, before)
+        self.assertLess(before, conditional)
+        self.assertLess(conditional, setter)
+        self.assertLess(setter, final)
+        self.assertIn(
+            "GetProcessWindowStation()==originalStation &&",
+            script[before:conditional],
+        )
+        self.assertIn(
+            "originalDesktop!=IntPtr.Zero &&", script[before:conditional]
+        )
+        self.assertIn(
+            "GetThreadDesktop(originalThread)==originalDesktop",
+            script[before:conditional],
+        )
+        self.assertIn(
+            "DesktopRestoreCalled=!DesktopIdentityBefore",
+            script[before:conditional],
+        )
+        self.assertIn(
+            "DesktopRestoreOk=DesktopIdentityBefore",
+            script[before:conditional],
+        )
+        self.assertIn("$report.desktop_identity_before", script)
+        self.assertIn("$report.desktop_restore_called", script)
+        self.assertNotIn("DesktopRestoreError==170", script)
+
+    def test_unknown_or_different_binding_still_requires_setter_and_identity(
+        self,
+    ) -> None:
+        script = outer_script(Path("/synthetic"))
+        conditional = script.index("if(DesktopRestoreCalled)")
+        verification = script.index(
+            "StationIdentityOk=GetProcessWindowStation()", conditional
+        )
+        branch = script[conditional:verification]
+        self.assertIn(
+            "DesktopRestoreOk=SetThreadDesktop(originalDesktop)", branch
+        )
+        self.assertIn("DesktopRestoreError=DesktopRestoreOk ? 0 :", branch)
+        self.assertIn(
+            "Restored=StationRestoreOk && DesktopRestoreOk &&",
+            script[verification:],
+        )
+        self.assertIn(
+            "StationIdentityOk && DesktopIdentityOk", script[verification:]
+        )
+        self.assertIn(
+            'throw new InvalidOperationException("desktop_restore_unproven")',
+            script[verification:],
+        )
