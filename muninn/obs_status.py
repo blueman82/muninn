@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from muninn import query, store
+from muninn import platform_io, query, store
+from muninn.platform_paths import read_selection, windows_base
 
 
 def read_status(home: Path) -> dict[str, object]:
@@ -27,7 +29,13 @@ def read_status(home: Path) -> dict[str, object]:
         object.
     """
     try:
-        data = json.loads((home / "status.json").read_text())
+        path = home / "status.json"
+        with platform_io.open_regular(path, root=home) as handle:
+            platform_io.assert_private_fd(handle.fileno())
+            raw = handle.read(16385)
+        if len(raw) > 16384:
+            return {}
+        data = json.loads(raw)
     except (OSError, ValueError):
         return {}
     # json.loads gives Any; JSON object keys are always strings.
@@ -106,6 +114,12 @@ def install_sha(env: Mapping[str, str]) -> str | None:
     """
     if env.get("MUNINN_INSTALL_SHA"):
         return env["MUNINN_INSTALL_SHA"]
+    if sys.platform == "win32":
+        try:
+            selected = read_selection(windows_base(env))
+        except (OSError, ValueError):
+            return None
+        return selected[0].name if selected else None
     home = Path(env.get("HOME") or Path.home())
     current = home / ".local/lib/muninn/current"
     return current.readlink().name if current.is_symlink() else None

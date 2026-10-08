@@ -11,6 +11,7 @@ import dataclasses
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -22,6 +23,9 @@ from install.constants import (
     PLIST,
     REMOVED_PREFIX,
 )
+from muninn.obs_service import parse_process, process_command
+from muninn.obs_status import read_status
+from muninn.platform_paths import read_selection, windows_base
 
 
 class StepFailedError(Exception):
@@ -83,6 +87,8 @@ class Ctx:
         home: The HOME being installed into.
         run: Command runner; every external effect goes through it.
         ts: UTC timestamp that names this run's directories.
+        platform: Native platform, overridden only by isolated tests.
+        default_home: Use native environment paths when HOME was omitted.
         uid: User id for launchd's per-user ``gui/<uid>`` domain.
         dry_run: Plan and report without changing anything.
         now: Clock; replaced in tests.
@@ -108,7 +114,9 @@ class Ctx:
     home: Path
     run: Runner
     ts: str
-    uid: int = os.getuid()
+    uid: int = getattr(os, "getuid", lambda: 0)()
+    platform: str = sys.platform
+    default_home: bool = False
     dry_run: bool = False
     now: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
@@ -141,9 +149,42 @@ class Ctx:
         self.plist = h / PLIST
         self.settings = h / ".claude/settings.json"
         self.codex_home = h / ".codex"
-        self.config = h / ".codex/config.toml"
-        self.cache = h / ".codex/plugins/cache" / MKT_NAME / "muninn"
+        if self.default_home:
+            if claude_home := os.environ.get("CLAUDE_CONFIG_DIR"):
+                self.settings = Path(claude_home) / "settings.json"
+            if codex_home := os.environ.get("CODEX_HOME"):
+                self.codex_home = Path(codex_home)
+        self.config = self.codex_home / "config.toml"
+        self.cache = self.codex_home / "plugins/cache" / MKT_NAME / "muninn"
         self.target = f"gui/{self.uid}/{LABEL}"
+        if self.platform == "linux":
+            self.plist = h / ".config/systemd/user/muninn.service"
+            self.target = "muninn.service"
+        elif self.platform == "win32":
+            base = windows_base(
+                os.environ, home=None if self.default_home else h
+            )
+            self.data, self.lib = base / "data", base / "lib"
+            self.rdir = base / f"install-{self.ts}"
+            self.failed = base / f"failed-{self.ts}"
+            self.removed = base / f"{REMOVED_PREFIX}{self.ts}"
+            self.muninn = base / "bin/muninn.cmd"
+            self.plist = base / "task.xml"
+            self.target = "Muninn"
+
+    @property
+    def release(self) -> Path:
+        """The current confined release without requiring a symlink.
+
+        Raises:
+            StepFailedError: If the native release selection is absent.
+        """
+        if self.platform != "win32":
+            return self.lib / "current"
+        selected = read_selection(self.lib.parent)
+        if selected is None:
+            raise StepFailedError("no installed release selection")
+        return selected[0]
 
 
 def install_log(
@@ -252,6 +293,10 @@ def job(ctx: Ctx, target: str | None = None) -> Job | None:
     Returns:
         None when the label is not loaded, otherwise its pid and command.
     """
+    if ctx.platform == "linux":
+        return _linux_job(ctx, target)
+    if ctx.platform == "win32":
+        return _windows_job(ctx)
     r = ctx.run(["launchctl", "print", target or ctx.target])
     if r.returncode:
         return None
@@ -281,7 +326,7 @@ def link_text(link: Path) -> str:
 
 def is_new(ctx: Ctx, j: Job | None) -> bool:
     """Say whether a job is running from the new pinned release."""
-    return bool(j and j["pid"] and f"{ctx.lib}/" in j["cmd"])
+    return bool(j and j["pid"] and str(ctx.lib) in j["cmd"])
 
 
 def dry(ctx: Ctx, text: str) -> bool:
@@ -298,3 +343,38 @@ def dry(ctx: Ctx, text: str) -> bool:
     if ctx.dry_run:
         ctx.say(text)
     return ctx.dry_run
+
+
+def _linux_job(ctx: Ctx, target: str | None) -> Job | None:
+    """Inspect the actual user service MainPID."""
+    r = ctx.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            target or ctx.target,
+            "--property=MainPID",
+            "--value",
+        ]
+    )
+    if r.returncode or not r.stdout.strip().isdigit():
+        return None
+    pid = int(r.stdout.strip())
+    if not pid:
+        return {"pid": None, "cmd": ""}
+    ps = ctx.run(["ps", "-ww", "-o", "command=", "-p", str(pid)])
+    return {"pid": pid, "cmd": ps.stdout.decode(errors="replace").strip()}
+
+
+def _windows_job(ctx: Ctx) -> Job | None:
+    """Inspect the actual heartbeat process, never the task engine PID."""
+    status = read_status(ctx.data)
+    pid = status.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    result = ctx.run(process_command(pid))
+    if result.returncode:
+        return None
+    process = parse_process(result.stdout)
+    command = process["cmd"]
+    return {"pid": pid, "cmd": command if isinstance(command, str) else ""}
