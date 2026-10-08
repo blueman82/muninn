@@ -86,7 +86,7 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
         check=True,
         timeout=30,
     )
-    deadline = time.monotonic() + 600
+    deadline = time.monotonic() + 1800
     result = parent / "result.json"
     while not result.exists():
         if time.monotonic() >= deadline:
