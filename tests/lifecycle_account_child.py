@@ -51,7 +51,10 @@ try {
  $report.phase='account_task_create'
  $task=$folder.RegisterTaskDefinition($name,$definition,2,$null,$null,3,$null)
  [IO.File]::WriteAllText((Join-Path $base 'registered.xml'),$task.Xml)
- if(!(Test-Owned $task $base)){throw 'task_definition_mismatch'}
+ if(!(Test-Owned $task $base)){
+  $report.task_owned_mismatch=[int]$script:ownedMismatch
+  throw 'task_definition_mismatch'
+ }
  $report.phase='account_task_run';$running=$task.Run($null)
  $report.phase='account_task_wait'
  $deadline=[DateTime]::UtcNow.AddSeconds(30)

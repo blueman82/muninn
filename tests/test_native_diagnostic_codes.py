@@ -278,6 +278,7 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
                 ("task_principal_sid_equal", 1),
                 ("task_principal_logon_type", 6),
                 ("task_principal_run_level", 1),
+                ("task_owned_mismatch", 32),
             )
             for key, maximum in cases:
                 for value in (0, maximum):

@@ -25,7 +25,7 @@ function Copy-ChildCodes($value,$report){
                   'child_error_category','child_command_type',
                   'child_exception_kind','child_body_hresult','child_body_line',
                   'task_principal_sid_equal','task_principal_logon_type',
-                  'task_principal_run_level')){
+                  'task_principal_run_level','task_owned_mismatch')){
   if($null -eq $value.$key){continue}
   if($value.$key -isnot [int] -and $value.$key -isnot [long]){
    throw 'child_number_invalid'
@@ -34,7 +34,9 @@ function Copy-ChildCodes($value,$report){
   if(($key -eq 'task_principal_sid_equal' -and $number -notin @(0,1)) -or
      ($key -eq 'task_principal_logon_type' -and
       ($number -lt 0 -or $number -gt 6)) -or
-     ($key -eq 'task_principal_run_level' -and $number -notin @(0,1))){
+     ($key -eq 'task_principal_run_level' -and $number -notin @(0,1)) -or
+     ($key -eq 'task_owned_mismatch' -and
+      ($number -lt 0 -or $number -gt 32))){
    throw 'child_number_invalid'
   }
   if($key -eq 'child_body_line' -and
@@ -105,11 +107,13 @@ function Get-TaskSid($user){
  } catch {return $null}
 }
 function Test-Owned($task,$base){
+ $script:ownedMismatch=0
  [xml]$wanted=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
  [xml]$actual=$task.Xml
  $ns=[Xml.XmlNamespaceManager]::new($wanted.NameTable)
  $ns.AddNamespace('t','http://schemas.microsoft.com/windows/2004/02/mit/task')
  foreach($path in @('Actions','Principals','Triggers')){
+  $script:ownedMismatch++
   if($actual.SelectNodes('/t:Task/t:'+$path+'/*',$ns).Count -ne 1){
    return $false
   }
@@ -123,6 +127,7 @@ function Test-Owned($task,$base){
   'Settings/Enabled','Settings/RestartOnFailure/Interval',
   'Settings/RestartOnFailure/Count','Triggers/LogonTrigger/Enabled',
   'Triggers/LogonTrigger/UserId')){
+  $script:ownedMismatch++
   $xpath='/t:Task/t:'+($path.Replace('/','/t:'))
   $a=$actual.SelectSingleNode($xpath,$ns)
   $w=$wanted.SelectSingleNode($xpath,$ns)
@@ -134,6 +139,7 @@ function Test-Owned($task,$base){
   }
   if(!$same){return $false}
  }
+ $script:ownedMismatch++
  return $actual.SelectSingleNode('/t:Task/t:Actions',$ns).Context -eq
         $wanted.SelectSingleNode('/t:Task/t:Actions',$ns).Context
 }
