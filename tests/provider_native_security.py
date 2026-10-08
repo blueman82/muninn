@@ -42,24 +42,6 @@ def sample_fields(
     }
 
 
-def _parts(handle: int) -> tuple[int, bytes, bytes, bytes]:
-    """Read native security from the already validated empty sibling handle."""
-    if sys.platform != "win32":
-        raise OSError("security probe is Windows-only")
-    descriptor = ctypes.c_void_p()
-    code = config_windows._get(
-        handle, 1, 7, None, None, None, None, ctypes.byref(descriptor)
-    )
-    if code:
-        raise ctypes.WinError(code)
-    try:
-        return config_windows.security_parts(
-            config_windows._descriptor_bytes(descriptor)
-        )
-    finally:
-        config_windows._free(descriptor)
-
-
 def probe(path: Path) -> dict[str, int]:
     """Test setter flags without writing content or altering the source.
 
@@ -94,7 +76,10 @@ def probe(path: Path) -> dict[str, int]:
             metrics["probe_original_control"] = original[0]
             metrics.update(
                 sample_fields(
-                    variant_code, "initial", original, _parts(handle)
+                    variant_code,
+                    "initial",
+                    original,
+                    config_windows._read(handle),
                 )
             )
             code = config_windows._set(
@@ -108,7 +93,12 @@ def probe(path: Path) -> dict[str, int]:
             )
             metrics[f"probe_v{variant_code}_error"] = int(code)
             metrics.update(
-                sample_fields(variant_code, "final", original, _parts(handle))
+                sample_fields(
+                    variant_code,
+                    "final",
+                    original,
+                    config_windows._read(handle),
+                )
             )
 
         with mock.patch.object(

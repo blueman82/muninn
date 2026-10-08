@@ -218,3 +218,33 @@ class NativeDiagnosticsTest(unittest.TestCase):
             )
             for key, value in codes.items():
                 self.assertEqual(data[key], value)
+
+    def test_token_probe_accepts_fixed_numeric_codes_only(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            codes = {
+                "admin_member": 0,
+                "sid_valid": 1,
+                "elevation_type": 3,
+                "token_elevated": 0,
+                "linked_token_available": 1,
+                "linked_token_error": 0,
+            }
+            write("lifecycle", "ordinary_child_identity", metrics=codes)
+            data = json.loads(
+                (
+                    Path(tmp)
+                    / "muninn-native-diagnostics"
+                    / "muninn-lifecycle-proof.json"
+                ).read_text()
+            )
+            for key, value in codes.items():
+                self.assertEqual(data[key], value)
+            with self.assertRaises(ValueError):
+                write(
+                    "lifecycle",
+                    "ordinary_child_identity",
+                    metrics={"token_bytes": 1},
+                )

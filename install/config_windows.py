@@ -148,6 +148,22 @@ def _descriptor_bytes(descriptor: ctypes.c_void_p) -> bytes:
     return ctypes.string_at(descriptor, length)
 
 
+def _read(handle: int) -> tuple[int, bytes, bytes, bytes]:
+    """Read exact security components from an already validated handle."""
+    if sys.platform != "win32":
+        raise OSError("native config security is Windows-only")
+    descriptor = ctypes.c_void_p()
+    error = _get(
+        handle, 1, 7, None, None, None, None, ctypes.byref(descriptor)
+    )
+    if error:
+        raise ctypes.WinError(error)
+    try:
+        return security_parts(_descriptor_bytes(descriptor))
+    finally:
+        _free(descriptor)
+
+
 def _restore(
     handle: int,
     owner: ctypes.c_void_p,
@@ -155,29 +171,24 @@ def _restore(
     dacl: ctypes.c_void_p,
     descriptor: ctypes.c_void_p,
 ) -> None:
-    """Restore original metadata on only the empty sibling before any bytes."""
+    """Preserve exact initial metadata or restore it before any bytes."""
     if sys.platform != "win32" or not all(
         (owner.value, group.value, dacl.value)
     ):
         raise OSError("native config security component unavailable")
     wanted = security_parts(_descriptor_bytes(descriptor))
+    if _read(handle) == wanted:
+        return
     protection = 0x80000000 if wanted[0] & 0x1000 else 0x20000000
     error = _set(handle, 1, 7 | protection, owner, group, dacl, None)
     if error:
         raise ctypes.WinError(error)
-    actual = ctypes.c_void_p()
-    error = _get(handle, 1, 7, None, None, None, None, ctypes.byref(actual))
-    if error:
-        raise ctypes.WinError(error)
-    try:
-        got = security_parts(_descriptor_bytes(actual))
-        for code, before, after in zip(
-            ("control", "owner", "group", "dacl"), wanted, got, strict=True
-        ):
-            if before != after:
-                raise SecurityMismatchError(code, wanted, got)
-    finally:
-        _free(actual)
+    got = _read(handle)
+    for code, before, after in zip(
+        ("control", "owner", "group", "dacl"), wanted, got, strict=True
+    ):
+        if before != after:
+            raise SecurityMismatchError(code, wanted, got)
 
 
 def replacement(path: Path) -> tuple[int, Path]:

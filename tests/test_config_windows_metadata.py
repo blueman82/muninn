@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import ctypes
 import struct
 import unittest
+from unittest import mock
 
+from install import config_windows
 from install.config_windows import SecurityMismatchError, security_parts
 
 
@@ -57,3 +60,55 @@ class SecurityPartsTest(unittest.TestCase):
             (error.owner_equal, error.group_equal, error.dacl_equal), (1, 1, 1)
         )
         self.assertEqual(str(error), "config security differs: control")
+
+    def test_exact_initial_security_does_not_call_setter(self) -> None:
+        original = descriptor(flags=0x8004)
+        with (
+            mock.patch("install.config_windows.sys.platform", "win32"),
+            mock.patch.object(
+                config_windows, "_get", return_value=0, create=True
+            ),
+            mock.patch.object(config_windows, "_free", create=True),
+            mock.patch.object(
+                config_windows, "_set", return_value=0, create=True
+            ) as setter,
+            mock.patch.object(
+                config_windows, "_descriptor_bytes", return_value=original
+            ),
+        ):
+            config_windows._restore(
+                5,
+                ctypes.c_void_p(1),
+                ctypes.c_void_p(2),
+                ctypes.c_void_p(3),
+                ctypes.c_void_p(4),
+            )
+            setter.assert_not_called()
+
+    def test_changed_initial_uses_setter_and_exact_final_refusal(self) -> None:
+        original = descriptor(flags=0x8004)
+        changed = descriptor(flags=0x8404)
+        with (
+            mock.patch("install.config_windows.sys.platform", "win32"),
+            mock.patch.object(
+                config_windows, "_get", return_value=0, create=True
+            ),
+            mock.patch.object(config_windows, "_free", create=True),
+            mock.patch.object(
+                config_windows, "_set", return_value=0, create=True
+            ) as setter,
+            mock.patch.object(
+                config_windows,
+                "_descriptor_bytes",
+                side_effect=[original, changed, changed],
+            ),
+        ):
+            with self.assertRaises(SecurityMismatchError):
+                config_windows._restore(
+                    5,
+                    ctypes.c_void_p(1),
+                    ctypes.c_void_p(2),
+                    ctypes.c_void_p(3),
+                    ctypes.c_void_p(4),
+                )
+            setter.assert_called_once()
