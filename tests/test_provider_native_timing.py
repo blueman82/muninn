@@ -10,7 +10,12 @@ from unittest import mock
 
 from install.context import Ctx, run_real
 from muninn import platform_windows
-from tests.provider_native import baselines, pe_machine, prove_hooks
+from tests.provider_native import (
+    baselines,
+    emitter_baseline,
+    pe_machine,
+    prove_hooks,
+)
 
 
 class MachineCodesTest(unittest.TestCase):
@@ -99,3 +104,84 @@ class MachineCodesTest(unittest.TestCase):
                 self.assertRaisesRegex(AssertionError, "unexpected stderr"),
             ):
                 prove_hooks(ctx, {})
+
+    def test_post_failure_emitter_isolation_uses_actual_source_functions(
+        self,
+    ) -> None:
+        with (
+            mock.patch("tests.provider_native.sys.platform", "win32"),
+            mock.patch.object(
+                platform_windows, "assert_executable", create=True
+            ),
+            mock.patch(
+                "tests.provider_native.time.monotonic", side_effect=[0, 1]
+            ),
+            mock.patch(
+                "tests.provider_native.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, b"", b""),
+            ) as run,
+        ):
+            result = emitter_baseline({"HOME": "synthetic"})
+        command = run.call_args.args[0][-1]
+        self.assertIn("DefinePInvokeMethod", command)
+        self.assertIn("[void](Initialize-Native)", command)
+        self.assertNotIn("Open-Native", command)
+        self.assertNotIn("Add-Type", command)
+        self.assertEqual(
+            result,
+            {
+                "baseline_emit_ms": 1000,
+                "baseline_emit_returncode": 0,
+                "baseline_emit_error": 0,
+            },
+        )
+
+    def test_emitter_baseline_never_starts_before_actual_failed_route(
+        self,
+    ) -> None:
+        events: list[str] = []
+
+        def failed_route(
+            *args: object, **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes]:
+            events.append("route")
+            return subprocess.CompletedProcess(
+                [], 0, b"{}", b"synthetic stderr"
+            )
+
+        def isolation(env: dict[str, str]) -> dict[str, int]:
+            events.append("emitter")
+            return {}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Ctx(Path(tmp), run_real, "synthetic", platform="darwin")
+            with (
+                mock.patch("tests.provider_native.configedit.atomic_write"),
+                mock.patch(
+                    "tests.provider_native.hook_invocations",
+                    return_value=[["synthetic"]],
+                ),
+                mock.patch(
+                    "tests.provider_native.subprocess.run",
+                    side_effect=failed_route,
+                ),
+                mock.patch(
+                    "tests.provider_native.emitter_baseline",
+                    side_effect=isolation,
+                ),
+                mock.patch("tests.provider_native.baselines", return_value={}),
+                mock.patch("tests.provider_native.write"),
+                self.assertRaisesRegex(AssertionError, "unexpected stderr"),
+            ):
+                prove_hooks(ctx, {})
+        self.assertEqual(events, ["route", "emitter"])
+
+    def test_non_windows_emitter_isolation_does_not_start_a_process(
+        self,
+    ) -> None:
+        with (
+            mock.patch("tests.provider_native.sys.platform", "darwin"),
+            mock.patch("tests.provider_native.subprocess.run") as run,
+        ):
+            self.assertEqual(emitter_baseline({}), {})
+            run.assert_not_called()

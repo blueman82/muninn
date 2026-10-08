@@ -98,6 +98,28 @@ def acl_difference(original: bytes, current: bytes) -> dict[str, int]:
     return values
 
 
+def stage_difference(
+    original: tuple[int, bytes, bytes, bytes],
+    current: tuple[int, bytes, bytes, bytes],
+) -> dict[str, int]:
+    """Compare bound security components without disclosing their contents.
+
+    Args:
+        original: Original synthetic path's validated descriptor components.
+        current: Descriptor-bound or pathname-bound components at one stage.
+
+    Returns:
+        Only native controls and exact component equality codes.
+    """
+    return {
+        "control_before": original[0],
+        "control_after": current[0],
+        "owner_equal": int(original[1] == current[1]),
+        "group_equal": int(original[2] == current[2]),
+        "dacl_equal": int(original[3] == current[3]),
+    }
+
+
 def descriptor_difference(original: bytes, current: bytes) -> dict[str, int]:
     """Compare native components and layout without exposing descriptor bytes.
 
@@ -272,3 +294,23 @@ class SecurityPartsTest(unittest.TestCase):
         for changed in (bytes(too_many), bytes(invalid), original[:-1]):
             with self.assertRaises(OSError):
                 acl_difference(original, changed)
+
+    def test_stage_comparison_exposes_only_numeric_security_equality(
+        self,
+    ) -> None:
+        before = security_parts(descriptor())
+        current = security_parts(descriptor(ace_flags=0))
+        values = stage_difference(before, current)
+        self.assertEqual(
+            values,
+            {
+                "control_before": 0x8404,
+                "control_after": 0x8404,
+                "owner_equal": 1,
+                "group_equal": 1,
+                "dacl_equal": 0,
+            },
+        )
+        self.assertTrue(
+            all(isinstance(value, int) for value in values.values())
+        )

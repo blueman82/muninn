@@ -291,3 +291,35 @@ class NativeDiagnosticsTest(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 write("ordinary", "account_create", metrics={"password": 1})
+
+    def test_emitter_and_ordinary_privilege_fields_are_numeric_only(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            metrics = {
+                "caller_quota_present": 1,
+                "caller_quota_enabled": 0,
+                "caller_assign_present": 1,
+                "caller_assign_enabled": 0,
+                "caller_impersonate_present": 1,
+                "caller_impersonate_enabled": 1,
+            }
+            write("ordinary", "account_child_start", metrics=metrics)
+            write(
+                "provider",
+                "routes",
+                metrics={
+                    "baseline_emit_ms": 1,
+                    "baseline_emit_returncode": 0,
+                    "baseline_emit_error": 0,
+                },
+            )
+            with self.assertRaises(ValueError):
+                write(
+                    "ordinary",
+                    "account_child_start",
+                    metrics={"token_privilege_bytes": 1},
+                )

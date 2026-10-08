@@ -195,7 +195,11 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
     except Exception:
         # Optional metrics must not replace the actual hook failure.
         with suppress(OSError, ValueError):
-            write("provider", None, metrics=baselines(env))
+            write(
+                "provider",
+                None,
+                metrics={**emitter_baseline(env), **baselines(env)},
+            )
         raise
     return results
 
@@ -307,6 +311,57 @@ def baselines(env: dict[str, str]) -> dict[str, int]:
             metrics[f"baseline_{name}_returncode"] = code
     except Exception:
         metrics["baseline_error"] = 1
+    return metrics
+
+
+def emitter_baseline(env: dict[str, str]) -> dict[str, int]:
+    """Time actual native declaration functions only after a failed cold route.
+
+    Args:
+        env: Existing isolated synthetic provider environment.
+
+    Returns:
+        Numeric fresh-process elapsed time, exit and fixed error indicator.
+    """
+    if sys.platform != "win32":
+        return {}
+    metrics: dict[str, int] = {"baseline_emit_error": 0}
+    try:
+        shell = Path(powershell())
+        platform_windows.assert_executable(shell)
+        source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
+        start = source.index("function Define-NativeMethod(")
+        end = source.index("function Open-Native(", start)
+        script = (
+            "$ErrorActionPreference='Stop'\n"
+            + source[start:end]
+            + "\n[void](Initialize-Native); exit 0"
+        )
+        started = time.monotonic()
+        try:
+            done = subprocess.run(
+                [
+                    str(shell),
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ],
+                env=env,
+                capture_output=True,
+                timeout=90,
+                check=False,
+            )
+            code = done.returncode
+        except subprocess.TimeoutExpired:
+            code = -1
+        metrics["baseline_emit_ms"] = round(
+            (time.monotonic() - started) * 1000
+        )
+        metrics["baseline_emit_returncode"] = code
+        metrics["baseline_emit_error"] = int(code != 0)
+    except (OSError, ValueError):
+        metrics["baseline_emit_error"] = 1
     return metrics
 
 

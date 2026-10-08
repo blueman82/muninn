@@ -14,9 +14,13 @@ from unittest import mock
 
 from install import config_windows, configedit
 from muninn import platform_io
-from tests.test_config_windows_metadata import descriptor_difference
+from tests.test_config_windows_metadata import (
+    descriptor_difference,
+    stage_difference,
+)
 
 if sys.platform == "win32":
+    import msvcrt
 
     def descriptor(path: Path) -> bytes:
         """Read owner, group and DACL bytes from a synthetic regular config.
@@ -57,14 +61,84 @@ if sys.platform == "win32":
                 path = parent / "space café owner's settings.json"
                 configedit.atomic_write(path, b"before", 0o600)
                 original = descriptor(path)
-                configedit.edit_file(
-                    path, lambda data: b"after", lambda before, after: None
-                )
+                expected = config_windows.security_parts(original)
+                stages: dict[str, int] = {}
+                original_restore = config_windows._restore
+                original_temp = configedit._write_temp
+                original_publish = configedit._publish
+
+                def remember(
+                    label: str, parts: tuple[int, bytes, bytes, bytes]
+                ) -> None:
+                    for name, value in stage_difference(
+                        expected, parts
+                    ).items():
+                        stages[f"{label}_{name}"] = value
+
+                def remember_path(label: str, value: Path) -> None:
+                    remember(
+                        label + "_path",
+                        config_windows.security_parts(descriptor(value)),
+                    )
+                    with platform_io.open_regular(value) as source:
+                        remember(
+                            label + "_handle",
+                            config_windows._read(
+                                msvcrt.get_osfhandle(source.fileno())
+                            ),
+                        )
+
+                def restore(
+                    handle: int,
+                    owner: ctypes.c_void_p,
+                    group: ctypes.c_void_p,
+                    dacl: ctypes.c_void_p,
+                    value: ctypes.c_void_p,
+                ) -> None:
+                    remember(
+                        "source_descriptor",
+                        config_windows.security_parts(
+                            config_windows._descriptor_bytes(value)
+                        ),
+                    )
+                    remember(
+                        "sibling_before_write_handle",
+                        config_windows._read(handle),
+                    )
+                    original_restore(handle, owner, group, dacl, value)
+
+                def temporary(value: Path, data: bytes, mode: int) -> Path:
+                    result = original_temp(value, data, mode)
+                    remember_path("sibling_after_close", result)
+                    return result
+
+                def publish(source: Path, target: Path) -> None:
+                    remember_path("prepublish", source)
+                    original_publish(source, target)
+                    remember_path("postpublish", target)
+
+                remember_path("original", path)
+                with (
+                    mock.patch.object(
+                        config_windows, "_restore", side_effect=restore
+                    ),
+                    mock.patch.object(
+                        configedit, "_write_temp", side_effect=temporary
+                    ),
+                    mock.patch.object(
+                        configedit, "_publish", side_effect=publish
+                    ),
+                ):
+                    configedit.edit_file(
+                        path, lambda data: b"after", lambda before, after: None
+                    )
                 self.assertEqual(path.read_bytes(), b"after")
                 current = descriptor(path)
                 self.assertTrue(
                     current == original,
-                    json.dumps(descriptor_difference(original, current)),
+                    json.dumps(
+                        {**descriptor_difference(original, current), **stages}
+                    ),
                 )
                 self.assertTrue(platform_io.is_private(path))
 
