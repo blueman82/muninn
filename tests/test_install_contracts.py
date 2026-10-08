@@ -17,6 +17,7 @@ from unittest import mock
 from install import installer as co
 from install import rollback as rb
 from tests.installer_support import REAL_CODEX, ROOT
+from tests.store_support import assert_private
 
 
 class InstallLogTest(unittest.TestCase):
@@ -46,7 +47,7 @@ class InstallLogTest(unittest.TestCase):
                 self.assertNotIn(value, text)
             # stdout can carry transcript text, which must stay out of logs.
             self.assertNotIn("TRANSCRIPT-TEXT", text)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            assert_private(self, path)
 
     def test_unsafe_log_original_is_not_changed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

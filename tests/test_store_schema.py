@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import unittest
 
 from muninn import store
 from tests.store_support import (
     StoreCase,
+    assert_private,
     insert_event,
     insert_scope,
     insert_source,
-    mode,
+    public_read,
 )
 
 
@@ -147,19 +149,31 @@ class SchemaTests(StoreCase):
         conn = self.rw()
         conn.execute("BEGIN IMMEDIATE")
         insert_scope(conn)
-        self.assertEqual(mode(f"{self.db}-journal"), 0o600)
+        assert_private(self, f"{self.db}-journal")
         conn.execute("COMMIT")
         with store.writer_lock(self.home):
-            self.assertEqual(mode(self.home / "writer.lock"), 0o600)
-        self.assertEqual(mode(self.home), 0o700)
-        self.assertEqual(mode(self.db), 0o600)
+            assert_private(self, self.home / "writer.lock")
+        assert_private(self, self.home, directory=True)
+        assert_private(self, self.db)
 
-    def test_lax_existing_db_is_tightened(self) -> None:
+    def test_lax_existing_db_is_handled_before_writing(self) -> None:
         store.ensure_private_dir(self.home)
-        self.db.touch()
-        self.db.chmod(0o644)
-        self.rw()
-        self.assertEqual(mode(self.db), 0o600)
+        if sys.platform == "win32":
+            self.rw().close()
+            original = self.db.read_bytes()
+            with public_read(self, self.db):
+                with self.assertRaises(PermissionError):
+                    self.rw()
+                self.assertEqual(self.db.read_bytes(), original)
+                self.assertEqual(
+                    sorted(p.name for p in self.home.iterdir()),
+                    ["muninn.sqlite"],
+                )
+        else:
+            self.db.touch()
+            self.db.chmod(0o644)
+            self.rw()
+        assert_private(self, self.db)
 
     def test_missing_home_is_created_private_by_lock_and_connect(self) -> None:
         old = os.umask(0o022)
@@ -168,8 +182,8 @@ class SchemaTests(StoreCase):
             pass
         conn = store.connect_rw(self.tmp / "via-connect" / "muninn.sqlite")
         self.addCleanup(conn.close)
-        self.assertEqual(mode(self.tmp / "via-lock"), 0o700)
-        self.assertEqual(mode(self.tmp / "via-connect"), 0o700)
+        assert_private(self, self.tmp / "via-lock", directory=True)
+        assert_private(self, self.tmp / "via-connect", directory=True)
 
     def test_event_cwd_column_and_index(self) -> None:
         conn = self.rw()

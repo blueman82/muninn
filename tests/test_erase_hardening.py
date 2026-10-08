@@ -5,7 +5,6 @@ Synthetic provider trees and a temp MUNINN_HOME only.
 
 from __future__ import annotations
 
-import stat
 from typing import Any
 from unittest import mock
 
@@ -19,6 +18,7 @@ from muninn import (
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
 from tests.knowledge_support import KnowCase
+from tests.store_support import assert_private
 from tests.test_classify import PARENT, codex_meta, reply, user_msg
 from tests.test_ingest import rollout
 
@@ -105,7 +105,7 @@ class KeyedTagTests(EraseCase):
         plain = tombstones.role_digest("user", "yes").hex()
         self.assertNotIn(plain, log)
         key = self.home / tombstone_key.KEY_FILE
-        self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
+        assert_private(self, key)
         self.assertEqual(len(key.read_bytes()), 32)
 
     def test_the_key_is_reused_not_recreated(self) -> None:

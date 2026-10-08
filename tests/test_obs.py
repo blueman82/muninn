@@ -7,6 +7,7 @@ writes, and no transcript text is ever written anywhere.
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import time
 import unittest
@@ -16,6 +17,7 @@ from unittest import mock
 
 from muninn import obs
 from muninn.query.index_age import ALIVE_AT
+from tests.store_support import assert_private, public_read
 
 CANARY = "CANARY-OBS-" + "z9" * 8
 
@@ -82,7 +84,7 @@ class CallLogTests(ObsCase):
                 "ms",
             },
         )
-        self.assertEqual(self.log.stat().st_mode & 0o777, 0o600)
+        assert_private(self, self.log)
 
     def test_line_is_at_most_1kib(self) -> None:
         obs.log_call(
@@ -104,10 +106,18 @@ class CallLogTests(ObsCase):
             ["calls.jsonl", "calls.jsonl.1"],
         )
 
-    def test_logged_false_when_append_denied(self) -> None:
-        self.home.chmod(0o500)  # the Codex sandbox denies the append
-        self.addCleanup(self.home.chmod, 0o700)
-        self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
+    def test_logged_false_when_append_is_unsafe_or_denied(self) -> None:
+        if sys.platform == "win32":
+            self.assertTrue(obs.log_call(self.home, {"cmd": "stats"}))
+            original = self.log.read_bytes()
+            with public_read(self, self.log):
+                self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
+                self.assertEqual(self.log.read_bytes(), original)
+            assert_private(self, self.log)
+        else:
+            self.home.chmod(0o500)  # the Codex sandbox denies the append
+            self.addCleanup(self.home.chmod, 0o700)
+            self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
 
     def test_no_calllog_env(self) -> None:
         env = {"MUNINN_NO_CALLLOG": "1"}
@@ -177,7 +187,7 @@ class StatusTests(ObsCase):
             (60, 7, 123.0),
         )
         path = self.home / "status.json"
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        assert_private(self, path)
 
     def test_read_status_missing_or_corrupt_is_empty(self) -> None:
         self.assertEqual(obs.read_status(self.home), {})

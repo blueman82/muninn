@@ -7,20 +7,23 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 import time
 import unittest
 from pathlib import Path
 from typing import NoReturn
 from unittest import mock
 
-from muninn import store
+from muninn import platform_io, store
+from tests import store_support
 from tests.store_support import (
     HOLD_LOCK,
     SPILLING_WRITER,
     Child,
     StoreCase,
+    assert_private,
     insert_scope,
-    mode,
+    public_read,
 )
 
 # Re-exported because other test modules still import these helpers from
@@ -42,24 +45,70 @@ class PathTests(StoreCase):
             store.data_home({"MUNINN_HOME": "~/pc"}), Path.home() / "pc"
         )
 
+    def test_shared_privacy_control_rejects_public_file_and_directory(
+        self,
+    ) -> None:
+        target = self.tmp / "private"
+        store.ensure_private_dir(target)
+        path = target / "status.json"
+        store.write_json_atomic(path, {"unchanged": True})
+        original = path.read_bytes()
+        for value, directory in ((path, False), (target, True)):
+            with self.subTest(directory=directory):
+                store_support.assert_private(self, value, directory=directory)
+                with store_support.public_read(
+                    self, value, directory=directory
+                ):
+                    self.assertFalse(
+                        platform_io.is_private(value, directory=directory)
+                    )
+                    with self.assertRaises(AssertionError):
+                        store_support.assert_private(
+                            self, value, directory=directory
+                        )
+                    self.assertEqual(path.read_bytes(), original)
+                store_support.assert_private(self, value, directory=directory)
+        self.assertEqual(path.read_bytes(), original)
+
     def test_db_path(self) -> None:
         self.assertEqual(store.db_path(Path("/h")), Path("/h/muninn.sqlite"))
 
-    def test_ensure_private_dir_creates_and_tightens(self) -> None:
+    def test_ensure_private_dir_creates_and_handles_lax_existing_state(
+        self,
+    ) -> None:
         target = self.tmp / "a" / "b"
         store.ensure_private_dir(target)
-        self.assertEqual(mode(target), 0o700)
-        target.chmod(0o755)
-        store.ensure_private_dir(target)
-        self.assertEqual(mode(target), 0o700)
+        assert_private(self, target, directory=True)
+        if sys.platform == "win32":
+            marker = target / "unchanged.txt"
+            marker.write_bytes(b"unchanged")
+            with public_read(self, target, directory=True):
+                with self.assertRaises(PermissionError):
+                    store.ensure_private_dir(target)
+                self.assertEqual(marker.read_bytes(), b"unchanged")
+        else:
+            target.chmod(0o755)
+            store.ensure_private_dir(target)
+        assert_private(self, target, directory=True)
 
     def test_write_json_atomic_is_private_and_replaces(self) -> None:
         target = self.tmp / "status.json"
-        target.write_text("{}")
-        target.chmod(0o644)
+        if sys.platform == "win32":
+            store.write_json_atomic(target, {})
+            with public_read(self, target):
+                original = target.read_bytes()
+                with self.assertRaises(PermissionError):
+                    store.write_json_atomic(target, {"unsafe": True})
+                self.assertEqual(target.read_bytes(), original)
+                self.assertEqual(
+                    sorted(p.name for p in self.tmp.iterdir()), ["status.json"]
+                )
+        else:
+            target.write_text("{}")
+            target.chmod(0o644)
         store.write_json_atomic(target, {"b": 2, "a": [1]})
         self.assertEqual(target.read_text(), '{"a": [1], "b": 2}')  # sorted
-        self.assertEqual(mode(target), 0o600)
+        assert_private(self, target)
 
     def test_write_json_atomic_failure_keeps_old_and_leaves_no_temp(
         self,

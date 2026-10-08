@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +17,7 @@ from muninn import erase, obs, tombstone_key, tombstones
 from muninn.tombstone_key import KEY_FILE, TombstoneKeyError
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
+from tests.store_support import assert_private
 from tests.test_erase_hardening import (
     FORK,
     PARENT,
@@ -48,7 +48,7 @@ class KeyFileTests(unittest.TestCase):
         path = self.home / KEY_FILE
         self.assertEqual(path.read_bytes(), key)
         self.assertEqual(len(key), 32)
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        assert_private(self, path)
         self.assertEqual([p.name for p in self.home.iterdir()], [KEY_FILE])
 
     def test_a_missing_key_is_not_made_when_told_not_to(self) -> None:

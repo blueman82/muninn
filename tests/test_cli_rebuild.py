@@ -6,6 +6,7 @@ from typing import Any
 
 from muninn import store
 from tests.cli_support import CANARY, CliCase
+from tests.store_support import assert_private
 from tests.test_ingest import TID
 from tests.test_store_migrate import make_v1
 
@@ -93,8 +94,7 @@ class RebuildTests(CliCase):
             if "rebuild" in p.name or p.name.endswith("-journal")
         ]
         self.assertEqual(leftovers, [])
-        mode = store.db_path(self.home).stat().st_mode & 0o777
-        self.assertEqual(mode, 0o600)
+        assert_private(self, store.db_path(self.home))
         found = self.rows(
             "SELECT count(*) FROM knowledge_fts"
             " WHERE knowledge_fts MATCH 'rebuild'"
@@ -111,7 +111,7 @@ class RebuildTests(CliCase):
         aside = self.home / out["old_kept_as"]
         self.assertTrue(aside.name.startswith(store.UNREADABLE_PREFIX))
         self.assertEqual(aside.read_bytes(), junk)
-        self.assertEqual(aside.stat().st_mode & 0o777, 0o600)
+        assert_private(self, aside)
         self.assertIsNone(self.muninn("rebuild")[1]["old_kept_as"])
         self.assertGreaterEqual(out["reapplied_tombstones"], 1)
         texts = {r[0] for r in self.rows("SELECT text FROM event")}
