@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 from install import lifecycle
@@ -210,6 +211,7 @@ def main() -> int:
             failed = {
                 "task_owned_mismatch": min(mismatches, default=0),
                 "writer_binding_mismatch": min(bindings, default=0),
+                "step_failure_id": zlib.crc32(str(exc).encode()) & 0x7FFFFFFF,
             }
             write("lifecycle", None, error=exc, metrics=failed)
             result = {
