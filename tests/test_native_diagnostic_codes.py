@@ -172,3 +172,29 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
             for key in ("child_script", "child_report", "child_exception"):
                 with self.assertRaises(ValueError):
                     write("ordinary", "account_child_start", metrics={key: 1})
+
+    def test_child_module_codes_do_not_export_names_or_error_bodies(
+        self,
+    ) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            metrics = {
+                "child_module_readable": 0,
+                "child_module_hresult": -2147024891,
+                "child_error_category": 1,
+                "child_command_type": -1,
+            }
+            write("ordinary", "account_child_start", metrics=metrics)
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            data = json.loads(path.read_text())
+            for key, value in metrics.items():
+                self.assertEqual(data[key], value)
+            for key in ("child_module_name", "child_error_body"):
+                with self.assertRaises(ValueError):
+                    write("ordinary", "account_child_start", metrics={key: 1})

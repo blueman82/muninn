@@ -11,7 +11,7 @@ function Assert-Ordinary([string]$Path, [bool]$Directory) {
     if ($full -notmatch '^[A-Za-z]:\\' -or $full.Substring(2).Contains(':')) {
         throw 'A fixed local absolute path is required'
     }
-    $drive = New-Object IO.DriveInfo ($full.Substring(0, 3))
+    $drive = Microsoft.PowerShell.Utility\New-Object IO.DriveInfo ($full.Substring(0, 3))
     if ($drive.DriveType -ne [IO.DriveType]::Fixed) { throw 'Unsafe drive' }
     $item = Get-Item -LiteralPath $full -Force
     if ($item.PSIsContainer -ne $Directory) { throw 'Wrong object type' }

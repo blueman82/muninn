@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from muninn.cli import main
+from tests.hook_support import launcher_args
 
 ROOT = Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "bin" / "muninn"
@@ -77,32 +78,24 @@ class MainTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
-    """bin/muninn works from any cwd, through a symlink, and as a module."""
+    """CLI behavior runs via POSIX shell or isolated native Python."""
 
     def test_version_from_foreign_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            proc = run([str(LAUNCHER), "--version"], cwd=tmp)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout, VERSION_LINE)
-
-    def test_version_via_symlink(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            link = Path(tmp) / "muninn-link"
-            link.symlink_to(LAUNCHER)
-            proc = run([str(link), "--version"], cwd=tmp)
+            proc = run(launcher_args("--version"), cwd=tmp)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
 
     def test_exit_code_propagates(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            proc = run([str(LAUNCHER), "frobnicate"], cwd=tmp)
+            proc = run(launcher_args("frobnicate"), cwd=tmp)
         self.assertEqual(proc.returncode, 2)
         self.assertIn("usage:", proc.stderr)
 
     def test_ignores_stdlib_shadowing_in_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "argparse.py").write_text("raise RuntimeError\n")
-            proc = run([str(LAUNCHER), "--version"], cwd=tmp)
+            proc = run(launcher_args("--version"), cwd=tmp)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
 
@@ -111,6 +104,20 @@ class LauncherTests(unittest.TestCase):
         proc = run(cmd, cwd=ROOT)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout, VERSION_LINE)
+
+
+if sys.platform != "win32":
+
+    class PosixSymlinkTests(unittest.TestCase):
+        """The POSIX launcher accepts a launcher symlink from another cwd."""
+
+        def test_version_via_symlink(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                link = Path(tmp) / "muninn-link"
+                link.symlink_to(LAUNCHER)
+                proc = run([str(link), "--version"], cwd=tmp)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout, VERSION_LINE)
 
 
 if __name__ == "__main__":

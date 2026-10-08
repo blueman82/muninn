@@ -146,6 +146,29 @@ class ProviderRenderTest(unittest.TestCase):
         self.assertNotIn("PSModuleAutoLoadingPreference", source)
         self.assertNotIn("PSModulePath", source)
 
+    def test_first_drive_cmdlet_names_its_module_and_keeps_fixed_guard(
+        self,
+    ) -> None:
+        source = (ROOT / "bin/muninn.ps1").read_text()
+        command = (
+            "    $drive = Microsoft.PowerShell.Utility\\New-Object"
+            " IO.DriveInfo ($full.Substring(0, 3))"
+        )
+        self.assertEqual(source.count(command), 1)
+        self.assertIn(
+            command + "\n"
+            "    if ($drive.DriveType -ne [IO.DriveType]::Fixed) "
+            "{ throw 'Unsafe drive' }",
+            source,
+        )
+        self.assertIn("    $builder = New-Object Text.StringBuilder", source)
+        self.assertEqual(
+            source.count(
+                "    $start = New-Object Diagnostics.ProcessStartInfo"
+            ),
+            2,
+        )
+
     def test_first_ancestor_acl_cmdlet_keeps_its_native_guard(self) -> None:
         source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
         command = (

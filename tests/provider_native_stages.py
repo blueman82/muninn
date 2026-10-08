@@ -57,7 +57,8 @@ _MARKERS = (
 )
 _FIRST_MARKERS = (
     (
-        "    $drive = New-Object IO.DriveInfo ($full.Substring(0, 3))",
+        "    $drive = Microsoft.PowerShell.Utility\\New-Object"
+        " IO.DriveInfo ($full.Substring(0, 3))",
         "ordinary_drive",
     ),
     ("    $item = Get-Item -LiteralPath $full -Force", "ordinary_item"),
@@ -77,7 +78,8 @@ _FIRST_MARKERS = (
 )
 _OPEN_MARKERS = (
     (
-        "    $drive = New-Object IO.DriveInfo ($full.Substring(0, 3))",
+        "    $drive = Microsoft.PowerShell.Utility\\New-Object"
+        " IO.DriveInfo ($full.Substring(0, 3))",
         "ordinary_before_drive",
     ),
     ("        Hold-Directories $root", "before_hold"),

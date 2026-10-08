@@ -221,6 +221,21 @@ if sys.platform == "win32":
                     self.assertEqual((done.returncode, done.stdout), (127, ""))
                     self.assertFalse(marker.exists())
 
+        def test_reparse_interpreter_refuses_before_marker_execution(
+            self,
+        ) -> None:
+            executable = self.root / "marker.exe"
+            marker = self.root / "reparse-marker"
+            compile_marker(self, executable, marker)
+            linked = self.root / "linked-python.exe"
+            linked.symlink_to(executable)
+            self.assertTrue(linked.is_symlink())
+            self.env["MUNINN_PYTHON"] = str(linked)
+            self.env["MUNINN_TEST_MARKER"] = str(marker)
+            done = self.run_cmd(["stats"])
+            self.assertEqual((done.returncode, done.stdout), (127, ""))
+            self.assertFalse(marker.exists())
+
         def test_present_unsafe_override_refuses_without_marker_execution(
             self,
         ) -> None:
