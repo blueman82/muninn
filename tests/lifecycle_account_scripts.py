@@ -188,7 +188,9 @@ try {
   (Join-Path $base 'child.ps1')+'"')
  if($command.Length -gt 1024){throw 'native_command_too_large'}
  $zero=[char]0
- $minimal='SystemRoot='+$env:SystemRoot+$zero+'TEMP='+$base+$zero+
+ $moduleRoot=[IO.Path]::Combine([IO.Path]::GetDirectoryName($exe),'Modules')
+ $minimal='PSModulePath='+$moduleRoot+$zero+
+  'SystemRoot='+$env:SystemRoot+$zero+'TEMP='+$base+$zero+
   'TMP='+$base+$zero+'WINDIR='+$env:SystemRoot+$zero+$zero
  $environment=[Runtime.InteropServices.Marshal]::StringToHGlobalUni($minimal)
  $report.phase='account_child_start';$report.child_stage=1

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import io
 import tempfile
 import unittest
@@ -24,7 +25,12 @@ def _main(*argv: str) -> tuple[int, str]:
         The exit status and the printed text.
     """
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
+    with (
+        contextlib.redirect_stdout(out),
+        mock.patch.object(
+            co, "Ctx", functools.partial(co.Ctx, platform="darwin")
+        ),
+    ):
         status = co.main(list(argv))
     return status, out.getvalue()
 
@@ -114,6 +120,26 @@ class FreshPlanTest(unittest.TestCase):
 
 class DryRunWritesNothingTest(unittest.TestCase):
     """The command line's dry run leaves no log and no directory."""
+
+    def test_cli_uses_the_same_darwin_backend_as_world(self) -> None:
+        w = World(self)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(co, "Ctx", wraps=co.Ctx) as context,
+        ):
+            status, _ = _main(
+                "--repo",
+                str(w.repo),
+                "--sha",
+                w.sha,
+                "--fresh",
+                "--dry-run",
+                "--home",
+                tmp,
+            )
+            self.assertEqual(status, 0)
+            self.assertEqual(context.call_args.kwargs["platform"], "darwin")
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_fresh_dry_run_into_an_empty_home_creates_nothing(self) -> None:
         w = World(self)

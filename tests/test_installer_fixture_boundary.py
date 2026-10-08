@@ -8,11 +8,13 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PureWindowsPath
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from install import steps_release
+from install import rollback, steps_release
 from install.context import StepFailedError
 from install.provider_paths import render_pinned
+from tests import installer_fakes
 from tests.installer_support import ROOT, Fake, World, git
 
 
@@ -129,3 +131,82 @@ class FixturePlistPathTests(unittest.TestCase):
         program.unlink()
         with self.assertRaises(StepFailedError):
             steps_release._check_plist(ctx, data)
+
+
+class FixtureLinkModelTests(unittest.TestCase):
+    """The Windows fake models link outcomes without claiming atomicity."""
+
+    def test_both_aliases_model_upgrade_and_rollback_only_in_owned_home(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            with patch(
+                "tests.installer_fakes.sys",
+                SimpleNamespace(platform="win32"),
+            ):
+                installer_fakes.register(self, home)
+            link = home / ".local/lib/muninn/current"
+            for name in ("old", "new"):
+                target = link.parent / name
+                target.mkdir(parents=True, exist_ok=True)
+                (target / "marker").write_text(name)
+            steps_release.relink(link, "old", "1")
+            steps_release.relink(link, "new", "2")
+            self.assertEqual(link.readlink(), Path("new"))
+            self.assertEqual((link / "marker").read_text(), "new")
+            rollback.relink(link, "old", "3")
+            self.assertEqual(link.readlink(), Path("old"))
+            self.assertEqual((link / "marker").read_text(), "old")
+            self.assertEqual((link.parent / "new/marker").read_text(), "new")
+            self.assertEqual(list(link.parent.glob(".current.*")), [])
+
+    def test_nonlink_outside_similar_prefix_and_parent_escape_refuse(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "owned"
+            home.mkdir()
+            link = home / ".local/lib/muninn/current"
+            link.parent.mkdir(parents=True)
+            link.write_text("untouched")
+            outside = root / "owned-other/.local/lib/muninn/current"
+            outside.parent.mkdir(parents=True)
+            outside.write_text("foreign")
+            for candidate in (link, outside, home / ".local/lib/muninn/other"):
+                with (
+                    self.subTest(candidate=candidate),
+                    self.assertRaises(ValueError),
+                ):
+                    installer_fakes.relink(home, candidate, "new", "1")
+            self.assertEqual(link.read_text(), "untouched")
+            self.assertEqual(outside.read_text(), "foreign")
+            link.unlink()
+            link.parent.rmdir()
+            link.parent.symlink_to(outside.parent, target_is_directory=True)
+            with self.assertRaises(ValueError):
+                installer_fakes.relink(home, link, "new", "2")
+            self.assertEqual(outside.read_text(), "foreign")
+            self.assertEqual(list(outside.parent.glob(".current.*")), [])
+
+    def test_existing_temp_is_retained_and_posix_aliases_are_unchanged(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            original = steps_release.relink, rollback.relink
+            with patch(
+                "tests.installer_fakes.sys", SimpleNamespace(platform="darwin")
+            ):
+                installer_fakes.register(self, home)
+            self.assertEqual((steps_release.relink, rollback.relink), original)
+            link = home / ".local/lib/muninn/current"
+            link.parent.mkdir(parents=True)
+            pending = link.with_name(".current.1")
+            pending.write_text("unknown")
+            with self.assertRaises(FileExistsError):
+                installer_fakes.relink(home, link, "new", "1")
+            self.assertEqual(pending.read_text(), "unknown")
+            self.assertFalse(link.exists())

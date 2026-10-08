@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from tests.installer_support import ROOT, git
 
@@ -25,7 +29,8 @@ class WrapperTest(unittest.TestCase):
         self.log = Path(tmp.name) / "argv"
         self.stub = Path(tmp.name) / "python-stub"
         self.stub.write_text(
-            f'#!/bin/sh\necho "$@" >> {self.log}\nexit "${{STUB_RC:-0}}"\n'
+            f'#!/bin/sh\necho "$@" >> {shlex.quote(self.log.as_posix())}\n'
+            'exit "${STUB_RC:-0}"\n'
         )
         self.stub.chmod(0o755)
         self.sha = git(ROOT, "rev-parse", "HEAD").decode().strip()
@@ -51,9 +56,16 @@ class WrapperTest(unittest.TestCase):
             MUNINN_PYTHON=str(self.stub),
             STUB_RC=str(rc),
         )
-        return subprocess.run(
-            [script, *args], env=env, capture_output=True, text=True
-        )
+        command: list[str | Path] = [script, *args]
+        if sys.platform == "win32":
+            shell = shutil.which("sh")
+            if shell is None:
+                raise RuntimeError("Windows wrapper fixture needs required sh")
+            command = [shell, script.as_posix(), *args]
+            env.update(
+                HOME=self.home.as_posix(), MUNINN_PYTHON=self.stub.as_posix()
+            )
+        return subprocess.run(command, env=env, capture_output=True, text=True)
 
     def installed(self, sha: str) -> None:
         """Make the temp HOME look like a machine running release ``sha``."""
@@ -64,6 +76,46 @@ class WrapperTest(unittest.TestCase):
     def argv(self) -> str:
         """Return what the stub Python was run with, or empty if never."""
         return self.log.read_text() if self.log.exists() else ""
+
+    def test_windows_facade_runs_the_same_script_with_required_sh(
+        self,
+    ) -> None:
+        shell = shutil.which("sh")
+        self.assertIsNotNone(shell)
+        with (
+            mock.patch(
+                __name__ + ".sys",
+                SimpleNamespace(platform="win32"),
+                create=True,
+            ),
+            mock.patch.object(subprocess, "run", wraps=subprocess.run) as run,
+        ):
+            result = self.run_wrapper("--repo", "/x", "--sha", "f" * 40)
+        self.assertEqual(
+            run.call_args.args[0][:2], [shell, WRAPPER.as_posix()]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"--repo /x --sha {'f' * 40}", self.argv())
+        self.assertEqual(
+            run.call_args.kwargs["env"]["HOME"], self.home.as_posix()
+        )
+        self.assertEqual(
+            run.call_args.kwargs["env"]["MUNINN_PYTHON"], self.stub.as_posix()
+        )
+
+    def test_windows_facade_refuses_missing_required_shell(self) -> None:
+        with (
+            mock.patch(
+                __name__ + ".sys",
+                SimpleNamespace(platform="win32"),
+                create=True,
+            ),
+            mock.patch.object(shutil, "which", return_value=None),
+            mock.patch.object(subprocess, "run") as run,
+            self.assertRaisesRegex(RuntimeError, "required sh"),
+        ):
+            self.run_wrapper()
+        run.assert_not_called()
 
     def test_bare_on_an_empty_machine_runs_a_fresh_install(self) -> None:
         r = self.run_wrapper()

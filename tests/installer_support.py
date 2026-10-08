@@ -18,12 +18,12 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 from install import configedit as ce
 from install import installer as co
 from install.context import Ctx
 from muninn import store
+from tests.installer_fakes import register
 
 ROOT = Path(__file__).resolve().parent.parent
 CRED = "sk-fake-" + "feedface" * 5
@@ -375,16 +375,11 @@ class World:
         Args:
             tc: The running test; owns the temp dir's lifetime.
         """
-        identity = mock.patch(
-            "install.steps_config.codex_identity",
-            return_value=("synthetic-codex-candidate",),
-        )
-        identity.start()
-        tc.addCleanup(identity.stop)
         temporary = tempfile.TemporaryDirectory(prefix="inst-")
         tc.addCleanup(temporary.cleanup)
         tmp = Path(temporary.name).resolve()
         self.home, self.repo = tmp / "home", tmp / "repo"
+        register(tc, self.home)
         self.out: list[str] = []
         for rel in PINNED:
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)

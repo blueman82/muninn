@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -80,6 +81,37 @@ class AccountSpikeTests(unittest.TestCase):
             self.assertIn(key, parent)
         self.assertEqual(parent.count("Copy-ChildCodes $value $report"), 2)
         self.assertIn("[Enum]::IsDefined", parent)
+
+    def test_child_module_lookup_input_uses_only_the_fixed_host(self) -> None:
+        source = lifecycle_account_scripts.outer_script(Path("/synthetic"))
+        derived = (
+            "$moduleRoot=[IO.Path]::Combine("
+            "[IO.Path]::GetDirectoryName($exe),'Modules')"
+        )
+        self.assertIn(derived, source)
+        self.assertIn("'PSModulePath='+$moduleRoot+$zero", source)
+        self.assertLess(source.index(derived), source.index("$minimal="))
+        self.assertLess(
+            source.index("'PSModulePath='+$moduleRoot+$zero"),
+            source.index("::CreateProcessWithTokenW("),
+        )
+        self.assertNotIn("$env:PSModulePath", source)
+        self.assertNotIn("Import-Module", source)
+        self.assertIn("$childArgs=' -NoProfile -NonInteractive", source)
+        self.assertIn("::CreateProcessWithTokenW($token,0,$exe", source)
+        self.assertIn("'TMP='+$base+$zero+'WINDIR='+$env:SystemRoot", source)
+
+    def test_child_unicode_environment_is_sorted_and_double_terminated(
+        self,
+    ) -> None:
+        source = lifecycle_account_scripts.outer_script(Path("/synthetic"))
+        block = source.split("$minimal=", 1)[1].split("$environment=", 1)[0]
+        keys = re.findall(r"'([A-Za-z]+)='", block)
+        self.assertEqual(
+            keys, ["PSModulePath", "SystemRoot", "TEMP", "TMP", "WINDIR"]
+        )
+        self.assertEqual(keys, sorted(keys, key=str.casefold))
+        self.assertTrue(block.rstrip().endswith("$zero+$zero"))
 
     def test_noop_definition_keeps_safe_native_task_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
