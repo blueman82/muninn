@@ -58,14 +58,20 @@ try {
  }
  $report.interactive_recognized=1
 } catch {
+ $originalBodyError=$_
  $report.winerror=[int]$_.Exception.HResult
+ try {
+  $childBodyHResult=[int]$originalBodyError.Exception.GetBaseException().HResult
+  $childBodyLine=[int]$originalBodyError.InvocationInfo.ScriptLineNumber
+ } catch {}
 } finally {
  if($null -ne $task){
   try {$report.scheduler_instances=[int]$task.GetInstances(0).Count}
   catch {$report.scheduler_instances=-1}
  }
- [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),
-  ($report|ConvertTo-Json -Compress))
+ $childReportPath=Join-Path $base 'child-result.json'
+ $childReportJson=$report|ConvertTo-Json -Compress
+ [IO.File]::WriteAllText($childReportPath,$childReportJson)
 }
 """
 
@@ -125,7 +131,9 @@ trap {try {
   ',"child_module_hresult":'+$childModuleHResult+
   ',"child_error_category":'+$childCategory+
   ',"child_command_type":'+$childCommand+
-  ',"child_exception_kind":'+$childExceptionKind+'}'
+  ',"child_exception_kind":'+$childExceptionKind+
+  ',"child_body_hresult":'+$childBodyHResult+
+  ',"child_body_line":'+$childBodyLine+'}'
  $path=[IO.Path]::Combine($childBase,'child-failure.json')
  if(![IO.File]::Exists($path)){[IO.File]::WriteAllText($path,$data)}
 } catch {} finally {exit 1}}
@@ -136,6 +144,7 @@ def child_script(parent: Path) -> str:
     """Retain uncaught child codes while explicitly preserving exit one."""
     header = (
         f"$childBase={literal(str(parent))};$childStage=1\n"
+        "$childBodyHResult=0;$childBodyLine=0\n"
         + EXCEPTION_KIND
         + _TRAP
         + _PROBE
@@ -153,9 +162,9 @@ def child_script(parent: Path) -> str:
             "$childStage=2;$name=Split-Path -Leaf $base",
         )
         .replace(
-            " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+            " $childReportPath=Join-Path $base 'child-result.json'",
             " $childStage=3\n"
-            " [IO.File]::WriteAllText((Join-Path $base 'child-result.json'),",
+            " $childReportPath=Join-Path $base 'child-result.json'",
         )
     )
     return OWNED + header + body

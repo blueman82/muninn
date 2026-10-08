@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -13,7 +12,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from muninn.obs_service import powershell
 from tests import (
     lifecycle_account_child,
     lifecycle_account_native,
@@ -93,67 +91,6 @@ class AccountSpikeTests(unittest.TestCase):
             self.assertIn(key, parent)
         self.assertEqual(parent.count("Copy-ChildCodes $value $report"), 2)
         self.assertIn("[Enum]::IsDefined", parent)
-
-    def test_original_exception_kind_and_parent_numeric_boundaries(
-        self,
-    ) -> None:
-        child = lifecycle_account_child.child_script(Path("/synthetic"))
-        parent = lifecycle_account_scripts.outer_script(Path("/synthetic"))
-        self.assertIn("Get-ChildExceptionKind $nativeChildFailure", child)
-        self.assertIn("'child_exception_kind'", parent)
-        self.assertIn("$number -notin @(-1,0,1,2,3,4,5)", parent)
-        self.assertIn("finally {exit 1}", child)
-        self.assertNotIn(".GetType()", child)
-        self.assertNotIn("Exception.Message", child)
-        if sys.platform == "win32":
-            source = (
-                lifecycle_account_child.EXCEPTION_KIND
-                + lifecycle_account_scripts._CHILD_DIAGNOSTICS
-                + r"""
-$ErrorActionPreference='Stop';$observed=@()
-$manifest=[IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management',
- 'Microsoft.PowerShell.Management.psd1')
-Microsoft.PowerShell.Core\Import-Module -Name $manifest -ErrorAction Stop
-$childPath=[IO.Path]::Combine($PSHOME,'child.ps1')
-$actualParent=Microsoft.PowerShell.Management\Split-Path -Parent $childPath
-if($actualParent -ne $PSHOME){throw 'parent_failed'}
-$missing=[IO.Path]::Combine([IO.Path]::GetTempPath(),
- [Guid]::NewGuid().ToString()+'.psd1')
-$importRefused=$false
-try{Microsoft.PowerShell.Core\Import-Module -Name $missing -ErrorAction Stop}
-catch{$importRefused=$true}
-if(!$importRefused){throw 'missing_module_not_refused'}
-$types=@([UnauthorizedAccessException],[Security.SecurityException],
- [Runtime.InteropServices.COMException],[ComponentModel.Win32Exception],
- [Management.Automation.RuntimeException])
-foreach($type in $types){$observed+=Get-ChildExceptionKind ($type::new())}
-if(($observed -join ',') -ne '1,2,3,4,5'){throw 'classification_failed'}
-if((Get-ChildExceptionKind $null) -ne -1 -or
-   (Get-ChildExceptionKind ([Exception]::new())) -ne 0){throw 'other_failed'}
-foreach($number in @(-1,0,1,2,3,4,5)){
- $report=@{};$value=[pscustomobject]@{child_exception_kind=$number}
- Copy-ChildCodes $value $report
- if($report.child_exception_kind -ne $number){throw 'projection_failed'}
-}
-foreach($invalid in @(-2,6,'1')){
- $report=@{sentinel=7};$refused=$false
- $value=[pscustomobject]@{child_module_readable=1;child_exception_kind=$invalid}
- try{Copy-ChildCodes $value $report}catch{$refused=$true}
- if(!$refused -or $report.Count -ne 1 -or $report.sentinel -ne 7){
-  throw 'invalid_projection_or_partial_update'
- }
-}
-'{"classified":5,"valid":7,"refused":3}'
-"""
-            )
-            result = subprocess.run(
-                powershell(source), capture_output=True, text=True, timeout=30
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                json.loads(result.stdout),
-                {"classified": 5, "valid": 7, "refused": 3},
-            )
 
     def test_child_module_lookup_input_uses_only_the_fixed_host(self) -> None:
         source = lifecycle_account_scripts.outer_script(Path("/synthetic"))

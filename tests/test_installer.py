@@ -70,7 +70,7 @@ class FreshInstallTest(unittest.TestCase):
         text = (h / ".codex/config.toml").read_text()
         self.assertEqual(
             codex_view(text),
-            (f"{self.lib}/current/integrations/codex", True, 2),
+            (str(self.lib / "current/integrations/codex"), True, 2),
         )
         record = Path(rec["rdir"]) / "rollback-record.json"
         assert_private(self, record)
