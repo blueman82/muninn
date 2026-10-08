@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - runner: macos-15
