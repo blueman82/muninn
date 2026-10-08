@@ -12,12 +12,13 @@ import tempfile
 import time
 from pathlib import Path
 
-from install import installer, lifecycle
+from install import lifecycle
 from install.context import Ctx, run_real
 from muninn import obs, obs_status, platform_io, tombstone_key
 from muninn.obs_service import parse_process, process_command, service_status
 from tests import (
     lifecycle_native_doctor,
+    lifecycle_native_entry,
     lifecycle_native_linux,
     lifecycle_native_rollback,
     lifecycle_native_windows,
@@ -66,7 +67,7 @@ def exercise(parent: Path) -> dict[str, object]:
     )
     started = time.monotonic()
     write("lifecycle", "fresh_install")
-    installer.install(ctx, ROOT, sha)
+    lifecycle_native_entry.install(ctx, ROOT, sha)
     first_job = lifecycle.job(ctx)
     assert first_job is not None
     assert isinstance(first_job["pid"], int) and first_job["pid"] > 0
@@ -86,7 +87,7 @@ def exercise(parent: Path) -> dict[str, object]:
     )
     upgraded_started = time.time()
     write("lifecycle", "upgrade_install")
-    installer.install(upgraded, ROOT, sha)
+    lifecycle_native_entry.install(upgraded, ROOT, sha)
     after_job = lifecycle.job(upgraded)
     assert after_job is not None
     assert isinstance(after_job["pid"], int) and after_job["pid"] > 0
@@ -101,6 +102,7 @@ def exercise(parent: Path) -> dict[str, object]:
     if sys.platform == "linux":
         lifecycle_native_writer.crash_restart(upgraded, upgraded_started)
         lifecycle_native_rollback.rollback(upgraded, ROOT)
+        lifecycle_native_entry.maintenance_checks(upgraded, ROOT)
     else:
         lifecycle.stop(upgraded)
     result = {
@@ -113,17 +115,23 @@ def exercise(parent: Path) -> dict[str, object]:
         "managed_busy_commit": sys.platform == "linux",
         "managed_crash_restart": sys.platform == "linux",
         "migration_rollback": sys.platform == "linux",
+        "source_wrappers": sys.platform == "linux",
         "native_seconds": round(time.monotonic() - started, 3),
     }
+    cleanup_backend(upgraded)
+    return result
+
+
+def cleanup_backend(ctx: Ctx) -> None:
+    """Remove only owned synthetic service resources after graceful stop."""
     if sys.platform == "win32":
         deleted = run_real(
-            ["schtasks.exe", "/Delete", "/TN", upgraded.target, "/F"]
+            ["schtasks.exe", "/Delete", "/TN", ctx.target, "/F"]
         )
         assert deleted.returncode == 0
     else:
         ctx.plist.unlink()
         run_real(["systemctl", "--user", "daemon-reload"])
-    return result
 
 
 def refused_main(parent: Path) -> None:

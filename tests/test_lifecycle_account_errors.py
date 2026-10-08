@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 import unittest
 
-from tests.lifecycle_account_errors import failure_codes
+from tests.lifecycle_account_errors import failure_codes, response
 
 
 class AccountErrorTests(unittest.TestCase):
@@ -48,3 +49,32 @@ class AccountErrorTests(unittest.TestCase):
                 self.assertEqual(
                     failure_codes(1, raw)["outer_compile_code"], 0
                 )
+
+    def test_absent_malformed_or_oversized_report_keeps_nonzero_exit(
+        self,
+    ) -> None:
+        for stdout in (b"", b"not json", b"x" * 16385, b"[]", b"{}"):
+            result = subprocess.CompletedProcess(
+                [], 7, stdout, b"ParserError secret"
+            )
+            with (
+                self.subTest(size=len(stdout)),
+                self.assertRaises(subprocess.CalledProcessError) as raised,
+            ):
+                response(result)
+            self.assertEqual(raised.exception.returncode, 7)
+            self.assertEqual(
+                failure_codes(7, raised.exception.stderr)[
+                    "outer_parser_error"
+                ],
+                1,
+            )
+
+    def test_valid_nonzero_report_retains_stage_for_diagnosis(self) -> None:
+        result = subprocess.CompletedProcess(
+            [],
+            7,
+            b'{"phase":"account_create","outer_stage":2,"winerror":123}',
+            b"",
+        )
+        self.assertEqual(response(result)["outer_stage"], 2)
