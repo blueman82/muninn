@@ -29,6 +29,8 @@ class LauncherStagesTest(unittest.TestCase):
             self.assertIn(line, result)
         for name in (
             "initialize",
+            "root",
+            "installed",
             "ancestry",
             "selection",
             "interpreter",
@@ -47,6 +49,7 @@ class LauncherStagesTest(unittest.TestCase):
             "native_path",
             "hold_enter",
             "before_open",
+            "before_hold",
         ):
             field = "stage_first_" + name + "_ms"
             self.assertEqual(result.count("Contains('" + field + "')"), 1)
@@ -68,6 +71,9 @@ class LauncherStagesTest(unittest.TestCase):
     def test_parser_accepts_only_all_fixed_numeric_markers(self) -> None:
         values = {
             "stage_initialize_ms": 1,
+            "stage_root_ms": 1,
+            "stage_installed_ms": 1,
+            "stage_first_before_hold_ms": 1,
             "stage_ancestry_ms": 2,
             "stage_selection_ms": 3,
             "stage_interpreter_ms": 4,
@@ -116,6 +122,9 @@ class LauncherStagesTest(unittest.TestCase):
                 "stage_" + key + "_ms": 1
                 for key in (
                     "initialize",
+                    "root",
+                    "installed",
+                    "first_before_hold",
                     "ancestry",
                     "selection",
                     "interpreter",

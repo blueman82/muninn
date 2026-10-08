@@ -16,6 +16,12 @@ from tests.ingest_support import ROOT
 _PREFIX = b"__MUNINN_STAGE__"
 _MARKERS = (
     ("    $native = Initialize-Native", "initialize"),
+    ("    $root = Split-Path -Parent $PSScriptRoot", "root"),
+    (
+        "    $installed = -not (Test-Path -LiteralPath "
+        "(Join-Path $root 'muninn/cli.py'))",
+        "installed",
+    ),
     ("        Hold-Directories $root", "ancestry"),
     (
         "        $recorded = Assert-InterpreterField $record.python",
@@ -44,6 +50,7 @@ _FIRST_MARKERS = (
     ),
 )
 _OPEN_MARKERS = (
+    ("        Hold-Directories $root", "before_hold"),
     ("            $guard = (Open-Native $part $true)", "before_open"),
     (
         "function Open-Native([string]$Path, [bool]$Directory) {",
