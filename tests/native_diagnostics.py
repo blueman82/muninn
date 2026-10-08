@@ -161,6 +161,8 @@ _METRICS = frozenset(
         "child_failure_stage",
         "child_failure_hresult",
         "child_exception_kind",
+        "child_body_hresult",
+        "child_body_line",
         "child_failure_line",
         "private_desktop_created",
         "token_session",
@@ -192,6 +194,11 @@ _PROBE_METRICS = (
     | frozenset(f"probe_v{variant}_error" for variant in (1, 2, 3))
 )
 _METRICS = _METRICS | _PROBE_METRICS
+_METRIC_BOUNDS = {
+    "child_exception_kind": (-1, 5),
+    "child_body_hresult": (-2147483648, 2147483647),
+    "child_body_line": (0, 4096),
+}
 _SECURITY_CODES = frozenset(
     (
         "control_before",
@@ -226,9 +233,10 @@ def _previous(path: Path) -> dict[str, str | int]:
 def _safe_field(key: str, value: object) -> bool:
     """Accept only explicit scalar fields when exporting a child artifact."""
     if key in _METRICS | _CODES:
+        bounds = _METRIC_BOUNDS.get(key)
         return isinstance(value, int) and (
-            key != "child_exception_kind"
-            or (type(value) is int and -1 <= value <= 5)
+            bounds is None
+            or (type(value) is int and bounds[0] <= value <= bounds[1])
         )
     if not isinstance(value, str):
         return False

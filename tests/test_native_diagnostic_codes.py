@@ -228,3 +228,38 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
             for key in ("child_exception_name", "child_exception_body"):
                 with self.assertRaises(ValueError):
                     write("ordinary", "account_child_start", metrics={key: 1})
+
+    def test_original_child_body_codes_are_bounded_numbers(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            cases = (
+                (
+                    "child_body_hresult",
+                    (-2147483648, -2147024891, 0, 2147483647),
+                    (-2147483649, 2147483648, True),
+                ),
+                ("child_body_line", (0, 1, 4096), (-1, 4097, True)),
+            )
+            for key, valid, invalid in cases:
+                for value in valid:
+                    write(
+                        "ordinary", "account_child_start", metrics={key: value}
+                    )
+                    self.assertEqual(json.loads(path.read_text())[key], value)
+                for value in invalid:
+                    with self.assertRaises(ValueError):
+                        write(
+                            "ordinary",
+                            "account_child_start",
+                            metrics={key: value},
+                        )
+            for key in ("child_body_message", "child_body_source"):
+                with self.assertRaises(ValueError):
+                    write("ordinary", "account_child_start", metrics={key: 1})

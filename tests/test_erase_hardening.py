@@ -26,6 +26,7 @@ from muninn import (
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
 from tests.knowledge_support import KnowCase
+from tests.provider_native_stderr import classify
 from tests.store_support import assert_private
 from tests.test_classify import PARENT, codex_meta, reply, user_msg
 from tests.test_ingest import rollout
@@ -198,15 +199,65 @@ class AsideFileTests(EraseCase):
         got = subprocess.run(
             argv, cwd=self.home, env=env, capture_output=True, timeout=30
         )
-        self.assertEqual(
-            (got.returncode, got.stdout, got.stderr), (0, b"", b"")
-        )
+        self.assert_manual_removal_result(got, windows=sys.platform == "win32")
         self.assertTrue(all(not target.exists() for target in targets))
         self.assertEqual(decoy.read_bytes(), b"wildcard decoy")
         self.assertEqual(marker.read_bytes(), b"injection marker unchanged")
         self.assertEqual(
             transcript.read_bytes(), b"CANARY-TRANSCRIPT-UNCHANGED"
         )
+
+    def assert_manual_removal_result(
+        self, got: subprocess.CompletedProcess[bytes], *, windows: bool
+    ) -> None:
+        """Require success and reject all stderr except native progress."""
+        self.assertEqual((got.returncode, got.stdout), (0, b""))
+        if windows and got.stderr:
+            codes = classify(got.stderr)
+            self.assertEqual(
+                (
+                    codes["stderr_clixml"],
+                    codes["stderr_progress_only"],
+                    codes["stderr_error_count"],
+                    codes["stderr_other_count"],
+                ),
+                (1, 1, 0, 0),
+            )
+        else:
+            self.assertEqual(got.stderr, b"")
+
+    def test_manual_command_accepts_only_bounded_native_progress(self) -> None:
+        progress = (
+            b'#< CLIXML\r\n<Objs Version="1.1.0.1" '
+            b'xmlns="http://schemas.microsoft.com/powershell/2004/04">'
+            b'<Obj S="progress"><MS><PR N="Record">'
+            b"<AV>Preparing modules for first use.</AV>"
+            b"</PR></MS></Obj></Objs>"
+        )
+        result = subprocess.CompletedProcess(["synthetic"], 0, b"", progress)
+        self.assert_manual_removal_result(result, windows=True)
+        with self.assertRaises(AssertionError):
+            self.assert_manual_removal_result(result, windows=False)
+        for stderr in (
+            b"unrecognized output",
+            b"#< CLIXML\nmalformed",
+            progress.replace(b'S="progress"', b'S="Error"'),
+            progress.replace(b'S="progress"', b'S="unknown"'),
+            b"#< CLIXML\n" + b"x" * 65536,
+        ):
+            with self.assertRaises(AssertionError):
+                self.assert_manual_removal_result(
+                    subprocess.CompletedProcess(["synthetic"], 0, b"", stderr),
+                    windows=True,
+                )
+        for result in (
+            subprocess.CompletedProcess(["synthetic"], 1, b"", progress),
+            subprocess.CompletedProcess(
+                ["synthetic"], 0, b"INJECTED", progress
+            ),
+        ):
+            with self.assertRaises(AssertionError):
+                self.assert_manual_removal_result(result, windows=True)
 
     def test_no_aside_file_means_no_command(self) -> None:
         out = self.erase(session=PARENT, dry_run=True)
