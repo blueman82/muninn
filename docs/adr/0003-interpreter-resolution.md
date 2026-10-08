@@ -30,3 +30,9 @@ recorded interpreter; Linux invokes that interpreter with a pinned bootstrap
 that validates private state before imports. Upgrade repairs the recorded
 interpreter/action. The action definition alone does not establish later
 integrity of Python dependencies.
+
+
+Native Windows interpreter fields require a fixed local `.exe` path, checked
+before the version probe. Batch and script candidates are refused before any
+execution, preventing recursive wrapper probes. A missing recorded `.exe`
+continues to use the validated runtime fallback.

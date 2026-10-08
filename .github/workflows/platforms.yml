@@ -244,6 +244,16 @@ jobs:
           import subprocess
           import sys
           subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
+      - name: Upload early native proof codes
+        if: runner.os != 'macOS' && !cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-proof-codes-${{ matrix.runner }}
+          path: |
+            ${{ runner.temp }}/muninn-native-diagnostics/muninn-lifecycle-proof.json
+            ${{ runner.temp }}/muninn-native-diagnostics/muninn-provider-proof.json
+          if-no-files-found: error
+          retention-days: 1
       - name: Run mandatory native runtime safety checks
         if: runner.os == 'Windows' && !cancelled()
         shell: python
@@ -256,7 +266,8 @@ jobs:
                           '-Command', 'exit 0'], check=True, timeout=90)
           print('PowerShell cold startup seconds:', round(time.monotonic() - started, 3))
           subprocess.run(
-              [sys.executable, '-m', 'unittest', 'tests.test_platform_lock',
+              [sys.executable, '-m', 'unittest', '-v', 'tests.test_atomic_state', 'tests.test_interpreter_guard',
+               'tests.test_platform_lock',
                'tests.test_file_sync', 'tests.test_platform_io',
                'tests.test_platform_windows', 'tests.test_windows_runtime',
                'tests.test_platform_paths', 'tests.test_poller_stop',
@@ -272,8 +283,10 @@ jobs:
           import subprocess
           import sys
           subprocess.run([
-              sys.executable, '-m', 'unittest',
-              'tests.test_install_platform_context', 'tests.test_install_lifecycle',
+              sys.executable, '-m', 'unittest', '-v',
+              'tests.test_atomic_state', 'tests.test_install_preflight_logging',
+              'tests.test_install_contracts', 'tests.test_lifecycle_diagnostics',
+              'tests.test_interpreter_guard', 'tests.test_install_platform_context', 'tests.test_install_lifecycle',
               'tests.test_install_snapshot', 'tests.test_installer',
               'tests.test_install_dry_run', 'tests.test_uninstall',
               'tests.test_native_install_entry', 'tests.test_provider_paths',

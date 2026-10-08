@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -13,7 +14,8 @@ from typing import cast
 
 from install.context import Ctx, run_real
 from install.lifecycle import _same_process, _task_engines, task_xml
-from muninn.obs_service import powershell
+from muninn.obs_service import literal, powershell
+from tests.native_diagnostics import transfer, write
 
 
 def run_child(parent: Path, root: Path) -> dict[str, object]:
@@ -31,7 +33,8 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     assert command is not None and arguments is not None
     command.text = sys.executable
     code = (
-        "import sys;sys.path.insert(0,sys.argv.pop(1));"
+        "import os,sys;root=sys.argv.pop(1);"
+        "os.environ['RUNNER_TEMP']=sys.argv.pop(1);sys.path.insert(0,root);"
         "from tests.lifecycle_native import main;raise SystemExit(main())"
     )
     args = [
@@ -42,6 +45,7 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
         "-c",
         code,
         str(root),
+        str(parent),
         "--child",
         str(parent),
     ]
@@ -59,12 +63,9 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     )
     name = "Muninn-CI-" + uuid.uuid4().hex
     ctx.target = name
-    subprocess.run(
-        ["schtasks.exe", "/Create", "/TN", name, "/XML", str(xml), "/F"],
-        capture_output=True,
-        check=True,
-        timeout=30,
-    )
+    write("lifecycle", "outer_task_create")
+    _create_task(name, xml)
+    write("lifecycle", "outer_task_run")
     subprocess.run(
         ["schtasks.exe", "/Run", "/TN", name],
         capture_output=True,
@@ -82,8 +83,9 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     raw: object = json.loads(result.read_text())
     assert isinstance(raw, dict)
     report = cast(dict[str, object], raw)
+    transfer("lifecycle", parent)
     if report.get("ok") is not True:
-        raise RuntimeError(str(report))
+        raise RuntimeError("ordinary child lifecycle failed; state retained")
     assert report.get("elevated") is False, report
     pid, created = report.get("child_pid"), report.get("child_created")
     assert isinstance(pid, int) and isinstance(created, str)
@@ -130,3 +132,85 @@ def _grant_synthetic_access(parent: Path) -> str:
             timeout=120,
         )
     return identity
+
+
+def registration_codes(data: bytes) -> dict[str, str | int]:
+    """Extract fixed scheduler XML refusal codes without arbitrary messages."""
+    text = data.decode(errors="replace")
+    result: dict[str, str | int] = {"code": "task_registration_unknown"}
+    if "task XML contains" in text:
+        result["code"] = "task_xml_refused"
+    elif "Access is denied" in text:
+        result["code"] = "task_access_denied"
+    match = re.search(r"\((\d{1,5}),(\d{1,5})\):([A-Za-z_:]{1,64})", text)
+    if match is not None:
+        result["xml_line"], result["xml_column"] = int(match[1]), int(match[2])
+        element = match[3].rstrip(":").split(":")[-1]
+        if element in {
+            "Task",
+            "Triggers",
+            "Principals",
+            "Principal",
+            "Actions",
+            "Exec",
+            "Settings",
+            "LogonType",
+            "RunLevel",
+            "ExecutionTimeLimit",
+        }:
+            result["xml_element"] = element
+    return result
+
+
+def _create_task(name: str, xml: Path) -> None:
+    """Register the synthetic task, reporting only fixed refusal codes."""
+    created_task = subprocess.run(
+        ["schtasks.exe", "/Create", "/TN", name, "/XML", str(xml), "/F"],
+        capture_output=True,
+        timeout=30,
+    )
+    if created_task.returncode:
+        codes = xml_validation_codes(xml)
+        write(
+            "lifecycle",
+            None,
+            metrics={"returncode": created_task.returncode, **codes},
+        )
+        print(
+            json.dumps(
+                registration_codes(created_task.stdout + created_task.stderr)
+            ),
+            flush=True,
+        )
+        created_task.check_returncode()
+
+
+def xml_validation_codes(xml: Path) -> dict[str, int]:
+    """Validate the exact XML in COM, exposing only numeric failure results."""
+    script = (
+        "$ErrorActionPreference='Stop';"
+        "try{$s=New-Object -ComObject Schedule.Service;$s.Connect();"
+        "$t=$s.NewTask(0);"
+        f"$t.XmlText=[IO.File]::ReadAllText({literal(str(xml))});"
+        "@{hresult=0;inner_hresult=0}|ConvertTo-Json -Compress}"
+        "catch{$e=$_.Exception;$hr=[int]$e.HResult;"
+        "while($null -ne $e.InnerException){$e=$e.InnerException};"
+        "@{hresult=$hr;inner_hresult=[int]$e.HResult}|"
+        "ConvertTo-Json -Compress}"
+    )
+    result = subprocess.run(
+        powershell(script), capture_output=True, timeout=30
+    )
+    try:
+        value: object = json.loads(result.stdout)
+    except ValueError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: code
+        for key, code in value.items()
+        if key in {"hresult", "inner_hresult"}
+        and isinstance(code, int)
+        and not isinstance(code, bool)
+    }

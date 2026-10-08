@@ -282,6 +282,8 @@ if sys.platform == "win32":
 
     def assert_interpreter_field(path: Path) -> None:
         """Validate a recorded local path without requiring it to exist."""
+        if path.suffix.casefold() != ".exe":
+            raise OSError("recorded interpreter must be an EXE")
         if not path.is_absolute():
             raise OSError("recorded interpreter must be absolute")
         absolute = _local_path(path)

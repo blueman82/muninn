@@ -19,7 +19,7 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
-from muninn import platform_io, platform_paths
+from muninn import file_sync, platform_io, platform_paths, platform_windows
 from muninn.obs_log import log_poller
 from muninn.platform_lock import try_lock
 from muninn.store_migrate import migrate_v1_to_v2, migrate_v2_to_v3
@@ -97,7 +97,12 @@ def write_json_atomic(path: Path, obj: object) -> None:
         with os.fdopen(fd, "wb") as handle:  # mkstemp files are 0600
             platform_io.assert_private_fd(handle.fileno())
             handle.write(payload)
-        Path(tmp).replace(path)
+            handle.flush()
+            file_sync.sync_fd(handle.fileno())
+        if os.name == "nt":
+            platform_windows.publish(Path(tmp), path, replace=True)
+        else:
+            Path(tmp).replace(path)
     except BaseException:
         # BaseException so an interrupt does not leave a stray temp file
         # holding the payload. The cleanup must not fail: the interrupt may

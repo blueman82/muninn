@@ -20,9 +20,9 @@ from tests.installer_support import REAL_CODEX, ROOT
 
 
 class InstallLogTest(unittest.TestCase):
-    """The install log keeps status and stderr and drops stdout."""
+    """The private install log retains codes and numeric status."""
 
-    def test_log_has_status_and_stderr_but_never_stdout(self) -> None:
+    def test_log_has_codes_and_status_but_no_external_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "lib/install.log"
 
@@ -40,12 +40,71 @@ class InstallLogTest(unittest.TestCase):
                 say("hello")
                 logged(["launchctl", "bootstrap", "x"])
             text = path.read_text()
-            self.assertIn("hello", text)
-            self.assertIn("run launchctl bootstrap -> 3", text)
-            self.assertIn("stderr: boom", text)
+            self.assertIn("install_progress", text)
+            self.assertIn('"exit": 3', text)
+            for value in ("hello", "launchctl", "bootstrap", "boom"):
+                self.assertNotIn(value, text)
             # stdout can carry transcript text, which must stay out of logs.
             self.assertNotIn("TRANSCRIPT-TEXT", text)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_unsafe_log_original_is_not_changed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp) / "private"
+            parent.mkdir(mode=0o700)
+            path = parent / "install.log"
+            path.write_bytes(b"original")
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
+                    check=True,
+                    capture_output=True,
+                )
+            else:
+                path.chmod(0o666)
+            with self.assertRaises(OSError):
+                co.install_log(path)
+            self.assertEqual(path.read_bytes(), b"original")
+            if sys.platform != "win32":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o666)
+
+    def test_symlink_log_parent_is_refused_before_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "outside"
+            outside.mkdir(mode=0o700)
+            link = root / "link"
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                    check=True,
+                    capture_output=True,
+                )
+            else:
+                link.symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(OSError):
+                co.install_log(link / "install.log")
+            self.assertEqual(list(outside.iterdir()), [])
+
+    def test_failed_record_does_not_persist_external_error_text(self) -> None:
+        rec: co.Record = {"steps": []}
+        ctx = co.Ctx(
+            Path("/synthetic/home"), co.run_real, "test", say=lambda text: None
+        )
+        with (
+            mock.patch.object(co, "save"),
+            mock.patch.object(co, "rollback", return_value=[]),
+            mock.patch.object(co, "install_record"),
+        ):
+            co._roll_back(
+                ctx,
+                rec,
+                co.pin,
+                RuntimeError("external transcript and credential"),
+            )
+        self.assertEqual(
+            rec["failed"], {"step": "pin", "error": "RuntimeError"}
+        )
 
 
 class CliTest(unittest.TestCase):

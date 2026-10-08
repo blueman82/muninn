@@ -13,7 +13,7 @@ pass `--repo` and `--sha`. A wrong choice is easy to make and an upgrade deletes
 - `--help` describes the three forms above.
 - Any other arguments go straight to `install.installer`, so `--repo`, `--sha`, `--fresh`, `--upgrade` and `--dry-run` keep
   working unchanged. The wrapper adds no mode the installer lacks.
-- A real run prints one summary line (commit, mode, poller pid, log path). The step-by-step commands stay in `install.log`.
+- A real run prints one summary line (commit, mode, poller pid, log path). The fixed progress codes and command exit statuses stay in `install.log`.
 
 **Consequences.**
 - The owner runs `bin/muninn-install`; agents run only `--check` and `--status`.

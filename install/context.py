@@ -15,7 +15,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Protocol, TypedDict
+from typing import Any, TypedDict
 
 from install.constants import (
     LABEL,
@@ -23,6 +23,9 @@ from install.constants import (
     PLIST,
     REMOVED_PREFIX,
 )
+from install.installer_log import Runner as Runner
+from install.installer_log import install_log as install_log
+from install.installer_log import run_real as run_real
 from muninn.obs_service import parse_process, process_command
 from muninn.obs_status import read_status
 from muninn.platform_paths import read_selection, windows_base
@@ -30,19 +33,6 @@ from muninn.platform_paths import read_selection, windows_base
 
 class StepFailedError(Exception):
     """An install step could not complete; rollback follows."""
-
-
-class Runner(Protocol):
-    """A command runner: real subprocesses, or a fake in tests."""
-
-    def __call__(
-        self,
-        argv: Sequence[str | Path],
-        env: Mapping[str, str] | None = None,
-        input: bytes | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        """Run ``argv`` and return the finished process."""
-        ...
 
 
 class Job(TypedDict):
@@ -57,28 +47,6 @@ class Job(TypedDict):
     cmd: str
 
 
-def run_real(
-    argv: Sequence[str | Path],
-    env: Mapping[str, str] | None = None,
-    input: bytes | None = None,
-) -> subprocess.CompletedProcess[bytes]:
-    """Run a command for real, capturing output.
-
-    Args:
-        argv: Program and arguments; paths are converted to strings.
-        env: Full environment, or None to inherit.
-        input: Bytes for stdin.
-
-    Returns:
-        The finished process; the caller inspects the exit status.
-    """
-    text_argv = [str(a) for a in argv]
-    # The timeout is a backstop against a hung tool, not a tuned deadline.
-    return subprocess.run(
-        text_argv, env=env, input=input, capture_output=True, timeout=600
-    )
-
-
 @dataclasses.dataclass
 class Ctx:
     """Everything one install or rollback run needs.
@@ -89,6 +57,7 @@ class Ctx:
         ts: UTC timestamp that names this run's directories.
         platform: Native platform, overridden only by isolated tests.
         default_home: Use native environment paths when HOME was omitted.
+        log_path: Optional CLI log activated only after successful preflight.
         uid: User id for launchd's per-user ``gui/<uid>`` domain.
         dry_run: Plan and report without changing anything.
         now: Clock; replaced in tests.
@@ -117,6 +86,7 @@ class Ctx:
     uid: int = getattr(os, "getuid", lambda: 0)()
     platform: str = sys.platform
     default_home: bool = False
+    log_path: Path | None = None
     dry_run: bool = False
     now: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
@@ -185,51 +155,6 @@ class Ctx:
         if selected is None:
             raise StepFailedError("no installed release selection")
         return selected[0]
-
-
-def install_log(
-    path: Path, run: Runner = run_real
-) -> tuple[Callable[[str], None], Runner]:
-    """Build a ``say`` and a ``run`` that also append to a log file.
-
-    The log is 0600 and timestamped. It records messages, each command's
-    name and exit status, and a failed command's stderr tail. It never
-    records stdout, which can carry transcript paths or text. Only messages
-    reach the screen; the command lines are for the log.
-
-    Args:
-        path: The log file; its directory is created on demand.
-        run: The runner to wrap.
-
-    Returns:
-        ``(say, run)``: a printer that also logs, and the logging runner.
-    """
-
-    def note(text: str) -> None:
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Create with 0600 atomically; chmod afterwards would leave a window.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a") as f:
-            f.write(f"{stamp} {text}\n")
-
-    def say(text: str) -> None:
-        print(text)
-        note(text)
-
-    def logged(
-        argv: Sequence[str | Path],
-        env: Mapping[str, str] | None = None,
-        input: bytes | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        r = run(argv, env=env, input=input)
-        name = " ".join(str(a) for a in argv[:2])
-        note(f"run {name} -> {r.returncode}")
-        if r.returncode:
-            note("  stderr: " + r.stderr.decode(errors="replace")[-300:])
-        return r
-
-    return say, logged
 
 
 def must(

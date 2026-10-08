@@ -97,6 +97,7 @@ function Assert-InterpreterField([string]$Path) {
     $drive = [IO.DriveInfo]::new($Path.Substring(0, 3))
     if ($drive.DriveType -ne [IO.DriveType]::Fixed) { throw 'Unsafe recorded drive' }
     $full = [IO.Path]::GetFullPath($Path)
+    if ([IO.Path]::GetExtension($full) -ine '.exe') { throw 'Interpreter must be an EXE' }
     $parts = [System.Collections.Generic.List[string]]::new()
     $parts.Add($full)
     $directory = [IO.DirectoryInfo]::new([IO.Path]::GetDirectoryName($full))

@@ -223,14 +223,16 @@ class PortableCliTests(CliCase):
         self.assertEqual(source.read_bytes(), original)
         with mock.patch("muninn.obs.run", fake_run()):
             code, out, err = self.muninn("doctor")
-        self.assertEqual(
-            (code, err), (1 if sys.platform == "win32" else 0, "")
-        )
+        self.assertEqual((code, err), (0, ""))
         checks = {check["check"]: check for check in out["checks"]}
         self.assertTrue(checks["data_dir_mode"]["ok"], out)
         self.assertTrue(checks["file_modes"]["ok"], out)
         if sys.platform == "win32":
-            self.assertFalse(checks["launchd_job"]["ok"])
+            self.assertIsNone(checks["managed_service"]["ok"])
+            self.assertEqual(
+                checks["managed_service"]["detail"], "service_state_unknown"
+            )
+            self.assertNotIn("launchd_job", checks)
 
 
 if sys.platform == "win32":

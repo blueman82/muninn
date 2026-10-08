@@ -22,6 +22,7 @@ re-exported here.
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import shutil
 import sys
@@ -213,7 +214,7 @@ def _roll_back(ctx: Ctx, rec: Record, step: Step, exc: Exception) -> None:
     """
     rec["failed"] = {
         "step": step.__name__,
-        "error": f"{type(exc).__name__}: {exc}",
+        "error": type(exc).__name__,
     }
     save(ctx, rec)
     ctx.say(f"install failed at {step.__name__}: {exc}; rolling back")
@@ -242,6 +243,10 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
             a dry run, re-raised without one).
     """
     rec = preflight(ctx, Path(repo), sha)
+    log_path = ctx.log_path
+    if log_path is not None and not ctx.dry_run:
+        ctx = copy.copy(ctx)
+        ctx.say, ctx.run = install_log(log_path, ctx.run)
     record(ctx, rec)
     step: Step = record
     try:
@@ -321,31 +326,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Files we create must not be readable by other users.
     os.umask(PRIVATE_UMASK)
     ts = time.strftime(TS_FORMAT, time.gmtime())
-    # A dry run writes nothing, not even the log.
-    say, run = (
-        (print, run_real)
-        if args.dry_run
-        else install_log(
-            Ctx(args.home, run_real, ts, default_home=default_home).lib
-            / "install.log"
-        )
-    )
     ctx = Ctx(
         args.home,
-        run,
+        run_real,
         ts,
         dry_run=args.dry_run,
         probe=codex_probe,
-        say=say,
+        say=print,
         fresh=args.fresh,
         upgrade=args.upgrade,
         default_home=default_home,
     )
+    ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
     try:
         install(ctx, args.repo.resolve(), args.sha)
-    except (StepFailedError, ce.RefusedError, ce.RacedError) as exc:
-        sink = say if ctx.rdir.exists() else print
-        sink(f"FAILED: {exc}")
+    except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
+        print(f"FAILED: {exc}")
         return 1
     return 0
 
