@@ -106,6 +106,14 @@ function Get-TaskSid($user){
    [Security.Principal.SecurityIdentifier]).Value
  } catch {return $null}
 }
+# The scheduler omits elements that hold their schema default when it stores
+# a definition, so a missing node means the default value.
+$TaskDefaults=@{
+ 'Principals/Principal/RunLevel'='LeastPrivilege'
+ 'Settings/MultipleInstancesPolicy'='IgnoreNew'
+ 'Settings/Enabled'='true'
+ 'Triggers/LogonTrigger/Enabled'='true'
+}
 function Test-Owned($task,$base){
  $script:ownedMismatch=0
  [xml]$wanted=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
@@ -131,10 +139,13 @@ function Test-Owned($task,$base){
   $xpath='/t:Task/t:'+($path.Replace('/','/t:'))
   $a=$actual.SelectSingleNode($xpath,$ns)
   $w=$wanted.SelectSingleNode($xpath,$ns)
-  if($null -eq $a -or $null -eq $w){return $false}
-  $same=$a.InnerText -eq $w.InnerText
+  if($null -eq $w){return $false}
+  $have=$TaskDefaults[$path]
+  if($null -ne $a){$have=$a.InnerText}
+  if($null -eq $have){return $false}
+  $same=$have -eq $w.InnerText
   if(!$same -and $path -like '*UserId'){
-   $sid=Get-TaskSid $a.InnerText
+   $sid=Get-TaskSid $have
    $same=$null -ne $sid -and $sid -eq (Get-TaskSid $w.InnerText)
   }
   if(!$same){return $false}
