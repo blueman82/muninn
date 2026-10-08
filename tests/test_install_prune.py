@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -12,6 +13,7 @@ from install import installer as co
 from install import rollback as rb
 from install import steps_release as sr
 from muninn import obs
+from muninn.platform_paths import windows_base
 from tests.installer_support import World, git
 
 TS = "20261002T000000Z"
@@ -156,7 +158,11 @@ class DoctorLeftoverTests(unittest.TestCase):
     def test_warns_only_while_one_is_left(self) -> None:
         w = World(self)
         env = {"HOME": str(w.home)}
-        lib = w.home / ".local/lib/muninn"
+        lib = (
+            windows_base(env) / "lib"
+            if sys.platform == "win32"
+            else w.home / ".local/lib/muninn"
+        )
         lib.mkdir(parents=True)
         self.assertTrue(obs._release_leftovers(env)["ok"])
         (lib / f"{sr.PRUNING}{TS}-abc").mkdir()

@@ -22,7 +22,8 @@ function Read-ChildJson($path){
 function Copy-ChildCodes($value,$report){
  $codes=@{}
  foreach($key in @('child_module_readable','child_module_hresult',
-                  'child_error_category','child_command_type')){
+                  'child_error_category','child_command_type',
+                  'child_exception_kind')){
   if($null -eq $value.$key){continue}
   if($value.$key -isnot [int] -and $value.$key -isnot [long]){
    throw 'child_number_invalid'
@@ -31,6 +32,8 @@ function Copy-ChildCodes($value,$report){
   if($key -eq 'child_module_readable' -and $number -notin @(-1,0,1)){
    throw 'child_number_invalid'
   }
+  if($key -eq 'child_exception_kind' -and
+     $number -notin @(-1,0,1,2,3,4,5)){throw 'child_number_invalid'}
   if($number -ne -1 -and
      (($key -eq 'child_error_category' -and ![Enum]::IsDefined(
       [Management.Automation.ErrorCategory],$number)) -or

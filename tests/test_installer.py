@@ -20,6 +20,7 @@ from tests.installer_support import (
     git,
     snapshot,
 )
+from tests.store_support import assert_private
 
 
 class FreshInstallTest(unittest.TestCase):
@@ -48,7 +49,7 @@ class FreshInstallTest(unittest.TestCase):
         rec = self.install()
         self.assertEqual(w.fake.loaded, "new")
         python = (self.lib / "python").readlink()
-        self.assertEqual(python, Path(sys.executable))
+        self.assertTrue(python.samefile(sys.executable))
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(
             (out["outcome"], out["fresh"], out["sha"], out["python"]["path"]),
@@ -57,9 +58,7 @@ class FreshInstallTest(unittest.TestCase):
         self.assertIn("hooks.SessionStart", out["config_keys"])
         # The record is shared with colleagues, so it must hold no secret.
         self.assertNotIn(CRED, json.dumps(out))
-        self.assertEqual(
-            (self.lib / co.INSTALL_RECORD).stat().st_mode & 0o777, 0o600
-        )
+        assert_private(self, self.lib / co.INSTALL_RECORD)
         s = json.loads((h / ".claude/settings.json").read_bytes())
         (group,) = s["hooks"]["SessionStart"]
         self.assertEqual(
@@ -72,7 +71,7 @@ class FreshInstallTest(unittest.TestCase):
             (f"{self.lib}/current/integrations/codex", True, 2),
         )
         record = Path(rec["rdir"]) / "rollback-record.json"
-        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        assert_private(self, record)
         self.assertIn(f"record in {rec['rdir']}", "\n".join(w.out))
         rb.rollback(w.ctx(), co.load_record(record))
         for rel, data in before.items():
@@ -87,7 +86,7 @@ class FreshInstallTest(unittest.TestCase):
     ) -> None:
         flag = self.w.home / ".local/share/muninn/recall.off"
         self.install()
-        self.assertEqual(flag.stat().st_mode & 0o777, 0o600)
+        assert_private(self, flag)
         self.assertEqual(flag.read_bytes(), b"")
         said = "\n".join(self.w.out)
         self.assertIn(f"unlink {flag}", said)

@@ -18,6 +18,7 @@ from install.constants import PRE_UPGRADE_PREFIX
 from muninn import erase_residue, obs, platform_io, store
 from tests.cli_support import fake_run
 from tests.installer_support import ROOT, World, git, make_store
+from tests.store_support import assert_private
 
 TS = "20261002T000000Z"
 SNAP = PRE_UPGRADE_PREFIX
@@ -93,7 +94,7 @@ class UpgradeFlowTests(SnapshotCase):
         sn.snapshot_store(
             self.ctx, {"sha": self.sha2, "schema_to": 2, "steps": []}
         )
-        self.assertEqual(self.snap.stat().st_mode & 0o777, 0o600)
+        assert_private(self, self.snap)
         self.assertEqual(rows(self.snap), rows(self.store))
 
     def test_existing_private_snapshot_is_never_overwritten(self) -> None:
@@ -164,7 +165,7 @@ class RollbackTests(SnapshotCase):
         """Assert the v1 store and the first release are live again."""
         w = self.w
         self.assertEqual(rows(self.store), (1, ["t", "row"]))
-        self.assertEqual(self.store.stat().st_mode & 0o777, 0o600)
+        assert_private(self, self.store)
         self.assertEqual(self.leftovers(), ["muninn.sqlite"])
         self.assertEqual((self.lib / "current").readlink(), Path(self.first))
         self.assertEqual(w.fake.loaded, "new")

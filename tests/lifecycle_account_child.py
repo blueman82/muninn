@@ -89,10 +89,26 @@ try {
 }
 """
 
+EXCEPTION_KIND = r"""
+function Get-ChildExceptionKind($failure){
+ if($null -eq $failure){return -1}
+ if($failure -is [UnauthorizedAccessException]){return 1}
+ if($failure -is [Security.SecurityException]){return 2}
+ if($failure -is [Runtime.InteropServices.COMException]){return 3}
+ if($failure -is [ComponentModel.Win32Exception]){return 4}
+ if($failure -is [Management.Automation.RuntimeException]){return 5}
+ return 0
+}
+"""
+
+
 _TRAP = r"""
 trap {try {
  $originalChildError=$_
  $nativeChildFailure=$originalChildError.Exception.GetBaseException()
+ $childExceptionKind=-1
+ try {$childExceptionKind=Get-ChildExceptionKind $nativeChildFailure}
+ catch {}
  $line=[int]$originalChildError.InvocationInfo.ScriptLineNumber
  $childCategory=-1;$childCommand=-1
  try {
@@ -108,7 +124,8 @@ trap {try {
   ',"child_module_readable":'+$childModuleReadable+
   ',"child_module_hresult":'+$childModuleHResult+
   ',"child_error_category":'+$childCategory+
-  ',"child_command_type":'+$childCommand+'}'
+  ',"child_command_type":'+$childCommand+
+  ',"child_exception_kind":'+$childExceptionKind+'}'
  $path=[IO.Path]::Combine($childBase,'child-failure.json')
  if(![IO.File]::Exists($path)){[IO.File]::WriteAllText($path,$data)}
 } catch {} finally {exit 1}}
@@ -118,7 +135,10 @@ trap {try {
 def child_script(parent: Path) -> str:
     """Retain uncaught child codes while explicitly preserving exit one."""
     header = (
-        f"$childBase={literal(str(parent))};$childStage=1\n" + _TRAP + _PROBE
+        f"$childBase={literal(str(parent))};$childStage=1\n"
+        + EXCEPTION_KIND
+        + _TRAP
+        + _PROBE
     )
     body = (
         CHILD.replace(
