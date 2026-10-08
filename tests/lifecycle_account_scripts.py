@@ -157,7 +157,15 @@ try {
  $startup.cb=[Runtime.InteropServices.Marshal]::SizeOf($startup)
  $quiescent=$false
  try {$startup.desktop=[MuninnCiDesktop]::Prepare($user.SID.Value,$callerSid)}
- finally {$report.desktop_restored=[int][MuninnCiDesktop]::Restored}
+ finally {
+  $report.desktop_restored=[int][MuninnCiDesktop]::Restored
+  $report.station_restore_ok=[int][MuninnCiDesktop]::StationRestoreOk
+  $report.station_restore_error=[int][MuninnCiDesktop]::StationRestoreError
+  $report.desktop_restore_ok=[int][MuninnCiDesktop]::DesktopRestoreOk
+  $report.desktop_restore_error=[int][MuninnCiDesktop]::DesktopRestoreError
+  $report.station_identity_ok=[int][MuninnCiDesktop]::StationIdentityOk
+  $report.desktop_identity_ok=[int][MuninnCiDesktop]::DesktopIdentityOk
+ }
  if(![MuninnCiDesktop]::Restored){throw 'desktop_restore_unproven'}
  $quiescent=$true;$report.private_desktop_created=1
  $report.token_session=[MuninnCiDesktop]::Session($token)

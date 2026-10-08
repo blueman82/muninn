@@ -67,6 +67,9 @@ public static class MuninnCiDesktop {
  public static extern IntPtr LocalFree(IntPtr data);
  public static IntPtr Station=IntPtr.Zero,Desktop=IntPtr.Zero;
  public static bool Restored=true;
+ public static bool StationRestoreOk,DesktopRestoreOk;
+ public static bool StationIdentityOk,DesktopIdentityOk;
+ public static int StationRestoreError,DesktopRestoreError;
  static void Required(bool valid) {
   if(!valid) throw new System.ComponentModel.Win32Exception(
    Marshal.GetLastWin32Error());
@@ -97,11 +100,14 @@ public static class MuninnCiDesktop {
      0x000F01FF,ref attributes);
     Required(Desktop!=IntPtr.Zero);
    } finally {
-    bool stationRestored=SetProcessWindowStation(originalStation);
-    bool desktopRestored=SetThreadDesktop(originalDesktop);
-    Restored=stationRestored && desktopRestored &&
-     GetProcessWindowStation()==originalStation &&
-     GetThreadDesktop(GetCurrentThreadId())==originalDesktop;
+    StationRestoreOk=SetProcessWindowStation(originalStation);
+    StationRestoreError=StationRestoreOk ? 0 : Marshal.GetLastWin32Error();
+    DesktopRestoreOk=SetThreadDesktop(originalDesktop);
+    DesktopRestoreError=DesktopRestoreOk ? 0 : Marshal.GetLastWin32Error();
+    StationIdentityOk=GetProcessWindowStation()==originalStation;
+    DesktopIdentityOk=GetThreadDesktop(GetCurrentThreadId())==originalDesktop;
+    Restored=StationRestoreOk && DesktopRestoreOk &&
+     StationIdentityOk && DesktopIdentityOk;
    }
    if(!Restored)
     throw new InvalidOperationException("desktop_restore_unproven");

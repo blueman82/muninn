@@ -89,3 +89,42 @@ class PrivateDesktopResultTests(unittest.TestCase):
                 check_result(missing)
         with self.assertRaises(ValueError):
             check_result({**report, "scheduler_child_session": 1})
+
+    def test_restore_codes_are_captured_before_the_next_native_call(
+        self,
+    ) -> None:
+        script = outer_script(Path("/synthetic"))
+        station = script.index(
+            "StationRestoreOk=SetProcessWindowStation(originalStation)"
+        )
+        station_error = script.index(
+            "StationRestoreError=StationRestoreOk ? 0 : "
+            "Marshal.GetLastWin32Error()"
+        )
+        desktop = script.index(
+            "DesktopRestoreOk=SetThreadDesktop(originalDesktop)"
+        )
+        desktop_error = script.index(
+            "DesktopRestoreError=DesktopRestoreOk ? 0 : "
+            "Marshal.GetLastWin32Error()"
+        )
+        identity = script.index(
+            "StationIdentityOk=GetProcessWindowStation()==originalStation"
+        )
+        self.assertLess(station, station_error)
+        self.assertLess(station_error, desktop)
+        self.assertLess(desktop, desktop_error)
+        self.assertLess(desktop_error, identity)
+        self.assertIn(
+            "Restored=StationRestoreOk && DesktopRestoreOk &&", script
+        )
+        self.assertIn("StationIdentityOk && DesktopIdentityOk", script)
+        for field in (
+            "station_restore_ok",
+            "station_restore_error",
+            "desktop_restore_ok",
+            "desktop_restore_error",
+            "station_identity_ok",
+            "desktop_identity_ok",
+        ):
+            self.assertIn("$report." + field, script)
