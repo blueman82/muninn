@@ -2,9 +2,7 @@
 
 The logging, heartbeat and stats code lives in ``obs_log``, ``obs_status``
 and ``obs_stats``; this module re-exports it and owns ``doctor``, whose
-health checks read the data directory, the store and the launchd job.
-``run`` and the doctor thresholds stay here because tests replace them on
-this module.
+health checks read private state and the native service. Tests replace ``run``.
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
-from muninn import ingest, platform_io, store, tombstone_key
+from muninn import ingest, obs_service, platform_io, store, tombstone_key
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_stats import db_space, human_bytes, reread, stats
 from muninn.obs_status import (
@@ -410,11 +408,7 @@ def _upgrade_snapshots(home: Path) -> CheckResult:
 
 def _release_leftovers(env: Mapping[str, str]) -> CheckResult:
     """No superseded release is left waiting for deletion."""
-    lib = Path(env.get("HOME") or Path.home()) / ".local/lib/muninn"
-    try:
-        left = sorted(p.name for p in lib.glob(f"{PRUNING}*"))
-    except OSError:
-        left = []
+    left = obs_service.release_leftovers(env)
     return _result("release_leftovers", not left, ",".join(left), level="warn")
 
 
@@ -488,7 +482,13 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _upgrade_snapshots(home),
         _tombstone_key(home),
         _release_leftovers(env),
-        _launchd_job(),
+        (
+            _launchd_job()
+            if sys.platform == "darwin"
+            else _result(
+                "managed_service", *obs_service.service_status(home, env, run)
+            )
+        ),
         _roots_readable(env),
         _roots_present(env),
     ]

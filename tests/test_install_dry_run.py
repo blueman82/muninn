@@ -8,9 +8,9 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from install import installer as co
-from muninn.cursor_import import default_database
 from tests.installer_support import World, git
 
 
@@ -91,13 +91,16 @@ class FreshPlanTest(unittest.TestCase):
     def test_history_detection_reports_without_writing(self) -> None:
         w = World(self)
         history = w.home / ".claude/projects/project/session.jsonl"
-        cursor = default_database(w.home)
+        cursor = w.home / "synthetic-cursor.sqlite"
         history.parent.mkdir(parents=True)
-        cursor.parent.mkdir(parents=True)
+        cursor.parent.mkdir(parents=True, exist_ok=True)
         history.touch()
         cursor.touch()
 
-        co.install(w.ctx(fresh=True, dry_run=True), w.repo, w.sha)
+        with mock.patch(
+            "install.steps_release.default_database", return_value=cursor
+        ):
+            co.install(w.ctx(fresh=True, dry_run=True), w.repo, w.sha)
 
         said = "\n".join(w.out)
         self.assertIn("Claude: found; would index", said)

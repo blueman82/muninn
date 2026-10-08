@@ -2,6 +2,8 @@
 # Python repeats this check once the private selected runtime is importable.
 $ErrorActionPreference = 'Stop'
 $Forwarded = @($args)
+$InstallerEntry = $Forwarded.Count -gt 0 -and $Forwarded[0] -ceq '--muninn-installer-entry'
+if ($InstallerEntry) { $Forwarded = @($Forwarded | Select-Object -Skip 1) }
 
 function Assert-Ordinary([string]$Path, [bool]$Directory) {
     $full = [IO.Path]::GetFullPath($Path)
@@ -292,6 +294,9 @@ namespace MuninnBootstrap {
     $program = 'import sys; sys.path.insert(0,sys.argv.pop(1)); from muninn.cli import main; raise SystemExit(main(sys.argv[1:]))'
     if ($installed) {
         $program = 'import os,sys; sys.path.insert(0,sys.argv.pop(1)); from pathlib import Path; from muninn.platform_paths import read_selection; selected=read_selection(Path(sys.argv.pop(1))); assert selected is not None; assert selected[0]==Path(sys.path[0]); from muninn.cli import main; raise SystemExit(main(sys.argv[1:]))'
+    }
+    if ($InstallerEntry) {
+        $program = $program.Replace('from muninn.cli import main', 'from install.entry import main')
     }
     $arguments = @('-I', '-B', '-X', 'utf8', '-c', $program, $root)
     if ($installed) { $arguments += $base }

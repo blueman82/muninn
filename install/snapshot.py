@@ -18,9 +18,13 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from install import lifecycle
 from install.constants import GIT_ENV, PRE_UPGRADE_PREFIX, STORE_FILE
 from install.context import Ctx, StepFailedError, dry, job, must, wait
 from install.record import Record
+from install.release_io import publish
+from muninn import file_sync, platform_io, store
+from muninn.platform_paths import read_selection
 
 SCHEMA_FILE = "muninn/store_schema.py"
 _VERSION = re.compile(rb"^SCHEMA_VERSION\s*=\s*(\d+)\s*$", re.MULTILINE)
@@ -52,6 +56,9 @@ def release_schema(ctx: Ctx, repo: Path, sha: str) -> int:
 
 def _readonly(path: Path) -> sqlite3.Connection:
     """Open ``path`` read-only; a hot journal is an error, never replayed."""
+    store.assert_sqlite_private(path)
+    with platform_io.open_regular(path, root=path.parent) as handle:
+        platform_io.assert_private_fd(handle.fileno())
     return sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
 
 
@@ -67,7 +74,7 @@ def store_version(path: Path) -> int | None:
     Raises:
         StepFailedError: If the file exists but cannot be read as a store.
     """
-    if not path.exists():
+    if not os.path.lexists(path):
         return None
     try:
         with closing(_readonly(path)) as conn:
@@ -93,7 +100,9 @@ def _copy(store: Path, tmp: Path, want: int) -> None:
     """
     tmp.unlink(missing_ok=True)
     # Mode 0600 from creation: the copy holds transcript text.
-    os.close(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    os.close(
+        platform_io.open_private(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    )
     with (
         closing(_readonly(store)) as src,
         closing(sqlite3.connect(tmp)) as dst,
@@ -103,14 +112,14 @@ def _copy(store: Path, tmp: Path, want: int) -> None:
         got = dst.execute("PRAGMA user_version").fetchone()[0]
     if check != "ok" or got != want:
         raise StepFailedError("the copy failed its integrity check")
-    fd = os.open(tmp, os.O_RDONLY)
+    fd = platform_io.open_private(tmp, os.O_RDWR)
     try:
-        os.fsync(fd)
+        file_sync.sync_fd(fd)
     finally:
         os.close(fd)
 
 
-def snapshot_store(ctx: Ctx, rec: Record) -> None:
+def _snapshot_store(ctx: Ctx, rec: Record) -> None:
     """Copy the store aside when the new release will migrate its schema.
 
     Runs before the release is pinned, so it fails closed: nothing has
@@ -145,12 +154,11 @@ def snapshot_store(ctx: Ctx, rec: Record) -> None:
     tmp = final.with_name(f"{name}.tmp")
     try:
         _copy(store, tmp, have)
-        tmp.replace(final)
+        publish(tmp, final)
     except (OSError, sqlite3.Error, StepFailedError) as exc:
-        tmp.unlink(missing_ok=True)
         raise StepFailedError(
             f"could not copy the store ({type(exc).__name__}); nothing was "
-            "changed"
+            "changed; any private copy was retained"
         ) from exc
     size = final.stat().st_size
     rec["snapshot"] = {"name": name, "from": have, "to": want, "bytes": size}
@@ -195,8 +203,10 @@ def _swap(data: Path, snap: Path) -> None:
     two steps is safe to repeat: the copy is still there.
     """
     (data / f"{STORE_FILE}-journal").unlink(missing_ok=True)
-    snap.chmod(0o600)
-    snap.replace(data / STORE_FILE)
+    if os.name != "nt":
+        snap.chmod(0o600)
+    store.assert_sqlite_private(snap)
+    publish(snap, data / STORE_FILE)
 
 
 def _running(ctx: Ctx) -> bool:
@@ -239,14 +249,46 @@ def undo_store(ctx: Ctx, rec: Record) -> bool:
     if ctx.dry_run:
         return stopped
     if stopped:
-        ctx.run(["launchctl", "bootout", ctx.target])
-        wait(ctx, lambda: job(ctx) is None, 30, "job still loaded")
-    _swap(ctx.data, ctx.data / snap["name"])
+        lifecycle.stop(ctx)
+    with store.writer_lock(ctx.data):
+        _swap(ctx.data, ctx.data / snap["name"])
     snap["state"] = "restored"
     return stopped
 
 
 def start_again(ctx: Ctx) -> None:
     """Load the job again on the relinked release after a restore."""
-    must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
+    if ctx.platform != "darwin":
+        if ctx.platform == "win32":
+            from_selection = lifecycle_selection(ctx)
+            lifecycle.start(ctx, from_selection[1], from_selection[0])
+        else:
+            must(ctx, ["systemctl", "--user", "enable", ctx.target])
+            must(ctx, ["systemctl", "--user", "start", ctx.target])
+    else:
+        must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     wait(ctx, functools.partial(_running, ctx), 30, "job has no live PID")
+
+
+def lifecycle_selection(ctx: Ctx) -> tuple[Path, Path]:
+    """Require the retained native release and recorded interpreter.
+
+    Returns:
+        Confined release and recorded interpreter paths.
+
+    Raises:
+        StepFailedError: If no safe retained selection exists.
+    """
+    selected = read_selection(ctx.lib.parent)
+    if selected is None:
+        raise StepFailedError("retained release selection is unavailable")
+    return selected
+
+
+def snapshot_store(ctx: Ctx, rec: Record) -> None:
+    """Serialize the snapshot against other writers without nested leases."""
+    if ctx.dry_run:
+        _snapshot_store(ctx, rec)
+        return
+    with store.writer_lock(ctx.data):
+        _snapshot_store(ctx, rec)

@@ -7,7 +7,6 @@ run records ``ok: null`` and never fails the install.
 from __future__ import annotations
 
 import json
-import shlex
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -15,8 +14,9 @@ from typing import Any
 from install import configedit as ce
 from install.constants import CLAUDE_EVENTS, OWNER_STEP, PLUGIN_ID
 from install.context import Ctx, StepFailedError, dry, is_new, job
+from install.provider_paths import hook_invocations
 from install.record import Record
-from install.steps_release import fresh, muninn_env
+from install.steps_release import command, fresh, installed_env
 from install.transforms import ours
 from install.trust import TrustedHook, codex_hooks
 
@@ -34,7 +34,7 @@ def hook_commands(ctx: Ctx) -> list[str]:
         hooks.json.
     """
     exists = ctx.settings.exists()
-    settings = ce.load_json(ctx.settings.read_bytes()) if exists else {}
+    settings = ce.load_json(ce.read_file(ctx.settings)) if exists else {}
     cmds: list[str] = []
     for event in CLAUDE_EVENTS:
         groups: list[dict[str, Any]] = ce.jget(settings, ("hooks", event))[1]
@@ -98,7 +98,7 @@ def codex_checks(ctx: Ctx, rec: Record, check: Check) -> None:
         check: Records one named check.
     """
     probe = ctx.probe or _no_probe
-    hooks = ctx.lib / "current/integrations/codex/hooks/hooks.json"
+    hooks = ctx.release / "integrations/codex/hooks/hooks.json"
     key = f"{PLUGIN_ID}:hooks/hooks.json:"
     want = {key + h["suffix"]: h for h in codex_hooks(hooks.read_bytes())}
     try:
@@ -157,16 +157,28 @@ def verify(ctx: Ctx, rec: Record) -> None:
     check("heartbeat_fresh", fresh(ctx, 0))
     # MUNINN_HOOK_DISABLE makes the hook echo ``{}`` without recording
     # anything, so running it here cannot pollute the new store.
-    env = muninn_env(ctx.data, MUNINN_HOOK_DISABLE="1")
-    for cmd in hook_commands(ctx):
-        r = ctx.run(shlex.split(cmd), env=env, input=b"{}")
+    env = installed_env(ctx, MUNINN_HOOK_DISABLE="1")
+    for argv in hook_invocations(ctx):
+        r = ctx.run(argv, env=env, input=b"{}")
         check(
-            "hook_runs", r.returncode == 0 and r.stdout.strip() == b"{}", cmd
+            "hook_runs",
+            r.returncode == 0 and r.stdout.strip() == b"{}",
+            "provider_hook",
         )
     if ctx.probe and rec["has_codex"]:
         codex_checks(ctx, rec, check)
-    r = ctx.run([ctx.muninn, "doctor"], env=muninn_env(ctx.data))
+    r = ctx.run(command(ctx, "doctor"), env=installed_env(ctx))
     check("doctor", r.returncode == 0)
+    if ctx.platform != "darwin":
+        report = json.loads(r.stdout)
+        check(
+            "managed_service_verified",
+            any(
+                entry.get("check") == "managed_service"
+                and entry.get("ok") is True
+                for entry in report.get("checks", [])
+            ),
+        )
     report = json.dumps({"checks": checks}, indent=1).encode()
     ce.atomic_write(ctx.rdir / "verify.json", report, 0o600)
     failed = [c["check"] for c in checks if c["ok"] is False]

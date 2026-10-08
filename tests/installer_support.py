@@ -410,6 +410,7 @@ class World:
             run=self.fake.run,
             ts="20261001T000000Z",
             uid=501,
+            platform="darwin",
             now=self.fake.now,
             sleep=self.fake.sleep,
             say=self.out.append,

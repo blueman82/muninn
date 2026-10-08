@@ -37,14 +37,16 @@ from install import configedit as ce
 from install.constants import (
     CLAUDE_EVENTS,
     CODEX_KEYS,
-    PRIVATE_DIR_MODE,
     PRIVATE_UMASK,
     TS_FORMAT,
 )
 from install.context import Ctx, StepFailedError, job, link_text, run_real
 from install.errors import RacedError, RefusedError
+from install.lifecycle import preflight_service, remove
 from install.rollback import bootout
 from install.transforms import claude_paths, codex_check, ours
+from muninn import platform_io
+from muninn.platform_paths import read_selection
 
 
 def _act(ctx: Ctx, text: str, fn: Callable[[], object]) -> bool:
@@ -139,11 +141,13 @@ def _preflight(ctx: Ctx, purge: bool) -> None:
         RefusedError: If a provider config cannot be edited safely.
         StepFailedError: If the dir for the moved data already exists.
     """
+    if ctx.platform != "darwin":
+        preflight_service(ctx)
     if ctx.settings.exists():
-        before = ctx.settings.read_bytes()
+        before = ce.read_file(ctx.settings)
         _settings_check(before, drop_hooks(before))
     if ctx.config.exists():
-        before = ctx.config.read_bytes()
+        before = ce.read_file(ctx.config)
         codex_check(before, _drop_sections_bytes(before))
     if not purge and ctx.data.exists() and ctx.removed.exists():
         raise StepFailedError(
@@ -155,7 +159,7 @@ def _unhook_claude(ctx: Ctx) -> bool:
     """Remove our hooks from Claude's settings.json, if it holds any."""
     if not ctx.settings.exists():
         return False
-    before = ctx.settings.read_bytes()
+    before = ce.read_file(ctx.settings)
     if drop_hooks(before) == before:
         return False
     return _act(
@@ -176,7 +180,7 @@ def _unconfigure_codex(ctx: Ctx) -> bool:
     """Remove our sections from Codex's config.toml and our plugin cache."""
     done = False
     if ctx.config.exists():
-        before = ctx.config.read_bytes()
+        before = ce.read_file(ctx.config)
         if _drop_sections_bytes(before) != before:
             done = _act(
                 ctx,
@@ -198,7 +202,9 @@ def _stop_job(ctx: Ctx) -> bool:
     """Unload the launchd job and remove its plist."""
     done = False
     j = job(ctx)
-    if j:
+    if ctx.platform != "darwin" and ctx.plist.exists():
+        done = _act(ctx, "remove owned native service", lambda: remove(ctx))
+    elif j:
         pid = f" (pid {j['pid']})" if j["pid"] else " (not running)"
         done = _act(ctx, f"stop the poller{pid}", lambda: bootout(ctx))
     if ctx.plist.exists():
@@ -208,6 +214,10 @@ def _stop_job(ctx: Ctx) -> bool:
 
 def _is_ours(ctx: Ctx) -> bool:
     """Say whether the ``muninn`` command link points into our release dir."""
+    if ctx.platform == "win32":
+        return read_selection(
+            ctx.lib.parent
+        ) is not None and platform_io.is_private(ctx.muninn)
     return ctx.muninn.is_symlink() and Path(
         link_text(ctx.muninn)
     ).is_relative_to(ctx.lib)
@@ -217,7 +227,23 @@ def _remove_release(ctx: Ctx) -> bool:
     """Remove the ``muninn`` link if it is ours, then the release dir."""
     done = False
     if _is_ours(ctx):
-        done = _act(ctx, f"remove {ctx.muninn}", ctx.muninn.unlink)
+        paths = (
+            list(ctx.muninn.parent.glob("muninn*.cmd"))
+            + list(ctx.muninn.parent.glob("muninn*.ps1"))
+            if ctx.platform == "win32"
+            else [ctx.muninn]
+        )
+        for path in paths:
+            if path.name in {
+                "muninn",
+                "muninn.cmd",
+                "muninn.ps1",
+                "muninn-install.cmd",
+                "muninn-install.ps1",
+                "muninn-uninstall.cmd",
+                "muninn-uninstall.ps1",
+            } and (ctx.platform != "win32" or platform_io.is_private(path)):
+                done = _act(ctx, f"remove {path}", path.unlink)
     if ctx.lib.exists():
         done = _act(ctx, f"remove {ctx.lib}", lambda: shutil.rmtree(ctx.lib))
     return done
@@ -225,7 +251,7 @@ def _remove_release(ctx: Ctx) -> bool:
 
 def _move_data(ctx: Ctx) -> None:
     """Move the data dir into a new private dir, undoing it on failure."""
-    ctx.removed.mkdir(mode=PRIVATE_DIR_MODE)
+    platform_io.ensure_private_dir(ctx.removed)
     try:
         ctx.data.rename(ctx.removed / ctx.data.name)
     except OSError:
@@ -310,7 +336,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Files we create must not be readable by other users.
     os.umask(PRIVATE_UMASK)
     ts = time.strftime(TS_FORMAT, time.gmtime())
-    ctx = Ctx(Path.home(), run_real, ts, dry_run=args.dry_run)
+    ctx = Ctx(
+        Path.home(), run_real, ts, dry_run=args.dry_run, default_home=True
+    )
     try:
         uninstall(ctx, args.purge_data)
     except (

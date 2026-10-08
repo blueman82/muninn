@@ -12,8 +12,8 @@ Exit 0 and `ok: true` mean no error-level check failed; exit 1 means at least on
 Each check has `ok` (true, false, or null = could not verify) and a `level`: `error` fails the run, `warn` is shown only, `info` is informational. Read `detail` for the cause.
 
 Common fixes:
-- `heartbeat` / `launchd_job` failing: the poller is not running; check the launchd job `com.muninn`.
-- `file_modes` or `data_dir_mode`: data dir must be 0700 and files 0600 (a `recall.off` file must be 0600).
+- `heartbeat` or `launchd_job` (macOS) / `managed_service` (Linux/Windows) failing: check the owned per-user service. A null service result means ownership or status could not be verified.
+- `file_modes` or `data_dir_mode`: POSIX data dir must be 0700 and files 0600; Windows requires private ACLs, which chmod does not establish.
 - `unexpected_files`: a stray file in the data dir; remove or move it.
 - `unowned_journal`: a crashed writer's journal; the next writer rolls it back.
 - `db_free_space` warn: run `muninn compact`.

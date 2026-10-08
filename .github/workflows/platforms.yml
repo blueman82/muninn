@@ -129,10 +129,14 @@ jobs:
             fi
           fi
           git config core.hooksPath .githooks
-      - name: Run mandatory full gate
-        if: runner.os != 'Windows'
+      - name: Run real isolated Linux lifecycle
+        if: runner.os == 'Linux'
         shell: bash
-        run: python3.13 -m tools.check --full
+        run: |
+          sudo systemd-run --scope --quiet --property=Delegate=yes \
+            --uid="$(id -u)" --gid="$(id -g)" \
+            env PATH="$PATH" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
+            dbus-run-session -- python3.13 -m tests.lifecycle_native
       - name: Install native gate tools
         if: runner.os == 'Windows'
         shell: python
@@ -239,6 +243,46 @@ jobs:
                'tests.test_platform_children', 'tests.test_windows_metadata',
                'tests.test_bootstrap_guards', 'tests.test_key_history'], check=True,
           )
+      - name: Run real ordinary Windows lifecycle
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.lifecycle_native'], check=True)
+      - name: Provision pinned Codex native proof
+        if: runner.os != 'macOS'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.provider_native_setup'], check=True)
+      - name: Run actual Codex and rendered provider routes
+        if: runner.os != 'macOS'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
+      - name: Run focused installer and provider checks
+        if: runner.os != 'macOS'
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([
+              sys.executable, '-m', 'unittest',
+              'tests.test_install_platform_context', 'tests.test_install_lifecycle',
+              'tests.test_install_snapshot', 'tests.test_installer',
+              'tests.test_install_dry_run', 'tests.test_uninstall',
+              'tests.test_native_install_entry', 'tests.test_provider_paths',
+              'tests.test_provider_render', 'tests.test_provider_codex_command',
+              'tests.test_configedit', 'tests.test_configedit_security',
+              'tests.test_configedit_windows', 'tests.test_hook',
+              'tests.test_hook_render', 'tests.test_hook_cli',
+              'tests.test_hook_e2e', 'tests.test_cursor_import',
+              'tests.test_integrations',
+          ], check=True)
       - name: Check Windows native API typing
         if: runner.os == 'Windows'
         shell: python
@@ -247,6 +291,10 @@ jobs:
           from pathlib import Path
           subprocess.run([str(Path('.venv/Scripts/python.exe')), '-m', 'pyright', '--pythonplatform',
                           'Windows', 'muninn'], check=True)
+      - name: Run mandatory full gate
+        if: runner.os != 'Windows' && !cancelled()
+        shell: bash
+        run: python3.13 -m tools.check --full
       - name: Run mandatory native full gate
         if: runner.os == 'Windows' && !cancelled()
         shell: python

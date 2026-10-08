@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -81,6 +82,7 @@ from install.steps_release import (
     muninn_env,
     pin,
     prune,
+    quiesce,
     relink,
     restart,
     start_new,
@@ -182,15 +184,18 @@ FRESH_STEPS: tuple[Step, ...] = (
     codex,
     verify,
     prune,
+    quiesce,
 )
 # The copy comes before pin: nothing may change if it cannot be made.
 UPGRADE_STEPS: tuple[Step, ...] = (
     history_upgrade,
+    quiesce,
     snapshot_store,
     pin,
     restart,
     verify,
     prune,
+    quiesce,
 )
 
 
@@ -290,7 +295,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="a new machine: no data, launchd job or release yet",
     )
-    ap.add_argument("--home", type=Path, default=Path.home())
+    ap.add_argument("--home", type=Path)
     return ap
 
 
@@ -305,7 +310,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     ap = _parser()
     args = ap.parse_args(argv)
-    if args.home.resolve() != Path.home().resolve() and not args.dry_run:
+    default_home = args.home is None
+    args.home = args.home or Path.home()
+    if (
+        sys.platform == "darwin"
+        and args.home.resolve() != Path.home().resolve()
+        and not args.dry_run
+    ):
         ap.error(
             "--home is dry-run only: launchctl acts on the real gui domain"
         )
@@ -316,7 +327,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     say, run = (
         (print, run_real)
         if args.dry_run
-        else install_log(args.home / ".local/lib/muninn/install.log")
+        else install_log(
+            Ctx(args.home, run_real, ts, default_home=default_home).lib
+            / "install.log"
+        )
     )
     ctx = Ctx(
         args.home,
@@ -327,11 +341,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         say=say,
         fresh=args.fresh,
         upgrade=args.upgrade,
+        default_home=default_home,
     )
     try:
         install(ctx, args.repo.resolve(), args.sha)
     except (StepFailedError, ce.RefusedError, ce.RacedError) as exc:
-        say(f"FAILED: {exc}")
+        sink = say if ctx.rdir.exists() else print
+        sink(f"FAILED: {exc}")
         return 1
     return 0
 

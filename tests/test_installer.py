@@ -13,7 +13,6 @@ from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
-from muninn.cursor_import import default_database
 from tests.installer_support import (
     CRED,
     World,
@@ -98,12 +97,15 @@ class FreshInstallTest(unittest.TestCase):
         w = self.w
         claude = w.home / ".claude/projects/project/session.jsonl"
         codex = w.home / ".codex/archived_sessions/rollout-one.jsonl"
-        cursor = default_database(w.home)
+        cursor = w.home / "synthetic-cursor.sqlite"
         for path in (claude, codex, cursor):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
 
-        self.install()
+        with mock.patch(
+            "install.steps_release.default_database", return_value=cursor
+        ):
+            self.install()
 
         said = "\n".join(w.out)
         self.assertIn("Claude: found; indexing...", said)
