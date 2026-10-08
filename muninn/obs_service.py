@@ -204,9 +204,8 @@ def _windows_status(
         or not isinstance(command, str)
     ):
         return None, "writer_release_unknown"
-    if (
-        executable.casefold() != str(selected[1]).casefold()
-        or str(selected[0]) not in command
+    if not same_path(executable, selected[1]) or not command_names_path(
+        command, selected[0]
     ):
         return False, "writer_release_mismatch"
     return True, pid
@@ -232,6 +231,50 @@ def parse_task_query(raw: bytes) -> ET.Element:
         except UnicodeDecodeError:
             text = raw.decode("cp1252")
     return ET.fromstring(re.sub(r"^\s*<\?xml[^>]*\?>", "", text))
+
+
+def _resolved(path: object) -> str:
+    """Resolve a path to its canonical case-folded spelling."""
+    return os.path.normcase(os.path.realpath(str(path))).casefold()
+
+
+def same_path(first: object, second: object) -> bool:
+    """Compare two paths by resolved identity rather than spelling.
+
+    Windows reports the same file by its short or long name, with either
+    case, depending on who asks.
+
+    Args:
+        first: One path.
+        second: The other path.
+
+    Returns:
+        True when both resolve to the same case-folded path.
+    """
+    try:
+        return _resolved(first) == _resolved(second)
+    except (OSError, ValueError):
+        return False
+
+
+def command_names_path(command: str, path: object) -> bool:
+    """Tell whether a command line carries a path or something beneath it.
+
+    Args:
+        command: The process command line.
+        path: The directory or file it must name.
+
+    Returns:
+        True when the literal text or a resolved token names the path.
+    """
+    if str(path).casefold() in command.casefold():
+        return True
+    root = _resolved(path)
+    for token in command.replace('"', " ").split():
+        resolved = _resolved(token)
+        if resolved == root or resolved.startswith(root + os.sep):
+            return True
+    return False
 
 
 def disable_task(definition: ET.Element) -> None:

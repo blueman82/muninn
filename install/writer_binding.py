@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from pathlib import Path
 
+from muninn.obs_service import command_names_path, same_path
+
 
 def writer_mismatch(
     selected: tuple[Path, Path] | None,
@@ -36,12 +38,13 @@ def writer_mismatch(
         isinstance(executable, str),
         selected is not None
         and isinstance(executable, str)
-        and executable.casefold() == str(selected[1]).casefold(),
-        selected is not None and str(selected[0]) in writer_command,
+        and same_path(executable, selected[1]),
+        selected is not None
+        and command_names_path(writer_command, selected[0]),
         isinstance(launcher_exe, str) and bool(command),
         isinstance(launcher_exe, str)
         and bool(command)
-        and str(launcher_exe).casefold() == str(command).casefold(),
+        and same_path(launcher_exe, command),
         isinstance(launcher_command, str) and bool(args),
         isinstance(launcher_command, str)
         and bool(args)
