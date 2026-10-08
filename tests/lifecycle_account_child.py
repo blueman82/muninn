@@ -21,7 +21,8 @@ try {
  $report.ordinary_child_admin=[int]$principal.IsInRole($admin)
  $report.ordinary_child_session=[Diagnostics.Process]::GetCurrentProcess().SessionId
  if($report.ordinary_child_admin -ne 0){throw 'ordinary_identity_required'}
- $service=New-Object -ComObject Schedule.Service;$service.Connect()
+ $service=New-Object -ComObject Schedule.Service
+ $service.Connect()
  $folder=$service.GetFolder('\')
  $definition=$service.NewTask(0)
  $definition.XmlText=[IO.File]::ReadAllText((Join-Path $base 'task.xml'))
@@ -153,6 +154,11 @@ def child_script(parent: Path) -> str:
         CHILD.replace(
             "$base=Split-Path -Parent $MyInvocation.MyCommand.Path",
             "Microsoft.PowerShell.Core\\Import-Module -Name $manifest "
+            "-ErrorAction Stop\n"
+            "$utilityManifest=[IO.Path]::Combine($PSHOME,'Modules',\n"
+            " 'Microsoft.PowerShell.Utility',"
+            "'Microsoft.PowerShell.Utility.psd1')\n"
+            "Microsoft.PowerShell.Core\\Import-Module -Name $utilityManifest "
             "-ErrorAction Stop\n"
             "$base=Microsoft.PowerShell.Management\\Split-Path "
             "-Parent $MyInvocation.MyCommand.Path",

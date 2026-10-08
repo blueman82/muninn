@@ -35,6 +35,13 @@ $ErrorActionPreference='Stop';$observed=@()
 $manifest=[IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Management',
  'Microsoft.PowerShell.Management.psd1')
 Microsoft.PowerShell.Core\Import-Module -Name $manifest -ErrorAction Stop
+$utilityManifest=[IO.Path]::Combine($PSHOME,'Modules',
+ 'Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')
+Microsoft.PowerShell.Core\Import-Module -Name $utilityManifest `
+ -ErrorAction Stop
+$version=New-Object System.Version -ArgumentList 1,2
+$actualJson=@{major=$version.Major}|ConvertTo-Json -Compress
+if($actualJson -ne '{"major":1}'){throw 'utility_commands_failed'}
 $childPath=[IO.Path]::Combine($PSHOME,'child.ps1')
 $actualParent=Microsoft.PowerShell.Management\Split-Path -Parent $childPath
 if($actualParent -ne $PSHOME){throw 'parent_failed'}

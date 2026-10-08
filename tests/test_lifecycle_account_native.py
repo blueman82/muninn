@@ -78,7 +78,7 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("CategoryInfo.Category", child)
         self.assertIn("InvocationInfo.MyCommand.CommandType", child)
         self.assertIn("finally {exit 1}", child)
-        self.assertEqual(child.count("Import-Module"), 1)
+        self.assertEqual(child.count("Import-Module"), 2)
         self.assertNotIn("$env:PSModulePath=", child)
         self.assertNotIn("Exception.Message", child)
         for key in (
@@ -91,6 +91,39 @@ class AccountSpikeTests(unittest.TestCase):
             self.assertIn(key, parent)
         self.assertEqual(parent.count("Copy-ChildCodes $value $report"), 2)
         self.assertIn("[Enum]::IsDefined", parent)
+
+    def test_fixed_utility_import_precedes_original_scheduler_calls(
+        self,
+    ) -> None:
+        source = lifecycle_account_child.child_script(Path("/synthetic"))
+        fixed = (
+            "$utilityManifest=[IO.Path]::Combine($PSHOME,'Modules',\n"
+            " 'Microsoft.PowerShell.Utility',"
+            "'Microsoft.PowerShell.Utility.psd1')"
+        )
+        imported = (
+            "Microsoft.PowerShell.Core\\Import-Module -Name $utilityManifest "
+            "-ErrorAction Stop"
+        )
+        self.assertEqual(source.count(fixed), 1)
+        self.assertEqual(source.count(imported), 1)
+        self.assertLess(source.index(fixed), source.index(imported))
+        self.assertLess(
+            source.index("Import-Module -Name $manifest"),
+            source.index(imported),
+        )
+        scheduler = "$service=New-Object -ComObject Schedule.Service"
+        connected = "$service.Connect()"
+        self.assertLess(source.index(imported), source.index(scheduler))
+        self.assertIn(scheduler + "\n " + connected, source)
+        self.assertEqual(source.count("$childStage=3"), 1)
+        self.assertIn(
+            "$childReportJson=$report|ConvertTo-Json -Compress", source
+        )
+        self.assertIn("finally {exit 1}", source)
+        for flag in ("-Force", "-Verbose", "-PassThru", "-AsCustomObject"):
+            self.assertNotIn(flag, source)
+        self.assertNotIn("$env:PSModulePath=", source)
 
     def test_child_module_lookup_input_uses_only_the_fixed_host(self) -> None:
         source = lifecycle_account_scripts.outer_script(Path("/synthetic"))
