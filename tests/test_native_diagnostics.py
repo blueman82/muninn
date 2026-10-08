@@ -330,6 +330,12 @@ class NativeDiagnosticsTest(unittest.TestCase):
         ):
             metrics = {
                 "desktop_restored": 1,
+                "station_restore_ok": 1,
+                "station_restore_error": 0,
+                "desktop_restore_ok": 1,
+                "desktop_restore_error": 0,
+                "station_identity_ok": 1,
+                "desktop_identity_ok": 1,
                 "private_desktop_created": 1,
                 "token_session": 2,
                 "caller_session": 2,
@@ -355,6 +361,8 @@ class NativeDiagnosticsTest(unittest.TestCase):
                     "first_native_create",
                     "first_native_metadata",
                     "first_native_path",
+                    "first_hold_enter",
+                    "first_before_open",
                 )
             }
             write(

@@ -45,6 +45,8 @@ class LauncherStagesTest(unittest.TestCase):
             "native_create",
             "native_metadata",
             "native_path",
+            "hold_enter",
+            "before_open",
         ):
             field = "stage_first_" + name + "_ms"
             self.assertEqual(result.count("Contains('" + field + "')"), 1)
@@ -79,6 +81,8 @@ class LauncherStagesTest(unittest.TestCase):
             "stage_first_native_create_ms": 1,
             "stage_first_native_metadata_ms": 1,
             "stage_first_native_path_ms": 1,
+            "stage_first_hold_enter_ms": 1,
+            "stage_first_before_open_ms": 1,
         }
         raw = b"__MUNINN_STAGE__" + json.dumps(values).encode() + b"\n"
         self.assertEqual(parse_stages(raw), values)
@@ -125,6 +129,8 @@ class LauncherStagesTest(unittest.TestCase):
                     "first_native_create",
                     "first_native_metadata",
                     "first_native_path",
+                    "first_hold_enter",
+                    "first_before_open",
                 )
             }
             with (

@@ -29,6 +29,7 @@ _MARKERS = (
     ("    $code = $process.ExitCode", "cli"),
 )
 _FIRST_MARKERS = (
+    ("function Hold-Directories([string]$Path) {", "hold_enter"),
     ("            $guard = (Open-Native $part $true)", "open"),
     ("                    [string]$Policy = 'private') {", "acl_enter"),
     (
@@ -43,6 +44,7 @@ _FIRST_MARKERS = (
     ),
 )
 _OPEN_MARKERS = (
+    ("            $guard = (Open-Native $part $true)", "before_open"),
     (
         "function Open-Native([string]$Path, [bool]$Directory) {",
         "native_enter",
