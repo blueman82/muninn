@@ -128,3 +128,20 @@ class ProviderRenderTest(unittest.TestCase):
                 requirement in source,
                 "native contract missing: " + requirement,
             )
+
+    def test_initial_root_cmdlet_names_its_module_without_host_changes(
+        self,
+    ) -> None:
+        source = (ROOT / "bin/muninn.ps1").read_text(encoding="utf-8")
+        command = (
+            "    $root = Microsoft.PowerShell.Management\\Split-Path"
+            " -Parent $PSScriptRoot"
+        )
+        self.assertEqual(source.count(command), 1)
+        self.assertNotIn(
+            "    $root = Split-Path -Parent $PSScriptRoot", source
+        )
+        self.assertIn("Hold-Directories (Split-Path -Parent $python)", source)
+        self.assertNotIn("Import-Module", source)
+        self.assertNotIn("PSModuleAutoLoadingPreference", source)
+        self.assertNotIn("PSModulePath", source)

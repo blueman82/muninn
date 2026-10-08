@@ -269,7 +269,7 @@ function Read-Metadata([IO.FileStream]$Stream) {
 
 try {
     $native = Initialize-Native
-    $root = Split-Path -Parent $PSScriptRoot
+    $root = Microsoft.PowerShell.Management\Split-Path -Parent $PSScriptRoot
     $installed = -not (Test-Path -LiteralPath (Join-Path $root 'muninn/cli.py'))
     $recorded = $null
     if ($installed) {

@@ -110,3 +110,31 @@ class NativeDiagnosticCodesTest(unittest.TestCase):
                     "account_create",
                     metrics={"captured_stderr": 1},
                 )
+
+    def test_child_launch_codes_do_not_export_native_handles(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"RUNNER_TEMP": tmp}),
+        ):
+            metrics = {
+                "child_stage": 1,
+                "child_launch_ok": 0,
+                "child_wait_result": 258,
+                "child_exit_query_ok": 0,
+                "child_exit_code": 1,
+            }
+            write("ordinary", "account_child_start", metrics=metrics)
+            path = (
+                Path(tmp)
+                / "muninn-native-diagnostics"
+                / "muninn-ordinary-proof.json"
+            )
+            data = json.loads(path.read_text())
+            for key, value in metrics.items():
+                self.assertEqual(data[key], value)
+            with self.assertRaises(ValueError):
+                write(
+                    "ordinary",
+                    "account_child_start",
+                    metrics={"child_handle": 1},
+                )

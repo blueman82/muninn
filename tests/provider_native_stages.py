@@ -16,7 +16,11 @@ from tests.ingest_support import ROOT
 _PREFIX = b"__MUNINN_STAGE__"
 _MARKERS = (
     ("    $native = Initialize-Native", "initialize"),
-    ("    $root = Split-Path -Parent $PSScriptRoot", "root"),
+    (
+        "    $root = Microsoft.PowerShell.Management\\Split-Path"
+        " -Parent $PSScriptRoot",
+        "root",
+    ),
     (
         "    $installed = -not (Test-Path -LiteralPath "
         "(Join-Path $root 'muninn/cli.py'))",
