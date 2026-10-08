@@ -15,6 +15,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import cast
 
+from install import lifecycle
 from install.context import Ctx, must, run_real
 from install.lifecycle import (
     _SID,
@@ -23,7 +24,7 @@ from install.lifecycle import (
     task_bytes,
     task_xml,
 )
-from muninn.obs_service import literal, powershell
+from muninn.obs_service import literal, powershell, task_mismatch
 from tests.native_diagnostics import transfer, write
 
 
@@ -357,3 +358,22 @@ def hosted_identity(ctx: Ctx) -> str:
         ).hexdigest()[:20]
     )
     return sid
+
+
+def record_task_mismatch() -> list[int]:
+    """Make the product ownership check also note which check failed.
+
+    Returns:
+        A list that receives the number of each failing check.
+    """
+    seen: list[int] = []
+
+    def recording(expected: ET.Element, actual: ET.Element) -> bool:
+        """Report the product verdict while keeping only the check number."""
+        index = task_mismatch(expected, actual)
+        if index is not None:
+            seen.append(index)
+        return index is None
+
+    lifecycle.task_matches = recording
+    return seen

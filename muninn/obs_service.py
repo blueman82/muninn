@@ -76,8 +76,17 @@ _TASK_DEFAULTS = {
 }
 
 
-def task_matches(expected: ET.Element, actual: ET.Element) -> bool:
-    """Require one owned user principal and one safe action with exact args."""
+def task_mismatch(expected: ET.Element, actual: ET.Element) -> int | None:
+    """Find the first way a stored task differs from the owned definition.
+
+    Args:
+        expected: The privately kept definition.
+        actual: The definition as the scheduler reports it.
+
+    Returns:
+        The 1-based number of the first failing check, or None when the
+        stored task is the owned one.
+    """
     ns = {"t": "http://schemas.microsoft.com/windows/2004/02/mit/task"}
     fields = (
         "t:Principals/t:Principal/t:UserId",
@@ -102,7 +111,7 @@ def task_matches(expected: ET.Element, actual: ET.Element) -> bool:
         or len(actual.findall("t:Principals/*", ns)) != 1
         or len(actual.findall("t:Triggers/*", ns)) != 1
     ):
-        return False
+        return 1
     actions = actual.find("t:Actions", ns)
     wanted = expected.find("t:Actions", ns)
     if (
@@ -110,12 +119,27 @@ def task_matches(expected: ET.Element, actual: ET.Element) -> bool:
         or wanted is None
         or actions.get("Context") != wanted.get("Context")
     ):
-        return False
-    return all(
-        actual.findtext(path, _TASK_DEFAULTS.get(path), ns)
-        == expected.findtext(path, _TASK_DEFAULTS.get(path), ns)
-        for path in fields
-    )
+        return 2
+    for number, path in enumerate(fields, start=3):
+        default = _TASK_DEFAULTS.get(path)
+        if actual.findtext(path, default, ns) != expected.findtext(
+            path, default, ns
+        ):
+            return number
+    return None
+
+
+def task_matches(expected: ET.Element, actual: ET.Element) -> bool:
+    """Require one owned user principal and one safe action with exact args.
+
+    Args:
+        expected: The privately kept definition.
+        actual: The definition as the scheduler reports it.
+
+    Returns:
+        True when the stored task is the owned definition.
+    """
+    return task_mismatch(expected, actual) is None
 
 
 def _private_json(path: Path) -> dict[str, object]:

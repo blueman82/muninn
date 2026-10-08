@@ -187,6 +187,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.child is not None:
         result: dict[str, object]
+        mismatches = lifecycle_native_windows.record_task_mismatch()
         try:
             codes = lifecycle_native_windows.token_codes()
             write("lifecycle", "ordinary_child_identity", metrics=codes)
@@ -205,7 +206,8 @@ def main() -> int:
             result["ordinary_user_sid"] = ordinary
             result["elevated"] = elevated
         except Exception as exc:
-            write("lifecycle", None, error=exc)
+            failed = {"task_owned_mismatch": min(mismatches, default=0)}
+            write("lifecycle", None, error=exc, metrics=failed)
             result = {
                 "ok": False,
                 "error": type(exc).__name__,
