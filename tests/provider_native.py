@@ -21,6 +21,7 @@ from muninn import ingest, knowledge, obs, platform_io, platform_windows
 from tests.ingest_support import ROOT, TID, line, rollout
 from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
+from tests.provider_native_security import probe
 from tests.test_classify import codex_meta, user_msg
 
 _SHA = "a" * 40
@@ -217,17 +218,21 @@ def main() -> None:
         def checkpoint(phase: str) -> None:
             write("provider", phase)
 
+        metrics: dict[str, int] = {}
         try:
             checkpoint("fixture_home")
             home = Path(tmp).resolve() / "space café 雪 owner's $ % home"
             ctx = Ctx(home, run_real, "synthetic", platform=sys.platform)
             env = fixture(ctx, checkpoint)
+            checkpoint("security_probe")
+            metrics = probe(ctx.codex_home / "synthetic-security-probe.json")
             codex = prove_codex(ctx, env, checkpoint)
             timings = prove_hooks(ctx, env)
             write(
                 "provider",
                 "complete",
                 metrics={
+                    **metrics,
                     "hooks_count": len(timings),
                     "codex_hooks": codex["hooks"],
                 },
@@ -244,7 +249,7 @@ def main() -> None:
                 )
             )
         except Exception as error:
-            write("provider", None, error=error)
+            write("provider", None, error=error, metrics=metrics)
             raise
 
 

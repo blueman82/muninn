@@ -30,6 +30,7 @@ _PHASES = frozenset(
         "codex_version",
         "codex_release",
         "codex_render",
+        "security_probe",
         "codex_config",
         "codex_add",
         "codex_cache",
@@ -65,6 +66,22 @@ _METRICS = frozenset(
         "xml_omitted_hresult",
     )
 )
+_PROBE_METRICS = (
+    frozenset({"probe_original_control"})
+    | frozenset(
+        f"probe_v{variant}_{stage}_{component}"
+        for variant in (1, 2, 3)
+        for stage in ("initial", "final")
+        for component in (
+            "control",
+            "owner_equal",
+            "group_equal",
+            "dacl_equal",
+        )
+    )
+    | frozenset(f"probe_v{variant}_error" for variant in (1, 2, 3))
+)
+_METRICS = _METRICS | _PROBE_METRICS
 _SECURITY_CODES = frozenset(
     (
         "control_before",
