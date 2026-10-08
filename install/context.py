@@ -26,7 +26,11 @@ from install.constants import (
 from install.installer_log import Runner as Runner
 from install.installer_log import install_log as install_log
 from install.installer_log import run_real as run_real
-from muninn.obs_service import parse_process, process_command
+from muninn.obs_service import (
+    command_names_path,
+    parse_process,
+    process_command,
+)
 from muninn.obs_status import read_status
 from muninn.platform_paths import read_selection, windows_base
 
@@ -251,7 +255,11 @@ def link_text(link: Path) -> str:
 
 def is_new(ctx: Ctx, j: Job | None) -> bool:
     """Say whether a job is running from the new pinned release."""
-    return bool(j and j["pid"] and str(ctx.lib) in j["cmd"])
+    if not (j and j["pid"]):
+        return False
+    if ctx.platform == "win32":
+        return command_names_path(j["cmd"], ctx.lib)
+    return str(ctx.lib) in j["cmd"]
 
 
 def dry(ctx: Ctx, text: str) -> bool:

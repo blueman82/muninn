@@ -190,6 +190,7 @@ def main() -> int:
         result: dict[str, object]
         mismatches = lifecycle_native_windows.record_task_mismatch()
         bindings = lifecycle_native_windows.record_writer_mismatch()
+        jobs = lifecycle_native_windows.record_new_job()
         try:
             codes = lifecycle_native_windows.token_codes()
             write("lifecycle", "ordinary_child_identity", metrics=codes)
@@ -211,6 +212,7 @@ def main() -> int:
             failed = {
                 "task_owned_mismatch": min(mismatches, default=0),
                 "writer_binding_mismatch": min(bindings, default=0),
+                "new_job_flags": jobs[0],
                 "step_failure_id": zlib.crc32(str(exc).encode()) & 0x7FFFFFFF,
             }
             write("lifecycle", None, error=exc, metrics=failed)

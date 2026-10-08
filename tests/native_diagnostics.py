@@ -169,6 +169,7 @@ _METRICS = frozenset(
         "task_owned_mismatch",
         "writer_binding_mismatch",
         "step_failure_id",
+        "new_job_flags",
         "task_last_result",
         "task_state",
         "child_failure_line",
@@ -212,6 +213,7 @@ _METRIC_BOUNDS = {
     "task_owned_mismatch": (0, 32),
     "writer_binding_mismatch": (0, 16),
     "step_failure_id": (0, 2147483647),
+    "new_job_flags": (0, 7),
     "task_last_result": (-2147483648, 2147483647),
     "task_state": (0, 4),
 }

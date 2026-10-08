@@ -15,7 +15,7 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any, cast
 
-from install import lifecycle
+from install import lifecycle, steps_release
 from install.context import Ctx, must, run_real
 from install.lifecycle import (
     _SID,
@@ -396,4 +396,28 @@ def record_writer_mismatch() -> list[int]:
         return index
 
     lifecycle.writer_mismatch = recording
+    return seen
+
+
+def record_new_job() -> list[int]:
+    """Make the new-job wait also note what the job lookup last showed.
+
+    Returns:
+        A one-item list holding bit 1 for a job, 2 for a live pid and 4 for
+        a job running from the new release.
+    """
+    seen = [0]
+    real = steps_release.is_new
+
+    def recording(ctx: Ctx, job: Any) -> bool:
+        """Pass the product verdict through while keeping three flags."""
+        verdict = real(ctx, job)
+        seen[0] = (
+            (1 if job else 0)
+            | (2 if job and job["pid"] else 0)
+            | (4 if verdict else 0)
+        )
+        return verdict
+
+    steps_release.is_new = recording
     return seen
