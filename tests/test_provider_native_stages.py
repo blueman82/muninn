@@ -35,9 +35,27 @@ class LauncherStagesTest(unittest.TestCase):
             "cli",
         ):
             self.assertIn("stage_" + name + "_ms", result)
-        for name in ("open", "acl_enter", "identity", "translate", "acl_exit"):
+        for name in (
+            "open",
+            "acl_enter",
+            "identity",
+            "translate",
+            "acl_exit",
+            "native_enter",
+            "native_create",
+            "native_metadata",
+            "native_path",
+        ):
             field = "stage_first_" + name + "_ms"
             self.assertEqual(result.count("Contains('" + field + "')"), 1)
+        for start, end in (
+            ("        if ($handle.IsInvalid)", "        $attributes ="),
+            ("            if ($native::GetFileType", "            $flags ="),
+            ("        if ($a -eq 0", "        $resolved ="),
+        ):
+            self.assertIn(
+                source[source.index(start) : source.index(end)], result
+            )
         self.assertIn("exit $code", result)
         self.assertIn("$guards[$index].Dispose()", result)
         self.assertNotIn("Add-Type", result)
@@ -57,6 +75,10 @@ class LauncherStagesTest(unittest.TestCase):
             "stage_first_identity_ms": 1,
             "stage_first_translate_ms": 1,
             "stage_first_acl_exit_ms": 1,
+            "stage_first_native_enter_ms": 1,
+            "stage_first_native_create_ms": 1,
+            "stage_first_native_metadata_ms": 1,
+            "stage_first_native_path_ms": 1,
         }
         raw = b"__MUNINN_STAGE__" + json.dumps(values).encode() + b"\n"
         self.assertEqual(parse_stages(raw), values)
@@ -99,6 +121,10 @@ class LauncherStagesTest(unittest.TestCase):
                     "first_identity",
                     "first_translate",
                     "first_acl_exit",
+                    "first_native_enter",
+                    "first_native_create",
+                    "first_native_metadata",
+                    "first_native_path",
                 )
             }
             with (
@@ -145,9 +171,14 @@ class LauncherStagesTest(unittest.TestCase):
                 "-File",
                 str(ctx.muninn.with_suffix(".ps1")),
             ]
-            with mock.patch(
-                "tests.provider_native_stages.subprocess.run"
-            ) as run:
+            with (
+                mock.patch(
+                    "tests.provider_native_stages.sys.platform", "darwin"
+                ),
+                mock.patch(
+                    "tests.provider_native_stages.subprocess.run"
+                ) as run,
+            ):
                 self.assertEqual(launcher_stages(ctx, {}, argv, b""), {})
                 run.assert_not_called()
             with (

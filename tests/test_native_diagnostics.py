@@ -351,6 +351,10 @@ class NativeDiagnosticsTest(unittest.TestCase):
                     "first_identity",
                     "first_translate",
                     "first_acl_exit",
+                    "first_native_enter",
+                    "first_native_create",
+                    "first_native_metadata",
+                    "first_native_path",
                 )
             }
             write(
@@ -385,6 +389,7 @@ class NativeDiagnosticsTest(unittest.TestCase):
                 "outer_returncode": 1,
                 "outer_compile_code": 1009,
                 "outer_parser_error": 0,
+                "outer_stage": 3,
             }
             write("ordinary", "account_create", metrics=metrics)
             path = (

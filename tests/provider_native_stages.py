@@ -42,9 +42,26 @@ _FIRST_MARKERS = (
         "translate",
     ),
 )
+_OPEN_MARKERS = (
+    (
+        "function Open-Native([string]$Path, [bool]$Directory) {",
+        "native_enter",
+    ),
+    (
+        "        $attributes = "
+        "[Runtime.InteropServices.Marshal]::AllocHGlobal(8)",
+        "native_create",
+    ),
+    (
+        "        $expected = [Text.StringBuilder]::new(32768)",
+        "native_metadata",
+    ),
+    ("        return $handle", "native_path"),
+)
 _KEYS = (
     frozenset("stage_" + name + "_ms" for _, name in _MARKERS)
     | frozenset("stage_first_" + name + "_ms" for _, name in _FIRST_MARKERS)
+    | frozenset("stage_first_" + name + "_ms" for _, name in _OPEN_MARKERS)
     | {"stage_first_acl_exit_ms"}
 )
 
@@ -97,6 +114,14 @@ def timed_launcher(source: str) -> str:
         if result.count(anchor) != 1:
             raise ValueError("unknown first native guard boundary")
         result = result.replace(anchor, anchor + "\n" + _first_marker(name), 1)
+    for anchor, name in _OPEN_MARKERS:
+        if result.count(anchor) != 1:
+            raise ValueError("unknown successful native open boundary")
+        if name == "native_enter":
+            replacement = anchor + "\n" + _first_marker(name)
+        else:
+            replacement = _first_marker(name) + "\n" + anchor
+        result = result.replace(anchor, replacement, 1)
     anchor = "\n}\n\nfunction Quote-Argument("
     if result.count(anchor) != 1:
         raise ValueError("unknown first native ACL exit boundary")
