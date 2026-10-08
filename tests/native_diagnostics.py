@@ -174,6 +174,7 @@ _METRICS = frozenset(
         "doctor_output_first_byte",
         "doctor_exit_status",
         "doctor_error_length",
+        "doctor_error_words",
         "task_last_result",
         "task_state",
         "child_failure_line",
@@ -222,6 +223,7 @@ _METRIC_BOUNDS = {
     "doctor_output_first_byte": (0, 255),
     "doctor_exit_status": (-1, 65535),
     "doctor_error_length": (0, 65535),
+    "doctor_error_words": (0, 4095),
     "task_last_result": (-2147483648, 2147483647),
     "task_state": (0, 4),
 }
