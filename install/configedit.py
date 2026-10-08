@@ -116,7 +116,7 @@ def _write_temp(path: Path, data: bytes, mode: int) -> Path:
         The temp file's path.
     """
     if sys.platform == "win32":
-        platform_windows.assert_ancestry(path)
+        platform_windows.assert_ancestry(path.parent)
         platform_windows.assert_private(path.parent, directory=True)
     if sys.platform == "win32" and path.exists():
         fd, temporary = replacement(path)

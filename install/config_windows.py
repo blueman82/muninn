@@ -74,7 +74,7 @@ def replacement(path: Path) -> tuple[int, Path]:
     """
     if sys.platform != "win32":
         raise OSError("native ACL replacement is Windows-only")
-    platform_windows.assert_ancestry(path)
+    platform_windows.assert_ancestry(path.parent)
     platform_windows.assert_private(path.parent, directory=True)
     descriptor = ctypes.c_void_p()
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}")

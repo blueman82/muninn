@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from install.provider_paths import hook_invocations, render_pinned
 from install.trust import codex_hooks
 from muninn import ingest, knowledge, obs, platform_io, platform_windows
 from tests.ingest_support import ROOT, TID, line, rollout
+from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
 from tests.test_classify import codex_meta, user_msg
 
@@ -25,26 +27,30 @@ _SHA = "a" * 40
 _WORDS = "nativealpha nativebeta nativegamma"
 
 
-def fixture(ctx: Ctx) -> dict[str, str]:
+def fixture(ctx: Ctx, checkpoint: Callable[[str], None]) -> dict[str, str]:
     """Build a private synthetic installation and a cited knowledge note.
 
     Args:
         ctx: Temporary installation context.
+        checkpoint: Persist an explicit fixture phase before each operation.
 
     Returns:
         Isolated environment for the real provider commands.
     """
-    for path in (
-        ctx.home,
-        ctx.data,
-        ctx.lib,
-        ctx.muninn.parent,
-        ctx.codex_home,
-        ctx.settings.parent,
+    for phase, path in (
+        ("fixture_home", ctx.home),
+        ("fixture_data", ctx.data),
+        ("fixture_lib", ctx.lib),
+        ("fixture_bin", ctx.muninn.parent),
+        ("fixture_codex", ctx.codex_home),
+        ("fixture_claude", ctx.settings.parent),
     ):
+        checkpoint(phase)
         platform_io.ensure_private_dir(path)
+    checkpoint("fixture_release")
     release = ctx.lib / _SHA
     platform_io.ensure_private_dir(release)
+    checkpoint("fixture_copy")
     shutil.copytree(
         ROOT / "muninn",
         release / "muninn",
@@ -56,6 +62,7 @@ def fixture(ctx: Ctx) -> dict[str, str]:
         else ("muninn",)
     ):
         shutil.copyfile(ROOT / "bin" / name, ctx.muninn.parent / name)
+    checkpoint("fixture_selection")
     if sys.platform == "win32":
         record = json.dumps({"sha": _SHA, "python": sys.executable}).encode()
         configedit.atomic_write(ctx.lib / "selection.json", record, 0o600)
@@ -72,8 +79,10 @@ def fixture(ctx: Ctx) -> dict[str, str]:
     path.parent.mkdir(parents=True)
     path.write_bytes(b"".join(map(line, records)))
     roots = {"codex-sessions": source}
+    checkpoint("fixture_ingest")
     stats = ingest.run_pass(ctx.data, roots)
     assert stats.events_added == 1
+    checkpoint("fixture_knowledge")
     knowledge.run_add(
         ctx.data,
         kind="decision",
@@ -84,6 +93,7 @@ def fixture(ctx: Ctx) -> dict[str, str]:
         roots=roots,
         env={},
     )
+    checkpoint("fixture_status")
     obs.write_status(ctx.data, {"last_pass_at": time.time(), "interval_s": 60})
     env = {
         key: value
@@ -114,6 +124,7 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
     Returns:
         Per-route elapsed milliseconds and compact JSON proof.
     """
+    write("provider", "claude_render")
     relative = "integrations/claude/settings-hooks.json"
     configedit.atomic_write(
         ctx.settings,
@@ -149,6 +160,9 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
                     [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
                 )
     for index, argv in enumerate(calls):
+        write(
+            "provider", "routes", metrics={"route": index, "budget_ms": 5000}
+        )
         started = time.monotonic()
         done = subprocess.run(
             argv,
@@ -160,6 +174,16 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
             check=False,
         )
         elapsed = time.monotonic() - started
+        write(
+            "provider",
+            None,
+            metrics={
+                "route": index,
+                "elapsed_ms": round(elapsed * 1000),
+                "budget_ms": 5000,
+                "returncode": done.returncode,
+            },
+        )
         assert done.returncode == 0, (
             index,
             done.returncode,
@@ -189,17 +213,39 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
 def main() -> None:
     """Run native provider proof without touching real provider homes."""
     with tempfile.TemporaryDirectory(prefix="muninn-provider-proof-") as tmp:
-        home = Path(tmp).resolve() / "space café 雪 owner's $ % home"
-        ctx = Ctx(home, run_real, "synthetic", platform=sys.platform)
-        env = fixture(ctx)
-        codex = prove_codex(ctx, env)
-        timings = prove_hooks(ctx, env)
-        print(
-            json.dumps(
-                {"platform": sys.platform, "codex": codex, "hooks": timings},
-                separators=(",", ":"),
+
+        def checkpoint(phase: str) -> None:
+            write("provider", phase)
+
+        try:
+            checkpoint("fixture_home")
+            home = Path(tmp).resolve() / "space café 雪 owner's $ % home"
+            ctx = Ctx(home, run_real, "synthetic", platform=sys.platform)
+            env = fixture(ctx, checkpoint)
+            codex = prove_codex(ctx, env, checkpoint)
+            timings = prove_hooks(ctx, env)
+            write(
+                "provider",
+                "complete",
+                metrics={
+                    "hooks_count": len(timings),
+                    "codex_hooks": codex["hooks"],
+                },
+                completed=True,
             )
-        )
+            print(
+                json.dumps(
+                    {
+                        "platform": sys.platform,
+                        "codex": codex,
+                        "hooks": timings,
+                    },
+                    separators=(",", ":"),
+                )
+            )
+        except Exception as error:
+            write("provider", None, error=error)
+            raise
 
 
 if __name__ == "__main__":
