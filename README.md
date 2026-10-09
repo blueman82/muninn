@@ -1,15 +1,14 @@
 ![Muninn: a rune-hung raven in flight over a night sky](assets/muninn-banner-wide.png)
 # Muninn: cross-provider memory and knowledge
 
-**Muninn: Odin's raven of memory, for your Claude Code, Codex and Cursor history.**
-
-It gives both one shared memory of past sessions plus a small ledger of cited knowledge: a Python
-3.13 standard-library CLI (`muninn`) over one SQLite file, kept current by a background poller (launchd, systemd user service or Task Scheduler).
+Muninn provides shared session history and a cited knowledge ledger for Claude Code, Codex and
+Cursor. Its Python 3.13 standard-library CLI (`muninn`) uses one SQLite file, maintained by a
+background poller (launchd, systemd user service or Task Scheduler).
 Everything it returns is untrusted historical data, never instructions. MIT licensed (`LICENSE`).
 
 ## Install, upgrade, uninstall, rollback
 
-Needs macOS, Linux or Windows (x64, ARM64), Python 3.13+, git, and Claude Code and/or Codex for the hook integrations.
+Requires macOS, Linux or Windows (x64, ARM64), Python 3.13+, git, and Claude Code and/or Codex for the hook integrations.
 Windows is verified on hosted CI only: not with a non-admin token, on a desktop, or under WSL.
 Cursor is optional; Muninn can import its local history database without Cursor installed.
 
@@ -20,14 +19,14 @@ Cursor is optional; Muninn can import its local history database without Cursor 
 - Upgrade: `git pull`, then the same two commands (`--status` compares the installed commit with
   `HEAD`). One pinned release is kept.
 - Rollback: a failed install or upgrade restores itself, and puts back the pre-upgrade store copy if
-  the new release had migrated it. After a good upgrade the old release is gone; check out an
+  the new release had migrated it. After a successful upgrade the old release is removed; check out an
   earlier commit and rerun.
 - Codex: if the installer prints `OWNER STEP`, run `/hooks` and trust the two hooks.
 - Uninstall: `bin/muninn-uninstall --dry-run` previews; `bin/muninn-uninstall` stops the poller and
   removes the hooks, the Codex plugin and the release. Your index and knowledge ledger are moved to
   `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
 - Templates: `integrations/` (Claude hooks, hooks-only Codex plugin) and `launchd/com.muninn.plist`
-  (poller, `muninn serve --interval 60`). More: `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
+  (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
   `docs/TROUBLESHOOTING.md`.
 
 ## What it stores
@@ -74,8 +73,8 @@ busy, 4 store unavailable, a crashed writer's hot journal, or a missing or damag
   `--scope-loop`; `know list` filters by `--tag` and `--status`. Expired, restricted and loop-scope
   entries are never pushed.
 - `muninn quote-check REF QUOTE`: check a quote against an event.
-- `muninn erase --session S | --event REF | --match TEXT`: forget content. It is a dry run that
-  lists the targets unless you add `--yes` (`--dry-run` forces a dry run).
+- `muninn erase --session S | --event REF | --match TEXT`: forget content. It lists targets
+  without applying changes unless invoked with `--yes` (`--dry-run` forces a dry run).
 - `muninn stats` and `muninn doctor`: counts, database size and free space, and health checks.
   `muninn compact` vacuums the database; `muninn rebuild` builds a new store from the transcripts,
   keeping ledger and tombstones. `--pretty` (or `MUNINN_PRETTY=1`) indents any JSON.
@@ -87,7 +86,7 @@ provider source roots for tests and evals, and `MUNINN_HOOK_DISABLE=1` silences 
 
 ## Hook injections
 
-These are the only automatic push, installed for Claude Code and Codex. Both redact secrets, escape
+These are the automatic memory injections installed for Claude Code and Codex. Both redact secrets, escape
 the frame delimiter, stay silent for subagent and reviewer transcripts, and fail open: on any error
 they exit 0 with a bounded "store unavailable" notice (or `{}` when disabled). A stale poller (no
 finished pass or alive stamp within 3 intervals), a failed or errored last pass, or unreadable transcript files
@@ -111,8 +110,8 @@ pushed (a `systemMessage` line). Default OFF: `--fresh` creates it (`--upgrade` 
 it on: `docs/REFERENCE.md`.
 
 `<muninn-memory` and `<muninn-recall` are the only automatic-injection markers. Ingest flags any
-stored text that contains either (or the CLI notice sentence), so a pasted block never returns as a
-normal prompt; hook contexts themselves are never stored.
+stored text that contains either (or the CLI notice sentence), so pasted blocks are excluded from
+normal prompts; hook contexts themselves are never stored.
 
 ## Privacy
 

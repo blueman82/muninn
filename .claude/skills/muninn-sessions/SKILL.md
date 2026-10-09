@@ -5,7 +5,7 @@ description: List and browse past sessions with `muninn sessions` and `muninn se
 
 # muninn sessions / session
 
-Browse instead of search, when you know roughly when but not what.
+Browse sessions by date when source text is unknown.
 
     muninn sessions --since 2026-09-30 --limit 20      # newest first, this repo
     muninn session ROOT                                # one session, in order
@@ -14,4 +14,4 @@ Browse instead of search, when you know roughly when but not what.
 - `sessions` flags: `--all-projects`, `--since`, `--limit`. Each row has provider, event and thread counts, first/last time and a `preview`.
 - `session` flags: `--from N` to continue with `next_from` from the previous page. Events carry `ref`, `kind`, `role`, `ts`, `preview`, `answer_citable`.
 - Previews are navigation only: take a `ref` and run `muninn open REF` before citing.
-- Feed a session id to `muninn search --session ID` to search inside it.
+- Use `muninn search --session ID` to search within a session.
