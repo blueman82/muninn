@@ -24,11 +24,12 @@ from install import configedit as ce
 from install import lifecycle
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
+from install.provider_paths import cursor_command
 from install.record import Record, load_record
 from install.release_io import write_private
 from install.snapshot import start_again, undo_store
 from install.steps_release import PRUNING, relink
-from install.transforms import codex_check
+from install.transforms import codex_check, restore_cursor_settings
 
 
 def restore_json(data: bytes, entries: Sequence[Mapping[str, Any]]) -> bytes:
@@ -123,7 +124,9 @@ def _restore_cursor(
     """Restore Cursor's prior hook keys and remove a newly empty config."""
     ce.edit_file(
         ctx.cursor_settings,
-        lambda data: restore_json(data, entries),
+        lambda data: restore_cursor_settings(
+            data, cursor_command(ctx), rec["cursor_ours"], entries[0]
+        ),
         lambda before, after: ce.json_check(before, after, paths),
     )
     if (

@@ -155,16 +155,35 @@ def _events(
     return tuple(events)
 
 
+def _decode_composer(
+    key: object, raw: object, conversation_id: str | None
+) -> tuple[str, dict[str, Any], bytes] | None:
+    """Validate a composer cell and optional exact hook identity."""
+    thread_id = key[13:] if isinstance(key, str) else ""
+    composer, cell = _object(raw), _cell_bytes(raw)
+    if not thread_id or composer is None or cell is None:
+        if conversation_id is not None:
+            raise ValueError("conversation_identity_unavailable")
+        return None
+    if conversation_id is not None and (
+        "composerId" in composer and composer["composerId"] != conversation_id
+    ):
+        raise ValueError("conversation_identity_mismatch")
+    return thread_id, composer, cell
+
+
 def _composer_rows(
-    conn: sqlite3.Connection, max_bubbles: int | None
-) -> sqlite3.Cursor:
-    """Select all composers for ingest or Cursor's newest one for a hook."""
-    if max_bubbles is not None:
-        return conn.execute(
-            "SELECT key, value FROM cursorDiskKV"
-            " WHERE key >= 'composerData:' AND key < 'composerData;'"
-            " ORDER BY rowid DESC LIMIT 1"
-        )
+    conn: sqlite3.Connection, conversation_id: str | None
+) -> list[tuple[Any, Any]] | sqlite3.Cursor:
+    """Select all composers for ingest or an exact, unique hook identity."""
+    if conversation_id is not None:
+        rows = conn.execute(
+            "SELECT key, value FROM cursorDiskKV WHERE key = ? LIMIT 2",
+            (f"composerData:{conversation_id}",),
+        ).fetchall()
+        if len(rows) != 1:
+            raise ValueError("conversation_identity_unavailable")
+        return rows
     return conn.execute(
         "SELECT key, value FROM cursorDiskKV"
         " WHERE substr(key, 1, 13) = 'composerData:' ORDER BY rowid"
@@ -172,14 +191,18 @@ def _composer_rows(
 
 
 def read(
-    path: Path, max_bubbles: int | None = None
+    path: Path,
+    max_bubbles: int | None = None,
+    *,
+    conversation_id: str | None = None,
 ) -> tuple[list[Conversation], int, tuple[int, int, int]]:
     """Read supported conversations from ``path`` using a read-only handle.
 
     Args:
         path: Cursor's SQLite database.
-        max_bubbles: For a preCompact refresh, cap the newest conversation at
-            Cursor's reported message count. None reads every conversation.
+        max_bubbles: Cap a hook refresh at Cursor's reported message count.
+            None leaves ordinary full imports unbounded.
+        conversation_id: Exact hook composer identity; None imports all.
 
     Returns:
         Conversations, skipped row count, and database file identity.
@@ -187,6 +210,8 @@ def read(
     Raises:
         ValueError: If the database is unsupported or cannot be read.
     """
+    if max_bubbles is not None and not conversation_id:
+        raise ValueError("conversation_identity_unavailable")
     conversations: list[Conversation] = []
     skipped = [0]
     try:
@@ -200,16 +225,12 @@ def read(
             if not {"key", "value"} <= columns:
                 raise ValueError("unsupported_database")
             conn.execute("BEGIN")
-            for key, raw in _composer_rows(conn, max_bubbles):
-                if not isinstance(key, str) or not key[13:]:
+            for key, raw in _composer_rows(conn, conversation_id):
+                decoded = _decode_composer(key, raw, conversation_id)
+                if decoded is None:
                     skipped[0] += 1
                     continue
-                composer = _object(raw)
-                cell = _cell_bytes(raw)
-                if composer is None or cell is None:
-                    skipped[0] += 1
-                    continue
-                thread_id = key[13:]
+                thread_id, composer, cell = decoded
                 events = _events(
                     conn, thread_id, composer, skipped, max_bubbles
                 )

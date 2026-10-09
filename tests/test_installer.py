@@ -14,6 +14,7 @@ from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
+from install.provider_paths import cursor_command
 from tests.installer_support import (
     CRED,
     World,
@@ -235,7 +236,7 @@ class FreshInstallTest(unittest.TestCase):
         self.assertEqual(handlers[0], {"command": "other"})
         self.assertEqual(
             handlers[1]["command"],
-            f"{h}/.local/bin/muninn hook pre-compact --provider cursor",
+            cursor_command(self.w.ctx()),
         )
         self.assertEqual(
             installed["hooks"]["afterFileEdit"], [{"command": "keep"}]

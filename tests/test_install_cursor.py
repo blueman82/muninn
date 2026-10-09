@@ -7,6 +7,7 @@ import unittest
 from unittest import mock
 
 from install import steps_config as sc
+from install.provider_paths import render_pinned
 from tests.installer_support import World
 
 
@@ -23,9 +24,11 @@ class CursorChoiceTest(unittest.TestCase):
         template = release / "integrations/cursor/hooks.json"
         template.parent.mkdir(parents=True)
         template.write_bytes(
-            (self.w.repo / "integrations/cursor/hooks.json")
-            .read_bytes()
-            .replace(b"@HOME@", str(ctx.home).encode())
+            render_pinned(
+                ctx,
+                "integrations/cursor/hooks.json",
+                (self.w.repo / "integrations/cursor/hooks.json").read_bytes(),
+            )
         )
         with mock.patch.object(
             type(ctx),
@@ -46,7 +49,7 @@ class CursorChoiceTest(unittest.TestCase):
             self.assertFalse(sc.choose_cursor_hooks(self.w.ctx()))
         said = "\n".join(self.w.out)
         self.assertIn(
-            f"Cursor hook target: {self.w.home}/.cursor/hooks.json", said
+            f"Cursor hook target: {self.w.ctx().cursor_settings}", said
         )
         self.assertIn("docs/QUICKSTART.md#cursor-history", said)
         self.assertIn("left for manual setup", said)

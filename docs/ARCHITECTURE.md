@@ -9,7 +9,7 @@ flowchart LR
   end
   P["poller<br/>muninn serve (60 s)<br/>launchd / systemd / Task Scheduler"]
   CI["fresh install /<br/>muninn ingest --full"]
-  CH["Cursor preCompact<br/>newest conversation,<br/>message_count limit"]
+  CH["Cursor preCompact<br/>exact conversation_id,<br/>message_count limit"]
   DB[("muninn.sqlite<br/>events, knowledge,<br/>tombstones, FTS5")]
   CLI["muninn CLI<br/>search, open, know,<br/>stats, doctor, compact,<br/>rebuild"]
   H["hooks<br/>SessionStart,<br/>UserPromptSubmit"]
@@ -49,12 +49,17 @@ flowchart LR
   will migrate its schema, `install/snapshot.py`), pin, optional Cursor config, restart,
   verify, prune, and
   deletes the copy after the prune. `install/rollback.py` reverses it from the recorded
-  values, restoring that copy over a migrated store. `install/uninstall.py` removes
+  values, restoring that copy over a migrated store. Cursor rollback restores only
+  prior owned handlers, retaining current foreign additions, edits, deletions and order. `install/uninstall.py` removes
   Muninn installation entries (no record survives an upgrade) and moves the data dir
   aside instead of deleting it (unless `--purge-data`).
-- **Cursor refresh.** The optional native `preCompact` hook imports the newest
-  conversation before compaction, using the reported `message_count` as a bubble read
-  limit. Oversized conversations are skipped whole; full ingest remains the complete
+- **Cursor refresh.** The optional native `preCompact` hook imports only the
+  uniquely matching `composerData:<conversation_id>`, scoped to valid native
+  `workspace_roots`. A single root overrides stale process context; multiple roots
+  require a matching project directory. Missing, ambiguous or mismatched identity
+  skips before writes. Bubble processing is capped at `message_count`, with one
+  additional probe to detect oversize. Oversized
+  conversations are skipped whole; full ingest remains the complete
   import path. The hook returns compact JSON, exits 0 on failure, and injects no
   context. Its 90-second deadline is a measured host-specific setting; see the
   [benchmark and limits](CURSOR-PRECOMPACT-BENCHMARK.md).

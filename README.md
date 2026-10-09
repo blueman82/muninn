@@ -36,7 +36,7 @@ Cursor is optional; Muninn can import its local history database without Cursor 
   `harness`), Claude Code main transcripts, and imported Cursor conversations. Only primary threads
   are searched, pushed and cited by default.
 - Cursor conversations are imported read-only from the standard local database during fresh install
-  and `muninn ingest --full`; the optional `preCompact` hook refreshes the newest conversation.
+  and `muninn ingest --full`; the optional `preCompact` hook refreshes the conversation identified by Cursor's hook payload.
   Cursor is not required, and its database is not polled in the background.
 - Event kinds: `prompt`, `reply`, `tool_call`, tagged `harness` text, and `tool_error`, a redacted
   head and tail of an error-bearing tool output (never pushed and never citable).

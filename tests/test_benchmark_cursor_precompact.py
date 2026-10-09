@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import tempfile
@@ -19,7 +20,7 @@ class CursorPrecompactBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "state.vscdb"
             benchmark._create_database(path, 2, 3, 11)
-            with sqlite3.connect(path) as conn:
+            with contextlib.closing(sqlite3.connect(path)) as conn:
                 rows = conn.execute(
                     "SELECT key, value FROM cursorDiskKV ORDER BY rowid"
                 ).fetchall()

@@ -27,6 +27,7 @@ from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
     codex_check,
+    cursor_ours,
     drop_trust,
     edit_cursor_settings,
     edit_settings,
@@ -97,6 +98,13 @@ def record(ctx: Ctx, rec: Record) -> None:
         if rec["cursor_hooks"]
         else []
     )
+    rec["cursor_ours"] = [
+        {"index": index, "value": handler}
+        for index, handler in enumerate(
+            cursor_obj.get("hooks", {}).get("preCompact", [])
+        )
+        if cursor_ours(handler, cursor_command(ctx))
+    ]
     links = (ctx.lib / "current", ctx.lib / "python", ctx.muninn)
     rec["links"] = {
         str(p): link_text(p) if p.is_symlink() else None for p in links

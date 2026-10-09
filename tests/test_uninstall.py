@@ -17,6 +17,7 @@ from install import uninstall as un
 from install.constants import PRE_UPGRADE_PREFIX, PRIVATE_UMASK
 from install.context import StepFailedError
 from install.errors import RefusedError
+from install.provider_paths import cursor_command
 from tests.installer_support import World, snapshot
 from tests.store_support import assert_private
 
@@ -131,12 +132,7 @@ class UninstallTest(UninstallCase):
                     "hooks": {
                         "preCompact": [
                             {"command": "other"},
-                            {
-                                "command": (
-                                    f"{self.w.home}/.local/bin/muninn hook "
-                                    "pre-compact --provider cursor"
-                                )
-                            },
+                            {"command": cursor_command(self.c)},
                         ],
                         "afterFileEdit": [{"command": "keep"}],
                     },

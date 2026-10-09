@@ -63,6 +63,7 @@ def _write_conversation(
     stat: tuple[int, int, int],
     cwd: str,
     key: bytes,
+    refresh_scope: bool,
 ) -> tuple[int, int, int]:
     """Store one conversation; return added, unchanged and skipped counts."""
     thread = conversation.thread_id
@@ -74,7 +75,11 @@ def _write_conversation(
         (thread,),
     ).fetchone()
     now = time.time()
-    if row is not None and row["parse_state"] == conversation.digest:
+    if (
+        row is not None
+        and row["parse_state"] == conversation.digest
+        and (not refresh_scope or _same_scope(conn, row["id"], cwd))
+    ):
         conn.execute(
             "UPDATE source SET path=?, status='active', last_seen=?"
             " WHERE id=?",
@@ -116,6 +121,19 @@ def _write_conversation(
         )
         added += 1
     return added, 0, skipped
+
+
+def _same_scope(conn: sqlite3.Connection, source_id: int, cwd: str) -> bool:
+    """Require authoritative scope for an unchanged hook import."""
+    sid = scope.scope_id(conn, cwd)
+    return (
+        conn.execute(
+            "SELECT 1 FROM event WHERE source_id=?"
+            " AND (cwd IS NOT ? OR scope_id IS NOT ?) LIMIT 1",
+            (source_id, cwd, sid),
+        ).fetchone()
+        is None
+    )
 
 
 def _upsert_source(
@@ -193,6 +211,7 @@ def run(
     wait_s: float,
     *,
     max_bubbles: int | None = None,
+    conversation_id: str | None = None,
 ) -> dict[str, int]:
     """Import visible Cursor chat text from one copied SQLite database.
 
@@ -203,6 +222,7 @@ def run(
         wait_s: Writer-lock wait limit.
         max_bubbles: Limit a hook refresh using Cursor's reported message
             count.
+        conversation_id: Exact hook composer identity; None imports all.
 
     Returns:
         Counts only; transcript text is never included.
@@ -210,7 +230,9 @@ def run(
     Raises:
         ValueError: If the file is not a supported Cursor database.
     """
-    conversations, skipped, stat = read(path, max_bubbles)
+    conversations, skipped, stat = read(
+        path, max_bubbles, conversation_id=conversation_id
+    )
     counts = {
         "conversations_seen": len(conversations),
         "events_added": 0,
@@ -218,6 +240,8 @@ def run(
         "skipped_rows": skipped,
         "events_skipped_erased": 0,
     }
+    if conversation_id is not None and not conversations:
+        return counts
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home))
         try:
@@ -227,7 +251,13 @@ def run(
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     added, unchanged, erased = _write_conversation(
-                        conn, conversation, str(path.resolve()), stat, cwd, key
+                        conn,
+                        conversation,
+                        str(path.resolve()),
+                        stat,
+                        cwd,
+                        key,
+                        conversation_id is not None,
                     )
                     conn.execute("COMMIT")
                 except BaseException:

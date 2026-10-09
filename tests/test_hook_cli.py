@@ -98,7 +98,12 @@ class HookCommandTests(HookCliCase):
         project = str(self.tmp / "cursor-project")
         with path, run as importer:
             out = hook_cursor.pre_compact(
-                {"cwd": str(self.repo), "message_count": 7},
+                {
+                    "cwd": str(self.repo),
+                    "workspace_roots": [project],
+                    "conversation_id": "active",
+                    "message_count": 7,
+                },
                 "cursor",
                 self.env
                 | {"HOME": str(self.tmp), "CURSOR_PROJECT_DIR": project},
@@ -122,7 +127,14 @@ class HookCommandTests(HookCliCase):
             mock.patch.object(hook_cursor.cursor_import, "run") as importer,
         ):
             out = hook_cursor.pre_compact(
-                {"message_count": 2}, "cursor", self.env, trace=trace
+                {
+                    "workspace_roots": [str(self.repo)],
+                    "conversation_id": "active",
+                    "message_count": 2,
+                },
+                "cursor",
+                self.env,
+                trace=trace,
             )
         self.assertEqual(out, {})
         self.assertEqual(trace, {"skipped": "missing_cursor_db"})
@@ -134,15 +146,23 @@ class HookCommandTests(HookCliCase):
         trace: dict[str, object] = {}
         env = self.env | {"MUNINN_CURSOR_DB": str(database)}
         with mock.patch.object(
-            hook_cursor.cursor_import.sys, "platform", "linux"
-        ):
+            hook_cursor.cursor_import,
+            "default_database",
+            wraps=hook_cursor.cursor_import.default_database,
+        ) as select_database:
             out = hook_cursor.pre_compact(
-                {"cwd": str(self.repo), "message_count": 3},
+                {
+                    "cwd": str(self.repo),
+                    "workspace_roots": [str(self.repo)],
+                    "conversation_id": "active",
+                    "message_count": 3,
+                },
                 "cursor",
                 env,
                 trace=trace,
             )
         self.assertEqual(out, {})
+        self.assertEqual(select_database.call_args.kwargs["env"], env)
         counts = trace["counts"]
         assert isinstance(counts, dict)
         self.assertEqual(counts["events_added"], 3)
@@ -172,7 +192,12 @@ class HookCommandTests(HookCliCase):
         trace: dict[str, object] = {}
         with path, run:
             out = hook_cursor.pre_compact(
-                {"cwd": str(self.repo), "message_count": 7},
+                {
+                    "cwd": str(self.repo),
+                    "workspace_roots": [str(self.repo)],
+                    "conversation_id": "active",
+                    "message_count": 7,
+                },
                 "cursor",
                 self.env | {"HOME": str(self.tmp)},
                 trace=trace,

@@ -160,6 +160,43 @@ def drop_cursor_settings(data: bytes, command: str) -> bytes:
     return ce.dump_like(data, obj)
 
 
+def restore_cursor_settings(
+    data: bytes,
+    command: str,
+    owned: Sequence[Mapping[str, Any]],
+    version: Mapping[str, Any],
+) -> bytes:
+    """Restore prior owned handlers while retaining current foreign config.
+
+    Args:
+        data: Current Cursor config bytes.
+        command: Exact native command owned by this installation.
+        owned: Prior owned handlers and their original list positions.
+        version: Before-value of the installer's version key.
+
+    Returns:
+        Config with only owned entries restored, preserving foreign changes.
+
+    Raises:
+        RefusedError: If current hook containers have malformed shapes.
+    """
+    obj = ce.load_json(drop_cursor_settings(data, command))
+    hooks = cast(dict[str, Any], obj.setdefault("hooks", {}))
+    handlers = cast(list[Any], hooks.get("preCompact", []))
+    for entry in owned:
+        handlers.insert(min(entry["index"], len(handlers)), entry["value"])
+    if handlers:
+        hooks["preCompact"] = handlers
+    if not hooks:
+        obj.pop("hooks")
+    if type(obj.get("version")) is int and obj["version"] == 1:
+        if version["present"]:
+            obj["version"] = version["value"]
+        elif not obj.get("hooks"):
+            obj.pop("version")
+    return ce.dump_like(data, obj)
+
+
 def codex_scan(text: str) -> dict[str, dict[str, Any] | None]:
     """Parse our config.toml sections and refuse stray markers.
 

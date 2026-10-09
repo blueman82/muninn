@@ -31,8 +31,9 @@ after a failed one).
 An interactive install also asks whether to configure Muninn's Cursor
 `preCompact` hook automatically or leave it for manual setup. Automatic setup
 merges only Muninn's handler into `~/.cursor/hooks.json`, preserving other
-hooks. On a non-interactive install, or if you choose manual, no Cursor config
-is changed; the installer prints the target path and a direct link to the
+hooks. Rollback restores prior owned handlers while retaining current foreign
+additions, edits, deletions and order. On a non-interactive install, or if you
+choose manual, no Cursor config is changed; the installer prints the target path and a direct link to the
 instructions below. An upgrade only changes Cursor settings if you choose
 automatic setup.
 
@@ -111,14 +112,29 @@ launcher command. On macOS/Linux it is under `~/.local/lib/muninn/current/`; on
 Windows it is under the selected `%LOCALAPPDATA%\Muninn\lib\<sha>\` release.
 Outside macOS, set `MUNINN_CURSOR_DB` to Cursor's native absolute database path in
 Cursor's environment; without it, the hook skips the import. Before compaction,
-the hook refreshes the
-newest Cursor conversation and reads at most the `message_count` bubbles
-reported by Cursor. If the stored conversation has more bubbles, Muninn skips
+the hook selects exactly one `composerData:<conversation_id>` matching the
+documented hook identity and processes at most the `message_count` bubbles
+reported by Cursor, probing one additional bubble to detect an oversized
+conversation. A present stored `composerId` must also match. Missing, malformed,
+duplicate or mismatched identity skips before writes; there is no newest-row
+fallback. Scope uses the hook's valid native absolute `workspace_roots`: a
+single root is authoritative, while multiple roots require a project directory
+equal to or inside a listed root. Missing, invalid or ambiguous roots skip
+before writes. If the stored conversation has more bubbles, Muninn skips
 that conversation whole; `muninn ingest --full` remains the complete import
 path. The hook does not add context to the compacted turn.
 Muninn's imported Claude hooks remain the only SessionStart hook, so Cursor
 does not receive duplicate startup context. Prompt recall after compaction
-still follows the `recall.off` setting.
+still follows the `recall.off` setting. An exact refresh also corrects stored
+event scope when unchanged content was previously imported under another cwd;
+ordinary full imports keep their existing behavior.
+
+The hook fields are documented in [Cursor's hook contract](https://cursor.com/docs/hooks).
+Their mapping to the local database is empirical: a [Cursor bundle analysis](https://forum.cursor.com/t/cursor-hooks-intermittently-emit-empty-conversation-id-session-id-on-tool-execution-events/167095)
+links lifecycle hook `conversation_id` to `composerId`, and [exporter source](https://github.com/Callum-Ward/cursaves/blob/main/cursor_saves/export.py#L108)
+looks up `composerData:<composerId>`. The database format is not a vendor-supported
+storage API; a format change may cause a skipped refresh. Real Cursor lifecycle
+execution on this checkout remains unverified.
 
     muninn search "a phrase from Cursor" --provider cursor
 

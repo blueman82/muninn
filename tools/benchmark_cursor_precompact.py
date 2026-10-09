@@ -151,7 +151,12 @@ def _run_sample(
                 f"writer lock holder failed: {error.decode()[:200]}"
             )
     payload = json.dumps(
-        {"cwd": env["CURSOR_PROJECT_DIR"], "message_count": messages}
+        {
+            "cwd": env["CURSOR_PROJECT_DIR"],
+            "workspace_roots": [env["CURSOR_PROJECT_DIR"]],
+            "conversation_id": "active",
+            "message_count": messages,
+        }
     ).encode()
     started = time.perf_counter()
     result: subprocess.CompletedProcess[bytes] | None = None

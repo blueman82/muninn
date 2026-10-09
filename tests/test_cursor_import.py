@@ -99,7 +99,7 @@ class CursorImportTests(CliCase):
     def test_precompact_read_skips_oversized_conversations_whole(self) -> None:
         path, _ = self.make_database()
         conversations, skipped, _ = cursor_import_read.read(
-            path, max_bubbles=1
+            path, max_bubbles=1, conversation_id="composer-1"
         )
         self.assertEqual(conversations, [])
         self.assertEqual(skipped, 1)
