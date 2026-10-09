@@ -208,7 +208,7 @@ Answer: `ok` (true when no error-level check is false) and `checks[]`. Each chec
 | `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
 | `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
 | `launchd_job` | error | on macOS, the launchd job is loaded with a live process | its pid |
-| `managed_service` | error | on Linux/Windows, the managed user service/task is owned and its heartbeat identifies the actual writer; unavailable inspection reports `null`, never success | constant code and process id |
+| `managed_service` | error | on Linux/Windows, the managed user service/task is owned and its heartbeat identifies the actual writer; unavailable inspection reports `null`, never success; executable and release paths match by resolved identity, so the short and long spellings of one Windows file are the same; each command doctor runs is limited to 60 s and a timeout fails the check rather than aborting doctor | constant code and process id |
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `roots_present` | info | always | names of provider roots that do not exist |
 

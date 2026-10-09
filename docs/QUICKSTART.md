@@ -2,7 +2,8 @@
 
 ## Prerequisites
 
-- macOS (the poller is a launchd job).
+- macOS (launchd job), Linux (systemd user service) or Windows 10/11 x64 or ARM64 (Task Scheduler
+  task). Windows has been proven on hosted CI runners, not yet with a non-admin token, a desktop or WSL.
 - Python 3.13 or newer. The installer pins the interpreter it runs under;
   set `MUNINN_PYTHON=/path/to/python3.13` to override at run time.
 - `git`, and a clean clone of this repo checked out at the commit to install.
