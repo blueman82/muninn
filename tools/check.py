@@ -86,9 +86,15 @@ def find_tool(name: str) -> str | None:
         The absolute path, or None when the tool is not installed.
     """
     for base in (ROOT, main_checkout()):
-        local = base / ".venv" / "bin" / name
-        if local.exists():
-            return str(local)
+        for relative in (
+            f"bin/{name}",
+            f"Scripts/{name}.exe",
+            f"Scripts/{name}.cmd",
+            f"Scripts/{name}",
+        ):
+            local = base / ".venv" / relative
+            if local.is_file():
+                return str(local)
     return shutil.which(name)
 
 

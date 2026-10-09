@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import sqlite3
-import stat
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from muninn.platform_io import open_regular
 from muninn.query.answers import (
     Answer,
     answer_citable,
@@ -103,23 +102,12 @@ def _read_line(roots: Mapping[str, Path], row: sqlite3.Row) -> bytes | None:
     root = (roots or {}).get(row["root"])
     if root is None or row["status"] != "active":
         return None
-    base = os.path.normpath(root)
-    path = os.path.normpath(Path(base) / row["path"])
     try:
-        if os.path.commonpath([base, path]) != base:
-            return None
-        # O_NOFOLLOW refuses a symlinked final component; O_NONBLOCK lets
-        # open() return at once on a FIFO so the S_ISREG check can reject it.
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with open_regular(root / row["path"], root=root) as handle:
+            handle.seek(row["byte_offset"])
+            return handle.readline(LINE_CAP + 1)
     except (OSError, ValueError):
         return None
-    with os.fdopen(fd, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        handle.seek(row["byte_offset"])
-        # The extra byte leaves room for the newline of a line exactly at the
-        # cap, so the cap bounds the line plus its terminator.
-        return handle.readline(LINE_CAP + 1)
 
 
 def _neighbours(

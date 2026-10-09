@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -17,8 +19,29 @@ from muninn.tombstone_key import key_for
 __all__ = ["default_database", "run"]
 
 
-def default_database(home: Path) -> Path:
-    """Return Cursor's standard macOS database path under ``home``."""
+def default_database(
+    home: Path, *, env: Mapping[str, str] | None = None
+) -> Path | None:
+    """Select an explicit native database or the established macOS path.
+
+    Args:
+        home: Provider home for the macOS default.
+        env: Optional explicit MUNINN_CURSOR_DB input; omitted ignores it.
+
+    Returns:
+        The database path, or None off macOS without explicit input.
+
+    Raises:
+        ValueError: If the explicit input is not a native absolute path.
+    """
+    explicit = (env or {}).get("MUNINN_CURSOR_DB")
+    if explicit:
+        path = Path(explicit)
+        if not path.is_absolute() or "\0" in explicit:
+            raise ValueError("MUNINN_CURSOR_DB must be a native absolute path")
+        return path
+    if sys.platform != "darwin":
+        return None
     return home / (
         "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
     )

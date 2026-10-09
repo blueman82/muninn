@@ -23,6 +23,7 @@ from install import configedit as ce
 from install import installer as co
 from install.context import Ctx
 from muninn import store
+from tests.installer_fakes import register
 
 ROOT = Path(__file__).resolve().parent.parent
 CRED = "sk-fake-" + "feedface" * 5
@@ -188,7 +189,9 @@ class Fake:
         self, args: list[str], env: Mapping[str, str], input: bytes | None
     ) -> subprocess.CompletedProcess[bytes]:
         """Run real git, refusing any repository outside the temp dir."""
-        assert args[0] == "-C" and tempfile.gettempdir() in args[1], args
+        assert args[0] == "-C" and Path(args[1]).resolve(
+            strict=True
+        ).is_relative_to(self.home.parent.resolve(strict=True)), args
         r = subprocess.run(["git", *args], capture_output=True, env=env)
         return done(r.stdout, r.returncode)
 
@@ -372,15 +375,28 @@ class World:
         Args:
             tc: The running test; owns the temp dir's lifetime.
         """
-        tmp = Path(tempfile.mkdtemp(prefix="inst-")).resolve()
-        tc.addCleanup(shutil.rmtree, tmp)
+        temporary = tempfile.TemporaryDirectory(prefix="inst-")
+        tc.addCleanup(temporary.cleanup)
+        tmp = Path(temporary.name).resolve()
         self.home, self.repo = tmp / "home", tmp / "repo"
+        register(tc, self.home)
         self.out: list[str] = []
         for rel in PINNED:
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / rel, self.repo / rel)
+            if rel == "launchd/com.muninn.plist":
+                path = self.repo / rel
+                prefix = str(Path("@HOME@") / ".local/lib/muninn").encode()
+                path.write_bytes(
+                    path.read_bytes().replace(
+                        b"@HOME@/.local/lib/muninn", prefix
+                    )
+                )
+            if rel == "bin/muninn":
+                (self.repo / rel).chmod(0o755)
         git(self.repo, "init", "-q")
         git(self.repo, "add", "-A")
+        git(self.repo, "update-index", "--chmod=+x", "bin/muninn")
         git(self.repo, "commit", "-qm", "new")
         self.sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
         h = self.home
@@ -410,6 +426,7 @@ class World:
             run=self.fake.run,
             ts="20261001T000000Z",
             uid=501,
+            platform="darwin",
             now=self.fake.now,
             sleep=self.fake.sleep,
             say=self.out.append,

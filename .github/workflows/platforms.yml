@@ -1,0 +1,315 @@
+name: Platform validation
+
+on:
+  push:
+    branches: [main, codex/windows-support-plan]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  platforms:
+    name: ${{ matrix.runner }} / ${{ matrix.lane }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+            lane: all
+          - runner: ubuntu-24.04
+            architecture: x64
+            lane: all
+          - runner: windows-2022
+            architecture: x64
+            lane: proof
+          - runner: windows-2022
+            architecture: x64
+            lane: gate
+          - runner: windows-11-arm
+            architecture: arm64
+            lane: proof
+          - runner: windows-11-arm
+            architecture: arm64
+            lane: gate
+    env:
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Provision supported SQLite on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sqlite_build="$RUNNER_TEMP/muninn-sqlite"
+          mkdir -p "$sqlite_build"
+          curl --fail --silent --show-error --retry 3 \
+            https://sqlite.org/2025/sqlite-amalgamation-3500400.zip \
+            -o "$sqlite_build/source.zip"
+          unzip -q "$sqlite_build/source.zip" -d "$sqlite_build"
+          python3.13 - "$sqlite_build" <<'PY'
+          import hashlib
+          import sys
+          from pathlib import Path
+
+          source = Path(sys.argv[1]) / 'sqlite-amalgamation-3500400/sqlite3.c'
+          expected = '9145255e83da6529e70121ee4d7a4c88fe83ca4511da0c9ed13d10842df36782'
+          assert hashlib.sha3_256(source.read_bytes()).hexdigest() == expected
+          PY
+          cc -O2 -fPIC -shared -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_COLUMN_METADATA \
+            -Wl,-soname,libsqlite3.so.0 \
+            "$sqlite_build/sqlite-amalgamation-3500400/sqlite3.c" \
+            -o "$sqlite_build/libsqlite3.so.0" -lm -lpthread -ldl
+          echo "LD_LIBRARY_PATH=$sqlite_build" >> "$GITHUB_ENV"
+      - name: Verify provisioned SQLite on Linux
+        if: runner.os == 'Linux'
+        shell: python
+        run: |
+          import sqlite3
+          assert sqlite3.sqlite_version_info == (3, 50, 4), sqlite3.sqlite_version
+          print('Verified SQLite', sqlite3.sqlite_version)
+      - name: Verify interpreter and SQLite FTS5 readiness
+        shell: python
+        run: |
+          import json
+          import os
+          import platform
+          import sqlite3
+          import sys
+          from pathlib import Path
+
+          assert sys.version_info[:2] == (3, 13), sys.version
+          assert platform.machine().lower() in {
+              'x86_64', 'amd64', 'arm64', 'aarch64'
+          }, platform.machine()
+          with sqlite3.connect(':memory:') as conn:
+              conn.execute('CREATE VIRTUAL TABLE readiness USING fts5(body)')
+              conn.execute("INSERT INTO readiness VALUES ('synthetic readiness')")
+              assert conn.execute(
+                  "SELECT count(*) FROM readiness WHERE readiness MATCH 'synthetic'"
+              ).fetchone() == (1,)
+          result = {
+              'sha': os.environ['GITHUB_SHA'],
+              'os': platform.platform(),
+              'architecture': platform.machine(),
+              'python': platform.python_version(),
+              'sqlite': sqlite3.sqlite_version,
+              'check': 'environment readiness; no Windows support claim',
+          }
+          print(json.dumps(result))
+          Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(
+              'Interpreter and SQLite FTS5 readiness passed.\n\n'
+              'Windows readiness does not validate Muninn runtime, installation, '
+              'provider integration, Windows 11 x64, or WSL.\n\n'
+              + '```json\n' + json.dumps(result, indent=2) + '\n```\n',
+              encoding='utf-8',
+          )
+      - name: Create private native proof scratch
+        id: native_scratch
+        if: runner.os != 'macOS'
+        shell: python
+        run: |
+          import os
+          import tempfile
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path.cwd()))
+          from muninn import platform_io
+
+          root = Path(tempfile.mkdtemp(prefix='muninn-native-proof-')).resolve()
+          platform_io.ensure_private_dir(root)
+          with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+              output.write('root=' + str(root) + '\n')
+      - name: Provision private Linux proof interpreter when required
+        id: native_python
+        if: runner.os == 'Linux' && !cancelled()
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
+        shell: bash
+        run: python3.13 -m tests.lifecycle_native_python
+      - name: Install full gate tools
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python3.13 -m venv .venv
+          .venv/bin/python -m pip install -r requirements-dev.txt
+          if ! command -v shellcheck >/dev/null; then
+            if [[ "$RUNNER_OS" == 'macOS' ]]; then
+              brew install shellcheck
+            else
+              sudo apt-get update
+              sudo apt-get install --yes shellcheck
+            fi
+          fi
+          git config core.hooksPath .githooks
+      - name: Run real isolated Linux lifecycle
+        if: runner.os == 'Linux'
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
+        shell: bash
+        run: |
+          sudo systemd-run --pipe --wait --collect --quiet --property=Delegate=yes \
+            --property=SendSIGKILL=no --property=TimeoutStopSec=infinity \
+            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
+            env PATH="$PATH" LD_LIBRARY_PATH="$LD_LIBRARY_PATH" \
+            RUNNER_TEMP="$RUNNER_TEMP" MUNINN_NATIVE_SCRATCH="$MUNINN_NATIVE_SCRATCH" \
+            dbus-run-session -- "${{ steps.native_python.outputs.executable }}" -m tests.lifecycle_native
+      - name: Install native gate tools
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import hashlib
+          import io
+          import os
+          import subprocess
+          import sys
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          subprocess.run([sys.executable, '-m', 'venv', '.venv'], check=True)
+          python = str(Path('.venv/Scripts/python.exe'))
+          subprocess.run([python, '-m', 'pip', 'install', '-r',
+                          'requirements-dev.txt'], check=True)
+          url = 'https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.zip'
+          expected = '8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e'
+          archive = urllib.request.urlopen(url, timeout=60).read()
+          assert hashlib.sha256(archive).hexdigest() == expected
+          tools = Path(os.environ['RUNNER_TEMP']) / 'muninn-native-tools'
+          tools.mkdir(exist_ok=True)
+          with zipfile.ZipFile(io.BytesIO(archive)) as source:
+              members = [name for name in source.namelist()
+                         if name.endswith('shellcheck.exe')]
+              assert len(members) == 1, members
+              (tools / 'shellcheck.exe').write_bytes(source.read(members[0]))
+          subprocess.run([str(tools / 'shellcheck.exe'), '--version'], check=True)
+          with Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8') as path:
+              path.write(str(tools) + '\n')
+          subprocess.run(['git', 'config', 'core.hooksPath', '.githooks'], check=True)
+      - name: Provision trusted native interpreter tree
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os
+          import shutil
+          import subprocess
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd()))
+          from muninn import platform_io
+
+          original = Path(sys.executable)
+          diagnostic = r"""
+          $item = Get-Item -LiteralPath $env:MUNINN_CI_ORIGINAL_PYTHON
+          while ($null -ne $item) {
+              $acl = Get-Acl -LiteralPath $item.FullName
+              $raw = [Security.AccessControl.RawSecurityDescriptor]::new(
+                  $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::All))
+              $rules = @($raw.DiscretionaryAcl | ForEach-Object {
+                  @{sid=$_.SecurityIdentifier.Value; mask=$_.AccessMask;
+                    flags=[int]$_.AceFlags; type=[int]$_.AceType}
+              })
+              @{path=$item.FullName; owner=$raw.Owner.Value; rules=$rules} | ConvertTo-Json -Depth 5 -Compress
+              if ($item -is [IO.DirectoryInfo]) { $item=$item.Parent }
+              else { $item=$item.Directory }
+          }
+          """
+          subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive',
+                          '-Command', diagnostic], check=True, timeout=90,
+                         env=os.environ | {'MUNINN_CI_ORIGINAL_PYTHON': str(original)})
+          destination = Path(tempfile.mkdtemp(prefix='muninn-ci-python-'))
+          platform_io.ensure_private_dir(destination)
+          shutil.copytree(original.parent, destination, dirs_exist_ok=True)
+          platform_io.ensure_private_dir(destination)
+          copied = destination / original.name
+          verification = (
+              'import encodings,json,sqlite3,sys; from pathlib import Path; '
+              'base=Path(sys.argv[1]).resolve(); '
+              'assert Path(sys.prefix).resolve()==base; '
+              'assert Path(encodings.__file__).resolve().is_relative_to(base); '
+              'assert sqlite3.sqlite_version_info>=(3,46,1); '
+              'print(json.dumps({"python":sys.version.split()[0],'
+              '"sqlite":sqlite3.sqlite_version,"private_copy":True}))'
+          )
+          subprocess.run([str(copied), '-I', '-B', '-X', 'utf8', '-c',
+                          verification, str(destination)], check=True, timeout=30)
+          with Path(os.environ['GITHUB_PATH']).open('a', encoding='utf-8') as path:
+              path.write(str(destination) + '\n')
+          with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as env:
+              env.write('MUNINN_PYTHON=' + str(copied) + '\n')
+      - name: Run real ordinary Windows lifecycle
+        if: runner.os == 'Windows' && matrix.lane != 'gate' && !cancelled()
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.lifecycle_native'], check=True)
+      - name: Provision pinned Codex native proof
+        id: provider_setup
+        if: runner.os != 'macOS' && matrix.lane != 'gate' && !cancelled()
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.provider_native_setup'], check=True)
+      - name: Run actual Codex and rendered provider routes
+        if: runner.os != 'macOS' && matrix.lane != 'gate' && !cancelled() && steps.provider_setup.outcome == 'success'
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
+      - name: Upload early native proof codes
+        if: runner.os != 'macOS' && matrix.lane != 'gate' && !cancelled()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-proof-codes-${{ matrix.runner }}
+          path: |
+            ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-lifecycle-proof.json
+            ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-provider-proof.json
+            ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-ordinary-proof.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Check Windows native API typing
+        if: runner.os == 'Windows' && matrix.lane == 'gate' && !cancelled()
+        shell: python
+        run: |
+          import subprocess
+          from pathlib import Path
+          subprocess.run([str(Path('.venv/Scripts/python.exe')), '-m', 'pyright', '--pythonplatform',
+                          'Windows', 'muninn'], check=True)
+      - name: Run mandatory full gate
+        if: runner.os != 'Windows' && !cancelled()
+        shell: bash
+        run: python3.13 -m tools.check --full
+      - name: Run mandatory native full gate
+        if: runner.os == 'Windows' && matrix.lane == 'gate' && !cancelled()
+        shell: python
+        run: |
+          import subprocess
+          import sys
+          subprocess.run([sys.executable, '-m', 'tools.check', '--full'], check=True)

@@ -8,12 +8,17 @@ import plistlib
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+
+from install.context import Ctx, run_real
+from install.provider_paths import render_pinned
+from install.trust import codex_hooks
 
 ROOT = Path(__file__).resolve().parent.parent
 CODEX_PLUGIN = ROOT / "integrations/codex/.codex-plugin/plugin.json"
@@ -26,7 +31,7 @@ PYRIGHT = ROOT / "pyrightconfig.json"
 
 HOME = "@HOME@"
 SESSION_MATCHER = "startup|resume|clear|compact"
-PYTHON = "/opt/homebrew/bin/python3.13"
+PYTHON = sys.executable
 ENV_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
 
@@ -224,6 +229,11 @@ class PlistTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
+def _event_position(event: str) -> int:
+    """Return the shipped hook's file-order position."""
+    return 0 if event == "SessionStart" else 1
+
+
 def all_commands() -> Iterator[tuple[str, str]]:
     """List every command the integration files ask a host to run.
 
@@ -239,13 +249,13 @@ def all_commands() -> Iterator[tuple[str, str]]:
 class CommandContractTest(unittest.TestCase):
     """Every command the files run starts at a known location."""
 
-    def test_every_command_starts_at_home_or_homebrew_python(self) -> None:
+    def test_every_command_starts_at_the_home_placeholder(self) -> None:
         commands = list(all_commands())
         self.assertEqual(len(commands), 5)
         for name, command in commands:
             with self.subTest(file=name, command=command):
                 self.assertTrue(
-                    command.startswith((f"{HOME}/", PYTHON)),
+                    command.startswith(f"{HOME}/"),
                     command,
                 )
 
@@ -267,11 +277,20 @@ class HomeSubstitutionTest(unittest.TestCase):
                 with self.subTest(text=text):
                     done = text.replace(HOME, home)
                     self.assertNotIn("@", done)
-                    first = shlex.split(done)[0]
+                    first = (
+                        done.split(" hook ")[0]
+                        if sys.platform == "win32"
+                        else shlex.split(done)[0]
+                    )
                     self.assertTrue(Path(first).is_absolute(), first)
-                    self.assertTrue(first.startswith(home + os.sep), first)
+                    self.assertTrue(
+                        Path(first).is_relative_to(Path(home)), first
+                    )
 
     def test_hook_commands_run_from_a_temp_home(self) -> None:
+        if sys.platform == "win32":
+            self.native_hook_arguments()
+            return
         with tempfile.TemporaryDirectory() as tmp:
             home = os.path.realpath(tmp)
             stub = Path(home, ".local/bin/muninn")
@@ -295,6 +314,60 @@ class HomeSubstitutionTest(unittest.TestCase):
                         words = hook_command(event, provider).split()[1:]
                         self.assertEqual(proc.stdout.split(), words)
 
+    def native_hook_arguments(self) -> None:
+        """Run rendered Windows provider commands against a synthetic stub."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Ctx(
+                Path(tmp).resolve() / "space café owner's % home",
+                run_real,
+                "test",
+                platform="win32",
+            )
+            stub = ctx.muninn.with_suffix(".ps1")
+            stub.parent.mkdir(parents=True)
+            stub.write_text(
+                "[Console]::Out.WriteLine(($args -join '|'))\n",
+                encoding="utf-8",
+            )
+            for relative, provider in (
+                ("integrations/claude/settings-hooks.json", "claude"),
+                ("integrations/codex/hooks/hooks.json", "codex"),
+            ):
+                raw = render_pinned(
+                    ctx, relative, (ROOT / relative).read_bytes()
+                )
+                for event, _, handler in handlers(json.loads(raw)):
+                    if provider == "claude":
+                        command: str | list[str] = [
+                            handler["command"],
+                            *handler["args"],
+                        ]
+                    else:
+                        command = codex_hooks(raw, platform="win32")[
+                            _event_position(event)
+                        ]["command"]
+                    result = subprocess.run(
+                        command,
+                        shell=provider == "codex",
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    verb = (
+                        "session-start"
+                        if event == "SessionStart"
+                        else "prompt"
+                    )
+                    self.assertEqual(
+                        result.stdout.strip(),
+                        f"hook|{verb}|--provider|{provider}",
+                    )
+
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "POSIX launchd links; native bootstrap has mandatory hosted proof",
+    )
     def test_plist_program_runs_through_the_current_symlink(self) -> None:
         # `python -I` puts nothing on sys.path, so muninn/__main__.py cannot be
         # run as a file; the plist must call the bin/muninn launcher instead.

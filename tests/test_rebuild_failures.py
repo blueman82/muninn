@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import sys
+from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
 
-from muninn import cli_rebuild, store
+from muninn import cli_rebuild, platform_windows, store
 from tests.cli_support import CliCase
+from tests.store_support import assert_private, public_read
 from tests.test_ingest import TID
 
 JUNK = b"not a database" * 100
@@ -42,11 +46,115 @@ class RebuildFailureTests(CliCase):
         self.assertEqual(first.read_bytes(), b"earlier")
         self.assertEqual((self.home / name).read_bytes(), JUNK)
 
-    def test_a_loose_old_store_is_tightened_to_0600(self) -> None:
-        self.db.chmod(0o644)
-        _, out, _ = self.muninn("rebuild")
-        aside = self.home / out["old_kept_as"]
-        self.assertEqual(aside.stat().st_mode & 0o777, 0o600)
+    def test_a_loose_old_store_is_tightened_or_refused(self) -> None:
+        if sys.platform == "win32":
+            with store.writer_lock(self.home):
+                pass
+            self.muninn("stats")
+            self.assertEqual(self.db.read_bytes(), JUNK)
+            with public_read(self, self.db):
+                before = self.names()
+                code, out, _ = self.muninn("rebuild")
+                self.assertEqual(
+                    (code, out["error"]), (4, "store_unavailable")
+                )
+                self.assertEqual(self.db.read_bytes(), JUNK)
+                self.assertEqual(self.names(), before)
+        else:
+            self.db.chmod(0o644)
+            _, out, _ = self.muninn("rebuild")
+            assert_private(self, self.home / out["old_kept_as"])
+
+    @contextlib.contextmanager
+    def refuse_native_publication(self, *, restore: bool) -> Generator[None]:
+        """Refuse the new native move and optionally the restore move."""
+        calls: list[str] = []
+        if sys.platform == "win32":
+            real_publish = platform_windows.publish
+
+            def native(
+                source: Path,
+                target: Path,
+                *,
+                replace: bool,
+                retry_move: bool = False,
+                directory: bool = False,
+            ) -> None:
+                if target == self.db and replace:
+                    if source.name == cli_rebuild.REBUILD:
+                        calls.append("new")
+                        raise PermissionError("denied")
+                    if source.name.startswith(".restore-"):
+                        calls.append("restore")
+                        if restore:
+                            raise PermissionError("denied")
+                real_publish(
+                    source,
+                    target,
+                    replace=replace,
+                    retry_move=retry_move,
+                    directory=directory,
+                )
+
+            with mock.patch.object(platform_windows, "publish", native):
+                yield
+            self.assertEqual(calls, ["new", "restore"])
+        else:
+            raise AssertionError("native publication fixture requires Windows")
+
+    @contextlib.contextmanager
+    def refuse_publication(self, *, restore: bool) -> Generator[None]:
+        """Interrupt the active publication backend at its actual move."""
+        if sys.platform == "win32":
+            with self.refuse_native_publication(restore=restore):
+                yield
+            return
+        calls: list[str] = []
+        real_replace, real_rename = Path.replace, Path.rename
+
+        def no_replace(path: Path, target: str | Path) -> Path:
+            if path.name == cli_rebuild.REBUILD:
+                calls.append("new")
+                raise PermissionError("denied")
+            return real_replace(path, target)
+
+        def no_return(path: Path, target: str | Path) -> Path:
+            if restore and path.name.startswith(store.UNREADABLE_PREFIX):
+                calls.append("restore")
+                raise PermissionError("denied")
+            return real_rename(path, target)
+
+        with (
+            mock.patch.object(Path, "replace", no_replace),
+            mock.patch.object(Path, "rename", no_return),
+        ):
+            yield
+        self.assertEqual(calls, ["new", "restore"] if restore else ["new"])
+
+    def assert_recovery_files(self, out: dict[str, object]) -> None:
+        """Check the retained original and absence of publication scratch."""
+        if sys.platform == "win32" or out["old_restored"] is True:
+            self.assertEqual(self.db.read_bytes(), JUNK)
+        else:
+            self.assertFalse(self.db.exists())
+        self.assertEqual(
+            (self.home / "muninn.sqlite-unknown").read_bytes(), b"owner"
+        )
+        self.assertFalse(
+            any(
+                n.startswith((cli_rebuild.REBUILD, ".restore-", ".recovery-"))
+                for n in self.names()
+            )
+        )
+        if sys.platform == "win32" or out["old_restored"] is False:
+            kept = out["old_kept_as"]
+            self.assertIsInstance(kept, str)
+            assert isinstance(kept, str)
+            self.assertEqual(self.asides(), [kept])
+            self.assertEqual((self.home / kept).read_bytes(), JUNK)
+            assert_private(self, self.home / kept)
+        else:
+            self.assertEqual(self.asides(), [])
 
     def test_the_answer_warns_that_the_ledger_was_not_copied(self) -> None:
         code, out, _ = self.muninn("rebuild")
@@ -57,42 +165,20 @@ class RebuildFailureTests(CliCase):
         self.assertIsNone(again["warning"])
 
     def test_a_failed_replace_puts_the_old_store_back(self) -> None:
-        real = Path.replace
-
-        def flaky(path: Path, target: str | Path) -> Path:
-            if path.name == cli_rebuild.REBUILD:
-                raise PermissionError("denied")
-            return real(path, target)
-
-        with mock.patch.object(Path, "replace", flaky):
+        (self.home / "muninn.sqlite-unknown").write_bytes(b"owner")
+        with self.refuse_publication(restore=False):
             code, out, _ = self.muninn("rebuild")
         self.assertEqual((code, out["error"]), (4, "replace_failed"))
         self.assertIs(out["old_restored"], True)
-        self.assertEqual(self.db.read_bytes(), JUNK)
-        self.assertEqual(self.asides(), [])
-        self.assertNotIn(cli_rebuild.REBUILD, self.names())
+        self.assert_recovery_files(out)
 
     def test_a_failed_put_back_is_reported_with_the_kept_name(self) -> None:
-        real_replace, real_rename = Path.replace, Path.rename
-
-        def no_replace(path: Path, target: str | Path) -> Path:
-            if path.name == cli_rebuild.REBUILD:
-                raise PermissionError("denied")
-            return real_replace(path, target)
-
-        def no_return(path: Path, target: str | Path) -> Path:
-            if path.name.startswith(store.UNREADABLE_PREFIX):
-                raise PermissionError("denied")
-            return real_rename(path, target)
-
-        with (
-            mock.patch.object(Path, "replace", no_replace),
-            mock.patch.object(Path, "rename", no_return),
-        ):
+        (self.home / "muninn.sqlite-unknown").write_bytes(b"owner")
+        with self.refuse_publication(restore=True):
             code, out, _ = self.muninn("rebuild")
         self.assertEqual((code, out["error"]), (4, "replace_failed"))
         self.assertIs(out["old_restored"], False)
-        self.assertEqual((self.home / out["old_kept_as"]).read_bytes(), JUNK)
+        self.assert_recovery_files(out)
 
     def test_a_failed_quick_check_sets_nothing_aside(self) -> None:
         built = cli_rebuild._Built(False, {}, 0, mock.MagicMock(), "bad")

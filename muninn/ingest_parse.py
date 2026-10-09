@@ -17,6 +17,7 @@ from typing import TypedDict, cast
 from muninn import classify, event_model, scope, tool_errors
 from muninn.ingest_lines import as_record, decode, lines
 from muninn.ingest_model import PROVIDER, Record, Work
+from muninn.platform_io import open_regular
 from muninn.tombstone_key import key_for
 from muninn.tombstones import (
     erased_ancestor_lines,
@@ -205,7 +206,7 @@ class _SourceParser:
 
     def run(self) -> ParseResult:
         """Read every whole line from the start cursor to the end of file."""
-        with self.w.path.open("rb") as handle:
+        with open_regular(self.w.path, expected=self.w.st) as handle:
             handle.seek(self.start.cursor[0])
             for number, begin, end, raw in lines(handle, *self.start.cursor):
                 # Advance the cursor for every whole line, usable or not, so

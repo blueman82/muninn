@@ -305,11 +305,13 @@ class RaceTests(IngestCase):
         self.write(rollout(), primary())
         real = ingest_plan._first_line
 
-        def racing(path: Path) -> bytes | None:
+        def racing(
+            path: Path, expected: os.stat_result | None = None
+        ) -> bytes | None:
             """Delete the doomed file just before it is first read."""
             if path == gone:
                 gone.unlink()  # archived or deleted after discovery
-            return real(path)
+            return real(path, expected)
 
         with mock.patch.object(ingest_plan, "_first_line", racing):
             stats = self.run_ingest()

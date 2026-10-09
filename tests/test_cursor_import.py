@@ -16,7 +16,11 @@ class CursorImportTests(CliCase):
 
     def database_path(self) -> Path:
         """Return Cursor's standard database path under the test HOME."""
-        return default_database(Path(self.env["HOME"]))
+        path = Path(self.env["HOME"]) / "synthetic Cursor/state.vscdb"
+        self.env["MUNINN_CURSOR_DB"] = str(path)
+        selected = default_database(Path(self.env["HOME"]), env=self.env)
+        assert selected is not None
+        return selected
 
     def make_database(self) -> tuple[Path, bytes]:
         """Create a supported synthetic Cursor database."""
@@ -72,8 +76,17 @@ class CursorImportTests(CliCase):
         code, stats, _ = self.muninn("stats")
         self.assertEqual(code, 0)
         self.assertEqual(stats["events_by_provider"]["cursor"], 2)
+        self.conn.close()
         code, rebuilt, _ = self.muninn("rebuild")
         self.assertEqual(code, 0, rebuilt)
+
+    def test_invalid_cursor_input_refuses_before_ingest(self) -> None:
+        with mock.patch("muninn.cli_maint.ingest.run_pass") as run:
+            code, output, _ = self.muninn(
+                "ingest", "--full", env={"MUNINN_CURSOR_DB": "relative"}
+            )
+        self.assertEqual(code, 2, output)
+        run.assert_not_called()
 
     def test_regular_ingest_does_not_import_cursor(self) -> None:
         self.make_database()

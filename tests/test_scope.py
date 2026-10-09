@@ -5,13 +5,40 @@ Temp repos and temp dirs only; HOME is patched to a temp dir.
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
+import stat
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from muninn import scope
 from tests.scope_support import ScopeCase
+
+
+def rewrite_pointer(path: Path, text: str) -> None:
+    """Rewrite an existing Git pointer without replacing native attributes.
+
+    Args:
+        path: Existing synthetic Git pointer file.
+        text: Synthetic replacement pointer consumed by the scope test.
+
+    Raises:
+        AssertionError: If the fixture cannot replace the pointer contents.
+    """
+    try:
+        with path.open("r+", encoding="utf-8", newline="") as stream:
+            stream.write(text)
+            stream.truncate()
+    except PermissionError as error:
+        try:
+            attributes = getattr(path.stat(), "st_file_attributes", 0)
+        except OSError:
+            attributes = -1
+        raise AssertionError(
+            f"git_pointer_rewrite errno={error.errno} attributes={attributes}"
+        ) from None
 
 
 class MatrixTests(ScopeCase):
@@ -74,7 +101,7 @@ class MatrixTests(ScopeCase):
         key = str(repo)
         with self.subTest("a deleted worktree resolves from the cache"):
             before = scope.scope_id(conn, str(wt))
-            shutil.rmtree(wt)
+            self.remove_tree(wt)
             uncached = scope.resolve_key(str(wt))  # control: no cache, no repo
             self.assertEqual(uncached, (str(wt), "dir", "cwd"))
             self.assertEqual(scope.scope_id(conn, str(wt)), before)
@@ -114,7 +141,16 @@ class MatrixTests(ScopeCase):
         self.make_repo(repo)
         self.git("worktree", "add", "-q", "-b", "f", str(wt), cwd=repo)
         with self.subTest("relative gitdir pointer"):
-            (wt / ".git").write_text("gitdir: ../repo/.git/worktrees/wt\n")
+            pointer = wt / ".git"
+            pointer.chmod(stat.S_IREAD | stat.S_IWRITE)
+            before = pointer.stat()
+            rewrite_pointer(pointer, "gitdir: ../repo/.git/worktrees/wt\n")
+            after = pointer.stat()
+            self.assertEqual(after.st_ino, before.st_ino)
+            self.assertEqual(
+                getattr(after, "st_file_attributes", 0),
+                getattr(before, "st_file_attributes", 0),
+            )
             want = (str(repo), "git", "worktree")
             self.assertEqual(scope.resolve_key(str(wt)), want)
         with self.subTest("submodule-style pointer is its own repo root"):
@@ -192,6 +228,45 @@ class LookupTests(ScopeCase):
         self.assertNotEqual(
             scope.scope_id(conn, "global"), scope.global_scope_id(conn)
         )
+
+
+class PointerDiagnosticTests(unittest.TestCase):
+    """Fixture failures expose only native attribute and error codes."""
+
+    def test_existing_pointer_rewrite_preserves_identity_and_attributes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".git"
+            path.write_text(
+                "gitdir: an old longer pointer path\n", encoding="utf-8"
+            )
+            before = path.stat()
+            with mock.patch.object(
+                Path,
+                "write_text",
+                side_effect=PermissionError(13, "CREATE_ALWAYS refused"),
+            ):
+                rewrite_pointer(path, "gitdir: café\n")
+            self.assertEqual(
+                path.read_text(encoding="utf-8"), "gitdir: café\n"
+            )
+            after = path.stat()
+            self.assertEqual(after.st_ino, before.st_ino)
+            self.assertEqual(
+                getattr(after, "st_file_attributes", 0),
+                getattr(before, "st_file_attributes", 0),
+            )
+
+    def test_rewrite_refusal_reports_existing_hidden_attribute(self) -> None:
+        path = mock.Mock(spec=Path)
+        path.open.side_effect = PermissionError(13, "private fixture body")
+        path.stat.return_value = SimpleNamespace(st_file_attributes=2)
+        with self.assertRaisesRegex(
+            AssertionError, "errno=13 attributes=2"
+        ) as raised:
+            rewrite_pointer(path, "private pointer body")
+        self.assertNotIn("private", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -103,17 +103,25 @@ def _out_of_scope(env: Mapping[str, str]) -> list[str]:
     return sorted(found)
 
 
+def _aside_remove(aside: list[str]) -> str | None:
+    """Return a shell command that removes only the listed literal paths."""
+    if not aside:
+        return None
+    if os.name != "nt":
+        return "rm -- " + " ".join(shlex.quote(path) for path in aside)
+    literals: list[str] = []
+    for path in aside:
+        # PowerShell recognises smart single quotes as string delimiters too.
+        for quote in "'\u2018\u2019\u201a\u201b":
+            path = path.replace(quote, quote * 2)
+        literals.append("'" + path + "'")
+    return "Remove-Item -LiteralPath @(" + ",".join(literals) + ")"
+
+
 def _aside_report(home: Path) -> dict[str, object]:
     """Name each set-aside store erase cannot scrub, with the removal."""
     aside = aside_files(home)
-    return {
-        "aside_files": aside,
-        "aside_remove": (
-            "rm -- " + " ".join(shlex.quote(p) for p in aside)
-            if aside
-            else None
-        ),
-    }
+    return {"aside_files": aside, "aside_remove": _aside_remove(aside)}
 
 
 def _apply(conn: sqlite3.Connection, target: Target) -> None:

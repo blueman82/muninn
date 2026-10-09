@@ -6,10 +6,13 @@ Temp repos and temp dirs only; HOME is patched to a temp dir.
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -28,7 +31,9 @@ class ScopeCase(unittest.TestCase):
         self.tmp = Path(os.path.realpath(tmp.name))  # /var -> /private/var
         self.home = self.tmp / "home"
         self.home.mkdir()
-        env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        env = mock.patch.dict(
+            os.environ, {"HOME": str(self.home), "USERPROFILE": str(self.home)}
+        )
         env.start()
         self.addCleanup(env.stop)
         self.db = self.tmp / "db" / "muninn.sqlite"
@@ -66,6 +71,7 @@ class ScopeCase(unittest.TestCase):
         env = {
             "PATH": os.environ["PATH"],
             "HOME": str(self.home),
+            "USERPROFILE": str(self.home),
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0",
         }
@@ -116,3 +122,23 @@ class ScopeCase(unittest.TestCase):
         ).fetchone()
         assert found is not None
         return (found[0], found[1], found[2])
+
+    def remove_tree(self, path: Path) -> None:
+        """Delete fixture Git objects, clearing native read-only flags only."""
+
+        def retry_readonly(
+            function: Callable[[str], object],
+            filename: str,
+            exception: BaseException,
+        ) -> None:
+            candidate = Path(filename)
+            mode = candidate.stat().st_mode
+            if (
+                not isinstance(exception, PermissionError)
+                or mode & stat.S_IWRITE
+            ):
+                raise exception
+            candidate.chmod(mode | stat.S_IWRITE)
+            function(filename)
+
+        shutil.rmtree(path, onexc=retry_readonly)

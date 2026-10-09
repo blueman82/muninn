@@ -11,10 +11,11 @@ import dataclasses
 import os
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Protocol, TypedDict
+from typing import Any, TypedDict
 
 from install.constants import (
     LABEL,
@@ -22,23 +23,21 @@ from install.constants import (
     PLIST,
     REMOVED_PREFIX,
 )
+from install.installer_log import Runner as Runner
+from install.installer_log import install_log as install_log
+from install.installer_log import run_real as run_real
+from muninn.obs_linux_service import query_unit
+from muninn.obs_service import (
+    command_names_path,
+    parse_process,
+    process_command,
+)
+from muninn.obs_status import read_status
+from muninn.platform_paths import read_selection, windows_base
 
 
 class StepFailedError(Exception):
     """An install step could not complete; rollback follows."""
-
-
-class Runner(Protocol):
-    """A command runner: real subprocesses, or a fake in tests."""
-
-    def __call__(
-        self,
-        argv: Sequence[str | Path],
-        env: Mapping[str, str] | None = None,
-        input: bytes | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        """Run ``argv`` and return the finished process."""
-        ...
 
 
 class Job(TypedDict):
@@ -53,28 +52,6 @@ class Job(TypedDict):
     cmd: str
 
 
-def run_real(
-    argv: Sequence[str | Path],
-    env: Mapping[str, str] | None = None,
-    input: bytes | None = None,
-) -> subprocess.CompletedProcess[bytes]:
-    """Run a command for real, capturing output.
-
-    Args:
-        argv: Program and arguments; paths are converted to strings.
-        env: Full environment, or None to inherit.
-        input: Bytes for stdin.
-
-    Returns:
-        The finished process; the caller inspects the exit status.
-    """
-    text_argv = [str(a) for a in argv]
-    # The timeout is a backstop against a hung tool, not a tuned deadline.
-    return subprocess.run(
-        text_argv, env=env, input=input, capture_output=True, timeout=600
-    )
-
-
 @dataclasses.dataclass
 class Ctx:
     """Everything one install or rollback run needs.
@@ -83,6 +60,9 @@ class Ctx:
         home: The HOME being installed into.
         run: Command runner; every external effect goes through it.
         ts: UTC timestamp that names this run's directories.
+        platform: Native platform, overridden only by isolated tests.
+        default_home: Use native environment paths when HOME was omitted.
+        log_path: Optional CLI log activated only after successful preflight.
         uid: User id for launchd's per-user ``gui/<uid>`` domain.
         dry_run: Plan and report without changing anything.
         now: Clock; replaced in tests.
@@ -108,7 +88,10 @@ class Ctx:
     home: Path
     run: Runner
     ts: str
-    uid: int = os.getuid()
+    uid: int = getattr(os, "getuid", lambda: 0)()
+    platform: str = sys.platform
+    default_home: bool = False
+    log_path: Path | None = None
     dry_run: bool = False
     now: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
@@ -141,54 +124,42 @@ class Ctx:
         self.plist = h / PLIST
         self.settings = h / ".claude/settings.json"
         self.codex_home = h / ".codex"
-        self.config = h / ".codex/config.toml"
-        self.cache = h / ".codex/plugins/cache" / MKT_NAME / "muninn"
+        if self.default_home:
+            if claude_home := os.environ.get("CLAUDE_CONFIG_DIR"):
+                self.settings = Path(claude_home) / "settings.json"
+            if codex_home := os.environ.get("CODEX_HOME"):
+                self.codex_home = Path(codex_home)
+        self.config = self.codex_home / "config.toml"
+        self.cache = self.codex_home / "plugins/cache" / MKT_NAME / "muninn"
         self.target = f"gui/{self.uid}/{LABEL}"
+        if self.platform == "linux":
+            self.plist = h / ".config/systemd/user/muninn.service"
+            self.target = "muninn.service"
+        elif self.platform == "win32":
+            base = windows_base(
+                os.environ, home=None if self.default_home else h
+            )
+            self.data, self.lib = base / "data", base / "lib"
+            self.rdir = base / f"install-{self.ts}"
+            self.failed = base / f"failed-{self.ts}"
+            self.removed = base / f"{REMOVED_PREFIX}{self.ts}"
+            self.muninn = base / "bin/muninn.cmd"
+            self.plist = base / "task.xml"
+            self.target = "Muninn"
 
+    @property
+    def release(self) -> Path:
+        """The current confined release without requiring a symlink.
 
-def install_log(
-    path: Path, run: Runner = run_real
-) -> tuple[Callable[[str], None], Runner]:
-    """Build a ``say`` and a ``run`` that also append to a log file.
-
-    The log is 0600 and timestamped. It records messages, each command's
-    name and exit status, and a failed command's stderr tail. It never
-    records stdout, which can carry transcript paths or text. Only messages
-    reach the screen; the command lines are for the log.
-
-    Args:
-        path: The log file; its directory is created on demand.
-        run: The runner to wrap.
-
-    Returns:
-        ``(say, run)``: a printer that also logs, and the logging runner.
-    """
-
-    def note(text: str) -> None:
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Create with 0600 atomically; chmod afterwards would leave a window.
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a") as f:
-            f.write(f"{stamp} {text}\n")
-
-    def say(text: str) -> None:
-        print(text)
-        note(text)
-
-    def logged(
-        argv: Sequence[str | Path],
-        env: Mapping[str, str] | None = None,
-        input: bytes | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
-        r = run(argv, env=env, input=input)
-        name = " ".join(str(a) for a in argv[:2])
-        note(f"run {name} -> {r.returncode}")
-        if r.returncode:
-            note("  stderr: " + r.stderr.decode(errors="replace")[-300:])
-        return r
-
-    return say, logged
+        Raises:
+            StepFailedError: If the native release selection is absent.
+        """
+        if self.platform != "win32":
+            return self.lib / "current"
+        selected = read_selection(self.lib.parent)
+        if selected is None:
+            raise StepFailedError("no installed release selection")
+        return selected[0]
 
 
 def must(
@@ -252,6 +223,10 @@ def job(ctx: Ctx, target: str | None = None) -> Job | None:
     Returns:
         None when the label is not loaded, otherwise its pid and command.
     """
+    if ctx.platform == "linux":
+        return _linux_job(ctx, target)
+    if ctx.platform == "win32":
+        return _windows_job(ctx)
     r = ctx.run(["launchctl", "print", target or ctx.target])
     if r.returncode:
         return None
@@ -281,7 +256,11 @@ def link_text(link: Path) -> str:
 
 def is_new(ctx: Ctx, j: Job | None) -> bool:
     """Say whether a job is running from the new pinned release."""
-    return bool(j and j["pid"] and f"{ctx.lib}/" in j["cmd"])
+    if not (j and j["pid"]):
+        return False
+    if ctx.platform == "win32":
+        return command_names_path(j["cmd"], ctx.lib)
+    return str(ctx.lib) in j["cmd"]
 
 
 def dry(ctx: Ctx, text: str) -> bool:
@@ -298,3 +277,49 @@ def dry(ctx: Ctx, text: str) -> bool:
     if ctx.dry_run:
         ctx.say(text)
     return ctx.dry_run
+
+
+def _linux_job(ctx: Ctx, target: str | None) -> Job | None:
+    """Distinguish an owned loaded unit from validated native absence."""
+    try:
+        values = query_unit(ctx.run, target or ctx.target)
+        if values["LoadState"] == "not-found":
+            if values != {
+                "LoadState": "not-found",
+                "ActiveState": "inactive",
+                "MainPID": "0",
+                "FragmentPath": "",
+                "DropInPaths": "",
+            }:
+                raise ValueError("service_absence_unknown")
+            return None
+        if (
+            values["LoadState"] != "loaded"
+            or not ctx.plist.is_file()
+            or values["FragmentPath"] != str(ctx.plist)
+            or values["DropInPaths"]
+        ):
+            raise ValueError("service_registration_unowned")
+        pid = int(values["MainPID"])
+    except (OSError, ValueError) as exc:
+        raise StepFailedError(
+            "cannot establish the owned user service"
+        ) from exc
+    if not pid:
+        return {"pid": None, "cmd": ""}
+    ps = ctx.run(["ps", "-ww", "-o", "command=", "-p", str(pid)])
+    return {"pid": pid, "cmd": ps.stdout.decode(errors="replace").strip()}
+
+
+def _windows_job(ctx: Ctx) -> Job | None:
+    """Inspect the actual heartbeat process, never the task engine PID."""
+    status = read_status(ctx.data)
+    pid = status.get("pid")
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return None
+    result = ctx.run(process_command(pid))
+    if result.returncode:
+        return None
+    process = parse_process(result.stdout)
+    command = process["cmd"]
+    return {"pid": pid, "cmd": command if isinstance(command, str) else ""}

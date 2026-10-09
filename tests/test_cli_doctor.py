@@ -6,14 +6,17 @@ import contextlib
 import io
 import json
 import os
+import sys
 import time
 from collections.abc import Callable, Sequence
 from subprocess import CompletedProcess
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
 from muninn import cli, obs, store
 from tests.cli_support import ALWAYS, CliCase, fake_run
+from tests.store_support import public_read
 from tests.test_classify import codex_meta, function_call
 from tests.test_ingest import TID, fc_output, rollout
 from tests.test_store import SPILLING_WRITER, Child
@@ -114,7 +117,20 @@ class StatsDoctorTests(CliCase):
         Returns:
             Exit code, parsed JSON and stderr of the call.
         """
-        with mock.patch.object(cli.obs, "run", run or fake_run()):
+
+        def uid() -> int:
+            return 501
+
+        native_access = SimpleNamespace(
+            getuid=uid, access=os.access, R_OK=os.R_OK, X_OK=os.X_OK
+        )
+        with (
+            mock.patch.object(cli.obs, "run", run or fake_run()),
+            mock.patch.object(
+                cli.obs, "sys", SimpleNamespace(platform="darwin")
+            ),
+            mock.patch.object(cli.obs, "os", native_access),
+        ):
             return self.muninn("doctor", *extra)
 
     def checks(self, out: dict[str, Any]) -> dict[str, bool]:
@@ -127,6 +143,48 @@ class StatsDoctorTests(CliCase):
             Check name to its ``ok`` flag.
         """
         return {c["check"]: c["ok"] for c in out["checks"]}
+
+    def test_fake_launchd_keeps_native_modules_and_supplies_uid(self) -> None:
+        self.session(TID, "hello", "hi")
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        native_platform = sys.platform
+        fake = fake_run()
+        calls: list[Sequence[object]] = []
+
+        def run(argv: Sequence[object]) -> CompletedProcess[bytes]:
+            self.assertIsNot(obs.sys, sys)
+            self.assertIsNot(obs.os, os)
+            self.assertEqual(sys.platform, native_platform)
+            self.assertIs(obs.os.access, os.access)
+            calls.append(argv)
+            return fake(argv)
+
+        without_uid = SimpleNamespace(
+            access=os.access, R_OK=os.R_OK, X_OK=os.X_OK
+        )
+        with mock.patch.object(obs, "os", without_uid):
+            code, out, _ = self.doctor(run=run)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(
+            list(calls[0]), ["launchctl", "print", "gui/501/com.muninn"]
+        )
+        self.assertIs(obs.sys, sys)
+        self.assertIs(obs.os, os)
+        self.assertEqual(sys.platform, native_platform)
+
+    def test_unsafe_status_control_retains_bytes_and_restores_privacy(
+        self,
+    ) -> None:
+        self.session(TID, "hello", "hi")
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        path = self.home / "status.json"
+        original = path.read_bytes()
+        with public_read(self, path):
+            code, out, _ = self.doctor()
+            self.assertEqual(code, 1, out)
+            self.assertIs(self.checks(out)["file_modes"], False)
+            self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.doctor()[0], 0)
 
     def test_doctor_checks(self) -> None:
         path = self.session(TID, "hello there", "hi")
@@ -170,9 +228,11 @@ class StatsDoctorTests(CliCase):
         kept.unlink()
         (self.home / "recall.off").touch(0o600)  # the recall switch is known
         self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
-        (self.home / "status.json").chmod(0o644)
-        self.assertIs(self.checks(self.doctor()[1])["file_modes"], False)
-        (self.home / "status.json").chmod(0o600)
+        status = self.home / "status.json"
+        original = status.read_bytes()
+        with public_read(self, status):
+            self.assertIs(self.checks(self.doctor()[1])["file_modes"], False)
+            self.assertEqual(status.read_bytes(), original)
         self.assertEqual(self.doctor(run=fake_run(pid=None))[0], 1)
         obs.write_status(self.home, {"last_pass_at": time.time() - 900})
         code, out, _ = self.doctor()

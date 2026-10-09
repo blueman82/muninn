@@ -10,7 +10,6 @@ briefly delay a writer's commit; that is why the writer sets busy_timeout.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
 import sqlite3
@@ -20,7 +19,9 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from muninn import file_sync, platform_io, platform_paths, platform_windows
 from muninn.obs_log import log_poller
+from muninn.platform_lock import try_lock
 from muninn.store_migrate import migrate_v1_to_v2, migrate_v2_to_v3
 from muninn.store_schema import SCHEMA_SQL, SCHEMA_VERSION
 
@@ -49,6 +50,8 @@ def data_home(env: Mapping[str, str] = os.environ) -> Path:
     configured = env.get("MUNINN_HOME")
     if configured:
         return Path(configured).expanduser()
+    if os.name == "nt":
+        return platform_paths.windows_base(env) / "data"
     return Path.home() / ".local" / "share" / "muninn"
 
 
@@ -60,6 +63,8 @@ UNREADABLE_PREFIX = "muninn.sqlite.unreadable-"
 # is not importable from the runtime, so install/snapshot.py repeats the
 # string and a test keeps the two equal.
 PRE_UPGRADE_PREFIX = "muninn.sqlite.pre-upgrade-"
+# A Windows publication keeps a durable old copy until replacement succeeds.
+RECOVERY_PREFIX = "muninn.sqlite.recovery-"
 
 
 def db_path(home: Path) -> Path:
@@ -69,8 +74,7 @@ def db_path(home: Path) -> Path:
 
 def ensure_private_dir(path: Path) -> None:
     """Create ``path`` and any parents, then force mode 0700 on the leaf."""
-    path.mkdir(parents=True, exist_ok=True)
-    path.chmod(0o700)
+    platform_io.ensure_private_dir(path)
 
 
 def write_json_atomic(path: Path, obj: object) -> None:
@@ -84,13 +88,23 @@ def write_json_atomic(path: Path, obj: object) -> None:
         obj: JSON-serialisable value; keys are sorted for stable bytes.
     """
     payload = json.dumps(obj, sort_keys=True).encode("utf-8")  # may raise
+    if os.name == "nt":
+        platform_io.ensure_private_dir(path.parent)
     # The temp file lives beside the target: rename is only atomic within one
     # filesystem, so readers see the old file or the new one, never a mix.
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as handle:  # mkstemp files are 0600
+            platform_io.assert_private_fd(handle.fileno())
             handle.write(payload)
-        Path(tmp).replace(path)
+            handle.flush()
+            file_sync.sync_fd(handle.fileno())
+        if os.name == "nt":
+            platform_windows.publish(
+                Path(tmp), path, replace=True, retry_move=True
+            )
+        else:
+            Path(tmp).replace(path)
     except BaseException:
         # BaseException so an interrupt does not leave a stray temp file
         # holding the payload. The cleanup must not fail: the interrupt may
@@ -119,7 +133,7 @@ WRITER_PRAGMAS = _WRITER_PRAGMAS
 
 def _ensure_dir(path: Path) -> None:
     """Create a missing data dir privately; never touch an existing one."""
-    if not path.is_dir():
+    if not path.is_dir() or os.name == "nt":
         ensure_private_dir(path)
 
 
@@ -188,6 +202,32 @@ def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
     )
 
 
+def assert_sqlite_private(path: Path) -> None:
+    """Refuse unsafe Windows databases and independently readable sidecars.
+
+    Args:
+        path: Database pathname to check before SQLite opens any file.
+
+    Raises:
+        PermissionError: If an existing database or sidecar is unsafe.
+    """
+    if os.name != "nt":
+        return
+    if not platform_io.is_private(path.parent, directory=True):
+        raise PermissionError("unsafe database directory")
+    for candidate in (
+        path,
+        *(
+            path.with_name(path.name + suffix)
+            for suffix in ("-journal", "-wal", "-shm")
+        ),
+    ):
+        if os.path.lexists(candidate) and not platform_io.is_private(
+            candidate
+        ):
+            raise PermissionError("unsafe database or sidecar")
+
+
 def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
     """Open the store for writing, creating and migrating it.
 
@@ -206,9 +246,11 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
         StoreUnavailableError: If the journal mode is not 'delete' or the
             file holds another schema version.
     """
+    if sqlite3.sqlite_version_info < (3, 46, 1):
+        raise StoreUnavailableError("SQLite 3.46.1 or newer is required")
     _ensure_dir(path.parent)
-    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)  # born private
-    os.fchmod(fd, 0o600)  # tightened if it already existed
+    assert_sqlite_private(path)
+    fd = platform_io.open_private(path, os.O_CREAT | os.O_RDWR)
     os.close(fd)
     # isolation_level=None: sqlite3's implicit transactions would fight the
     # explicit BEGIN IMMEDIATE that every caller issues to take the write
@@ -258,12 +300,12 @@ def writer_lock(home: Path, wait_s: float = 15.0) -> Generator[None]:
             cannot be opened.
     """
     _ensure_dir(home)
-    fd = os.open(home / "writer.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    fd = platform_io.open_private(home / "writer.lock", os.O_CREAT | os.O_RDWR)
     try:
         deadline = time.monotonic() + wait_s
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try_lock(fd)
                 break
             except BlockingIOError:  # contention raises, it does not return
                 if time.monotonic() >= deadline:
@@ -294,6 +336,17 @@ def connect_ro(path: Path) -> sqlite3.Connection:
         StoreUnavailableError: If the store cannot be read or holds another
             schema version.
     """
+    if os.name == "nt":
+        try:
+            assert_sqlite_private(path)
+        except OSError as exc:
+            raise StoreUnavailableError(
+                "store access control is unsafe or absent"
+            ) from exc
+        if not platform_io.is_private(path):
+            raise StoreUnavailableError(
+                "store access control is unsafe or absent"
+            )
     conn = None
     try:
         conn = sqlite3.connect(
@@ -338,6 +391,7 @@ def heal_hot_journal(path: Path, home: Path) -> bool:
     """
     try:
         with writer_lock(home, wait_s=0):
+            assert_sqlite_private(path)
             conn = sqlite3.connect(_uri(path, "rw"), uri=True)
             try:
                 conn.execute("PRAGMA user_version").fetchone()

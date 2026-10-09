@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from install import configedit as ce
+from muninn.platform_io import is_private
 
 CRED = "sk-fake-" + "0123456789abcdef" * 2
 MKT = "[marketplaces.muninn-local]"
@@ -190,7 +191,7 @@ class EditFileTest(unittest.TestCase):
     def test_writes_atomically_and_keeps_mode(self) -> None:
         ce.edit_file(self.path, self.enable, self.check)
         self.assertNotIn(b"enabled = false", self.path.read_bytes())
-        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(is_private(self.path))
         names = [p.name for p in Path(self.tmp.name).iterdir()]
         self.assertEqual(names, ["config.toml"])
 

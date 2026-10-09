@@ -5,19 +5,30 @@ Synthetic provider trees and a temp MUNINN_HOME only.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import stat
+import sys
 import tempfile
 import unittest
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import erase, obs, tombstone_key, tombstones
+from muninn import (
+    erase,
+    obs,
+    platform_io,
+    platform_windows,
+    tombstone_key,
+    tombstones,
+)
+from muninn.file_sync import sync_fd
 from muninn.tombstone_key import KEY_FILE, TombstoneKeyError
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
+from tests.store_support import assert_private
 from tests.test_erase_hardening import (
     FORK,
     PARENT,
@@ -48,7 +59,7 @@ class KeyFileTests(unittest.TestCase):
         path = self.home / KEY_FILE
         self.assertEqual(path.read_bytes(), key)
         self.assertEqual(len(key), 32)
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        assert_private(self, path)
         self.assertEqual([p.name for p in self.home.iterdir()], [KEY_FILE])
 
     def test_a_missing_key_is_not_made_when_told_not_to(self) -> None:
@@ -56,30 +67,75 @@ class KeyFileTests(unittest.TestCase):
             tombstone_key.load_key(self.home, create=False)
         self.assertFalse((self.home / KEY_FILE).exists())
 
-    def test_the_loser_of_a_creation_race_reads_the_winners_key(self) -> None:
-        winner = b"w" * 32
-        real = os.link
+    @contextlib.contextmanager
+    def winner_race(self, winner: bytes) -> Generator[None]:
+        """Create a real private winner before the backend collision."""
+        calls: list[str] = []
+        if sys.platform == "win32":
+            real_publish = platform_windows.publish
 
-        def raced(src: str | Path, dst: str | Path) -> None:
-            Path(dst).write_bytes(winner)  # the other creator got there first
-            real(src, dst)  # raises FileExistsError
+            def native(
+                source: Path,
+                target: Path,
+                *,
+                replace: bool,
+                retry_move: bool = False,
+                directory: bool = False,
+            ) -> None:
+                self.assertEqual(target, self.home / KEY_FILE)
+                self.assertFalse(replace)
+                fd = platform_io.open_private(
+                    target, os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                )
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(winner)
+                    handle.flush()
+                    sync_fd(handle.fileno())
+                assert_private(self, target)
+                calls.append("winner")
+                try:
+                    real_publish(
+                        source,
+                        target,
+                        replace=replace,
+                        retry_move=retry_move,
+                        directory=directory,
+                    )
+                except FileExistsError:
+                    calls.append("collision")
+                    raise
+                self.fail("non-replacing publication overwrote the winner")
 
-        with mock.patch.object(os, "link", raced):
-            got = tombstone_key.load_key(self.home)
-        self.assertEqual(got, winner)
+            with mock.patch.object(platform_windows, "publish", native):
+                yield
+            self.assertEqual(calls, ["winner", "collision"])
+        else:
+            real_link = os.link
+
+            def raced(src: str | Path, dst: str | Path) -> None:
+                Path(dst).write_bytes(winner)
+                calls.append("winner")
+                try:
+                    real_link(src, dst)
+                except FileExistsError:
+                    calls.append("collision")
+                    raise
+                self.fail("hard link overwrote the winner")
+
+            with mock.patch.object(os, "link", raced):
+                yield
+            self.assertEqual(calls, ["winner", "collision"])
+        self.assertEqual((self.home / KEY_FILE).read_bytes(), winner)
         self.assertEqual([p.name for p in self.home.iterdir()], [KEY_FILE])
 
+    def test_the_loser_of_a_creation_race_reads_the_winners_key(self) -> None:
+        winner = b"w" * 32
+        with self.winner_race(winner):
+            got = tombstone_key.load_key(self.home)
+        self.assertEqual(got, winner)
+
     def test_a_damaged_winner_is_not_adopted(self) -> None:
-        real = os.link
-
-        def raced(src: str | Path, dst: str | Path) -> None:
-            Path(dst).write_bytes(b"short")
-            real(src, dst)
-
-        with (
-            mock.patch.object(os, "link", raced),
-            self.assertRaises(TombstoneKeyError),
-        ):
+        with self.winner_race(b"short"), self.assertRaises(TombstoneKeyError):
             tombstone_key.load_key(self.home)
 
 

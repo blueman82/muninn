@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import re
 import time
 from pathlib import Path
@@ -18,6 +17,7 @@ from unittest import mock
 from muninn import hook, obs, store
 from tests import test_classify as tc
 from tests import test_knowledge as tk
+from tests.hook_nonregular import nonregular
 from tests.hook_support import (
     AKIA,
     CLOSE,
@@ -396,7 +396,9 @@ class SuppressionTests(HookCase):
             "proj/main.jsonl", tc.claude_rec("user", "hi")
         )
         fifo = self.tmp / "transcripts" / "fifo.jsonl"
-        os.mkfifo(fifo)
+        pipe = nonregular(fifo)
+        native_pipe = pipe.__enter__()
+        self.addCleanup(pipe.__exit__, None, None, None)
         link = self.tmp / "transcripts" / "link.jsonl"
         link.symlink_to(
             self.transcript("sub2.jsonl", tc.subagent_meta("thr-s2"))
@@ -410,7 +412,7 @@ class SuppressionTests(HookCase):
             ("codex", main_claude),
             ("codex", str(self.tmp / "missing.jsonl")),
             ("codex", str(self.tmp / "transcripts")),  # a directory
-            ("codex", str(fifo)),  # must not block
+            ("codex", native_pipe),  # must not block
             ("codex", str(link)),  # never followed
             ("codex", str(big)),  # line 1 too big to classify
         )

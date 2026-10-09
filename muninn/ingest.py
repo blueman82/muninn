@@ -1,13 +1,11 @@
 """Ingest provider transcripts into the store.
 
-Discover provider transcripts, identify each thread from line 1, and commit
-its newline-terminated lines as events.  `ingest` needs the caller to hold
-`store.writer_lock`; `run_pass` takes it.  There is one BEGIN IMMEDIATE per
-source: events, cursor, anchor, parse state and usage counts commit
-together.
+Discover transcripts, identify threads from line 1, and commit complete lines
+as events. `ingest` needs the caller to hold `store.writer_lock`; `run_pass`
+takes it. Each source transaction commits events, cursor, anchor, parse state
+and usage counts together.
 
-Planning lives in `muninn.ingest_plan`, line parsing in `muninn.ingest_parse`
-and the shared types in `muninn.ingest_model`.
+Planning, parsing and shared types live in the corresponding ingest modules.
 """
 
 from __future__ import annotations
@@ -15,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -57,6 +56,19 @@ class _Written(NamedTuple):
     skipped: int
 
 
+def provider_home(env: Mapping[str, str]) -> Path:
+    """Return the native provider home from an explicit environment.
+
+    Args:
+        env: HOME and, on Windows, USERPROFILE values.
+
+    Returns:
+        The native user home used by default provider discovery.
+    """
+    native = env.get("USERPROFILE") if sys.platform == "win32" else None
+    return Path(native or env.get("HOME") or Path.home())
+
+
 def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
     """Return the provider roots, or those named by MUNINN_ROOTS.
 
@@ -72,13 +84,15 @@ def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
     Raises:
         ValueError: If MUNINN_ROOTS is not an object naming known roots.
     """
-    home = Path(env.get("HOME") or Path.home())
+    home = provider_home(env)
     raw = env.get("MUNINN_ROOTS")
     if not raw:
+        codex = Path(env.get("CODEX_HOME") or home / ".codex")
+        claude = Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude")
         return {
-            "codex-sessions": home / ".codex" / "sessions",
-            "codex-archived": home / ".codex" / "archived_sessions",
-            "claude-projects": home / ".claude" / "projects",
+            "codex-sessions": codex / "sessions",
+            "codex-archived": codex / "archived_sessions",
+            "claude-projects": claude / "projects",
         }
     given = json.loads(raw)
     # isinstance leaves the JSON object's types unknown; its keys are always

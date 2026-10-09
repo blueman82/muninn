@@ -60,23 +60,24 @@ def ingest_command(
     a: Namespace, env: Env, home: Path, record: Record
 ) -> Result:
     """Catch up with transcripts; a full pass also imports Cursor history."""
+    cursor_db = (
+        cursor_import.default_database(ingest.provider_home(env), env=env)
+        if a.full
+        else None
+    )
     stats = ingest.run_pass(
         home,
         ingest.default_roots(env),
         full=a.full,
         wait_s=cli_core.WRITER_WAIT_S,
     )
-    if a.full:
-        cursor_db = cursor_import.default_database(
-            Path(env.get("HOME") or Path.home())
+    if cursor_db is not None and cursor_db.is_file():
+        cursor_import.run(
+            home,
+            cursor_db,
+            cli_core.current_dir(env),
+            cli_core.WRITER_WAIT_S,
         )
-        if cursor_db.is_file():
-            cursor_import.run(
-                home,
-                cursor_db,
-                cli_core.current_dir(env),
-                cli_core.WRITER_WAIT_S,
-            )
     heartbeat(home, stats, env)
     out: Out = {"ingest": dataclasses.asdict(stats)}
     record["counts"] = counts(out["ingest"])

@@ -5,16 +5,20 @@ Every helper works on temp dirs only; nothing here touches a live data dir.
 
 from __future__ import annotations
 
-import select
+import contextlib
+import queue
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from collections.abc import Generator
 from pathlib import Path
 
-from muninn import store
+from muninn import platform_io, store
+from tests import test_configedit_windows
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -59,6 +63,72 @@ def mode(path: str | Path) -> int:
         The mode with the file-type bits masked off.
     """
     return stat.S_IMODE(Path(path).stat().st_mode)
+
+
+def assert_private(
+    case: unittest.TestCase, path: str | Path, *, directory: bool = False
+) -> None:
+    """Assert actual private access and exact POSIX permission bits.
+
+    Args:
+        case: Test case recording an assertion failure.
+        path: Synthetic state object to inspect.
+        directory: Whether the object must be a private directory.
+    """
+    value = Path(path)
+    case.assertTrue(platform_io.is_private(value, directory=directory))
+    if sys.platform != "win32":
+        case.assertEqual(mode(value), 0o700 if directory else 0o600)
+
+
+@contextlib.contextmanager
+def public_read(
+    case: unittest.TestCase, path: Path, *, directory: bool = False
+) -> Generator[None]:
+    """Temporarily grant public reads on a synthetic private state object.
+
+    Args:
+        case: Test case verifying the real unsafe and restored controls.
+        path: Synthetic state object; never a user's state path.
+        directory: Whether the object is a directory.
+
+    Yields:
+        Control while actual privacy validation refuses the object.
+    """
+    assert_private(case, path, directory=directory)
+    original_mode = mode(path)
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["icacls.exe", str(path), "/grant", "*S-1-1-0:(R)"],
+                capture_output=True,
+                check=True,
+            )
+        else:
+            path.chmod(0o755 if directory else 0o644)
+        case.assertFalse(platform_io.is_private(path, directory=directory))
+        original_acl = (
+            test_configedit_windows.descriptor(path)
+            if sys.platform == "win32"
+            else None
+        )
+        yield
+        case.assertFalse(platform_io.is_private(path, directory=directory))
+        if sys.platform == "win32":
+            case.assertTrue(
+                test_configedit_windows.descriptor(path) == original_acl,
+                "unsafe state security descriptor changed",
+            )
+    finally:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["icacls.exe", str(path), "/remove:g", "*S-1-1-0"],
+                capture_output=True,
+                check=True,
+            )
+        else:
+            path.chmod(original_mode)
+    assert_private(case, path, directory=directory)
 
 
 def _rowid(cursor: sqlite3.Cursor) -> int:
@@ -208,8 +278,22 @@ class Child:
         """
         stdout, stderr = self.proc.stdout, self.proc.stderr
         assert stdout is not None and stderr is not None
-        ready, _, _ = select.select([stdout], [], [], timeout)
-        line = stdout.readline() if ready else ""
+        received: queue.Queue[str] = queue.Queue()
+
+        def read() -> None:
+            received.put(stdout.readline())
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        try:
+            line = received.get(timeout=timeout)
+        except queue.Empty:
+            line = ""
+        if line.strip() != "ready" and self.proc.poll() is None:
+            self.proc.kill()
+        reader.join(timeout=5)
+        assert not reader.is_alive(), "child readiness reader did not stop"
+
         if line.strip() != "ready":
             if self.proc.poll() is None:
                 self.proc.kill()

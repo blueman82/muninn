@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import functools
 import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from install import installer as co
-from muninn.cursor_import import default_database
 from tests.installer_support import World, git
 
 
@@ -24,7 +25,12 @@ def _main(*argv: str) -> tuple[int, str]:
         The exit status and the printed text.
     """
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
+    with (
+        contextlib.redirect_stdout(out),
+        mock.patch.object(
+            co, "Ctx", functools.partial(co.Ctx, platform="darwin")
+        ),
+    ):
         status = co.main(list(argv))
     return status, out.getvalue()
 
@@ -91,13 +97,16 @@ class FreshPlanTest(unittest.TestCase):
     def test_history_detection_reports_without_writing(self) -> None:
         w = World(self)
         history = w.home / ".claude/projects/project/session.jsonl"
-        cursor = default_database(w.home)
+        cursor = w.home / "synthetic-cursor.sqlite"
         history.parent.mkdir(parents=True)
-        cursor.parent.mkdir(parents=True)
+        cursor.parent.mkdir(parents=True, exist_ok=True)
         history.touch()
         cursor.touch()
 
-        co.install(w.ctx(fresh=True, dry_run=True), w.repo, w.sha)
+        with mock.patch(
+            "install.steps_release.default_database", return_value=cursor
+        ):
+            co.install(w.ctx(fresh=True, dry_run=True), w.repo, w.sha)
 
         said = "\n".join(w.out)
         self.assertIn("Claude: found; would index", said)
@@ -111,6 +120,26 @@ class FreshPlanTest(unittest.TestCase):
 
 class DryRunWritesNothingTest(unittest.TestCase):
     """The command line's dry run leaves no log and no directory."""
+
+    def test_cli_uses_the_same_darwin_backend_as_world(self) -> None:
+        w = World(self)
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(co, "Ctx", wraps=co.Ctx) as context,
+        ):
+            status, _ = _main(
+                "--repo",
+                str(w.repo),
+                "--sha",
+                w.sha,
+                "--fresh",
+                "--dry-run",
+                "--home",
+                tmp,
+            )
+            self.assertEqual(status, 0)
+            self.assertEqual(context.call_args.kwargs["platform"], "darwin")
+            self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_fresh_dry_run_into_an_empty_home_creates_nothing(self) -> None:
         w = World(self)

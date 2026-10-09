@@ -2,9 +2,7 @@
 
 The logging, heartbeat and stats code lives in ``obs_log``, ``obs_status``
 and ``obs_stats``; this module re-exports it and owns ``doctor``, whose
-health checks read the data directory, the store and the launchd job.
-``run`` and the doctor thresholds stay here because tests replace them on
-this module.
+health checks read private state and the native service. Tests replace ``run``.
 """
 
 from __future__ import annotations
@@ -13,11 +11,12 @@ import os
 import re
 import sqlite3
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
-from muninn import ingest, store, tombstone_key
+from muninn import ingest, obs_service, platform_io, store, tombstone_key
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_stats import db_space, human_bytes, reread, stats
 from muninn.obs_status import (
@@ -73,6 +72,7 @@ DATA_FILES = frozenset(
         "tombstones.jsonl",
         "tombstone.key",
         "recall.off",
+        "stop.json",
     }
 )
 
@@ -112,9 +112,13 @@ def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
     Returns:
         The completed process; output is captured, never decoded.
     """
-    return subprocess.run(
-        [str(a) for a in argv], capture_output=True, timeout=10, check=False
-    )
+    args = [str(a) for a in argv]
+    try:
+        # A backstop for a hung tool; a cold PowerShell start can be slow.
+        return subprocess.run(args, capture_output=True, timeout=60)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        code = 127 if isinstance(error, FileNotFoundError) else 124
+        return subprocess.CompletedProcess(args, code, b"", b"")
 
 
 def _result(
@@ -130,11 +134,6 @@ def _result(
         "level": level,
         "detail": str(detail),
     }
-
-
-def _mode(path: Path) -> int:
-    """Return the permission bits of a path."""
-    return path.stat().st_mode & 0o777
 
 
 def _names(home: Path) -> list[str]:
@@ -153,6 +152,8 @@ def _lock_free(home: Path) -> bool:
 
 def _job() -> JobInfo | None:
     """Return the launchd job's pid and command, or None if not loaded."""
+    if sys.platform == "win32":
+        return None
     r = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
     if r.returncode:
         return None
@@ -186,21 +187,24 @@ def _writer_secure_delete() -> bool:
 
 
 def _data_dir_mode(home: Path) -> CheckResult:
-    """The data directory exists and is private (0700)."""
+    """Check private data-directory permissions or the native Windows ACL."""
     present = home.is_dir()
+    detail = "ACL"
+    if present and sys.platform != "win32":
+        detail = oct(home.stat().st_mode & 0o777)
     return _result(
         "data_dir_mode",
-        present and _mode(home) == 0o700,
-        oct(_mode(home)) if present else "absent",
+        present and platform_io.is_private(home, directory=True),
+        detail if present else "absent",
     )
 
 
 def _file_modes(home: Path) -> CheckResult:
-    """No data file is readable by group or others."""
+    """Check owner-only file permissions or private Windows ACLs."""
     loose = [
         n
         for n in _names(home)
-        if (home / n).is_file() and _mode(home / n) & 0o077
+        if (home / n).is_file() and not platform_io.is_private(home / n)
     ]
     return _result("file_modes", not loose, ",".join(loose))
 
@@ -212,7 +216,7 @@ def _unexpected_files(home: Path) -> CheckResult:
         for n in _names(home)
         if n not in DATA_FILES
         and n != "muninn.sqlite-journal"
-        and not n.startswith(store.UNREADABLE_PREFIX)
+        and not n.startswith((store.UNREADABLE_PREFIX, store.RECOVERY_PREFIX))
         and not n.startswith(store.PRE_UPGRADE_PREFIX)
         and not n.startswith(".status.json.")  # an atomic write in flight
     ]
@@ -384,9 +388,13 @@ def _unreadable_files(home: Path) -> CheckResult:
 
 
 def _aside_files(home: Path) -> CheckResult:
-    """No unreadable store set aside by a rebuild is still on disk."""
+    """No unreadable or recovery store copy remains after a rebuild."""
     # erase cannot scrub these, so they keep erased text until removed.
-    kept = [n for n in _names(home) if n.startswith(store.UNREADABLE_PREFIX)]
+    kept = [
+        n
+        for n in _names(home)
+        if n.startswith((store.UNREADABLE_PREFIX, store.RECOVERY_PREFIX))
+    ]
     return _result("aside_files", not kept, ",".join(kept), level="warn")
 
 
@@ -400,11 +408,7 @@ def _upgrade_snapshots(home: Path) -> CheckResult:
 
 def _release_leftovers(env: Mapping[str, str]) -> CheckResult:
     """No superseded release is left waiting for deletion."""
-    lib = Path(env.get("HOME") or Path.home()) / ".local/lib/muninn"
-    try:
-        left = sorted(p.name for p in lib.glob(f"{PRUNING}*"))
-    except OSError:
-        left = []
+    left = obs_service.release_leftovers(env)
     return _result("release_leftovers", not left, ",".join(left), level="warn")
 
 
@@ -416,6 +420,8 @@ def _tombstone_key(home: Path) -> CheckResult:
 
 def _launchd_job() -> CheckResult:
     """The launchd job is loaded and running."""
+    if sys.platform == "win32":
+        return _result("launchd_job", False, "native scheduler pending")
     job = _job()
     if job is None:
         return _result("launchd_job", False, None)
@@ -476,7 +482,13 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _upgrade_snapshots(home),
         _tombstone_key(home),
         _release_leftovers(env),
-        _launchd_job(),
+        (
+            _launchd_job()
+            if sys.platform == "darwin"
+            else _result(
+                "managed_service", *obs_service.service_status(home, env, run)
+            )
+        ),
         _roots_readable(env),
         _roots_present(env),
     ]

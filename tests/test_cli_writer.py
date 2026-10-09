@@ -6,17 +6,20 @@ import json
 import signal
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-from muninn import cli_core, obs, store
+from muninn import cli_core, obs, platform_io, poller_stop, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CANARY, CliCase
+from tests.hook_support import launcher_args
 from tests.test_ingest import TID
 
 
@@ -72,66 +75,68 @@ class WriterTests(CliCase):
 LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "muninn"
 
 
-class LauncherTests(unittest.TestCase):
-    """bin/muninn finds its interpreter without a hardcoded path."""
+if sys.platform != "win32":
 
-    def launch(
-        self, home: Path, **env: str
-    ) -> subprocess.CompletedProcess[str]:
-        """Run ``bin/muninn --version`` with a minimal environment.
+    class LauncherTests(unittest.TestCase):
+        """bin/muninn finds its interpreter without a hardcoded path."""
 
-        Args:
-            home: Directory used as ``HOME``.
-            **env: Variables that override the minimal environment.
+        def launch(
+            self, home: Path, **env: str
+        ) -> subprocess.CompletedProcess[str]:
+            """Run ``bin/muninn --version`` with a minimal environment.
 
-        Returns:
-            The completed process with decoded output.
-        """
-        base = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
-        return subprocess.run(
-            [str(LAUNCHER), "--version"],
-            env=base | env,
-            capture_output=True,
-            text=True,
-        )
+            Args:
+                home: Directory used as ``HOME``.
+                **env: Variables that override the minimal environment.
 
-    def fake_python(self, path: Path) -> Path:
-        """Write an executable that stands in for a Python interpreter.
+            Returns:
+                The completed process with decoded output.
+            """
+            base = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+            return subprocess.run(
+                [str(LAUNCHER), "--version"],
+                env=base | env,
+                capture_output=True,
+                text=True,
+            )
 
-        Args:
-            path: Where to create the stand-in.
+        def fake_python(self, path: Path) -> Path:
+            """Write an executable that stands in for a Python interpreter.
 
-        Returns:
-            The same path.
-        """
-        path.write_text('#!/bin/sh\necho "ran $0"\n')
-        path.chmod(0o755)
-        return path
+            Args:
+                path: Where to create the stand-in.
 
-    def test_resolution_order_and_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp)
-            lib = home / ".local/lib/muninn"
-            lib.mkdir(parents=True)
-            linked = self.fake_python(home / "linked-python")
-            (lib / "python").symlink_to(linked)
-            self.assertIn("muninn/python", self.launch(home).stdout)
-            env_py = self.fake_python(home / "env-python")
-            r = self.launch(home, MUNINN_PYTHON=str(env_py))
-            self.assertIn("env-python", r.stdout)
-            (lib / "python").unlink()
-            stubs = home / "stubs"  # pythons older than 3.13
-            stubs.mkdir()
-            for name in ("python3.13", "python3.14", "python3"):
-                (stubs / name).write_text("#!/bin/sh\nexit 1\n")
-                (stubs / name).chmod(0o755)
-            r = self.launch(home, PATH=f"{stubs}:/usr/bin:/bin")
-            self.assertEqual(r.returncode, 127)
-            self.assertIn("MUNINN_PYTHON", r.stderr)
+            Returns:
+                The same path.
+            """
+            path.write_text('#!/bin/sh\necho "ran $0"\n')
+            path.chmod(0o755)
+            return path
+
+        def test_resolution_order_and_missing(self) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                home = Path(tmp)
+                lib = home / ".local/lib/muninn"
+                lib.mkdir(parents=True)
+                linked = self.fake_python(home / "linked-python")
+                (lib / "python").symlink_to(linked)
+                self.assertIn("muninn/python", self.launch(home).stdout)
+                env_py = self.fake_python(home / "env-python")
+                r = self.launch(home, MUNINN_PYTHON=str(env_py))
+                self.assertIn("env-python", r.stdout)
+                (lib / "python").unlink()
+                stubs = home / "stubs"  # pythons older than 3.13
+                stubs.mkdir()
+                for name in ("python3.13", "python3.14", "python3"):
+                    (stubs / name).write_text("#!/bin/sh\nexit 1\n")
+                    (stubs / name).chmod(0o755)
+                r = self.launch(home, PATH=f"{stubs}:/usr/bin:/bin")
+                self.assertEqual(r.returncode, 127)
+                self.assertIn("MUNINN_PYTHON", r.stderr)
 
 
 class ServeTests(CliCase):
-    """Run the poller as a real subprocess through the launcher."""
+    """Run CLI behavior through POSIX shell or isolated Windows Python."""
 
     def start_serve(self, interval: str = "0.2") -> subprocess.Popen[bytes]:
         """Start ``muninn serve`` with its output in the poller log.
@@ -146,7 +151,7 @@ class ServeTests(CliCase):
         log = self.enterContext(log_path.open("ab"))
         log_path.chmod(0o644)  # as launchd creates it
         proc = subprocess.Popen(
-            [str(LAUNCHER), "serve", "--interval", interval],
+            launcher_args("serve", "--interval", interval),
             env=self.env,
             stdout=log,
             stderr=log,
@@ -156,6 +161,47 @@ class ServeTests(CliCase):
         self.addCleanup(lambda: proc.poll() is None and proc.kill())
         self.proc = proc
         return proc
+
+    def stop(self, status: dict[str, Any]) -> None:
+        """Stop the real poller by signal or its published native generation.
+
+        Args:
+            status: Heartbeat from this poller process.
+        """
+        if sys.platform == "win32":
+            self.assertEqual(status["pid"], self.proc.pid)
+            generation = status["stop_generation"]
+            self.assertIsInstance(generation, str)
+            poller_stop.request(self.home, self.proc.pid, generation)
+            self.assertTrue(
+                poller_stop.requested(self.home, self.proc.pid, generation)
+            )
+        else:
+            self.proc.send_signal(signal.SIGTERM)
+
+    def test_start_serve_uses_platform_command_vector(self) -> None:
+        command = ["synthetic-python", "isolated", "serve"]
+        with (
+            mock.patch(
+                "tests.test_cli_writer.launcher_args", return_value=command
+            ) as arguments,
+            mock.patch("tests.test_cli_writer.subprocess.Popen") as start,
+        ):
+            self.start_serve(interval="17")
+        arguments.assert_called_once_with("serve", "--interval", "17")
+        self.assertEqual(start.call_args.args[0], command)
+
+    def test_native_stop_targets_the_published_generation(self) -> None:
+        self.proc = mock.Mock(pid=4242)
+        generation = "a" * 32
+        with mock.patch(
+            "tests.test_cli_writer.sys",
+            SimpleNamespace(platform="win32"),
+        ):
+            self.stop({"pid": 4242, "stop_generation": generation})
+        self.assertTrue(poller_stop.requested(self.home, 4242, generation))
+        self.assertFalse(poller_stop.requested(self.home, 4242, "b" * 32))
+        self.proc.send_signal.assert_not_called()
 
     def fail_if_exited(self, what: str) -> None:
         """Fail at once, with a diagnosis, if the poller process is gone.
@@ -251,7 +297,7 @@ class ServeTests(CliCase):
         # The heartbeat is written before the pass line, so SIGTERM sent on
         # the heartbeat alone can land between the two and lose the line.
         self.wait_log('"event":"pass"')
-        proc.send_signal(signal.SIGTERM)
+        self.stop(status)
         self.assertEqual(proc.wait(timeout=30), 0)
         self.assertFalse((self.home / "muninn.sqlite-journal").exists())
         self.assertEqual(status["pid"], proc.pid)
@@ -273,8 +319,11 @@ class ServeTests(CliCase):
         )
         self.assertEqual(status["events_added"], 2)
         # launchd opens StandardOutPath before Umask applies: 0644 -> 0600
-        log_mode = (self.home / "poller.log").stat().st_mode & 0o777
-        self.assertEqual(log_mode, 0o600)
+        log_path = self.home / "poller.log"
+        if sys.platform == "win32":
+            self.assertTrue(platform_io.is_private(log_path))
+        else:
+            self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
         events = [
             json.loads(x)
             for x in (self.home / "poller.log").read_text().splitlines()
@@ -315,7 +364,7 @@ class ServeTests(CliCase):
         # committed source: the pass is then between transactions of a pass
         # that still has sources left, which is the stop-after-COMMIT path.
         self.wait_for("a committed source", self.committed_sources, 60)
-        proc.send_signal(signal.SIGTERM)
+        self.stop(self.wait_status(ALIVE_AT))
         self.assertEqual(proc.wait(timeout=60), 0)
         self.assertFalse((self.home / "muninn.sqlite-journal").exists())
         conn = store.connect_ro(store.db_path(self.home))

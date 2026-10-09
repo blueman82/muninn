@@ -13,15 +13,16 @@ import plistlib
 import shutil
 import sys
 import tarfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
 from install import configedit as ce
+from install import lifecycle
 from install.constants import (
     GIT_ENV,
     HEARTBEAT_S,
     LABEL,
-    PRIVATE_DIR_MODE,
     RECALL_OFF,
 )
 from install.context import (
@@ -33,8 +34,12 @@ from install.context import (
     must,
     wait,
 )
+from install.provider_paths import render_pinned
 from install.record import Record
+from install.release_io import publish, write_private, write_selection
+from muninn import platform_io
 from muninn.cursor_import import default_database
+from muninn.obs_service import literal, powershell
 
 PLIST_SOURCE = "current/launchd/com.muninn.plist"
 HISTORY_ROOTS = (
@@ -54,7 +59,8 @@ def _history_found(ctx: Ctx) -> dict[str, bool]:
             for path in root.rglob(pattern)
         ):
             found[provider] = True
-    found["Cursor"] = default_database(ctx.home).is_file()
+    cursor = default_database(ctx.home, env={})
+    found["Cursor"] = cursor is not None and cursor.is_file()
     return found
 
 
@@ -87,7 +93,6 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
         # filter="data" refuses absolute paths, links out of the tree and
         # special files, so a hostile archive cannot escape ``tmp``.
         tf.extractall(tmp, filter="data")
-    home = str(ctx.home).encode()
     # Only these trees carry the placeholder. @HOME@ is substituted in this
     # extracted copy only, never in the source repo.
     for sub in ("integrations", "launchd"):
@@ -96,7 +101,8 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
                 continue
             data = path.read_bytes()
             if b"@HOME@" in data:
-                path.write_bytes(data.replace(b"@HOME@", home))
+                relative = path.relative_to(tmp).as_posix()
+                path.write_bytes(render_pinned(ctx, relative, data))
 
 
 def pin(ctx: Ctx, rec: Record) -> None:
@@ -108,12 +114,23 @@ def pin(ctx: Ctx, rec: Record) -> None:
     # Archive first: a failure here must not leave a half-made temp dir.
     tar = must(ctx, argv, env=GIT_ENV).stdout
     tmp = ctx.lib / f".{sha}.tmp-{ctx.ts}"
-    tmp.mkdir(parents=True)
+    platform_io.ensure_private_dir(tmp)
     _unpack(ctx, tar, tmp)
     if dest.exists():
         # Re-pinning the same commit: keep the old copy until prune.
         dest.rename(ctx.lib / f"{sha}.superseded-{ctx.ts}")
-    tmp.rename(dest)
+    publish(tmp, dest, replace=False, directory=True)
+    if ctx.platform == "win32":
+        platform_io.ensure_private_dir(ctx.muninn.parent)
+        for name in (
+            "muninn.cmd",
+            "muninn.ps1",
+        ):
+            write_private(
+                ctx.muninn.parent / name, (dest / "bin" / name).read_bytes()
+            )
+        write_selection(ctx.lib, sha, sys.executable)
+        return
     relink(ctx.lib / "current", sha, ctx.ts)
     relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
     # bin/muninn reads this link to find the interpreter that ran the install.
@@ -182,10 +199,12 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
         "existing transcripts",
     ):
         return
-    ctx.data.mkdir(parents=True, mode=PRIVATE_DIR_MODE)
+    platform_io.ensure_private_dir(ctx.data)
     flag = ctx.data / RECALL_OFF
     # Mode 0600 from creation: doctor fails file_modes on a looser file.
-    os.close(os.open(flag, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    os.close(
+        platform_io.open_private(flag, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    )
     ctx.say(
         "Per-prompt recall starts OFF: muninn will not add earlier prompts to "
         "your prompts until you turn it on. SessionStart memory is "
@@ -193,10 +212,10 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
         "project, so recall waits for a re-check (docs/adr/0007). "
         f"To turn recall on: unlink {flag}"
     )
-    env = muninn_env(ctx.data, HOME=str(ctx.home))
-    must(ctx, [ctx.muninn, "ingest", "--full"], env=env)
+    env = installed_env(ctx)
+    must(ctx, command(ctx, "ingest", "--full"), env=env)
     raw_stats: object = json.loads(
-        must(ctx, [ctx.muninn, "stats"], env=env).stdout
+        must(ctx, command(ctx, "stats"), env=env).stdout
     )
     if not isinstance(raw_stats, dict):
         raise StepFailedError("muninn stats omitted provider event counts")
@@ -246,7 +265,10 @@ def restart(ctx: Ctx, rec: Record) -> None:
     if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
     started = ctx.now()
-    must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
+    if ctx.platform != "darwin":
+        lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
+    else:
+        must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
     wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "job has no live PID")
     wait(ctx, lambda: fresh(ctx, started), HEARTBEAT_S, "heartbeat not fresh")
 
@@ -361,6 +383,17 @@ def start_new(ctx: Ctx, rec: Record) -> None:
     src = ctx.lib / PLIST_SOURCE
     if dry(ctx, f"would install the launchd job {ctx.plist} and start it"):
         return
+    if ctx.platform != "darwin":
+        started = ctx.now()
+        lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
+        wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "new job has no live PID")
+        wait(
+            ctx,
+            lambda: fresh(ctx, started),
+            HEARTBEAT_S,
+            "heartbeat not fresh",
+        )
+        return
     data = src.read_bytes()
     _check_plist(ctx, data)
     ctx.plist.parent.mkdir(parents=True, exist_ok=True)
@@ -373,4 +406,43 @@ def start_new(ctx: Ctx, rec: Record) -> None:
         lambda: fresh(ctx, started),
         HEARTBEAT_S,
         "heartbeat not fresh in 120 s",
+    )
+
+
+def command(ctx: Ctx, *args: str) -> Sequence[str | Path]:
+    """Invoke installed Windows code directly; retain the POSIX launcher."""
+    if ctx.platform == "win32":
+        script = f"$launcher={literal(str(ctx.muninn.with_suffix('.ps1')))};"
+        encoded_args = ",".join(f"({literal(value)})" for value in args)
+        script += (
+            f"$values=@({encoded_args});& $launcher @values;exit $LASTEXITCODE"
+        )
+        argv = powershell(script)
+        argv[3:3] = ["-ExecutionPolicy", "Bypass"]
+        return argv
+    return [ctx.muninn, *args]
+
+
+def quiesce(ctx: Ctx, rec: Record) -> None:
+    """Stop the managed native writer before any upgrade mutation."""
+    if ctx.platform == "darwin" or dry(
+        ctx, "would quiesce the owned writer before upgrade"
+    ):
+        return
+    lifecycle.stop(ctx)
+    rec["quiesced"] = True
+
+
+def installed_env(ctx: Ctx, **extra: str) -> dict[str, str]:
+    """Isolate provider configuration as well as the Muninn data directory."""
+    extra = dict(extra)
+    if ctx.platform == "win32":
+        extra["LOCALAPPDATA"] = str(ctx.lib.parent.parent)
+    return muninn_env(
+        ctx.data,
+        HOME=str(ctx.home),
+        USERPROFILE=str(ctx.home),
+        CODEX_HOME=str(ctx.codex_home),
+        CLAUDE_CONFIG_DIR=str(ctx.settings.parent),
+        **extra,
     )

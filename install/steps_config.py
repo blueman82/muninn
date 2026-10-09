@@ -20,6 +20,7 @@ from install.constants import (
     PRIVATE_DIR_MODE,
 )
 from install.context import Ctx, StepFailedError, dry, link_text, must
+from install.provider_paths import codex_argv, codex_identity
 from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
@@ -32,19 +33,19 @@ from install.transforms import (
 )
 from install.trust import codex_hooks
 
-CODEX_HOOKS_PIN = "current/integrations/codex/hooks/hooks.json"
-
 
 def record(ctx: Ctx, rec: Record) -> None:
     """Snapshot the before-values of our config keys and the links."""
     settings = (
-        ce.load_json(ctx.settings.read_bytes()) if rec["has_claude"] else {}
+        ce.load_json(ce.read_file(ctx.settings)) if rec["has_claude"] else {}
     )
     rec["claude"] = {
         "settings": [json_entry(settings, p) for p in claude_paths(settings)]
     }
     rec["codex"] = (
-        codex_record(ctx.config.read_text()) if rec["has_codex"] else []
+        codex_record(ce.read_file(ctx.config).decode())
+        if rec["has_codex"]
+        else []
     )
     links = (ctx.lib / "current", ctx.lib / "python", ctx.muninn)
     rec["links"] = {
@@ -58,12 +59,10 @@ def record(ctx: Ctx, rec: Record) -> None:
     )
     if dry(ctx, plan):
         return
-    try:
-        version = ctx.run(["codex", "--version"]).stdout.decode().strip()
-    except OSError:  # no codex on this machine
-        version = ""
-    # Only a Codex whose trust hash we have verified may be pre-trusted.
-    rec["trust"] = "auto" if version in CODEX_VERIFIED else "owner"
+    version, identity = _codex_observation(ctx)
+    rec["codex_version"] = version
+    rec["codex_identity"] = list(identity)
+    rec["trust"] = "auto" if version else "owner"
     ctx.rdir.mkdir(mode=PRIVATE_DIR_MODE, parents=True)
     save(ctx, rec)
 
@@ -76,7 +75,7 @@ def claude(ctx: Ctx, rec: Record) -> None:
     added = "add the muninn SessionStart and UserPromptSubmit hooks to"
     if dry(ctx, f"would {added} {ctx.settings}"):
         return
-    frag = ctx.lib / "current/integrations/claude/settings-hooks.json"
+    frag = ctx.release / "integrations/claude/settings-hooks.json"
     fragment = json.loads(frag.read_bytes())["hooks"]
 
     def check(before: bytes, after: bytes) -> None:
@@ -106,15 +105,15 @@ def _add_plugin(ctx: Ctx, rec: Record) -> bytes:
         StepFailedError: If Codex put the plugin somewhere unexpected, or
             its cached hooks.json is not the pinned one.
     """
-    before = ctx.config.read_bytes()
+    before = ce.read_file(ctx.config)
     env = dict(os.environ, CODEX_HOME=str(ctx.codex_home))
-    argv = ["codex", "plugin", "add", PLUGIN_ID, "--json"]
+    argv = codex_argv(ctx, "plugin", "add", PLUGIN_ID, "--json")
     out = json.loads(must(ctx, argv, env=env, quiet=True).stdout)
     # Codex rewrites config.toml itself; it may only have touched our keys.
-    codex_check(before, ctx.config.read_bytes())
+    codex_check(before, ce.read_file(ctx.config))
     # Read before the location check: if the pinned file is missing, that
     # failure must surface ahead of the "unexpected place" one.
-    pinned = (ctx.lib / CODEX_HOOKS_PIN).read_bytes()
+    pinned = (ctx.release / "integrations/codex/hooks/hooks.json").read_bytes()
     rec["codex_plugin_version"] = out["version"]
     installed = Path(out["installedPath"]).resolve()
     if installed != (ctx.cache / out["version"]).resolve():
@@ -135,7 +134,7 @@ def codex(ctx: Ctx, rec: Record) -> None:
     about to change, and written last, once the installed hooks are proven
     identical to the pinned ones.
     """
-    source = f"{ctx.lib}/current/integrations/codex"
+    source = str(ctx.release / "integrations/codex")
     if not rec["has_codex"]:
         ctx.say(f"{ctx.config} not found: Codex left unconfigured")
         return
@@ -149,7 +148,65 @@ def codex(ctx: Ctx, rec: Record) -> None:
     _edit_config(ctx, lambda text: repoint(text, source))
     pinned = _add_plugin(ctx, rec)
     _edit_config(ctx, enable)
+    if rec["trust"] == "auto" and not _can_trust(ctx, rec):
+        rec["trust"] = "owner"
     if rec["trust"] == "auto":
-        _edit_config(ctx, lambda text: write_trust(text, codex_hooks(pinned)))
+        _edit_config(
+            ctx,
+            lambda text: write_trust(
+                text, codex_hooks(pinned, platform=ctx.platform)
+            ),
+        )
     else:
         ctx.say(OWNER_STEP)
+
+
+def _codex_observation(ctx: Ctx) -> tuple[str, tuple[str, ...]]:
+    """Observe a successful verified version without a candidate change.
+
+    Args:
+        ctx: Provider executable selection and process runner.
+
+    Returns:
+        Verified version and opaque identity, or empty values for owner trust.
+    """
+    try:
+        before = codex_identity(ctx)
+        env = dict(
+            os.environ,
+            HOME=str(ctx.home),
+            USERPROFILE=str(ctx.home),
+            CODEX_HOME=str(ctx.codex_home),
+        )
+        done = ctx.run(codex_argv(ctx, "--version"), env=env)
+        if done.returncode != 0:
+            return "", ()
+        version = done.stdout.decode().strip()
+        verified = (
+            ("codex-cli 0.159.2",)
+            if ctx.platform == "win32"
+            else CODEX_VERIFIED
+        )
+        if version not in verified or before != codex_identity(ctx):
+            return "", ()
+    except (OSError, UnicodeError):
+        return "", ()
+    return version, before
+
+
+def _can_trust(ctx: Ctx, rec: Record) -> bool:
+    """Recheck selected provider identity and verified version before trust.
+
+    Args:
+        ctx: Current executable selection and runner.
+        rec: Original version and opaque candidate observation.
+
+    Returns:
+        Whether the currently selected provider matches the original proof.
+    """
+    version, identity = _codex_observation(ctx)
+    return (
+        bool(version)
+        and version == rec.get("codex_version")
+        and list(identity) == rec.get("codex_identity")
+    )

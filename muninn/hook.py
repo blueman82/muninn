@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import sqlite3
-import stat
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
@@ -38,6 +36,7 @@ from muninn.hook_recall import (
     prompt_terms,
     recall_block,
 )
+from muninn.platform_io import open_regular
 
 __all__ = [
     "BLOCK_LIMIT",
@@ -144,20 +143,11 @@ def _as_payload(raw: object) -> Mapping[str, object]:
 
 def _read_first_line(path: str) -> bytes | None:
     """Read line 1 of a regular file, or None if it cannot be read safely."""
-    # O_NOFOLLOW: a symlink could point the hook at any file the user can
-    # read. O_NONBLOCK: opening a FIFO must not hang the provider.
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except (OSError, ValueError):  # ValueError: a NUL in the path
+        with open_regular(Path(path)) as handle:
+            return handle.readline(FIRST_LINE)
+    except (OSError, ValueError):
         return None
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        return os.fdopen(fd, "rb", closefd=False).readline(FIRST_LINE)
-    except OSError:
-        return None
-    finally:
-        os.close(fd)
 
 
 def _first_record(path: str) -> dict[str, object] | None:
@@ -202,7 +192,7 @@ def _subagent(payload: Mapping[str, object], provider: str) -> bool:
         if provider == "codex":
             info = _CLASSIFY.codex_thread(first)
         else:
-            info = _CLASSIFY.claude_thread(path, first)
+            info = _CLASSIFY.claude_thread(Path(path).as_posix(), first)
     except ValueError:
         return False
     return info.thread_class in ("subagent", "reviewer")

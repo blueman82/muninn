@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import shlex
 import sys
 import unittest
 from pathlib import Path
@@ -13,7 +14,6 @@ from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
-from muninn.cursor_import import default_database
 from tests.installer_support import (
     CRED,
     World,
@@ -21,6 +21,7 @@ from tests.installer_support import (
     git,
     snapshot,
 )
+from tests.store_support import assert_private
 
 
 class FreshInstallTest(unittest.TestCase):
@@ -49,7 +50,7 @@ class FreshInstallTest(unittest.TestCase):
         rec = self.install()
         self.assertEqual(w.fake.loaded, "new")
         python = (self.lib / "python").readlink()
-        self.assertEqual(python, Path(sys.executable))
+        self.assertTrue(python.samefile(sys.executable))
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(
             (out["outcome"], out["fresh"], out["sha"], out["python"]["path"]),
@@ -58,22 +59,21 @@ class FreshInstallTest(unittest.TestCase):
         self.assertIn("hooks.SessionStart", out["config_keys"])
         # The record is shared with colleagues, so it must hold no secret.
         self.assertNotIn(CRED, json.dumps(out))
-        self.assertEqual(
-            (self.lib / co.INSTALL_RECORD).stat().st_mode & 0o777, 0o600
-        )
+        assert_private(self, self.lib / co.INSTALL_RECORD)
         s = json.loads((h / ".claude/settings.json").read_bytes())
         (group,) = s["hooks"]["SessionStart"]
         self.assertEqual(
             group["hooks"][0]["command"],
-            f"{h}/.local/bin/muninn hook session-start --provider claude",
+            shlex.quote((h / ".local/bin/muninn").as_posix())
+            + " hook session-start --provider claude",
         )
         text = (h / ".codex/config.toml").read_text()
         self.assertEqual(
             codex_view(text),
-            (f"{self.lib}/current/integrations/codex", True, 2),
+            (str(self.lib / "current/integrations/codex"), True, 2),
         )
         record = Path(rec["rdir"]) / "rollback-record.json"
-        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        assert_private(self, record)
         self.assertIn(f"record in {rec['rdir']}", "\n".join(w.out))
         rb.rollback(w.ctx(), co.load_record(record))
         for rel, data in before.items():
@@ -88,7 +88,7 @@ class FreshInstallTest(unittest.TestCase):
     ) -> None:
         flag = self.w.home / ".local/share/muninn/recall.off"
         self.install()
-        self.assertEqual(flag.stat().st_mode & 0o777, 0o600)
+        assert_private(self, flag)
         self.assertEqual(flag.read_bytes(), b"")
         said = "\n".join(self.w.out)
         self.assertIn(f"unlink {flag}", said)
@@ -98,12 +98,15 @@ class FreshInstallTest(unittest.TestCase):
         w = self.w
         claude = w.home / ".claude/projects/project/session.jsonl"
         codex = w.home / ".codex/archived_sessions/rollout-one.jsonl"
-        cursor = default_database(w.home)
+        cursor = w.home / "synthetic-cursor.sqlite"
         for path in (claude, codex, cursor):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.touch()
 
-        self.install()
+        with mock.patch(
+            "install.steps_release.default_database", return_value=cursor
+        ):
+            self.install()
 
         said = "\n".join(w.out)
         self.assertIn("Claude: found; indexing...", said)

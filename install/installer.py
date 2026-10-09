@@ -22,8 +22,10 @@ re-exported here.
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import shutil
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -81,6 +83,7 @@ from install.steps_release import (
     muninn_env,
     pin,
     prune,
+    quiesce,
     relink,
     restart,
     start_new,
@@ -186,6 +189,7 @@ FRESH_STEPS: tuple[Step, ...] = (
 # The copy comes before pin: nothing may change if it cannot be made.
 UPGRADE_STEPS: tuple[Step, ...] = (
     history_upgrade,
+    quiesce,
     snapshot_store,
     pin,
     restart,
@@ -210,7 +214,7 @@ def _roll_back(ctx: Ctx, rec: Record, step: Step, exc: Exception) -> None:
     """
     rec["failed"] = {
         "step": step.__name__,
-        "error": f"{type(exc).__name__}: {exc}",
+        "error": type(exc).__name__,
     }
     save(ctx, rec)
     ctx.say(f"install failed at {step.__name__}: {exc}; rolling back")
@@ -239,6 +243,10 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
             a dry run, re-raised without one).
     """
     rec = preflight(ctx, Path(repo), sha)
+    log_path = ctx.log_path
+    if log_path is not None and not ctx.dry_run:
+        ctx = copy.copy(ctx)
+        ctx.say, ctx.run = install_log(log_path, ctx.run)
     record(ctx, rec)
     step: Step = record
     try:
@@ -290,7 +298,7 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="a new machine: no data, launchd job or release yet",
     )
-    ap.add_argument("--home", type=Path, default=Path.home())
+    ap.add_argument("--home", type=Path)
     return ap
 
 
@@ -305,33 +313,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     ap = _parser()
     args = ap.parse_args(argv)
-    if args.home.resolve() != Path.home().resolve() and not args.dry_run:
+    default_home = args.home is None
+    args.home = args.home or Path.home()
+    if (
+        sys.platform == "darwin"
+        and args.home.resolve() != Path.home().resolve()
+        and not args.dry_run
+    ):
         ap.error(
             "--home is dry-run only: launchctl acts on the real gui domain"
         )
     # Files we create must not be readable by other users.
     os.umask(PRIVATE_UMASK)
     ts = time.strftime(TS_FORMAT, time.gmtime())
-    # A dry run writes nothing, not even the log.
-    say, run = (
-        (print, run_real)
-        if args.dry_run
-        else install_log(args.home / ".local/lib/muninn/install.log")
-    )
     ctx = Ctx(
         args.home,
-        run,
+        run_real,
         ts,
         dry_run=args.dry_run,
         probe=codex_probe,
-        say=say,
+        say=print,
         fresh=args.fresh,
         upgrade=args.upgrade,
+        default_home=default_home,
     )
+    ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
     try:
         install(ctx, args.repo.resolve(), args.sha)
-    except (StepFailedError, ce.RefusedError, ce.RacedError) as exc:
-        say(f"FAILED: {exc}")
+    except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
+        print(f"FAILED: {exc}")
         return 1
     return 0
 

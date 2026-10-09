@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from typing import Any, TypedDict
 
 from install.context import StepFailedError
@@ -92,7 +93,9 @@ def _digest(event: str, group: dict[str, Any], hook: dict[str, Any]) -> str:
     return f"sha256:{hashlib.sha256(blob.encode()).hexdigest()}"
 
 
-def codex_hooks(data: bytes) -> list[TrustedHook]:
+def codex_hooks(
+    data: bytes, *, platform: str = sys.platform
+) -> list[TrustedHook]:
     """List each command hook in a hooks.json with its Codex trust hash.
 
     This ports Codex rust-v0.159.2: handler normalisation in
@@ -104,6 +107,7 @@ def codex_hooks(data: bytes) -> list[TrustedHook]:
 
     Args:
         data: The bytes of a hooks.json file.
+        platform: Native platform selecting command_windows before hashing.
 
     Returns:
         One entry per hook, in file order.
@@ -118,6 +122,12 @@ def codex_hooks(data: bytes) -> list[TrustedHook]:
             for hi, h in enumerate(group["hooks"]):
                 if h.get("type") != "command" or event not in LABELS:
                     raise StepFailedError(f"unsupported Codex hook in {event}")
+                h = dict(h)
+                if platform == "win32":
+                    h["command"] = h.get(
+                        "command_windows",
+                        h.get("commandWindows", h["command"]),
+                    )
                 out.append(
                     {
                         "event": LABELS[event],

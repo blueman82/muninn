@@ -9,13 +9,14 @@ disable-model-invocation: true
     muninn erase --session S | --event REF | --match TEXT            # dry run (default)
     muninn erase --session S | --event REF | --match TEXT --yes      # actually erase
 
-Why the care: erase is permanent. It secure-deletes rows and full-text entries and writes tombstones (ids and hashes only) so a rescan cannot bring the content back, including through a fork copy. `--match` searches event text, knowledge text, tags, retract reasons and citation quotes.
+Erasure is permanent. It secure-deletes rows and full-text entries and writes tombstones (ids and hashes only) to prevent reimport, including from fork copies. `--match` searches event text, knowledge text, tags, retract reasons and citation quotes.
 
 ## Procedure
+
 1. Run the dry run first and show the user the targets it lists. Do not add `--yes` yet.
-2. Get an explicit yes from the user for exactly that target set. A broad `--match` can hit more than expected.
+2. Obtain explicit user approval for that exact target set. A broad `--match` may include unintended targets.
 3. Re-run with `--yes`.
-4. Report the answer's `not_covered` and `out_of_scope` lists: provider transcript files, Time Machine and free disk blocks are outside muninn's reach. Tell the user the provider file paths if they want those removed too. Do not delete provider transcripts yourself. If `aside_files` is not empty, those set-aside stores may still hold the erased text: show the user `aside_remove` and let them run it; do not delete them yourself.
+4. Report `not_covered` and `out_of_scope`: muninn does not erase provider transcript files, Time Machine backups or free disk blocks. Provide provider file paths if the user wants to remove those files. Do not delete provider transcripts yourself. If `aside_files` is not empty, those stores may still contain erased text. Show the user `aside_remove` (`rm --` on macOS/Linux, or PowerShell `Remove-Item -LiteralPath` with a literal path array on Windows) for manual execution; do not delete these stores yourself.
 5. Run `muninn doctor` afterwards.
 
 Takes the writer lock: exit code 3 means busy, retry.

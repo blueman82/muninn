@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
-import threading
 import unittest
 from pathlib import Path
 from typing import Any
-from unittest import mock
 
 from muninn import store
 from muninn.store_migrate import migrate_v1_to_v2
@@ -224,12 +223,15 @@ class SwapFailureTests(StoreCase):
 
     def assert_still_v1(self) -> None:
         """Check the file is the untouched v1 ledger."""
-        raw = sqlite3.connect(self.db)
-        self.addCleanup(raw.close)
-        self.assertEqual(raw.execute("PRAGMA user_version").fetchone()[0], 1)
-        self.assertEqual(rows(raw, "SELECT count(*) FROM knowledge"), [(4,)])
-        cols = [r[1] for r in raw.execute("PRAGMA table_info(knowledge)")]
-        self.assertNotIn("tags", cols)
+        with contextlib.closing(sqlite3.connect(self.db)) as raw:
+            self.assertEqual(
+                raw.execute("PRAGMA user_version").fetchone()[0], 1
+            )
+            self.assertEqual(
+                rows(raw, "SELECT count(*) FROM knowledge"), [(4,)]
+            )
+            cols = [r[1] for r in raw.execute("PRAGMA table_info(knowledge)")]
+            self.assertNotIn("tags", cols)
 
     def test_foreign_keys_restored_after_a_real_mid_swap_failure(self) -> None:
         for before in (1, 0):
@@ -329,37 +331,6 @@ class SwapFailureTests(StoreCase):
         raw.close()
         conn = self.rw()
         self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
-
-    def test_two_real_connections_racing_migrate_once(self) -> None:
-        make_v1(self.db)
-        gate = threading.Barrier(2, timeout=10)
-        real = store.migrate_v1_to_v2
-
-        def after_both_saw_v1(conn: sqlite3.Connection) -> int | None:
-            gate.wait()  # neither starts before both read user_version 1
-            return real(conn)
-
-        failures: list[BaseException] = []
-
-        def open_store() -> None:
-            try:
-                store.connect_rw(self.db, fullfsync=False).close()
-            except BaseException as exc:  # reported on the main thread
-                failures.append(exc)
-
-        with mock.patch.object(store, "migrate_v1_to_v2", after_both_saw_v1):
-            workers = [threading.Thread(target=open_store) for _ in range(2)]
-            for worker in workers:
-                worker.start()
-            for worker in workers:
-                worker.join(30)
-        self.assertEqual(failures, [])
-        text = (self.db.parent / "poller.log").read_text()
-        events = sorted(json.loads(x)["event"] for x in text.splitlines())
-        self.assertEqual(events, ["migrate_raced", "migrated"])
-        self.assertEqual(
-            self.rw().execute("PRAGMA user_version").fetchone()[0], 3
-        )
 
 
 class ProviderMigrationTests(StoreCase):

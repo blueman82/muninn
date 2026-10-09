@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import signal
+import json
+import subprocess
+import sys
 import time
 from typing import Any
 
+from tests.hook_nonregular import nonregular
+from tests.ingest_support import ROOT
 from tests.query_support import NOTICE, OpenCase, open_specs, sha
 
 
@@ -183,30 +186,44 @@ class OpenTests(OpenCase):
         self.assertEqual(got["provenance"]["source_status"], "missing")
         self.assertEqual(got["text"], open_specs()[6][0])  # text survives
 
-    def test_open_does_not_block_on_a_fifo(self) -> None:
-        _, ids, _, _ = self.write_source("thr-fifo", open_specs()[:1])
-        (self.sessions / "thr-fifo.jsonl").unlink()
-        os.mkfifo(self.sessions / "thr-fifo.jsonl")
-
-        def timeout(*_: object) -> None:
-            """Fail the test when the alarm fires.
-
-            Args:
-                *_: The signal number and frame, unused.
-
-            Raises:
-                AssertionError: Always; it means ``open`` hung.
-            """
-            raise AssertionError("open blocked on a FIFO")
-
-        old = signal.signal(signal.SIGALRM, timeout)
-        signal.alarm(5)
-        try:
-            got = self.open(ids[0])
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old)
+    def test_open_does_not_block_on_a_native_pipe(self) -> None:
+        source, ids, _, _ = self.write_source("thr-fifo", open_specs()[:1])
+        path = self.sessions / "thr-fifo.jsonl"
+        path.unlink()
+        with nonregular(path) as pipe:
+            if sys.platform == "win32":
+                self.rw.execute(
+                    "UPDATE source SET path = ? WHERE id = ?", (pipe, source)
+                )
+            code = (
+                "import json,sys;sys.path.insert(0,sys.argv[1]);"
+                "from pathlib import Path;from muninn import query,store;"
+                "conn=store.connect_ro(Path(sys.argv[2]));"
+                "value=query.open_event(conn,sys.argv[3],"
+                "roots={'codex-sessions':Path(sys.argv[4])},raw=True);"
+                "conn.close();print(json.dumps(value))"
+            )
+            done = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    code,
+                    str(ROOT),
+                    str(self.db),
+                    str(ids[0]),
+                    str(self.sessions),
+                ],
+                capture_output=True,
+                timeout=5,
+                check=True,
+            )
+        self.assertEqual(done.stderr, b"")
+        got = json.loads(done.stdout)
         self.assertIsNone(got["hash_ok"])
+        self.assertEqual(got["error"], "raw_unavailable")
+        self.assertNotIn("raw", got)
 
     def test_open_never_leaves_the_root(self) -> None:
         _, ids, _, _ = self.write_source("thr-x", open_specs()[:1])

@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from muninn import store
+from muninn import platform_io, store
 from muninn.erase_collect import Target
 
 NEEDLES, NEEDLE_BYTES = 50, 48
@@ -229,9 +229,17 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
     if not needles:
         return []
     hits: list[str] = []
+    # Empty files cannot hold residue; reading a native locked range can fail
+    # even beyond EOF, so avoid that unnecessary read while holding the lock.
     for path in sorted(home.rglob("*")):
         if path.is_file() and not path.is_symlink():
-            data = path.read_bytes()
+            discovered = path.lstat()
+            if not discovered.st_size:
+                continue
+            with platform_io.open_regular(
+                path, root=home, expected=discovered
+            ) as handle:
+                data = handle.read()
             if any(needle in data for needle in needles):
                 hits.append(path.relative_to(home).as_posix())
     return hits
@@ -240,8 +248,8 @@ def residue_scan(home: Path, needles: list[bytes]) -> list[str]:
 def aside_files(home: Path) -> list[str]:
     """Return the store copies set aside, by absolute path.
 
-    These are the unreadable stores a rebuild kept and any pre-upgrade copy
-    the installer left. Erase cannot scrub them (the first are not valid
+    These are unreadable and recovery stores a rebuild kept, and upgrade
+    copies the installer left. Erase cannot scrub them (the first are not valid
     databases, the second is a frozen copy), so they may still hold erased
     text until the owner removes them.
 
@@ -249,12 +257,15 @@ def aside_files(home: Path) -> list[str]:
         home: Data directory.
 
     Returns:
-        Sorted paths of every ``muninn.sqlite.unreadable-*`` and
-        ``muninn.sqlite.pre-upgrade-*`` file.
+        Sorted paths of unreadable, recovery and pre-upgrade store copies.
     """
     return sorted(
         str(p)
-        for prefix in (store.UNREADABLE_PREFIX, store.PRE_UPGRADE_PREFIX)
+        for prefix in (
+            store.UNREADABLE_PREFIX,
+            store.PRE_UPGRADE_PREFIX,
+            store.RECOVERY_PREFIX,
+        )
         for p in home.glob(f"{prefix}*")
         if p.is_file() and not p.is_symlink()
     )

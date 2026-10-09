@@ -14,6 +14,7 @@ from pathlib import Path
 
 from muninn import erase, store
 from tests.erase_support import CANARY, EraseCase, digest
+from tests.store_support import assert_private
 from tests.test_classify import codex_meta, user_msg
 from tests.test_ingest import HOLD_LOCK, ROOT, TID, primary, rollout
 
@@ -66,7 +67,7 @@ class TombstoneFileTests(EraseCase):
         self.erase(session=TID)
         self.erase(match=CANARY)
         path = self.home / "tombstones.jsonl"
-        self.assertEqual(Path(path).stat().st_mode & 0o777, 0o600)
+        assert_private(self, path)
         rows = [json.loads(line) for line in path.read_text().splitlines()]
         self.assertEqual(
             len(rows), self.count("SELECT count(*) FROM tombstone")
