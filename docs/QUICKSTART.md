@@ -118,8 +118,10 @@ reported by Cursor, probing one additional bubble to detect an oversized
 conversation. A present stored `composerId` must also match. Missing, malformed,
 duplicate or mismatched identity skips before writes; there is no newest-row
 fallback. Scope uses the hook's valid native absolute `workspace_roots`: a
-single root is authoritative, while multiple roots require a project directory
-equal to or inside a listed root. Missing, invalid or ambiguous roots skip
+single root is authoritative. With multiple roots, a payload `cwd` equal to or
+inside a listed root takes precedence over inherited `CURSOR_PROJECT_DIR`;
+the environment directory is a fallback only when it also matches a listed root.
+Missing, invalid or ambiguous roots skip
 before writes. If the stored conversation has more bubbles, Muninn skips
 that conversation whole; `muninn ingest --full` remains the complete import
 path. The hook does not add context to the compacted turn.

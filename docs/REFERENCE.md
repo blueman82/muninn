@@ -168,8 +168,9 @@ the copy after the prune, because it contains transcript text; if deletion fails
 installer warns, and `doctor` warns `upgrade_snapshot` until it is removed.
 `install-record.json` records `snapshot` (name, byte size, `from` and `to` versions,
 `state`: `deleted`, `restored` or `kept`), never content; `--check` names the copy and
-writes nothing. Read-only callers (hooks, `stats`, `doctor`) refuse a v1 or v2 file
-until a writer has migrated it, so hooks fail open (they exit 0 with a
+writes nothing. Read-only callers (session-start and prompt hooks, `stats`,
+`doctor`) refuse a v1 or v2 file until a writer has migrated it, so these hooks
+fail open (they exit 0 with a
 `memory unavailable (store_unavailable)` notice) in that window. `muninn rebuild`
 accepts a v1 or v2 old store.
 

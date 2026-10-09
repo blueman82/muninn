@@ -155,7 +155,9 @@ class CursorPrecompactTests(CliCase):
         roots = [str(self.repo), str(other)]
         with mock.patch.object(cursor_import.store, "writer_lock") as writer:
             out = hook_cursor.pre_compact(
-                self.payload(workspace_roots=roots),
+                self.payload(
+                    workspace_roots=roots, cwd=str(self.tmp / "foreign")
+                ),
                 "cursor",
                 self.env | {"CURSOR_PROJECT_DIR": str(self.tmp / "foreign")},
             )
@@ -163,13 +165,34 @@ class CursorPrecompactTests(CliCase):
             writer.assert_not_called()
         child = self.repo / "child"
         child.mkdir()
-        out = hook_cursor.pre_compact(
-            self.payload(workspace_roots=roots),
-            "cursor",
-            self.env | {"CURSOR_PROJECT_DIR": str(child)},
-        )
-        self.assertEqual(out, {})
-        self.assertEqual({row[1] for row in self.rows()}, {str(child)})
+        for cwd in (None, "relative", str(self.tmp / "foreign")):
+            with self.subTest(cwd=cwd):
+                out = hook_cursor.pre_compact(
+                    self.payload(workspace_roots=roots, cwd=cwd),
+                    "cursor",
+                    self.env | {"CURSOR_PROJECT_DIR": str(child)},
+                )
+                self.assertEqual(out, {})
+                self.assertEqual({row[1] for row in self.rows()}, {str(child)})
+
+    def test_multi_root_payload_cwd_overrides_foreign_environment(
+        self,
+    ) -> None:
+        other = self.tmp / "other"
+        other.mkdir()
+        child = self.repo / "child"
+        child.mkdir()
+        roots = [str(self.repo), str(other)]
+        for cwd in (self.repo, child):
+            with self.subTest(cwd=cwd):
+                out = hook_cursor.pre_compact(
+                    self.payload(workspace_roots=roots, cwd=str(cwd)),
+                    "cursor",
+                    self.env
+                    | {"CURSOR_PROJECT_DIR": str(self.tmp / "foreign")},
+                )
+                self.assertEqual(out, {})
+                self.assertEqual({row[1] for row in self.rows()}, {str(cwd)})
 
     def test_oversized_refresh_preserves_complete_stored_conversation(
         self,

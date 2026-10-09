@@ -56,7 +56,8 @@ flowchart LR
 - **Cursor refresh.** The optional native `preCompact` hook imports only the
   uniquely matching `composerData:<conversation_id>`, scoped to valid native
   `workspace_roots`. A single root overrides stale process context; multiple roots
-  require a matching project directory. Missing, ambiguous or mismatched identity
+  prefer a matching payload `cwd`, then a matching `CURSOR_PROJECT_DIR` fallback.
+  Missing, ambiguous or mismatched identity
   skips before writes. Bubble processing is capped at `message_count`, with one
   additional probe to detect oversize. Oversized
   conversations are skipped whole; full ingest remains the complete

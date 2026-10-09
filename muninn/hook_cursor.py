@@ -11,6 +11,21 @@ from muninn import cli_core, cursor_import, hook_context, ingest, store
 __all__ = ["pre_compact"]
 
 
+def _matching_cwd(value: object, roots: list[Path]) -> str | None:
+    """Accept only a native absolute directory inside a declared workspace."""
+    if not isinstance(value, str) or "\0" in value:
+        return None
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        return None
+    candidate = candidate.resolve()
+    return (
+        str(candidate)
+        if any(candidate.is_relative_to(root) for root in roots)
+        else None
+    )
+
+
 def _workspace_cwd(
     payload: Mapping[str, object], env: Mapping[str, str]
 ) -> str | None:
@@ -28,14 +43,8 @@ def _workspace_cwd(
         roots.append(path.resolve())
     if len(roots) == 1:
         return str(roots[0])
-    candidate = Path(hook_context.project_cwd(payload, env))
-    if not candidate.is_absolute():
-        return None
-    candidate = candidate.resolve()
-    return (
-        str(candidate)
-        if any(candidate.is_relative_to(root) for root in roots)
-        else None
+    return _matching_cwd(payload.get("cwd"), roots) or _matching_cwd(
+        env.get("CURSOR_PROJECT_DIR"), roots
     )
 
 
