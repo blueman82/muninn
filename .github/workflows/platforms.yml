@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   platforms:
-    name: ${{ matrix.runner }} / ${{ matrix.check }}
+    name: ${{ matrix.runner }} / ${{ matrix.lane }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     strategy:
@@ -24,16 +24,22 @@ jobs:
         include:
           - runner: macos-15
             architecture: arm64
-            check: full gate
+            lane: all
           - runner: ubuntu-24.04
             architecture: x64
-            check: full gate
+            lane: all
           - runner: windows-2022
             architecture: x64
-            check: native runtime primitives
+            lane: proof
+          - runner: windows-2022
+            architecture: x64
+            lane: gate
           - runner: windows-11-arm
             architecture: arm64
-            check: native runtime primitives
+            lane: proof
+          - runner: windows-11-arm
+            architecture: arm64
+            lane: gate
     env:
       PYTHONUTF8: '1'
       PYTHONUNBUFFERED: '1'
@@ -47,6 +53,8 @@ jobs:
         with:
           python-version: '3.13'
           architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
       - name: Provision supported SQLite on Linux
         if: runner.os == 'Linux'
         shell: bash
@@ -250,7 +258,7 @@ jobs:
           with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as env:
               env.write('MUNINN_PYTHON=' + str(copied) + '\n')
       - name: Run real ordinary Windows lifecycle
-        if: runner.os == 'Windows' && !cancelled()
+        if: runner.os == 'Windows' && matrix.lane != 'gate' && !cancelled()
         env:
           MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
         shell: python
@@ -260,14 +268,14 @@ jobs:
           subprocess.run([sys.executable, '-m', 'tests.lifecycle_native'], check=True)
       - name: Provision pinned Codex native proof
         id: provider_setup
-        if: runner.os != 'macOS' && !cancelled()
+        if: runner.os != 'macOS' && matrix.lane != 'gate' && !cancelled()
         shell: python
         run: |
           import subprocess
           import sys
           subprocess.run([sys.executable, '-m', 'tests.provider_native_setup'], check=True)
       - name: Run actual Codex and rendered provider routes
-        if: runner.os != 'macOS' && !cancelled() && steps.provider_setup.outcome == 'success'
+        if: runner.os != 'macOS' && matrix.lane != 'gate' && !cancelled() && steps.provider_setup.outcome == 'success'
         env:
           MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
         shell: python
@@ -276,7 +284,7 @@ jobs:
           import sys
           subprocess.run([sys.executable, '-m', 'tests.provider_native'], check=True)
       - name: Upload early native proof codes
-        if: runner.os != 'macOS' && !cancelled()
+        if: runner.os != 'macOS' && matrix.lane != 'gate' && !cancelled()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: native-proof-codes-${{ matrix.runner }}
@@ -287,7 +295,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - name: Check Windows native API typing
-        if: runner.os == 'Windows' && !cancelled()
+        if: runner.os == 'Windows' && matrix.lane == 'gate' && !cancelled()
         shell: python
         run: |
           import subprocess
@@ -299,7 +307,7 @@ jobs:
         shell: bash
         run: python3.13 -m tools.check --full
       - name: Run mandatory native full gate
-        if: runner.os == 'Windows' && !cancelled()
+        if: runner.os == 'Windows' && matrix.lane == 'gate' && !cancelled()
         shell: python
         run: |
           import subprocess

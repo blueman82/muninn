@@ -10,6 +10,12 @@ from pathlib import Path
 
 from muninn.file_sync import sync_fd
 from muninn.platform_io import ensure_private_dir, open_private, open_regular
+from tests.native_diagnostic_metrics import (
+    METRIC_BOUNDS,
+    TIMING_METRICS,
+    TIMING_PHASES,
+    timing_fields,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 _ARTIFACTS = frozenset(("provider", "lifecycle", "ordinary"))
@@ -62,6 +68,7 @@ _PHASES = frozenset(
         "complete",
     )
 )
+_PHASES = _PHASES | TIMING_PHASES
 _METRICS = frozenset(
     (
         "route",
@@ -207,26 +214,8 @@ _PROBE_METRICS = (
     )
     | frozenset(f"probe_v{variant}_error" for variant in (1, 2, 3))
 )
-_METRICS = _METRICS | _PROBE_METRICS
-_METRIC_BOUNDS = {
-    "child_exception_kind": (-1, 5),
-    "child_body_hresult": (-2147483648, 2147483647),
-    "child_body_line": (0, 4096),
-    "task_principal_sid_equal": (0, 1),
-    "task_principal_logon_type": (0, 6),
-    "task_principal_run_level": (0, 1),
-    "task_owned_mismatch": (0, 32),
-    "writer_binding_mismatch": (0, 16),
-    "step_failure_id": (0, 2147483647),
-    "new_job_flags": (0, 7),
-    "doctor_output_length": (0, 65535),
-    "doctor_output_first_byte": (0, 255),
-    "doctor_exit_status": (-1, 65535),
-    "doctor_error_length": (0, 65535),
-    "doctor_error_words": (0, 4095),
-    "task_last_result": (-2147483648, 2147483647),
-    "task_state": (0, 4),
-}
+_METRICS = _METRICS | _PROBE_METRICS | TIMING_METRICS
+
 _SECURITY_CODES = frozenset(
     (
         "control_before",
@@ -261,7 +250,7 @@ def _previous(path: Path) -> dict[str, str | int]:
 def _safe_field(key: str, value: object) -> bool:
     """Accept only explicit scalar fields when exporting a child artifact."""
     if key in _METRICS | _CODES:
-        bounds = _METRIC_BOUNDS.get(key)
+        bounds = METRIC_BOUNDS.get(key)
         return isinstance(value, int) and (
             bounds is None
             or (type(value) is int and bounds[0] <= value <= bounds[1])
@@ -292,6 +281,8 @@ def _publish(artifact: str, values: dict[str, str | int]) -> None:
     leaf = Path(directory) / "muninn-native-diagnostics"
     ensure_private_dir(leaf)
     path = leaf / f"muninn-{artifact}-proof.json"
+    if artifact == "lifecycle":
+        values = timing_fields(_previous(path)) | values
     fd = open_private(path, os.O_WRONLY | os.O_CREAT)
     with os.fdopen(fd, "wb") as output:
         output.truncate(0)
@@ -404,6 +395,8 @@ def write(
     )
     values = _previous(path) if phase is None else {}
     if phase is None and values.get("status") == "failed":
+        values.update(metrics or {})
+        _publish(artifact, values)
         return
     values["phase"] = phase or str(values.get("phase", "initial"))
     values["status"] = (

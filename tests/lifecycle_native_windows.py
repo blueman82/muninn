@@ -24,6 +24,7 @@ from install.lifecycle import (
     task_xml,
 )
 from muninn.obs_service import literal, powershell
+from tests.native_diagnostic_metrics import measure
 from tests.native_diagnostics import transfer, write
 
 
@@ -34,7 +35,16 @@ def _timed_out(parent: Path) -> RuntimeError:
 
 
 def run_child(parent: Path, root: Path) -> dict[str, object]:
-    """Create one scoped filtered-token task and await its terminal result."""
+    """Retain parent timings alongside transferred child failure codes."""
+    metrics: dict[str, int] = {}
+    try:
+        return _run_child(parent, root, metrics)
+    finally:
+        write("lifecycle", None, metrics=metrics)
+
+
+def _outer_task(parent: Path, root: Path) -> tuple[Ctx, str, Path]:
+    """Prepare the owned task definition and grant synthetic prerequisites."""
     identity = _grant_synthetic_access(parent)
     ctx = Ctx(parent, run_real, "outer")
     definition = ET.fromstring(
@@ -77,41 +87,56 @@ def run_child(parent: Path, root: Path) -> dict[str, object]:
     xml.write_bytes(task_bytes(definition))
     name = "Muninn-CI-" + uuid.uuid4().hex
     ctx.target = name
-    write("lifecycle", "outer_task_create")
-    _create_task(name, xml)
-    write("lifecycle", "outer_task_run")
-    subprocess.run(
-        ["schtasks.exe", "/Run", "/TN", name],
-        capture_output=True,
-        check=True,
-        timeout=30,
-    )
-    deadline = time.monotonic() + 1800
-    result = parent / "result.json"
-    while not result.exists():
-        if time.monotonic() >= deadline:
-            raise _timed_out(parent)
-        time.sleep(1)
-    raw: object = json.loads(result.read_text())
-    assert isinstance(raw, dict)
-    report = cast(dict[str, object], raw)
-    transfer("lifecycle", parent)
-    if report.get("ok") is not True:
-        raise RuntimeError("ordinary child lifecycle failed; state retained")
-    assert isinstance(report.get("elevated"), bool), report
-    pid, created = report.get("child_pid"), report.get("child_created")
-    assert isinstance(pid, int) and isinstance(created, str)
-    child = {"pid": pid, "created": created}
-    while _task_engines(ctx) or _same_process(ctx, child):
-        if time.monotonic() >= deadline:
-            raise RuntimeError("outer child exit unknown; state retained")
-        time.sleep(0.5)
-    subprocess.run(
-        ["schtasks.exe", "/Delete", "/TN", name, "/F"],
-        capture_output=True,
-        check=True,
-        timeout=30,
-    )
+    return ctx, name, xml
+
+
+def _run_child(
+    parent: Path, root: Path, metrics: dict[str, int]
+) -> dict[str, object]:
+    """Create one scoped filtered-token task and await its terminal result."""
+    with measure("outer_setup", metrics):
+        ctx, name, xml = _outer_task(parent, root)
+    with measure("outer_task_create", metrics):
+        write("lifecycle", "outer_task_create", metrics=metrics)
+        _create_task(name, xml)
+    with measure("outer_task_run", metrics):
+        write("lifecycle", "outer_task_run", metrics=metrics)
+        subprocess.run(
+            ["schtasks.exe", "/Run", "/TN", name],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    with measure("outer_task_wait", metrics):
+        deadline = time.monotonic() + 1800
+        result = parent / "result.json"
+        while not result.exists():
+            if time.monotonic() >= deadline:
+                raise _timed_out(parent)
+            time.sleep(1)
+        raw: object = json.loads(result.read_text())
+        assert isinstance(raw, dict)
+        report = cast(dict[str, object], raw)
+        transfer("lifecycle", parent)
+        if report.get("ok") is not True:
+            raise RuntimeError(
+                "ordinary child lifecycle failed; state retained"
+            )
+        assert isinstance(report.get("elevated"), bool), report
+        pid, created = report.get("child_pid"), report.get("child_created")
+        assert isinstance(pid, int) and isinstance(created, str)
+        child = {"pid": pid, "created": created}
+        while _task_engines(ctx) or _same_process(ctx, child):
+            if time.monotonic() >= deadline:
+                raise RuntimeError("outer child exit unknown; state retained")
+            time.sleep(0.5)
+    with measure("outer_cleanup", metrics):
+        subprocess.run(
+            ["schtasks.exe", "/Delete", "/TN", name, "/F"],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
     return report
 
 
