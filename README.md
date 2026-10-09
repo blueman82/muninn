@@ -136,7 +136,8 @@ normal prompt; hook contexts themselves are never stored.
 
 ## Development
 
-- Runtime: Python 3.13 standard library only, launched by `bin/muninn` with `python3.13 -I -B`. No
+- Runtime: Python 3.13+ standard library only, launched by `bin/muninn` on macOS/Linux
+  and `bin/muninn.cmd` / `bin/muninn.ps1` on Windows, with Python isolation flags `-I -B`. No
   third-party imports and no MLX.
 - Dev checks (`docs/STANDARDS.md`): the tests, then the whole gate (ruff, black, pyright strict,
   shellcheck and the stdlib rules):
@@ -145,3 +146,4 @@ normal prompt; hook contexts themselves are never stored.
       python3.13 -m tools.check --full
 
 - Tests use a temporary `MUNINN_HOME` and synthetic fixtures only.
+- Platform CI: [parallel Windows checks, timing diagnostics and timeout ceilings](docs/ARCHITECTURE.md#platform-ci).
