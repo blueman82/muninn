@@ -15,6 +15,7 @@ from typing import Any
 from install import configedit as ce
 from install.constants import CLAUDE_EVENTS
 from install.context import Ctx
+from install.provider_apps import installed
 from install.transforms import ours
 from install.trust import codex_hooks
 from muninn import platform_windows
@@ -118,7 +119,7 @@ def hook_invocations(ctx: Ctx) -> list[list[str]]:
     """
     settings: dict[str, Any] = (
         ce.load_json(ce.read_file(ctx.settings))
-        if ctx.settings.exists()
+        if installed(ctx, "claude") and ctx.settings.exists()
         else {}
     )
     handlers = [
@@ -136,7 +137,12 @@ def hook_invocations(ctx: Ctx) -> list[list[str]]:
         )
         for handler in handlers
     ]
-    for path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
+    paths: list[Path] = (
+        list(ctx.cache.glob("*/hooks/hooks.json"))
+        if installed(ctx, "codex")
+        else []
+    )
+    for path in sorted(paths):
         calls.extend(
             shlex.split(hook["command"])
             for hook in codex_hooks(path.read_bytes(), platform=ctx.platform)

@@ -43,6 +43,10 @@ flowchart LR
   `lib/selection.json` to select the pinned release; interpreter selection tries
   `MUNINN_PYTHON`, the recorded interpreter, then Python 3.13+ on PATH, with native path
   and ACL checks.
+- **Provider detection (`install/provider_apps.py`).**
+  - Gates: setup, config validation, installed-hook verification.
+  - Evidence: installed desktop apps; never leftover configs/transcripts.
+  - History import/existing index: independent.
 - **Installer.** `install/installer.py` has two modes (`--fresh`, `--upgrade`) over one
   step pipeline. A fresh install runs pin, first ingest, start, Claude and Codex config,
   optional Cursor config, verify, prune. An upgrade runs `snapshot_store` (copies the store when the new release

@@ -16,6 +16,7 @@ from install import configedit as ce
 from install.constants import CLAUDE_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.lifecycle import preflight_service
+from install.provider_apps import installed
 from install.provider_paths import codex_argv, cursor_command, render_pinned
 from install.record import Record
 from install.snapshot import release_schema
@@ -212,9 +213,9 @@ def _dry_apply(
         json.JSONDecodeError: If settings.json is not valid JSON.
     """
     if provider_configs:
-        if ctx.settings.exists():
+        if installed(ctx, "claude") and ctx.settings.exists():
             edit_settings(ce.read_file(ctx.settings), fragment)
-        if ctx.config.exists():
+        if installed(ctx, "codex") and ctx.config.exists():
             if ctx.platform == "win32":
                 codex_argv(ctx, "--version")
             text = ce.read_file(ctx.config).decode()
@@ -263,6 +264,7 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     _check_machine(ctx)
     preflight_service(ctx)
     # An upgrade re-pins only; provider config was set up by the fresh run.
+    ctx.cursor_hooks = ctx.cursor_hooks and installed(ctx, "cursor")
     touch = not ctx.upgrade
     if touch or ctx.cursor_hooks:
         _dry_apply(ctx, files, fragment, touch)
@@ -273,8 +275,10 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     return {
         "fresh": ctx.fresh,
         "upgrade": ctx.upgrade,
-        "has_claude": touch and ctx.settings.exists(),
-        "has_codex": touch and ctx.config.exists(),
+        "has_claude": touch
+        and installed(ctx, "claude")
+        and ctx.settings.exists(),
+        "has_codex": touch and installed(ctx, "codex") and ctx.config.exists(),
         "cursor_hooks": ctx.cursor_hooks,
         "schema": 1,
         "ts": ctx.ts,

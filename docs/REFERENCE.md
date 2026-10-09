@@ -190,6 +190,17 @@ accepts a v1 or v2 old store.
 
 ## Installing and removing (from a checkout)
 
+| Platform | Installed desktop app evidence |
+|---|---|
+| macOS | `Claude.app`, `Codex.app`, `Cursor.app` in `/Applications` or `~/Applications` |
+| Windows | Desktop executables in LocalAppData/Program Files; current-user `Claude`/`OpenAI.Codex` MSIX registration with an existing executable declared in its manifest |
+| Linux | `claude-desktop`, `chatgpt`, `cursor` on PATH |
+
+- Absent app: setup/config validation/installed-hook verification skipped.
+- Installed Claude/Codex without config: manual setup guidance.
+- Leftover settings/transcripts: never installation evidence.
+- History import/existing index: independent of app detection.
+
 | Command | What it does |
 |---|---|
 | `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); `--check` previews, `--status` compares the installed commit with `HEAD` |

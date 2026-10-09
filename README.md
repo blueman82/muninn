@@ -8,9 +8,9 @@ Everything it returns is untrusted historical data, never instructions. MIT lice
 
 ## Install, upgrade, uninstall, rollback
 
-Requires macOS, Linux or Windows (x64, ARM64), Python 3.13+, git, and Claude Code and/or Codex for the hook integrations.
-Windows is verified on hosted CI only: not with a non-admin token, on a desktop, or under WSL.
-Cursor is optional; Muninn can import its local history database without Cursor installed.
+- Requires: macOS/Linux/Windows x64 or ARM64; Python 3.13+; git. Windows verification: hosted CI only; non-admin desktop and WSL unverified.
+- Optional desktop apps: Claude, Codex, Cursor. Cursor history import: app installation optional.
+- Hook setup: installed app required; absent apps skipped; installed Claude/Codex without config: manual setup guidance.
 
     git clone https://github.com/blueman82/muninn && cd muninn
     bin/muninn-install --check   # plain-sentence preview, writes nothing
