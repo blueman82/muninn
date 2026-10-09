@@ -24,8 +24,7 @@ Instructions for coding agents working in this repo. Any parent-directory
   `probe.py`, `context.py`, `errors.py`, `constants.py`, `uninstall.py`, `configedit.py`,
   `tomledit.py`; `ls install` is the full list.
 - `tools/`: the standards gate (`python3.13 -m tools.check`).
-- `integrations/`, `launchd/`: templates with a literal `@HOME@`. Windows and Linux services are
-  rendered by `install/lifecycle.py` (Task Scheduler XML, systemd user unit), not from templates.
+- `integrations/`, `launchd/`: templates with a literal `@HOME@`. Linux and Windows services are rendered in `install/lifecycle.py`.
 - `.claude/skills/muninn-*` and the mirrors `.codex/skills/muninn-*`: one skill per
   user-facing command. When a command, flag or answer field changes, update both skills and
   `docs/REFERENCE.md` together (`docs/SKILLS.md`).

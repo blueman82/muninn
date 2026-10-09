@@ -44,8 +44,7 @@ Scheduler definition with LeastPrivilege. The installer does not configure
 linger, administrator services, passwords or elevated tasks. Stop disables
 automatic launches before requesting graceful exit. Windows binds the actual
 writer generation and launcher creation identities to the owned action and
-running task engine, comparing executable and release paths by resolved
-identity so the short and long spellings of one Windows file match; both processes and all task instances must exit. Linux
+running task engine (paths compared by resolved identity); both processes and all task instances must exit. Linux
 uses unbounded systemd stop with no SIGKILL fallback. A bounded installer wait
 that expires refuses restoration/config undo/pruning and retains private state.
 

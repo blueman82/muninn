@@ -365,19 +365,12 @@ OS/Python/SQLite versions, release SHA, actual executed checks and any skips.
 Do not treat the administrator identity of a hosted runner as proof of the
 normal-user/no-symlink-privilege contract. Test that contract explicitly.
 
-(verified 2026-10-08, hosted runs 37836844227 and earlier) Hosted Windows
-runners run with UAC off: the interactive user is an administrator with no
-filtered token, and a disposable local account never gets an interactive
-session, so Task Scheduler reports its task as "has not run" (0x41303). An
-ordinary non-admin token therefore cannot be proven on a hosted runner. The
-native lifecycle proof runs as the runner user instead. Its test child
-substitutes only the elevation clause of the installer's identity guard
-(`tests/lifecycle_native_windows.py`, `hosted_identity`) and records the
-token as elevated; the product guard is unchanged. The disposable-account
-scheduling probe step was removed for that reason. Ordinary-token task
-execution stays unclaimed until a real interactive Windows session exists.
-Windows 11 ARM needs a 30 minute child deadline and a 75 minute job limit:
-its cold PowerShell starts are about ten times slower than x64.
+(verified 2026-10-08) Hosted Windows runners are elevated (UAC off) and a
+disposable account gets no interactive session (task result 0x41303), so an
+ordinary-token task is unprovable there. The lifecycle proof runs as the
+runner user with a test-only identity substitute (`hosted_identity`); the
+product guard is unchanged. The account scheduling probe step was removed.
+Windows 11 ARM needs a 30 minute child deadline and a 75 minute job limit.
 
 (verified) GitHub says standard hosted Actions runners are free for public
 repositories. Private repositories consume the account's included minutes
