@@ -22,6 +22,7 @@ from install.constants import (
     PRIVATE_DIR_MODE,
 )
 from install.context import Ctx, StepFailedError, dry, link_text, must
+from install.provider_apps import installed
 from install.provider_paths import codex_argv, codex_identity, cursor_command
 from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
@@ -44,6 +45,8 @@ EMPTY_CURSOR_CONFIG = b'{"version":1,"hooks":{}}\n'
 
 def choose_cursor_hooks(ctx: Ctx) -> bool:
     """Ask whether this install should configure Cursor automatically."""
+    if not installed(ctx, "cursor"):
+        return False
     ctx.say(f"Cursor hook target: {ctx.cursor_settings}")
     ctx.say(f"Manual setup instructions: {CURSOR_DOC_URL}")
     if ctx.dry_run:
@@ -117,7 +120,9 @@ def record(ctx: Ctx, rec: Record) -> None:
     )
     if dry(ctx, plan):
         return
-    version, identity = _codex_observation(ctx)
+    version, identity = (
+        _codex_observation(ctx) if installed(ctx, "codex") else ("", ())
+    )
     rec["codex_version"] = version
     rec["codex_identity"] = list(identity)
     rec["trust"] = "auto" if version else "owner"
@@ -128,7 +133,17 @@ def record(ctx: Ctx, rec: Record) -> None:
 def claude(ctx: Ctx, rec: Record) -> None:
     """Merge our two hooks into Claude settings."""
     if not rec["has_claude"]:
-        ctx.say(f"{ctx.settings} not found: Claude Code left unconfigured")
+        if not installed(ctx, "claude"):
+            ctx.say("Claude app not installed: setup skipped")
+        elif ctx.upgrade:
+            ctx.say("Claude installed: existing settings retained")
+        else:
+            ctx.say(
+                "Claude installed; manual setup: settings not found; "
+                "Claude Code left unconfigured. Merge "
+                f"{ctx.release / 'integrations/claude/settings-hooks.json'} "
+                f"into {ctx.settings} after initializing Claude Code."
+            )
         return
     added = "add the muninn SessionStart and UserPromptSubmit hooks to"
     if dry(ctx, f"would {added} {ctx.settings}"):
@@ -194,7 +209,16 @@ def codex(ctx: Ctx, rec: Record) -> None:
     """
     source = str(ctx.release / "integrations/codex")
     if not rec["has_codex"]:
-        ctx.say(f"{ctx.config} not found: Codex left unconfigured")
+        if not installed(ctx, "codex"):
+            ctx.say("Codex app not installed: setup skipped")
+        elif ctx.upgrade:
+            ctx.say("Codex installed: existing settings retained")
+        else:
+            ctx.say(
+                "Codex installed; manual setup: config not found; "
+                "Codex left unconfigured. Initialize Codex, then add "
+                f"the plugin from {source} and trust its hooks in /hooks."
+            )
         return
     if dry(
         ctx,

@@ -6,8 +6,10 @@
 - Python 3.13 or newer. The installer pins the interpreter it runs under; set
   `MUNINN_PYTHON=/path/to/python3.13` to override at run time.
 - `git`, and a clean clone of this repo checked out at the commit to install.
-- Claude Code and/or Codex. Either is optional: a missing `~/.claude/settings.json` or
-  `~/.codex/config.toml` is skipped and reported.
+- Optional desktop apps: Claude, Codex, Cursor.
+- Absent app: hook setup skipped.
+- Installed Claude/Codex without `~/.claude/settings.json`/`~/.codex/config.toml`:
+  manual setup guidance.
 
 ## Install on a new machine
 
@@ -28,7 +30,20 @@ poller, merges the two hooks into Claude's settings, adds the Codex plugin, runs
 migrate the store first copies it aside (deleted after a successful upgrade, restored
 after a failed one).
 
-An interactive install also asks whether to configure Muninn's Cursor
+| Platform | Installed desktop app evidence |
+|---|---|
+| macOS | `Claude.app`, `Codex.app`, `Cursor.app` in `/Applications` or `~/Applications` |
+| Windows | Desktop executables in LocalAppData/Program Files; current-user `Claude`/`OpenAI.Codex` MSIX registration with an existing executable declared in its manifest |
+| Linux | `claude-desktop`, `chatgpt`, `cursor` on PATH |
+
+- Provider setup/config validation/hook verification: installed app required.
+- Leftover settings/transcripts: never installation evidence.
+- Absent app: setup skipped.
+- Installed Claude/Codex without config: manual setup guidance.
+- History import/existing index: independent of app detection.
+- Cursor setup prompt: installed Cursor; interactive install only.
+
+An interactive install asks whether to configure Muninn's Cursor
 `preCompact` hook automatically or leave it for manual setup. Automatic setup
 merges only Muninn's handler into `~/.cursor/hooks.json`, preserving other
 hooks. Rollback restores prior owned handlers while retaining current foreign

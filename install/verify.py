@@ -15,6 +15,7 @@ from typing import Any
 from install import configedit as ce
 from install.constants import CLAUDE_EVENTS, OWNER_STEP, PLUGIN_ID
 from install.context import Ctx, StepFailedError, dry, is_new, job
+from install.provider_apps import installed
 from install.provider_paths import hook_invocations
 from install.record import Record
 from install.steps_release import command, fresh, installed_env
@@ -34,7 +35,7 @@ def hook_commands(ctx: Ctx) -> list[str]:
         Commands from our Claude hook groups and every cached Codex
         hooks.json.
     """
-    exists = ctx.settings.exists()
+    exists = installed(ctx, "claude") and ctx.settings.exists()
     settings = ce.load_json(ce.read_file(ctx.settings)) if exists else {}
     cmds: list[str] = []
     for event in CLAUDE_EVENTS:
@@ -42,7 +43,12 @@ def hook_commands(ctx: Ctx) -> list[str]:
         cmds += [
             h["command"] for g in groups or [] if ours(g) for h in g["hooks"]
         ]
-    for path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
+    paths: list[Path] = (
+        list(ctx.cache.glob("*/hooks/hooks.json"))
+        if installed(ctx, "codex")
+        else []
+    )
+    for path in sorted(paths):
         cmds += [h["command"] for h in codex_hooks(path.read_bytes())]
     return cmds
 

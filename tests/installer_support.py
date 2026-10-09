@@ -18,6 +18,7 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from install import configedit as ce
 from install import installer as co
@@ -374,16 +375,17 @@ class World:
     """A temp HOME with plain provider configs and a git repo to install."""
 
     def __init__(self, tc: unittest.TestCase) -> None:
-        """Build the HOME and repo, registering their cleanup on ``tc``.
-
-        Args:
-            tc: The running test; owns the temp dir's lifetime.
-        """
+        """Build a temporary HOME and repo owned by the running test."""
         temporary = tempfile.TemporaryDirectory(prefix="inst-")
         tc.addCleanup(temporary.cleanup)
         tmp = Path(temporary.name).resolve()
         self.home, self.repo = tmp / "home", tmp / "repo"
         register(tc, self.home)
+        apps = mock.patch(
+            "install.provider_apps.APPLICATIONS", tmp / "system-apps"
+        )
+        apps.start()
+        tc.addCleanup(apps.stop)
         self.out: list[str] = []
         for rel in PINNED:
             (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -404,6 +406,8 @@ class World:
         git(self.repo, "commit", "-qm", "new")
         self.sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
         h = self.home
+        for provider in ("Claude", "Codex", "Cursor"):
+            (h / "Applications" / f"{provider}.app").mkdir(parents=True)
         (h / ".claude").mkdir(parents=True)
         (h / ".claude/settings.json").write_bytes(
             dump({"theme": "dark", "env": {"TOKEN": CRED}})
@@ -417,14 +421,7 @@ class World:
         self.fake = Fake(h)
 
     def ctx(self, **kw: Any) -> Ctx:
-        """Build an install context wired to the fakes.
-
-        Args:
-            **kw: Extra ``Ctx`` fields such as ``fresh`` or ``dry_run``.
-
-        Returns:
-            The context.
-        """
+        """Build a fake context with extra fields from ``kw``."""
         return Ctx(
             home=self.home,
             run=self.fake.run,

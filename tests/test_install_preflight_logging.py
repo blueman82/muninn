@@ -21,6 +21,14 @@ from tests.installer_support import World, done
 class PreflightLoggingTests(unittest.TestCase):
     """Exercise main and the real preflight with isolated external effects."""
 
+    def setUp(self) -> None:
+        launcher = mock.patch(
+            "install.provider_apps.shutil.which",
+            return_value="/installed/claude-desktop",
+        )
+        launcher.start()
+        self.addCleanup(launcher.stop)
+
     def test_refused_native_preflight_writes_nothing(self) -> None:
         for platform in ("linux", "win32", "unsafe_config"):
             native = "linux" if platform == "unsafe_config" else platform
