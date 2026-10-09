@@ -25,9 +25,10 @@ Cursor is optional; Muninn can import its local history database without Cursor 
 - Uninstall: `bin/muninn-uninstall --dry-run` previews; `bin/muninn-uninstall` stops the poller and
   removes the hooks, the Codex plugin and the release. Your index and knowledge ledger are moved to
   `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
-- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin) and `launchd/com.muninn.plist`
+- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, optional Cursor hook) and
+  `launchd/com.muninn.plist`
   (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
-  `docs/TROUBLESHOOTING.md`.
+  `docs/TROUBLESHOOTING.md`, and the synthetic [Cursor preCompact benchmark](docs/CURSOR-PRECOMPACT-BENCHMARK.md).
 
 ## What it stores
 
@@ -35,7 +36,8 @@ Cursor is optional; Muninn can import its local history database without Cursor 
   `harness`), Claude Code main transcripts, and imported Cursor conversations. Only primary threads
   are searched, pushed and cited by default.
 - Cursor conversations are imported read-only from the standard local database during fresh install
-  and `muninn ingest --full`. Cursor is not required, and its database is not polled.
+  and `muninn ingest --full`; the optional `preCompact` hook refreshes the conversation identified by Cursor's hook payload.
+  Cursor is not required, and its database is not polled in the background.
 - Event kinds: `prompt`, `reply`, `tool_call`, tagged `harness` text, and `tool_error`, a redacted
   head and tail of an error-bearing tool output (never pushed and never citable).
 - Subagent threads are also indexed, as class `subagent`, but stay out of default search, both hook

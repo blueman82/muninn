@@ -24,11 +24,12 @@ from install import configedit as ce
 from install import lifecycle
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
+from install.provider_paths import cursor_command
 from install.record import Record, load_record
 from install.release_io import write_private
 from install.snapshot import start_again, undo_store
 from install.steps_release import PRUNING, relink
-from install.transforms import codex_check
+from install.transforms import codex_check, restore_cursor_settings
 
 
 def restore_json(data: bytes, entries: Sequence[Mapping[str, Any]]) -> bytes:
@@ -114,6 +115,27 @@ def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
         )
 
 
+def _restore_cursor(
+    ctx: Ctx,
+    rec: Record,
+    entries: Sequence[Mapping[str, Any]],
+    paths: Sequence[ce.JsonPath],
+) -> None:
+    """Restore Cursor's prior hook keys and remove a newly empty config."""
+    ce.edit_file(
+        ctx.cursor_settings,
+        lambda data: restore_cursor_settings(
+            data, cursor_command(ctx), rec["cursor_ours"], entries[0]
+        ),
+        lambda before, after: ce.json_check(before, after, paths),
+    )
+    if (
+        not rec.get("cursor_file_present")
+        and ce.load_json(ce.read_file(ctx.cursor_settings)) == {}
+    ):
+        ctx.cursor_settings.unlink(missing_ok=True)
+
+
 def _undo_config(ctx: Ctx, rec: Record) -> None:
     """Restore the provider config keys we changed."""
     claude = rec.get("claude", {}).get("settings")
@@ -127,6 +149,15 @@ def _undo_config(ctx: Ctx, rec: Record) -> None:
                 lambda b: restore_json(b, claude),
                 lambda a, b: ce.json_check(a, b, paths),
             ),
+        )
+    cursor = rec.get("cursor")
+    if cursor and ctx.cursor_settings.exists():
+        paths = [tuple(e["path"]) for e in cursor]
+
+        _act(
+            ctx,
+            f"restore {len(paths)} keys in {ctx.cursor_settings.name}",
+            lambda: _restore_cursor(ctx, rec, cursor, paths),
         )
     if rec.get("codex"):
         _act(

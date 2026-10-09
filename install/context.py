@@ -79,6 +79,8 @@ class Ctx:
         muninn: The ``muninn`` command link.
         plist: The launchd plist path.
         settings: Claude Code's settings.json.
+        cursor_settings: Cursor's hooks.json.
+        cursor_hooks: Whether this install manages Cursor's preCompact hook.
         codex_home: Codex's home directory.
         config: Codex's config.toml.
         cache: Codex's plugin cache for our plugin.
@@ -93,6 +95,7 @@ class Ctx:
     default_home: bool = False
     log_path: Path | None = None
     dry_run: bool = False
+    cursor_hooks: bool = False
     now: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
     say: Callable[[str], None] = print
@@ -107,6 +110,9 @@ class Ctx:
     muninn: Path = dataclasses.field(init=False, repr=False, compare=False)
     plist: Path = dataclasses.field(init=False, repr=False, compare=False)
     settings: Path = dataclasses.field(init=False, repr=False, compare=False)
+    cursor_settings: Path = dataclasses.field(
+        init=False, repr=False, compare=False
+    )
     codex_home: Path = dataclasses.field(init=False, repr=False, compare=False)
     config: Path = dataclasses.field(init=False, repr=False, compare=False)
     cache: Path = dataclasses.field(init=False, repr=False, compare=False)
@@ -123,6 +129,7 @@ class Ctx:
         self.muninn = h / ".local/bin/muninn"
         self.plist = h / PLIST
         self.settings = h / ".claude/settings.json"
+        self.cursor_settings = h / ".cursor/hooks.json"
         self.codex_home = h / ".codex"
         if self.default_home:
             if claude_home := os.environ.get("CLAUDE_CONFIG_DIR"):

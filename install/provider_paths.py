@@ -20,7 +20,10 @@ from install.trust import codex_hooks
 from muninn import platform_windows
 from muninn.platform_io import open_regular
 
-_VERBS = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
+_VERBS = {
+    "SessionStart": "session-start",
+    "UserPromptSubmit": "prompt",
+}
 
 
 def powershell() -> str:
@@ -44,6 +47,13 @@ def _windows_command(ctx: Ctx, verb: str, provider: str) -> str:
     )
 
 
+def cursor_command(ctx: Ctx) -> str:
+    """Return Cursor's hook command using the native installed launcher."""
+    if ctx.platform == "win32":
+        return _windows_command(ctx, "pre-compact", "cursor")
+    return f"{shlex.quote(str(ctx.muninn))} hook pre-compact --provider cursor"
+
+
 def render_pinned(ctx: Ctx, relative: str, data: bytes) -> bytes:
     """Render a pinned template without substituting raw bytes into JSON.
 
@@ -58,9 +68,14 @@ def render_pinned(ctx: Ctx, relative: str, data: bytes) -> bytes:
     if relative not in (
         "integrations/claude/settings-hooks.json",
         "integrations/codex/hooks/hooks.json",
+        "integrations/cursor/hooks.json",
     ):
         return data.replace(b"@HOME@", str(ctx.home).encode())
     doc: dict[str, Any] = json.loads(data)
+    if "/cursor/" in relative:
+        [handler] = doc["hooks"]["preCompact"]
+        handler["command"] = cursor_command(ctx)
+        return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()
     provider = "claude" if "/claude/" in relative else "codex"
     for event, groups in doc["hooks"].items():
         for group in groups:

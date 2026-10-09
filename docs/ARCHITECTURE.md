@@ -9,6 +9,7 @@ flowchart LR
   end
   P["poller<br/>muninn serve (60 s)<br/>launchd / systemd / Task Scheduler"]
   CI["fresh install /<br/>muninn ingest --full"]
+  CH["Cursor preCompact<br/>exact conversation_id,<br/>message_count limit"]
   DB[("muninn.sqlite<br/>events, knowledge,<br/>tombstones, FTS5")]
   CLI["muninn CLI<br/>search, open, know,<br/>stats, doctor, compact,<br/>rebuild"]
   H["hooks<br/>SessionStart,<br/>UserPromptSubmit"]
@@ -18,6 +19,8 @@ flowchart LR
   CX --> P
   P -->|"ingest: classify, redact"| DB
   CUR --> CI
+  CUR --> CH
+  CH -->|"read-only import;<br/>no context injection"| DB
   CI -->|"read-only import;<br/>no polling"| DB
   P --> L
   DB --> CLI
@@ -42,12 +45,25 @@ flowchart LR
   and ACL checks.
 - **Installer.** `install/installer.py` has two modes (`--fresh`, `--upgrade`) over one
   step pipeline. A fresh install runs pin, first ingest, start, Claude and Codex config,
-  verify, prune. An upgrade runs `snapshot_store` (copies the store when the new release
-  will migrate its schema, `install/snapshot.py`), pin, restart, verify, prune, and
+  optional Cursor config, verify, prune. An upgrade runs `snapshot_store` (copies the store when the new release
+  will migrate its schema, `install/snapshot.py`), pin, optional Cursor config, restart,
+  verify, prune, and
   deletes the copy after the prune. `install/rollback.py` reverses it from the recorded
-  values, restoring that copy over a migrated store. `install/uninstall.py` removes
+  values, restoring that copy over a migrated store. Cursor rollback restores only
+  prior owned handlers, retaining current foreign additions, edits, deletions and order. `install/uninstall.py` removes
   Muninn installation entries (no record survives an upgrade) and moves the data dir
   aside instead of deleting it (unless `--purge-data`).
+- **Cursor refresh.** The optional native `preCompact` hook imports only the
+  uniquely matching `composerData:<conversation_id>`, scoped to valid native
+  `workspace_roots`. A single root overrides stale process context; multiple roots
+  prefer a matching payload `cwd`, then a matching `CURSOR_PROJECT_DIR` fallback.
+  Missing, ambiguous or mismatched identity
+  skips before writes. Bubble processing is capped at `message_count`, with one
+  additional probe to detect oversize. Oversized
+  conversations are skipped whole; full ingest remains the complete
+  import path. The hook returns compact JSON, exits 0 on failure, and injects no
+  context. Its 90-second deadline is a measured host-specific setting; see the
+  [benchmark and limits](CURSOR-PRECOMPACT-BENCHMARK.md).
 - **Trust.** Stored content is untrusted historical data. Secrets receive best-effort
   redaction at ingest and on output; automatic injection is framed so pasted copies are
   flagged on ingest. See the README for the full list.

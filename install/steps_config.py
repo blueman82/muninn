@@ -9,29 +9,66 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 from install import configedit as ce
 from install.constants import (
     CODEX_VERIFIED,
+    CURSOR_DOC_URL,
     OWNER_STEP,
     PLUGIN_ID,
     PRIVATE_DIR_MODE,
 )
 from install.context import Ctx, StepFailedError, dry, link_text, must
-from install.provider_paths import codex_argv, codex_identity
+from install.provider_paths import codex_argv, codex_identity, cursor_command
 from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
     codex_check,
+    cursor_ours,
     drop_trust,
+    edit_cursor_settings,
     edit_settings,
     enable,
     repoint,
     write_trust,
 )
 from install.trust import codex_hooks
+from muninn.platform_io import ensure_private_dir
+
+CURSOR_HOOKS_PIN = "integrations/cursor/hooks.json"
+EMPTY_CURSOR_CONFIG = b'{"version":1,"hooks":{}}\n'
+
+
+def choose_cursor_hooks(ctx: Ctx) -> bool:
+    """Ask whether this install should configure Cursor automatically."""
+    ctx.say(f"Cursor hook target: {ctx.cursor_settings}")
+    ctx.say(f"Manual setup instructions: {CURSOR_DOC_URL}")
+    if ctx.dry_run:
+        ctx.say(
+            "DRY-RUN: Cursor hook choice skipped; no settings will change."
+        )
+        return False
+    if not sys.stdin.isatty():
+        ctx.say("Non-interactive install: Cursor hooks left for manual setup.")
+        return False
+    try:
+        choice = input(
+            f"Set up Muninn's Cursor preCompact hook in "
+            f"{ctx.cursor_settings}? "
+            "[a]utomatic or [m]anual (default m)? "
+        )
+    except (EOFError, OSError):
+        choice = ""
+    automatic = choice.strip().casefold() in ("a", "automatic")
+    ctx.say(
+        "Cursor hook setup: automatic."
+        if automatic
+        else "Cursor hook setup: manual; existing settings left unchanged."
+    )
+    return automatic
 
 
 def record(ctx: Ctx, rec: Record) -> None:
@@ -47,14 +84,35 @@ def record(ctx: Ctx, rec: Record) -> None:
         if rec["has_codex"]
         else []
     )
+    rec["cursor_file_present"] = ctx.cursor_settings.exists()
+    cursor_obj = (
+        ce.load_json(ce.read_file(ctx.cursor_settings))
+        if rec["cursor_hooks"] and rec["cursor_file_present"]
+        else {}
+    )
+    rec["cursor"] = (
+        [
+            json_entry(cursor_obj, ("version",)),
+            json_entry(cursor_obj, ("hooks", "preCompact")),
+        ]
+        if rec["cursor_hooks"]
+        else []
+    )
+    rec["cursor_ours"] = [
+        {"index": index, "value": handler}
+        for index, handler in enumerate(
+            cursor_obj.get("hooks", {}).get("preCompact", [])
+        )
+        if cursor_ours(handler, cursor_command(ctx))
+    ]
     links = (ctx.lib / "current", ctx.lib / "python", ctx.muninn)
     rec["links"] = {
         str(p): link_text(p) if p.is_symlink() else None for p in links
     }
     plan = (
-        "would not touch Claude or Codex settings"
+        "would not touch provider settings"
         if ctx.upgrade
-        else "would note the current links and the Claude and Codex "
+        else "would note the current links and the provider "
         "settings entries this install changes, so a failure can be undone"
     )
     if dry(ctx, plan):
@@ -210,3 +268,26 @@ def _can_trust(ctx: Ctx, rec: Record) -> bool:
         and version == rec.get("codex_version")
         and list(identity) == rec.get("codex_identity")
     )
+
+
+def cursor(ctx: Ctx, rec: Record) -> None:
+    """Merge Muninn's preCompact hook into Cursor's user hooks.json."""
+    if not rec["cursor_hooks"]:
+        return
+    if dry(
+        ctx,
+        f"would merge Muninn's preCompact hook into {ctx.cursor_settings}",
+    ):
+        return
+    fragment = json.loads((ctx.release / CURSOR_HOOKS_PIN).read_bytes())
+    [handler] = fragment["hooks"]["preCompact"]
+    ensure_private_dir(ctx.cursor_settings.parent)
+    ce.create_file(ctx.cursor_settings, EMPTY_CURSOR_CONFIG, 0o600)
+
+    def edit(data: bytes) -> bytes:
+        return edit_cursor_settings(data, cursor_command(ctx), handler)
+
+    def check(before: bytes, after: bytes) -> None:
+        ce.json_check(before, after, [("version",), ("hooks", "preCompact")])
+
+    ce.edit_file(ctx.cursor_settings, edit, check)

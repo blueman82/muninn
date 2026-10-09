@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from unittest import mock
 
-from muninn import hook
+from muninn import hook, hook_cursor
 from tests import test_classify as tc
 from tests import test_cli as tcli
 from tests.hook_support import (
@@ -25,6 +25,7 @@ from tests.hook_support import (
     HookCliCase,
     launcher_args,
 )
+from tools import benchmark_cursor_precompact as benchmark
 
 
 class HookCommandTests(HookCliCase):
@@ -45,8 +46,11 @@ class HookCommandTests(HookCliCase):
         for event, provider in (
             ("session-start", "claude"),
             ("session-start", "codex"),
+            ("session-start", "cursor"),
             ("prompt", "claude"),
             ("prompt", "codex"),
+            ("prompt", "cursor"),
+            ("pre-compact", "cursor"),
         ):
             with self.subTest(event, provider=provider):
                 done = subprocess.run(
@@ -69,6 +73,138 @@ class HookCommandTests(HookCliCase):
             self.assertEqual(
                 (done.returncode, done.stdout.strip()), (0, b"{}")
             )
+
+    def test_precompact_refreshes_cursor_history_without_exposing_text(
+        self,
+    ) -> None:
+        database = self.tmp / "state.vscdb"
+        database.touch()
+        counts = {
+            "conversations_seen": 2,
+            "events_added": 3,
+            "events_unchanged": 4,
+            "skipped_rows": 0,
+            "events_skipped_erased": 0,
+        }
+        run = mock.patch.object(
+            hook_cursor.cursor_import, "run", return_value=counts
+        )
+        path = mock.patch.object(
+            hook_cursor.cursor_import,
+            "default_database",
+            return_value=database,
+        )
+        trace: dict[str, object] = {}
+        project = str(self.tmp / "cursor-project")
+        with path, run as importer:
+            out = hook_cursor.pre_compact(
+                {
+                    "cwd": str(self.repo),
+                    "workspace_roots": [project],
+                    "conversation_id": "active",
+                    "message_count": 7,
+                },
+                "cursor",
+                self.env
+                | {"HOME": str(self.tmp), "CURSOR_PROJECT_DIR": project},
+                trace=trace,
+            )
+        self.assertEqual(out, {})
+        self.assertEqual(trace, {"counts": counts})
+        self.assertEqual(importer.call_args.args[2], project)
+        self.assertEqual(importer.call_args.kwargs["max_bubbles"], 7)
+
+    def test_precompact_skips_when_native_database_is_unconfigured(
+        self,
+    ) -> None:
+        trace: dict[str, object] = {}
+        with (
+            mock.patch.object(
+                hook_cursor.cursor_import,
+                "default_database",
+                return_value=None,
+            ),
+            mock.patch.object(hook_cursor.cursor_import, "run") as importer,
+        ):
+            out = hook_cursor.pre_compact(
+                {
+                    "workspace_roots": [str(self.repo)],
+                    "conversation_id": "active",
+                    "message_count": 2,
+                },
+                "cursor",
+                self.env,
+                trace=trace,
+            )
+        self.assertEqual(out, {})
+        self.assertEqual(trace, {"skipped": "missing_cursor_db"})
+        importer.assert_not_called()
+
+    def test_precompact_imports_explicit_native_database(self) -> None:
+        database = self.tmp / "state.vscdb"
+        benchmark._create_database(database, 2, 3, 16)
+        trace: dict[str, object] = {}
+        env = self.env | {"MUNINN_CURSOR_DB": str(database)}
+        with mock.patch.object(
+            hook_cursor.cursor_import,
+            "default_database",
+            wraps=hook_cursor.cursor_import.default_database,
+        ) as select_database:
+            out = hook_cursor.pre_compact(
+                {
+                    "cwd": str(self.repo),
+                    "workspace_roots": [str(self.repo)],
+                    "conversation_id": "active",
+                    "message_count": 3,
+                },
+                "cursor",
+                env,
+                trace=trace,
+            )
+        self.assertEqual(out, {})
+        self.assertEqual(select_database.call_args.kwargs["env"], env)
+        counts = trace["counts"]
+        assert isinstance(counts, dict)
+        self.assertEqual(counts["events_added"], 3)
+        self.assertEqual(counts["conversations_seen"], 1)
+
+    def test_precompact_skips_without_a_message_count(self) -> None:
+        trace: dict[str, object] = {}
+        out = hook_cursor.pre_compact({}, "cursor", self.env, trace=trace)
+        self.assertEqual(trace, {"skipped": "message_count_unavailable"})
+        self.assertEqual(
+            out["user_message"],
+            "Muninn skipped the Cursor history refresh because this Cursor "
+            "hook payload has no valid message_count.",
+        )
+
+    def test_precompact_fails_open_when_cursor_import_fails(self) -> None:
+        database = self.tmp / "state.vscdb"
+        database.touch()
+        path = mock.patch.object(
+            hook_cursor.cursor_import,
+            "default_database",
+            return_value=database,
+        )
+        run = mock.patch.object(
+            hook_cursor.cursor_import, "run", side_effect=RuntimeError
+        )
+        trace: dict[str, object] = {}
+        with path, run:
+            out = hook_cursor.pre_compact(
+                {
+                    "cwd": str(self.repo),
+                    "workspace_roots": [str(self.repo)],
+                    "conversation_id": "active",
+                    "message_count": 7,
+                },
+                "cursor",
+                self.env | {"HOME": str(self.tmp)},
+                trace=trace,
+            )
+        self.assertEqual(trace, {"error": "cursor_import_failed"})
+        self.assertIn("user_message", out)
+        self.assertNotIn("transcript", json.dumps(out))
 
     def test_a_malformed_hook_command_never_fails_the_provider(self) -> None:
         for argv in (

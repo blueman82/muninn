@@ -3,10 +3,10 @@
   python3.13 -E -s -B -m install.uninstall [--dry-run] [--purge-data]
 
 Stops the launchd job and removes its plist, takes our hooks out of Claude's
-settings.json and our sections out of Codex's config.toml, deletes our Codex
-plugin cache, and removes the pinned releases and the ``muninn`` command
-link. Nothing else in either provider config is touched: each edit is proved
-to change only our own keys, as the install does.
+and Cursor's settings, removes our sections from Codex's config.toml, deletes
+our Codex plugin cache, and removes the pinned releases and ``muninn`` link.
+Nothing else in a provider config is touched: each edit is proved to change
+only our own keys, as the install does.
 
 Everything that can refuse (a config we cannot edit safely, a name already
 taken for the data) is checked first, in a dry run too, so a refusal leaves
@@ -43,8 +43,14 @@ from install.constants import (
 from install.context import Ctx, StepFailedError, job, link_text, run_real
 from install.errors import RacedError, RefusedError
 from install.lifecycle import preflight_service, remove
+from install.provider_paths import cursor_command
 from install.rollback import bootout
-from install.transforms import claude_paths, codex_check, ours
+from install.transforms import (
+    claude_paths,
+    codex_check,
+    drop_cursor_settings,
+    ours,
+)
 from muninn import platform_io
 from muninn.platform_paths import read_selection
 
@@ -130,6 +136,11 @@ def _settings_check(before: bytes, after: bytes) -> None:
     ce.json_check(before, after, claude_paths(ce.load_json(before)))
 
 
+def _cursor_settings_check(before: bytes, after: bytes) -> None:
+    """Prove Cursor unhooking changed only the preCompact handlers."""
+    ce.json_check(before, after, [("hooks", "preCompact")])
+
+
 def _preflight(ctx: Ctx, purge: bool) -> None:
     """Refuse before any change when a later step would have to refuse.
 
@@ -149,6 +160,13 @@ def _preflight(ctx: Ctx, purge: bool) -> None:
     if ctx.config.exists():
         before = ce.read_file(ctx.config)
         codex_check(before, _drop_sections_bytes(before))
+    if ctx.cursor_settings.exists():
+        if ctx.cursor_settings.is_symlink():
+            raise RefusedError("Cursor hooks.json must not be a symlink")
+        before = ce.read_file(ctx.cursor_settings)
+        _cursor_settings_check(
+            before, drop_cursor_settings(before, cursor_command(ctx))
+        )
     if not purge and ctx.data.exists() and ctx.removed.exists():
         raise StepFailedError(
             f"{ctx.removed} already exists; move it away and run again"
@@ -166,6 +184,24 @@ def _unhook_claude(ctx: Ctx) -> bool:
         ctx,
         f"remove the muninn hooks from {ctx.settings}",
         lambda: ce.edit_file(ctx.settings, drop_hooks, _settings_check),
+    )
+
+
+def _unhook_cursor(ctx: Ctx) -> bool:
+    """Remove Muninn's Cursor preCompact hook, preserving other hooks."""
+    if not ctx.cursor_settings.exists():
+        return False
+    before = ce.read_file(ctx.cursor_settings)
+    if drop_cursor_settings(before, cursor_command(ctx)) == before:
+        return False
+    return _act(
+        ctx,
+        f"remove the muninn hook from {ctx.cursor_settings}",
+        lambda: ce.edit_file(
+            ctx.cursor_settings,
+            lambda data: drop_cursor_settings(data, cursor_command(ctx)),
+            _cursor_settings_check,
+        ),
     )
 
 
@@ -298,6 +334,7 @@ def uninstall(ctx: Ctx, purge: bool = False) -> bool:
     steps: tuple[Callable[[Ctx], bool], ...] = (
         _stop_job,
         _unhook_claude,
+        _unhook_cursor,
         _unconfigure_codex,
         _remove_release,
         functools.partial(_remove_data, purge=purge),

@@ -39,6 +39,7 @@ __all__ = [
     "RacedError",
     "RefusedError",
     "atomic_write",
+    "create_file",
     "dump_like",
     "edit_file",
     "get_section",
@@ -151,6 +152,32 @@ def atomic_write(path: Path, data: bytes, mode: int) -> None:
     finally:
         tmp.unlink(missing_ok=True)
     _fsync_dir(path.parent)
+
+
+def create_file(path: Path, data: bytes, mode: int) -> bool:
+    """Atomically create a file only if it does not already exist.
+
+    Args:
+        path: The destination file.
+        data: Its contents.
+        mode: Permission bits applied before the data is written.
+
+    Returns:
+        True if this call created the file, false if it already existed.
+    """
+    tmp = _write_temp(path, data, mode)
+    try:
+        try:
+            if sys.platform == "win32":
+                platform_windows.publish(tmp, path, replace=False)
+            else:
+                os.link(tmp, path)
+        except FileExistsError:
+            return False
+        _fsync_dir(path.parent)
+        return True
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def edit_file(

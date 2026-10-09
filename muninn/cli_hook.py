@@ -14,16 +14,17 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from muninn import hook, obs, store
+from muninn import hook, hook_cursor, obs, store
 
 __all__ = ["HOOKS", "PROVIDERS", "hook_main"]
 
-PROVIDERS = ("claude", "codex")
+PROVIDERS = ("claude", "codex", "cursor")
 type HookRunner = Callable[..., dict[str, Any]]
 # Tests patch entries in this dict, so it must stay the one shared object.
 HOOKS: dict[str, HookRunner] = {
     "session-start": hook.session_start,
     "prompt": hook.prompt_submit,
+    "pre-compact": hook_cursor.pre_compact,
 }
 
 

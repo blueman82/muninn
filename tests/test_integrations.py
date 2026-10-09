@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CODEX_PLUGIN = ROOT / "integrations/codex/.codex-plugin/plugin.json"
 CODEX_HOOKS = ROOT / "integrations/codex/hooks/hooks.json"
 CLAUDE_HOOKS = ROOT / "integrations/claude/settings-hooks.json"
+CURSOR_HOOKS = ROOT / "integrations/cursor/hooks.json"
 PLIST = ROOT / "launchd/com.muninn.plist"
 README = ROOT / "README.md"
 PYPROJECT = ROOT / "pyproject.toml"
@@ -40,12 +41,16 @@ def hook_command(event: str, provider: str) -> str:
 
     Args:
         event: Hook event name, such as ``SessionStart``.
-        provider: ``claude`` or ``codex``.
+        provider: Provider passed to the hook command.
 
     Returns:
         The command line with the literal home placeholder.
     """
-    verb = {"SessionStart": "session-start", "UserPromptSubmit": "prompt"}
+    verb = {
+        "SessionStart": "session-start",
+        "UserPromptSubmit": "prompt",
+        "preCompact": "pre-compact",
+    }
     return f"{HOME}/.local/bin/muninn hook {verb[event]} --provider {provider}"
 
 
@@ -90,7 +95,7 @@ class JsonFilesTest(unittest.TestCase):
 
     def test_every_integration_json_parses(self) -> None:
         found = sorted((ROOT / "integrations").rglob("*.json"))
-        expected = {CODEX_PLUGIN, CODEX_HOOKS, CLAUDE_HOOKS}
+        expected = {CODEX_PLUGIN, CODEX_HOOKS, CLAUDE_HOOKS, CURSOR_HOOKS}
         self.assertLessEqual(expected, set(found))
         for path in [*found, PYRIGHT]:
             with self.subTest(path=path.relative_to(ROOT).as_posix()):
@@ -170,6 +175,23 @@ class ClaudeFragmentTest(unittest.TestCase):
         self.assertEqual(seen, {"SessionStart", "UserPromptSubmit"})
 
 
+class CursorHooksTest(unittest.TestCase):
+    """Cursor runs one native preCompact history refresh."""
+
+    def test_precompact_hook_uses_cursor_provider(self) -> None:
+        doc = load(CURSOR_HOOKS)
+        self.assertEqual(doc["version"], 1)
+        self.assertEqual(set(doc["hooks"]), {"preCompact"})
+        [hook] = doc["hooks"]["preCompact"]
+        self.assertEqual(
+            hook,
+            {
+                "command": hook_command("preCompact", "cursor"),
+                "timeout": 90,
+            },
+        )
+
+
 class PlistTest(unittest.TestCase):
     """The launchd plist is complete, minimal and lint-clean."""
 
@@ -243,6 +265,8 @@ def all_commands() -> Iterator[tuple[str, str]]:
     for path in (CODEX_HOOKS, CLAUDE_HOOKS):
         for _, _, hook in handlers(load(path)):
             yield path.name, hook["command"]
+    for hook in load(CURSOR_HOOKS)["hooks"]["preCompact"]:
+        yield CURSOR_HOOKS.name, hook["command"]
     yield PLIST.name, load_plist()["ProgramArguments"][0]
 
 
@@ -251,7 +275,7 @@ class CommandContractTest(unittest.TestCase):
 
     def test_every_command_starts_at_the_home_placeholder(self) -> None:
         commands = list(all_commands())
-        self.assertEqual(len(commands), 5)
+        self.assertEqual(len(commands), 6)
         for name, command in commands:
             with self.subTest(file=name, command=command):
                 self.assertTrue(
@@ -313,6 +337,17 @@ class HomeSubstitutionTest(unittest.TestCase):
                         self.assertEqual(proc.returncode, 0, proc.stderr)
                         words = hook_command(event, provider).split()[1:]
                         self.assertEqual(proc.stdout.split(), words)
+            for hook in load(CURSOR_HOOKS)["hooks"]["preCompact"]:
+                proc = subprocess.run(
+                    hook["command"].replace(HOME, home),
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                words = hook_command("preCompact", "cursor").split()[1:]
+                self.assertEqual(proc.stdout.split(), words)
 
     def native_hook_arguments(self) -> None:
         """Run rendered Windows provider commands against a synthetic stub."""

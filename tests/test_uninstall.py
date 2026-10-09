@@ -17,6 +17,7 @@ from install import uninstall as un
 from install.constants import PRE_UPGRADE_PREFIX, PRIVATE_UMASK
 from install.context import StepFailedError
 from install.errors import RefusedError
+from install.provider_paths import cursor_command
 from tests.installer_support import World, snapshot
 from tests.store_support import assert_private
 
@@ -118,6 +119,43 @@ class UninstallTest(UninstallCase):
             {"SessionStart": [OWNER_GROUP], "Stop": [OWNER_GROUP]},
         )
         self.assertEqual(after["theme"], "dark")
+
+    def test_cursor_uninstall_removes_our_handler_and_keeps_other_settings(
+        self,
+    ) -> None:
+        path = self.w.home / ".cursor/hooks.json"
+        path.parent.mkdir()
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "hooks": {
+                        "preCompact": [
+                            {"command": "other"},
+                            {"command": cursor_command(self.c)},
+                        ],
+                        "afterFileEdit": [{"command": "keep"}],
+                    },
+                    "other": True,
+                },
+                indent=2,
+            )
+        )
+
+        self.run_uninstall()
+
+        after = json.loads(path.read_text())
+        self.assertEqual(
+            after,
+            {
+                "version": 1,
+                "hooks": {
+                    "preCompact": [{"command": "other"}],
+                    "afterFileEdit": [{"command": "keep"}],
+                },
+                "other": True,
+            },
+        )
 
     def test_dry_run_changes_nothing(self) -> None:
         configs = snapshot(self.w.home)

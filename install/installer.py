@@ -75,7 +75,13 @@ from install.record import (
 )
 from install.rollback import rollback
 from install.snapshot import discard, snapshot_store
-from install.steps_config import claude, codex, record
+from install.steps_config import (
+    choose_cursor_hooks,
+    claude,
+    codex,
+    cursor,
+    record,
+)
 from install.steps_release import (
     fresh,
     history_upgrade,
@@ -138,6 +144,7 @@ __all__ = [
     "codex_probe",
     "codex_record",
     "codex_scan",
+    "cursor",
     "drop_trust",
     "edit_settings",
     "enable",
@@ -183,6 +190,7 @@ FRESH_STEPS: tuple[Step, ...] = (
     start_new,
     claude,
     codex,
+    cursor,
     verify,
     prune,
 )
@@ -192,6 +200,7 @@ UPGRADE_STEPS: tuple[Step, ...] = (
     quiesce,
     snapshot_store,
     pin,
+    cursor,
     restart,
     verify,
     prune,
@@ -338,6 +347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default_home=default_home,
     )
     ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
+    ctx.cursor_hooks = choose_cursor_hooks(ctx)
     try:
         install(ctx, args.repo.resolve(), args.sha)
     except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:

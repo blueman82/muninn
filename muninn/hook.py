@@ -1,4 +1,4 @@
-"""muninn provider hooks: SessionStart and UserPromptSubmit.
+"""Muninn provider hooks: SessionStart and UserPromptSubmit.
 
 ``session_start`` and ``prompt_submit`` take the provider's hook payload and
 return its hook output: ``{"hookSpecificOutput": {"hookEventName",
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 
 from muninn import classify, knowledge, scope, store
+from muninn.hook_context import as_payload, env_for_provider, project_cwd
 from muninn.hook_frame import (
     BLOCK_LIMIT,
     RECALL_LIMIT,
@@ -134,13 +135,6 @@ def read_input(stream: BinaryIO) -> dict[str, object]:
     )
 
 
-def _as_payload(raw: object) -> Mapping[str, object]:
-    """Treat anything that is not a JSON object as an empty payload."""
-    return (
-        cast("Mapping[str, object]", raw) if isinstance(raw, Mapping) else {}
-    )
-
-
 def _read_first_line(path: str) -> bytes | None:
     """Read line 1 of a regular file, or None if it cannot be read safely."""
     try:
@@ -232,17 +226,6 @@ def _notice(code: str) -> str:
     return frame(' kind="notice"', [f"muninn: store unavailable ({code})"])
 
 
-def _cwd(payload: Mapping[str, object]) -> str:
-    """The payload's working directory, else the process's, else empty."""
-    cwd = payload.get("cwd")
-    if isinstance(cwd, str) and cwd:
-        return cwd
-    try:
-        return str(Path.cwd())
-    except OSError:  # the directory was deleted under us
-        return ""
-
-
 def _label(conn: sqlite3.Connection, ids: list[int], cwd: str) -> str:
     """Name the scope: its stored label, else the last path component."""
     row = conn.execute(
@@ -307,7 +290,7 @@ def _respond(
     if env.get("MUNINN_HOOK_DISABLE") == "1":
         trace["skipped"] = "disabled"
         return {}
-    data = _as_payload(payload)
+    data = as_payload(payload)
     if _skip_as_subagent(data, provider):
         trace["skipped"] = "subagent"
         return {}
@@ -370,8 +353,7 @@ def _start_block(
     limit: int,
 ) -> str:
     """Build the SessionStart block for the payload's repository."""
-    del env  # part of the Builder signature; unused here
-    cwd = _cwd(payload)
+    cwd = project_cwd(payload, env)
     ids = scope.scope_ids_for_read(conn, cwd)
     entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
@@ -408,6 +390,7 @@ def session_start(
     Returns:
         The provider's hook output, or ``{}``.
     """
+    env = env_for_provider(env, provider)
     limit = _limits(provider)[0]
     build = partial(_start_block, limit=limit)
     return _respond("SessionStart", payload, provider, env, trace, build)
@@ -424,7 +407,10 @@ def _recall_block(
 ) -> str:
     """Build the recall block for the payload's prompt."""
     request = RecallRequest(
-        terms, _cwd(payload), partial(index_notes, home), limit
+        terms,
+        project_cwd(payload, env),
+        partial(index_notes, home),
+        limit,
     )
     return recall_block(conn, payload, env, trace, request)
 
@@ -456,12 +442,17 @@ def prompt_submit(
     Returns:
         The provider's hook output, or ``{}``.
     """
+    env = env_for_provider(env, provider)
     trace = {} if trace is None else trace
     if (store.data_home(env) / RECALL_OFF).exists():  # owner switch
         trace["skipped"] = "recall_off"
         return {}
-    terms = prompt_terms(_as_payload(payload), trace)
+    terms = prompt_terms(as_payload(payload), trace)
     if terms is None:  # nothing to recall: the store is not even opened
         return {}
-    build = partial(_recall_block, terms=terms, limit=_limits(provider)[1])
+    build = partial(
+        _recall_block,
+        terms=terms,
+        limit=_limits(provider)[1],
+    )
     return _respond("UserPromptSubmit", payload, provider, env, trace, build)

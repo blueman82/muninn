@@ -19,6 +19,17 @@ unsupported and malformed rows. Do not poll Cursor databases. Store the events a
 provider `cursor`, and widen the store constraints through the one-way schema v3
 migration.
 
+An optional Cursor `preCompact` hook refreshes only the unique exact
+`composerData:<conversation_id>` from Cursor's documented hook payload, with
+`workspace_roots` binding the requested scope and `message_count` as the bubble
+processing limit plus one oversize-detection probe. Missing, ambiguous or mismatched identity or workspace skips before
+writes; the hook does not fall back to the newest database row. The hook-to-store
+identity mapping is empirical, with sources and compatibility limits in the
+[quick start](../QUICKSTART.md#cursor-history). If the stored conversation
+has more bubbles than Cursor reported, skip it whole rather than replacing
+stored events with a partial import. A full ingest remains the complete
+history import path. This is event-triggered import, not background polling.
+
 ## Consequences
 
 - Cursor text is searchable and erasable through the same event and tombstone paths as

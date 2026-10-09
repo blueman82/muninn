@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 from unittest import mock
 
+from muninn import cursor_import_read
 from muninn.cursor_import import default_database
 from tests.cli_support import CliCase
 
@@ -94,6 +95,14 @@ class CursorImportTests(CliCase):
         code, stats, _ = self.muninn("stats")
         self.assertEqual(code, 0)
         self.assertEqual(stats["events_by_provider"].get("cursor", 0), 0)
+
+    def test_precompact_read_skips_oversized_conversations_whole(self) -> None:
+        path, _ = self.make_database()
+        conversations, skipped, _ = cursor_import_read.read(
+            path, max_bubbles=1, conversation_id="composer-1"
+        )
+        self.assertEqual(conversations, [])
+        self.assertEqual(skipped, 1)
 
     def test_full_ingest_skips_a_missing_cursor_database(self) -> None:
         self.assertEqual(self.muninn("ingest", "--full")[0], 0)
