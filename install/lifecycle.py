@@ -170,7 +170,7 @@ def preflight_service(ctx: Ctx) -> None:
         if sys.platform == "linux":
             _linux_interpreter(Path(sys.executable))
         must(ctx, ["systemctl", "--user", "show-environment"], quiet=True)
-        if ctx.plist.exists():
+        if ctx.plist.exists() or job(ctx):
             try:
                 _linux_owned(ctx)
             except (OSError, ValueError) as exc:
@@ -331,7 +331,7 @@ def stop(ctx: Ctx) -> None:
     if ctx.platform == "win32":
         if ctx.plist.exists():
             _stop_windows(ctx)
-    elif ctx.platform == "linux":
+    elif ctx.platform == "linux" and job(ctx) is not None:
         must(ctx, ["systemctl", "--user", "disable", ctx.target], quiet=True)
         must(
             ctx,
@@ -349,7 +349,7 @@ def stop(ctx: Ctx) -> None:
             raise StepFailedError(
                 "cannot establish writer quiescence"
             ) from exc
-    else:
+    elif ctx.platform != "linux":
         ctx.run(["launchctl", "bootout", ctx.target])
         wait(ctx, lambda: job(ctx) is None, 30, "job still loaded")
 

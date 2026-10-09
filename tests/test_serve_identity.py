@@ -50,6 +50,7 @@ class WriterIdentityTests(CliCase):
 
         def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
             response = (
+                "LoadState=loaded\n"
                 f"MainPID={os.getpid()}\nActiveState=active\n"
                 f"FragmentPath={unit}\nDropInPaths=\n"
             ).encode()

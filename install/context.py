@@ -26,6 +26,7 @@ from install.constants import (
 from install.installer_log import Runner as Runner
 from install.installer_log import install_log as install_log
 from install.installer_log import run_real as run_real
+from muninn.obs_linux_service import query_unit
 from muninn.obs_service import (
     command_names_path,
     parse_process,
@@ -279,20 +280,31 @@ def dry(ctx: Ctx, text: str) -> bool:
 
 
 def _linux_job(ctx: Ctx, target: str | None) -> Job | None:
-    """Inspect the actual user service MainPID."""
-    r = ctx.run(
-        [
-            "systemctl",
-            "--user",
-            "show",
-            target or ctx.target,
-            "--property=MainPID",
-            "--value",
-        ]
-    )
-    if r.returncode or not r.stdout.strip().isdigit():
-        return None
-    pid = int(r.stdout.strip())
+    """Distinguish an owned loaded unit from validated native absence."""
+    try:
+        values = query_unit(ctx.run, target or ctx.target)
+        if values["LoadState"] == "not-found":
+            if values != {
+                "LoadState": "not-found",
+                "ActiveState": "inactive",
+                "MainPID": "0",
+                "FragmentPath": "",
+                "DropInPaths": "",
+            }:
+                raise ValueError("service_absence_unknown")
+            return None
+        if (
+            values["LoadState"] != "loaded"
+            or not ctx.plist.is_file()
+            or values["FragmentPath"] != str(ctx.plist)
+            or values["DropInPaths"]
+        ):
+            raise ValueError("service_registration_unowned")
+        pid = int(values["MainPID"])
+    except (OSError, ValueError) as exc:
+        raise StepFailedError(
+            "cannot establish the owned user service"
+        ) from exc
     if not pid:
         return {"pid": None, "cmd": ""}
     ps = ctx.run(["ps", "-ww", "-o", "command=", "-p", str(pid)])

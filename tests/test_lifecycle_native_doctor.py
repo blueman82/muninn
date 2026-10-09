@@ -39,6 +39,7 @@ class NativeDoctorCodesTests(unittest.TestCase):
             patch(
                 "tests.lifecycle_native_doctor.obs_linux_service.query_unit",
                 return_value={
+                    "LoadState": "loaded",
                     "MainPID": "44",
                     "ActiveState": "active",
                     "FragmentPath": "/private/unit",
@@ -56,7 +57,7 @@ class NativeDoctorCodesTests(unittest.TestCase):
         ):
             report = codes(Path("/synthetic"), {"HOME": "/synthetic"}, result)
         self.assertEqual(report["doctor_code"], "service_state_unknown")
-        self.assertEqual(report["query_key_count"], 4)
+        self.assertEqual(report["query_key_count"], 5)
         self.assertEqual(report["dropins_empty"], 1)
         self.assertEqual(report["pid_matches"], 1)
         self.assertEqual(report["inspect_code"], "process_command_invalid")

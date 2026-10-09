@@ -16,7 +16,13 @@ from muninn.obs_service_commands import arguments, render_unit
 from muninn.obs_status import read_status
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
-_PROPERTIES = ("MainPID", "ActiveState", "FragmentPath", "DropInPaths")
+_PROPERTIES = (
+    "LoadState",
+    "MainPID",
+    "ActiveState",
+    "FragmentPath",
+    "DropInPaths",
+)
 
 
 def read_unit(path: Path) -> str:
@@ -147,6 +153,7 @@ def process_identity(pid: int) -> tuple[str, Path, list[str]]:
 
 def query_unit(
     run: Callable[[Sequence[str]], subprocess.CompletedProcess[bytes]],
+    target: str = "muninn.service",
 ) -> dict[str, str]:
     """Read only the finite native registration and process-state fields."""
     response = run(
@@ -155,7 +162,7 @@ def query_unit(
             "--user",
             "show",
             "--all",
-            "muninn.service",
+            target,
             "--property=" + ",".join(_PROPERTIES),
         ]
     )
@@ -165,6 +172,12 @@ def query_unit(
     values = dict(line.split("=", 1) for line in lines)
     if len(lines) != len(_PROPERTIES) or set(values) != set(_PROPERTIES):
         raise ValueError("service_query_unknown")
+    if (
+        re.fullmatch(r"0|[1-9][0-9]*", values["MainPID"]) is None
+        or re.fullmatch(r"[a-z]+", values["ActiveState"]) is None
+        or re.fullmatch(r"[a-z]+(?:-[a-z]+)*", values["LoadState"]) is None
+    ):
+        raise ValueError("service_state_unknown")
     return values
 
 
@@ -181,13 +194,12 @@ def unit_stopped(
         OSError: If the native service query cannot execute.
     """
     values = query_unit(run)
-    pid, state = values["MainPID"], values["ActiveState"]
-    if (
-        re.fullmatch(r"0|[1-9][0-9]*", pid) is None
-        or re.fullmatch(r"[a-z]+", state) is None
-    ):
+    if values["LoadState"] != "loaded":
         raise ValueError("service_state_unknown")
-    return pid == "0" and state in ("inactive", "failed")
+    return values["MainPID"] == "0" and values["ActiveState"] in (
+        "inactive",
+        "failed",
+    )
 
 
 def registered_unit(

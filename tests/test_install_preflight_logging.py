@@ -60,7 +60,13 @@ class PreflightLoggingTests(unittest.TestCase):
                     case: str = platform,
                 ) -> subprocess.CompletedProcess[bytes]:
                     if str(argv[0]) == "systemctl":
-                        return done(rc=0 if case == "unsafe_config" else 1)
+                        if case == "unsafe_config":
+                            return done(
+                                b"LoadState=not-found\nMainPID=0\n"
+                                b"ActiveState=inactive\nFragmentPath=\n"
+                                b"DropInPaths=\n"
+                            )
+                        return done(rc=1)
                     if str(argv[0]).endswith("powershell.exe"):
                         return done(
                             json.dumps(

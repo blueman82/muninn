@@ -109,6 +109,7 @@ class LinuxServiceTests(unittest.TestCase):
     def test_inspection_binds_unit_process_and_loaded_release(self) -> None:
         pid = 34567
         response = (
+            "LoadState=loaded\n"
             f"MainPID={pid}\nActiveState=active\n"
             f"FragmentPath={self.ctx.plist}\nDropInPaths=\n"
         ).encode()
