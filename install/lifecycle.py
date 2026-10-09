@@ -22,6 +22,7 @@ from muninn.obs_linux_service import (
     require_interpreter,
     selection,
     unit_matches,
+    unit_stopped,
 )
 from muninn.obs_service import (
     canonical_trigger_user,
@@ -337,12 +338,17 @@ def stop(ctx: Ctx) -> None:
             ["systemctl", "--user", "stop", "--no-block", ctx.target],
             quiet=True,
         )
-        wait(
-            ctx,
-            lambda: not ((found := job(ctx)) and found["pid"]),
-            30,
-            "writer did not quiesce; retained state unchanged",
-        )
+        try:
+            wait(
+                ctx,
+                lambda: unit_stopped(ctx.run),
+                30,
+                "writer did not quiesce; retained state unchanged",
+            )
+        except (OSError, ValueError) as exc:
+            raise StepFailedError(
+                "cannot establish writer quiescence"
+            ) from exc
     else:
         ctx.run(["launchctl", "bootout", ctx.target])
         wait(ctx, lambda: job(ctx) is None, 30, "job still loaded")

@@ -168,6 +168,28 @@ def query_unit(
     return values
 
 
+def unit_stopped(
+    run: Callable[[Sequence[str]], subprocess.CompletedProcess[bytes]],
+) -> bool:
+    """Confirm a terminal native state without an outstanding writer.
+
+    Returns:
+        True only when the unit is inactive or failed and has no writer.
+
+    Raises:
+        ValueError: If native service state is unavailable or malformed.
+        OSError: If the native service query cannot execute.
+    """
+    values = query_unit(run)
+    pid, state = values["MainPID"], values["ActiveState"]
+    if (
+        re.fullmatch(r"0|[1-9][0-9]*", pid) is None
+        or re.fullmatch(r"[a-z]+", state) is None
+    ):
+        raise ValueError("service_state_unknown")
+    return pid == "0" and state in ("inactive", "failed")
+
+
 def registered_unit(
     home: Path,
     user: Path,
