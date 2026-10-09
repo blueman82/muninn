@@ -119,6 +119,48 @@ class UninstallTest(UninstallCase):
         )
         self.assertEqual(after["theme"], "dark")
 
+    def test_cursor_uninstall_removes_our_handler_and_keeps_other_settings(
+        self,
+    ) -> None:
+        path = self.w.home / ".cursor/hooks.json"
+        path.parent.mkdir()
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "hooks": {
+                        "preCompact": [
+                            {"command": "other"},
+                            {
+                                "command": (
+                                    f"{self.w.home}/.local/bin/muninn hook "
+                                    "pre-compact --provider cursor"
+                                )
+                            },
+                        ],
+                        "afterFileEdit": [{"command": "keep"}],
+                    },
+                    "other": True,
+                },
+                indent=2,
+            )
+        )
+
+        self.run_uninstall()
+
+        after = json.loads(path.read_text())
+        self.assertEqual(
+            after,
+            {
+                "version": 1,
+                "hooks": {
+                    "preCompact": [{"command": "other"}],
+                    "afterFileEdit": [{"command": "keep"}],
+                },
+                "other": True,
+            },
+        )
+
     def test_dry_run_changes_nothing(self) -> None:
         configs = snapshot(self.w.home)
         self.assertTrue(self.run_uninstall(dry_run=True))

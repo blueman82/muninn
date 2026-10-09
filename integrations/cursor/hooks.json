@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "preCompact": [
+      {
+        "command": "@HOME@/.local/bin/muninn hook pre-compact --provider cursor",
+        "timeout": 90
+      }
+    ]
+  }
+}

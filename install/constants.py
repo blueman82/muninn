@@ -24,6 +24,10 @@ CODEX_KEYS = {
 # Substrings that mark a line as ours; none may appear outside our sections.
 MARKERS = (MKT_NAME, "muninn@")
 CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit")
+CURSOR_DOC_URL = (
+    "https://github.com/blueman82/muninn/blob/main/docs/QUICKSTART.md"
+    "#cursor-history"
+)
 # Codex versions whose trust-hash algorithm we have checked: 0.159.2 against
 # the Codex source and binary, 0.159.3 only against a live ``hooks/list``
 # currentHash. Any other version leaves trusting the hooks to the owner
@@ -55,6 +59,7 @@ PINNED = (
     "integrations/codex/.agents/plugins/marketplace.json",
     "integrations/codex/.codex-plugin/plugin.json",
     "integrations/codex/hooks/hooks.json",
+    "integrations/cursor/hooks.json",
     "launchd/com.muninn.plist",
 )
 OWNER_STEP = (

@@ -114,6 +114,25 @@ def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
         )
 
 
+def _restore_cursor(
+    ctx: Ctx,
+    rec: Record,
+    entries: Sequence[Mapping[str, Any]],
+    paths: Sequence[ce.JsonPath],
+) -> None:
+    """Restore Cursor's prior hook keys and remove a newly empty config."""
+    ce.edit_file(
+        ctx.cursor_settings,
+        lambda data: restore_json(data, entries),
+        lambda before, after: ce.json_check(before, after, paths),
+    )
+    if (
+        not rec.get("cursor_file_present")
+        and ce.load_json(ce.read_file(ctx.cursor_settings)) == {}
+    ):
+        ctx.cursor_settings.unlink(missing_ok=True)
+
+
 def _undo_config(ctx: Ctx, rec: Record) -> None:
     """Restore the provider config keys we changed."""
     claude = rec.get("claude", {}).get("settings")
@@ -127,6 +146,15 @@ def _undo_config(ctx: Ctx, rec: Record) -> None:
                 lambda b: restore_json(b, claude),
                 lambda a, b: ce.json_check(a, b, paths),
             ),
+        )
+    cursor = rec.get("cursor")
+    if cursor and ctx.cursor_settings.exists():
+        paths = [tuple(e["path"]) for e in cursor]
+
+        _act(
+            ctx,
+            f"restore {len(paths)} keys in {ctx.cursor_settings.name}",
+            lambda: _restore_cursor(ctx, rec, cursor, paths),
         )
     if rec.get("codex"):
         _act(

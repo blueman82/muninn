@@ -10,17 +10,18 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from install import configedit as ce
 from install.constants import CLAUDE_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.lifecycle import preflight_service
-from install.provider_paths import codex_argv, render_pinned
+from install.provider_paths import codex_argv, cursor_command, render_pinned
 from install.record import Record
 from install.snapshot import release_schema
 from install.transforms import (
     drop_trust,
+    edit_cursor_settings,
     edit_settings,
     enable,
     repoint,
@@ -31,11 +32,41 @@ from muninn.platform_paths import read_selection
 from tools.standards import check_repo
 
 CODEX_HOOKS_FILE = "integrations/codex/hooks/hooks.json"
+CURSOR_HOOKS_FILE = "integrations/cursor/hooks.json"
+EMPTY_CURSOR_CONFIG = b'{"version":1,"hooks":{}}\n'
 
 
 def _git(ctx: Ctx, repo: Path, *args: str) -> bytes:
     """Run a read-only git command in ``repo`` and return its stdout."""
     return must(ctx, ["git", "-C", repo, *args], env=GIT_ENV).stdout
+
+
+def _check_cursor_fragment(data: bytes, ctx: Ctx) -> None:
+    """Verify the pinned Cursor fragment contains Muninn's single hook.
+
+    Args:
+        data: The pinned Cursor hooks.json bytes.
+        ctx: Native installation context used in the expected command.
+
+    Raises:
+        StepFailedError: If the fragment does not match the expected shape.
+    """
+    fragment: Any = json.loads(data)
+    hooks: Any = fragment.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise StepFailedError("Cursor hook fragment must be an object")
+    hook_map = cast(dict[str, Any], hooks)
+    if set(hook_map) != {"preCompact"}:
+        raise StepFailedError("Cursor hook fragment must be preCompact only")
+    handlers: Any = hook_map["preCompact"]
+    if not isinstance(handlers, list):
+        raise StepFailedError("Cursor hook fragment must contain one handler")
+    handler_list = cast(list[Any], handlers)
+    if len(handler_list) != 1 or not isinstance(handler_list[0], dict):
+        raise StepFailedError("Cursor hook fragment must contain one handler")
+    handler = cast(dict[str, Any], handler_list[0])
+    if handler.get("command") != cursor_command(ctx):
+        raise StepFailedError("Cursor hook fragment has an unexpected command")
 
 
 def _check_repo(
@@ -88,6 +119,7 @@ def _check_repo(
         raise StepFailedError(
             "Claude hook fragment must be SessionStart+UserPromptSubmit"
         )
+    _check_cursor_fragment(files[CURSOR_HOOKS_FILE], ctx)
     return files, fragment
 
 
@@ -159,7 +191,10 @@ def _check_machine(ctx: Ctx) -> None:
 
 
 def _dry_apply(
-    ctx: Ctx, files: dict[str, bytes], fragment: dict[str, Any]
+    ctx: Ctx,
+    files: dict[str, bytes],
+    fragment: dict[str, Any],
+    provider_configs: bool,
 ) -> None:
     """Run every config transform on the real files and discard the result.
 
@@ -170,23 +205,39 @@ def _dry_apply(
         ctx: The run context.
         files: The pinned files from ``_check_repo``.
         fragment: The Claude hook groups per event.
+        provider_configs: Whether Claude and Codex config will be edited.
 
     Raises:
         RefusedError: If a config file has a layout the edits refuse.
         json.JSONDecodeError: If settings.json is not valid JSON.
     """
-    if ctx.settings.exists():
-        edit_settings(ce.read_file(ctx.settings), fragment)
-    if ctx.config.exists():
-        if ctx.platform == "win32":
-            codex_argv(ctx, "--version")
-        text = ce.read_file(ctx.config).decode()
-        hooks = codex_hooks(files[CODEX_HOOKS_FILE])
-        text = drop_trust(text)
-        text = enable(
-            repoint(text, str((ctx.lib / "current") / "integrations/codex"))
+    if provider_configs:
+        if ctx.settings.exists():
+            edit_settings(ce.read_file(ctx.settings), fragment)
+        if ctx.config.exists():
+            if ctx.platform == "win32":
+                codex_argv(ctx, "--version")
+            text = ce.read_file(ctx.config).decode()
+            hooks = codex_hooks(files[CODEX_HOOKS_FILE])
+            text = drop_trust(text)
+            text = enable(
+                repoint(
+                    text, str((ctx.lib / "current") / "integrations/codex")
+                )
+            )
+            write_trust(text, hooks)
+    if ctx.cursor_hooks:
+        if ctx.cursor_settings.is_symlink():
+            raise ce.RefusedError("Cursor hooks.json must not be a symlink")
+        doc = (
+            ce.read_file(ctx.cursor_settings)
+            if ctx.cursor_settings.exists()
+            else EMPTY_CURSOR_CONFIG
         )
-        write_trust(text, hooks)
+        fragment = json.loads(files[CURSOR_HOOKS_FILE])
+        [handler] = fragment["hooks"]["preCompact"]
+        changed = edit_cursor_settings(doc, cursor_command(ctx), handler)
+        ce.json_check(doc, changed, [("version",), ("hooks", "preCompact")])
 
 
 def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
@@ -213,8 +264,8 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     preflight_service(ctx)
     # An upgrade re-pins only; provider config was set up by the fresh run.
     touch = not ctx.upgrade
-    if touch:
-        _dry_apply(ctx, files, fragment)
+    if touch or ctx.cursor_hooks:
+        _dry_apply(ctx, files, fragment, touch)
     schema = release_schema(ctx, repo, sha) if ctx.upgrade else None
     selection = None
     if ctx.platform == "win32" and ctx.upgrade:
@@ -224,6 +275,7 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
         "upgrade": ctx.upgrade,
         "has_claude": touch and ctx.settings.exists(),
         "has_codex": touch and ctx.config.exists(),
+        "cursor_hooks": ctx.cursor_hooks,
         "schema": 1,
         "ts": ctx.ts,
         "home": str(ctx.home),

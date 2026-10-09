@@ -33,6 +33,7 @@ PINNED = (
     "integrations/codex/.agents/plugins/marketplace.json",
     "integrations/codex/.codex-plugin/plugin.json",
     "integrations/codex/hooks/hooks.json",
+    "integrations/cursor/hooks.json",
     "launchd/com.muninn.plist",
     "muninn/store_schema.py",
 )
@@ -45,7 +46,10 @@ REAL_CODEX = {
     "user_prompt_submit:0:0": "sha256:0f70ed084cf82ab3f801aca70bbf2a5bda6b6ec9"
     "3d5b72bbcf264a74d7b3f80d",
 }
-CONFIG_FILES = (".claude/settings.json", ".codex/config.toml")
+CONFIG_FILES = (
+    ".claude/settings.json",
+    ".codex/config.toml",
+)
 
 
 def git(cwd: Path, *args: str) -> bytes:

@@ -80,6 +80,86 @@ def edit_settings(data: bytes, fragment: Mapping[str, Sequence[Any]]) -> bytes:
     return ce.dump_like(data, obj)
 
 
+def cursor_ours(handler: Mapping[str, Any], command: str) -> bool:
+    """Say whether a Cursor handler is Muninn's preCompact hook."""
+    return handler.get("command") == command
+
+
+def edit_cursor_settings(data: bytes, command: str, handler: Any) -> bytes:
+    """Merge Muninn's preCompact handler while preserving other Cursor hooks.
+
+    Args:
+        data: Existing Cursor hooks.json bytes.
+        command: Muninn's rendered native hook command.
+        handler: The pinned preCompact handler to install.
+
+    Returns:
+        The edited JSON, preserving every other hook and top-level value.
+
+    Raises:
+        RefusedError: If Cursor's version or hooks shape is unsupported.
+    """
+    obj = ce.load_json(data)
+    if obj.get("version", 1) != 1:
+        raise ce.RefusedError("hooks.json version is not supported")
+    hooks_value: Any = obj.setdefault("hooks", {})
+    if not isinstance(hooks_value, dict):
+        raise ce.RefusedError("hooks.json hooks is not an object")
+    hooks = cast(dict[str, Any], hooks_value)
+    handlers: Any = hooks.get("preCompact", [])
+    if not isinstance(handlers, list):
+        raise ce.RefusedError("hooks.json hooks.preCompact is not a list")
+    handler_list = cast(list[Any], handlers)
+    if any(not isinstance(handler, dict) for handler in handler_list):
+        raise ce.RefusedError("hooks.json preCompact handler is not an object")
+    current = cast(list[dict[str, Any]], handler_list)
+    hooks["preCompact"] = [
+        h for h in current if not cursor_ours(h, command)
+    ] + [handler]
+    obj["version"] = 1
+    return ce.dump_like(data, obj)
+
+
+def drop_cursor_settings(data: bytes, command: str) -> bytes:
+    """Remove Muninn's Cursor handler and preserve all other hook settings.
+
+    Args:
+        data: Cursor hooks.json bytes.
+        command: Muninn's rendered native hook command.
+
+    Returns:
+        The original bytes when the handler is absent, or edited JSON when
+        it is removed.
+
+    Raises:
+        RefusedError: If the preCompact event is not a list.
+    """
+    obj = ce.load_json(data)
+    hooks_value: Any = obj.get("hooks", {})
+    if not isinstance(hooks_value, dict):
+        raise ce.RefusedError("hooks.json hooks is not an object")
+    hooks = cast(dict[str, Any], hooks_value)
+    handlers: Any = hooks.get("preCompact")
+    if handlers is None:
+        return data
+    if not isinstance(handlers, list):
+        raise ce.RefusedError("hooks.json hooks.preCompact is not a list")
+    handler_list = cast(list[Any], handlers)
+    if any(not isinstance(handler, dict) for handler in handler_list):
+        raise ce.RefusedError("hooks.json preCompact handler is not an object")
+    current = cast(list[dict[str, Any]], handler_list)
+    kept = [h for h in current if not cursor_ours(h, command)]
+    if len(kept) == len(current):
+        return data
+    if kept:
+        hooks["preCompact"] = kept
+    else:
+        hooks.pop("preCompact")
+    if not hooks:
+        obj.pop("hooks")
+    return ce.dump_like(data, obj)
+
+
 def codex_scan(text: str) -> dict[str, dict[str, Any] | None]:
     """Parse our config.toml sections and refuse stray markers.
 

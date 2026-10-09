@@ -31,6 +31,7 @@ _SUMMARY_FIELDS = (
     "failed",
     "sweep_failed",
     "snapshot",
+    "cursor_hooks",
 )
 
 
@@ -108,6 +109,8 @@ def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
         if rec["has_claude"]
     ]
     keys += [e["header"] for e in rec["codex"] if rec["has_codex"]]
+    if rec.get("cursor_hooks"):
+        keys.append("hooks.preCompact")
     out = {k: rec.get(k) for k in _SUMMARY_FIELDS}
     out |= {
         "outcome": outcome,

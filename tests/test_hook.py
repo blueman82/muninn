@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlite3 import Connection
 from unittest import mock
 
-from muninn import hook, obs, store
+from muninn import hook, hook_context, obs, store
 from tests import test_classify as tc
 from tests import test_knowledge as tk
 from tests.hook_nonregular import nonregular
@@ -304,6 +304,23 @@ class FailOpenTests(HookCase):
         self.assertIn(USAGE, self.body(self.start(transcript_path="a\0b")))
         self.assertIn(
             USAGE, self.body(hook.session_start({}, "nonsense", self.env))
+        )
+
+    def test_cursor_project_directory_is_provider_scoped(self) -> None:
+        env = {"CURSOR_PROJECT_DIR": "/cursor-project"}
+        self.assertEqual(
+            hook_context.project_cwd(
+                {"cwd": "/payload-project"},
+                hook_context.env_for_provider(env, "claude"),
+            ),
+            "/payload-project",
+        )
+        self.assertEqual(
+            hook_context.project_cwd(
+                {"cwd": "/payload-project"},
+                hook_context.env_for_provider(env, "cursor"),
+            ),
+            "/cursor-project",
         )
 
     def test_bounded_stdin_64k(self) -> None:

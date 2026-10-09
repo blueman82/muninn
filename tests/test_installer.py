@@ -216,6 +216,38 @@ class FreshInstallTest(unittest.TestCase):
         repo = self.w.repo / "integrations/claude/settings-hooks.json"
         self.assertIn(b"@HOME@", repo.read_bytes())
 
+    def test_cursor_hooks_merge_and_rollback_preserve_existing_settings(
+        self,
+    ) -> None:
+        w, h = self.w, self.w.home
+        path = h / ".cursor/hooks.json"
+        path.parent.mkdir()
+        before = (
+            b'{"version":1,"hooks":{"preCompact":[{"command":"other"}],'
+            b'"afterFileEdit":[{"command":"keep"}]},"other":true}\n'
+        )
+        path.write_bytes(before)
+
+        rec = self.install(cursor_hooks=True)
+
+        installed = json.loads(path.read_bytes())
+        handlers = installed["hooks"]["preCompact"]
+        self.assertEqual(handlers[0], {"command": "other"})
+        self.assertEqual(
+            handlers[1]["command"],
+            f"{h}/.local/bin/muninn hook pre-compact --provider cursor",
+        )
+        self.assertEqual(
+            installed["hooks"]["afterFileEdit"], [{"command": "keep"}]
+        )
+        self.assertTrue(rec["cursor"])
+        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
+        self.assertIn("hooks.preCompact", out["config_keys"])
+
+        record = Path(rec["rdir"]) / "rollback-record.json"
+        rb.rollback(w.ctx(), co.load_record(record))
+        self.assertEqual(json.loads(path.read_bytes()), json.loads(before))
+
     def test_inherited_muninn_env_never_reaches_muninn(self) -> None:
         with mock.patch.dict(os.environ, {"MUNINN_ROOTS": "{}"}):
             # Fake._muninn asserts MUNINN_ROOTS is absent from the child env.

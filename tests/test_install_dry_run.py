@@ -61,7 +61,7 @@ class UpgradePlanTest(unittest.TestCase):
 
     def test_says_provider_config_is_left_alone(self) -> None:
         self.assertNotIn("config keys", self.said)
-        self.assertIn("would not touch Claude or Codex settings", self.said)
+        self.assertIn("would not touch provider settings", self.said)
 
     def test_explains_history_import_would_be_skipped(self) -> None:
         self.assertIn(
