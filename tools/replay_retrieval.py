@@ -27,9 +27,9 @@ from pathlib import Path
 from typing import Any
 
 from muninn import ingest, query, store
+from muninn.query.hits import CANDIDATES
 from muninn.query.ranked import SearchArgs, candidate_rows
 
-REAL_CANDIDATES = 300  # muninn.query.hits.CANDIDATES
 REAL_FINAL = 10  # the CLI search page limit default
 
 
@@ -132,7 +132,7 @@ def _replay(
         "id": item["id"],
         "control": False,
         "refs": refs,
-        "all_in_candidates": all(r["rank"] for r in refs),
+        "all_in_candidates": all(r["rank"] is not None for r in refs),
         "all_in_final": all(r["in_final"] for r in refs),
     }
 
@@ -177,7 +177,7 @@ def _parser() -> argparse.ArgumentParser:
         "--scope", help="only events whose cwd is exactly this"
     )
     parser.add_argument("--cwd", help="scope root when --no-all-projects")
-    parser.add_argument("--candidates", type=int, default=REAL_CANDIDATES)
+    parser.add_argument("--candidates", type=int, default=CANDIDATES)
     parser.add_argument("--final", type=int, default=REAL_FINAL)
     return parser
 

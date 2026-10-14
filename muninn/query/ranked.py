@@ -254,14 +254,13 @@ def search(
         found = candidate_rows(conn, fts, args)
     except BadArgumentError as bad:
         return error(str(bad))
-    root, rows, ids, where, params, inside = found
     scope, everywhere = args.get("scope"), args.get("all_projects", False)
-    total, other = tally(conn, fts, where, params, inside)
+    total, other = tally(conn, fts, found.where, found.params, found.inside)
     entries, session_capped, tool_capped = compose(
-        rows,
+        found.rows,
         limit,
-        per_session=root is None,
-        tools=not args.get("kinds") and root is None,
+        per_session=found.root is None,
+        tools=not args.get("kinds") and found.root is None,
     )
     pool = entries
     if args.get("recent"):
@@ -272,7 +271,7 @@ def search(
         )
     hits = render(conn, fts, pool, entries, total)
     out |= {
-        "scope": scope_label(conn, ids, scope, everywhere),
+        "scope": scope_label(conn, found.ids, scope, everywhere),
         "hits": hits,
         "page": page,
         "limit": limit,
@@ -280,15 +279,15 @@ def search(
         "stages": {
             "matches": sum(total.values()) + sum(other.values()),
             "in_scope": sum(total.values()),
-            "candidates": len(rows),
+            "candidates": len(found.rows),
             "session_capped": session_capped,
             "tool_capped": tool_capped,
             "returned": len(hits),
         },
     }
-    if root is None:
+    if found.root is None:
         out |= _knowledge_part(
-            conn, fts, ids, everywhere, args.get("push_only", False)
+            conn, fts, found.ids, everywhere, args.get("push_only", False)
         )
     if not total and other:
         out["note"] = _outside_note(sum(other.values()))
