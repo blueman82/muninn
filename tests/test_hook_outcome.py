@@ -102,6 +102,24 @@ class HookOutcomeTests(RecallCase):
         self.assertEqual(out, {})
         self.assertEqual(trace["stages"], {"floor_dropped": 0, "returned": 0})
 
+    def test_error_on_page_two_is_not_a_miss(self) -> None:
+        for i in range(8):
+            self.talk(f"t{i}", f"alphaterm filler{i} word{i}")
+        self.noise(self.repo)
+        real = hook_recall._search_page
+        pages: list[object] = []
+
+        def flaky(*args: Any) -> Any:
+            pages.append(args[-1])
+            return real(*args) if len(pages) == 1 else {"error": "bad_arg"}
+
+        with mock.patch.object(hook_recall, "_search_page", flaky):
+            trace, out = self.traced()
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(out, {})
+        self.assertEqual(trace["stages"]["matches"], 8)
+        self.assertFalse(MISSES & set(trace["stages"]))
+
     def test_outcome_failure_fails_open(self) -> None:
         self.talk("a", "alphaterm betaterm gammaterm deltaterm here")
         self.noise(self.repo)

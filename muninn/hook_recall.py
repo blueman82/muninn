@@ -174,6 +174,8 @@ def _pool(
     for page in range(1, POOL_PAGES + 1):
         found = _search_page(conn, payload, env, cwd, page)
         if "error" in found:
+            if page > 1:  # later pages unread: the floor outcome is unknown
+                stages = stages | {"pool_error": 1}
             break
         if page == 1:  # knowledge does not change between pages
             entries = _pushable(conn, found["knowledge"])
@@ -206,7 +208,8 @@ def _outcome(
         return out | {"miss_zero": 1}
     if out["in_scope"] == 0:
         return out | {"miss_outside": 1}
-    return out | ({"miss_floor": 1} if dropped else {})
+    unread = "pool_error" in stages  # a later page failed: not a known miss
+    return out | ({"miss_floor": 1} if dropped and not unread else {})
 
 
 def recall_block(
