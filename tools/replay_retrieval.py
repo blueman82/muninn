@@ -24,12 +24,13 @@ import json
 import os
 import sqlite3
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any, cast
 
 from muninn import ingest, query, store
 from muninn.query.answers import BadArgumentError
-from muninn.query.hits import CANDIDATES
+from muninn.query.hits import CANDIDATES, PER_SESSION
 from muninn.query.ranked import SearchArgs, candidate_rows
 
 REAL_FINAL = 10  # the CLI search page limit default
@@ -106,6 +107,18 @@ def _resolve(
     return opened["id"], opened["hash_ok"] is True
 
 
+def _diversity(hits: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count sessions and bytes of the final hits, as search reports them."""
+    sessions = Counter(hit["session"] for hit in hits)
+    return {
+        "distinct_sessions": len(sessions),
+        "max_session_share": _rate(
+            max(sessions.values(), default=0), len(hits)
+        ),
+        "final_bytes": len(json.dumps(hits).encode()),
+    }
+
+
 def _replay(
     conn: sqlite3.Connection,
     item: dict[str, Any],
@@ -123,18 +136,24 @@ def _replay(
     rows = candidate_rows(conn, fts, base, args.candidates).rows if fts else []
     ranked = [row["id"] for row in rows]
     no_terms = fts is None
+    final_args: SearchArgs = {
+        **base,
+        "limit": args.final,
+        "per_session_cap": args.per_session,
+    }
+    final = query.search(conn, item["query"], **final_args)
+    if "error" in final:
+        raise BadArgumentError(str(final["error"]))
+    final_ids = [hit["id"] for hit in final["hits"]]
+    cost = _diversity(final["hits"])
     if item["control"]:
         return {
             "id": item["id"],
             "control": True,
             "no_terms": no_terms,
             "results": len(ranked),
+            "final_hits": len(final_ids),
         }
-    final_args: SearchArgs = {**base, "limit": args.final}
-    final = query.search(conn, item["query"], **final_args)
-    if "error" in final:
-        raise BadArgumentError(str(final["error"]))
-    final_ids = [hit["id"] for hit in final["hits"]]
     refs: list[dict[str, Any]] = []
     for ref in item["required"]:
         event_id, resolves = _resolve(conn, ref, roots)
@@ -154,6 +173,8 @@ def _replay(
         "refs": refs,
         "all_in_candidates": all(r["rank"] is not None for r in refs),
         "all_in_final": all(r["in_final"] for r in refs),
+        "final_hits": len(final_ids),
+        **cost,
     }
 
 
@@ -162,12 +183,25 @@ def _rate(hit: int, total: int) -> float | None:
     return round(hit / total, 4) if total else None
 
 
+def _mean(values: list[float]) -> float | None:
+    """Return the mean rounded to 4 places, or None for no values."""
+    return round(sum(values) / len(values), 4) if values else None
+
+
 def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate the per-question results into the four headline numbers."""
     gold = [r for r in results if not r["control"]]
     controls = [r for r in results if r["control"]]
     refs = [ref for r in gold for ref in r["refs"]]
     return {
+        **{
+            f"{key}_mean": _mean([r[key] for r in gold if r[key] is not None])
+            for key in (
+                "distinct_sessions",
+                "max_session_share",
+                "final_bytes",
+            )
+        },
         "candidate_recall": _rate(
             sum(ref["rank"] is not None for ref in refs), len(refs)
         ),
@@ -203,6 +237,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--cwd", help="scope root when --no-all-projects")
     parser.add_argument("--candidates", type=int, default=CANDIDATES)
     parser.add_argument("--final", type=int, default=REAL_FINAL)
+    parser.add_argument(
+        "--per-session",
+        type=int,
+        default=PER_SESSION,
+        help="hits one session may keep in the final list (>= 1)",
+    )
     return parser
 
 
@@ -218,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
         the store cannot be read.
     """
     args = _parser().parse_args(argv)
-    if not 1 <= args.final <= 30 or args.candidates < 1:
+    if not 1 <= args.final <= 30 or min(args.candidates, args.per_session) < 1:
         print("invalid option", file=sys.stderr)
         return 2
     try:
@@ -240,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "candidates": args.candidates,
         "final": args.final,
+        "per_session": args.per_session,
         "summary": _summary(results),
         "questions": results,
     }

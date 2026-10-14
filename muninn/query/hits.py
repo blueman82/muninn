@@ -82,18 +82,20 @@ def compose(
     *,
     per_session: bool,
     tools: bool,
+    per_session_cap: int = PER_SESSION,
 ) -> tuple[list[Entry], int, int]:
     """Turn rank-ordered rows into page-ready entries.
 
     Identical text within a session collapses into its first hit (repeats);
-    then at most PER_SESSION hits per session and TOOLS_PER_PAGE tool_call
-    hits in each ``limit``-sized page are kept.
+    then at most ``per_session_cap`` (PER_SESSION) hits per session and
+    TOOLS_PER_PAGE tool_call hits in each ``limit``-sized page are kept.
 
     Args:
         rows: Candidate rows in rank order.
         limit: Hits per page, which sets where the tool budget resets.
         per_session: Cap the hits any one session may contribute.
         tools: Cap the tool_call hits on each page.
+        per_session_cap: Hits one session may contribute when ``per_session``.
 
     Returns:
         The entries, how many the session cap dropped and how many the tool
@@ -111,7 +113,7 @@ def compose(
         if key in seen:
             seen[key]["repeats"] += 1
             continue
-        if per_session and shown[root] >= PER_SESSION:
+        if per_session and shown[root] >= per_session_cap:
             session_capped += 1
             continue
         is_tool = row["kind"] == "tool_call"

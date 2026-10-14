@@ -66,3 +66,17 @@ Cursor has no UserPromptSubmit hook, so only `muninn search` outcomes apply to
 Cursor content; `hook prompt` outcomes never cover it. Take each REF from the
 `ref` field of `muninn search` output. The questions file must be your own data
 and is never committed.
+
+### Trying a different per-session cap
+
+`--per-session N` (default 2, an integer of 1 or more) sets the per-session cap
+used for the final list, so `in_final` reflects it; the candidate ranks are
+unaffected. The cap counts hits across the whole candidate list, not per page,
+and the hits it drops are gone for good: paging does not bring them back.
+
+Each question reports `final_hits` (controls too), and each question that has
+required refs also reports `distinct_sessions` (sessions in the final list),
+`max_session_share` (the largest fraction of the final list that one session
+supplies) and `final_bytes` (bytes of the returned hits as search reports
+them). The summary adds the mean of each over those questions. Counts and
+ratios only, as before.

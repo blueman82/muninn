@@ -49,3 +49,23 @@ class CandidateRowsTests(QueryCase):
     def test_search_output_matches_golden(self) -> None:
         got = json.loads(json.dumps(self.build(), sort_keys=True))
         self.assertEqual(got, json.loads(GOLDEN.read_text()))
+
+
+class PerSessionCapTests(QueryCase):
+    """The per-session cap is a knob whose default is today's value."""
+
+    def test_default_is_two_and_a_cap_changes_the_list(self) -> None:
+        repo = self.add_scope("/repo")
+        src = self.add_source("one")
+        for text in ("kiwi alpha", "kiwi beta", "kiwi gamma"):
+            self.add_event(src, repo, text)
+        self.noise(repo)
+
+        def count(**kw: Any) -> int:
+            """Return how many hits the search keeps."""
+            return len(self.search("kiwi", **kw)["hits"])
+
+        self.assertEqual(count(), 2)
+        self.assertEqual(count(per_session_cap=2), 2)
+        self.assertEqual(count(per_session_cap=1), 1)
+        self.assertEqual(count(per_session_cap=3), 3)

@@ -67,13 +67,16 @@ def _terms(fts: str | None) -> list[str]:
 
 
 def prompt_terms(
-    payload: Mapping[str, object], trace: dict[str, object]
+    payload: Mapping[str, object],
+    trace: dict[str, object],
+    min_terms: int = MIN_TERMS,
 ) -> list[str] | None:
     """Extract the query terms of the prompt.
 
     Args:
         payload: The provider's hook payload.
         trace: Receives ``skipped`` and ``n_terms`` for the stage log.
+        min_terms: The term floor; the default is ``MIN_TERMS``.
 
     Returns:
         The terms, or None when the prompt recalls nothing: no prompt, a
@@ -85,7 +88,7 @@ def prompt_terms(
         return None
     terms = _terms(query.build_fts_query(prompt))
     trace["n_terms"] = len(terms)
-    if len(terms) < MIN_TERMS:
+    if len(terms) < min_terms:
         trace["skipped"] = "short"
         return None
     return terms
@@ -159,6 +162,7 @@ def _pool(
     env: Mapping[str, str],
     cwd: str,
     terms: list[str],
+    min_terms: int = MIN_TERMS,
 ) -> tuple[list[RecallEntry], list[RecallHit], int, dict[str, int], bool]:
     """Page through search results for events that pass the term floor.
 
@@ -183,7 +187,7 @@ def _pool(
             stages = found.get("stages", {})  # whole-query, same per page
         counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
         for hit in found["hits"]:
-            if counts[hit["id"]] >= MIN_TERMS:
+            if counts[hit["id"]] >= min_terms:
                 hits.append(hit)
             else:
                 dropped += 1
@@ -221,6 +225,7 @@ def recall_block(
     env: Mapping[str, str],
     trace: dict[str, object],
     request: RecallRequest,
+    min_terms: int = MIN_TERMS,
 ) -> str:
     """Build the recall block for the prompt.
 
@@ -230,12 +235,13 @@ def recall_block(
         env: Environment, for the caller's own session.
         trace: Receives ids and stage counts for the stage log.
         request: Terms, scope, notes and size limit.
+        min_terms: The term floor; the default is ``MIN_TERMS``.
 
     Returns:
         The framed block, or an empty string when nothing qualifies.
     """
     entries, hits, dropped, page1, unread = _pool(
-        conn, payload, env, request.cwd, request.terms
+        conn, payload, env, request.cwd, request.terms, min_terms
     )
     hits = hits[:MAX_EVENTS]
     trace["returned_ids"] = [h["id"] for h in hits]

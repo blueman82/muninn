@@ -89,9 +89,14 @@ class ReplayTests(OpenCase):
         self.assertFalse(ghost["refs"][0]["resolves"])
         self.assertEqual(ctl["results"], 0)
         self.assertEqual(ctl2["results"], 3)
+        self.assertEqual((ctl["final_hits"], ctl2["final_hits"]), (0, 2))
+        summary = report["summary"]
+        self.assertGreater(summary.pop("final_bytes_mean"), 0)
         self.assertEqual(
-            report["summary"],
+            summary,
             {
+                "distinct_sessions_mean": 2.0,
+                "max_session_share_mean": 0.5,
                 "candidate_recall": 0.75,
                 "complete_required_set_at_final": 0.0,
                 "citation_resolves_rate": 0.75,
@@ -247,14 +252,16 @@ class ReplayTests(OpenCase):
             self.assertTrue(ref["resolves"] and inside["resolves"])
             self.assertIsNotNone(inside["rank"])
 
-    def final_flags(self, texts: list[str], query: str) -> list[bool]:
+    def final_flags(
+        self, texts: list[str], query: str, *flags: str
+    ) -> list[bool]:
         """Put the texts in one new session; return each one's in_final."""
-        source = self.add_source("thr-one")
+        source = self.add_source("thr-" + "".join(flags))
         ids = [self.add_event(source, self.repo, text) for text in texts]
         question = [
             {"id": "g", "query": query, "required": [str(i) for i in ids]}
         ]
-        _, report, _ = self.replay(question, "--final", "10")
+        _, report, _ = self.replay(question, "--final", "10", *flags)
         refs = report["questions"][0]["refs"]
         self.assertTrue(all(r["rank"] for r in refs))  # all candidates
         return [r["in_final"] for r in refs]
@@ -268,3 +275,42 @@ class ReplayTests(OpenCase):
         # At most two hits per session: the worst-ranked of three drops.
         texts = ["quark quark quark", "quark quark pad", "quark pad pad pad"]
         self.assertEqual(self.final_flags(texts, "quark"), [True, True, False])
+
+    def test_per_session_flag_moves_the_final_cut(self) -> None:
+        texts = ["quark quark quark", "quark quark pad", "quark pad pad pad"]
+        for cap, want in (
+            ("1", [True, False, False]),
+            ("2", [True, True, False]),
+            ("3", [True, True, True]),
+        ):
+            with self.subTest(cap=cap):
+                got = self.final_flags(texts, "quark", "--per-session", cap)
+                self.assertEqual(got, want)
+
+    def test_diversity_metrics_follow_the_cap(self) -> None:
+        source = self.add_source("thr-one")
+        for text in ("quark quark quark", "quark quark pad", "quark pad pad"):
+            self.add_event(source, self.repo, text)
+        question = [{"id": "g", "query": "quark", "required": ["codex:x:1.1"]}]
+        sizes = []
+        for cap, hits in (("2", 2), ("3", 3)):
+            _, report, _ = self.replay(question, "--per-session", cap)
+            got = report["questions"][0]
+            self.assertEqual(got["final_hits"], hits)
+            self.assertEqual(got["distinct_sessions"], 1)
+            self.assertEqual(got["max_session_share"], 1.0)
+            sizes.append(got["final_bytes"])
+        self.assertLess(sizes[0], sizes[1])
+        _, report, _ = self.replay(
+            [{"id": "z", "query": "zephyr", "required": self.refs}]
+        )
+        got = report["questions"][0]
+        self.assertEqual(got["distinct_sessions"], 3)
+        self.assertEqual(got["max_session_share"], 0.3333)
+
+    def test_bad_per_session_exits_2(self) -> None:
+        question = [{"id": "g", "query": "zephyr", "required": self.refs}]
+        for value in ("0", "-1"):
+            with self.subTest(value=value):
+                code, report, _ = self.replay(question, "--per-session", value)
+                self.assertEqual((code, report), (2, {}))

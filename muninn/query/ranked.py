@@ -23,6 +23,7 @@ from muninn.query.guard import guarded
 from muninn.query.hits import (
     CANDIDATES,
     CANDIDATES_SQL,
+    PER_SESSION,
     compose,
     expired_omitted,
     knowledge,
@@ -59,6 +60,7 @@ class SearchArgs(TypedDict, total=False):
     current_session: str | None
     status: Mapping[str, Any] | None
     push_only: bool
+    per_session_cap: int
 
 
 def _eligibility(
@@ -223,9 +225,10 @@ def search(
             ``kinds``, ``provider``, ``since``, ``until``, ``session``,
             ``recent``, ``limit`` (default 10), ``page`` (default 1),
             ``include_current``, ``scope``, ``include_subagents``,
-            ``current_session``, ``push_only`` (knowledge a hook may push; the
-            CLI also gets restricted entries, flagged) and ``status`` (a
-            parsed status.json).
+            ``current_session``, ``per_session_cap`` (default PER_SESSION; a
+            tuning knob, not a CLI flag), ``push_only`` (knowledge a hook may
+            push; the CLI also gets restricted entries, flagged) and
+            ``status`` (a parsed status.json).
 
     Returns:
         The answer, or ``{"error": code}`` for bad input.
@@ -261,6 +264,7 @@ def search(
         limit,
         per_session=found.root is None,
         tools=not args.get("kinds") and found.root is None,
+        per_session_cap=args.get("per_session_cap", PER_SESSION),
     )
     pool = entries
     if args.get("recent"):
