@@ -259,12 +259,13 @@ def search(
         return error(str(bad))
     scope, everywhere = args.get("scope"), args.get("all_projects", False)
     total, other = tally(conn, fts, found.where, found.params, found.inside)
+    cap = args.get("per_session_cap", PER_SESSION)
     entries, session_capped, tool_capped = compose(
         found.rows,
         limit,
         per_session=found.root is None,
         tools=not args.get("kinds") and found.root is None,
-        per_session_cap=args.get("per_session_cap", PER_SESSION),
+        per_session_cap=cap,
     )
     pool = entries
     if args.get("recent"):
@@ -273,7 +274,7 @@ def search(
             key=lambda e: e["row"]["ts"] or "",
             reverse=True,
         )
-    hits = render(conn, fts, pool, entries, total)
+    hits = render(conn, fts, pool, entries, total, cap)
     out |= {
         "scope": scope_label(conn, found.ids, scope, everywhere),
         "hits": hits,

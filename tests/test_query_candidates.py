@@ -69,3 +69,19 @@ class PerSessionCapTests(QueryCase):
         self.assertEqual(count(per_session_cap=2), 2)
         self.assertEqual(count(per_session_cap=1), 1)
         self.assertEqual(count(per_session_cap=3), 3)
+
+    def test_more_in_session_follows_the_cap(self) -> None:
+        repo = self.add_scope("/repo")
+        src = self.add_source("one")
+        for text in ("kiwi a", "kiwi b", "kiwi c", "kiwi d"):
+            self.add_event(src, repo, text)
+        self.noise(repo)
+
+        def more(**kw: Any) -> list[Any]:
+            """Return each hit's more_in_session."""
+            hits = self.search("kiwi", **kw)["hits"]
+            return [h.get("more_in_session") for h in hits]
+
+        self.assertEqual(more(), [2, 2])
+        self.assertEqual(more(per_session_cap=3), [1, 1, 1])
+        self.assertEqual(more(per_session_cap=1), [3])
