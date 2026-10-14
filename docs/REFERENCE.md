@@ -118,9 +118,10 @@ flagged, `know check` reports an `expired` count, and `stats` counts it under
 `calls.jsonl` can carry 0/1 integer flags, present only when 1: `miss_zero` (searchable terms
 but no match), `miss_outside` (matches, none in scope), and for search `miss_noterms`
 (no searchable terms; `stages` then holds only this key) or for the hook `miss_floor`
-(matches in scope, all dropped by the term floor; not set when a later result page could
-not be read). The hook's `stages` holds `floor_dropped`,
-`returned`, and, when its search answered, `matches` and `in_scope` plus at most one miss key;
+(every event read was dropped by the term floor; pages not read when the pool stopped at its
+page limit). The hook's `stages` holds `floor_dropped`, `returned`, `pool_error` (set when
+any result page errored; `miss_floor` is then left out) and, when its search answered,
+`matches` and `in_scope` plus at most one miss key;
 it logs `n_terms` but no query hash or text. A flag is set only when the call returned no hit
 and no knowledge; an errored call never sets one. `MUNINN_NO_CALLLOG=1` stops the log. These are facts about a call,
 not proof that the answer was missing; only the labeled replay in

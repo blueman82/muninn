@@ -107,8 +107,11 @@ def _scan_calls(home: Path) -> tuple[int, dict[str, object]]:
     }
     for name in ("calls.jsonl.1", "calls.jsonl"):
         try:
-            lines = (home / name).read_text().splitlines()
-        except OSError:
+            path = home / name
+            lines = path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
+        except (OSError, ValueError):
             continue
         for line in lines:
             try:
@@ -122,10 +125,10 @@ def _scan_calls(home: Path) -> tuple[int, dict[str, object]]:
             stages: dict[str, object] = (
                 cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
             )
-            if cmd in counts:
+            if isinstance(cmd, str) and cmd in counts:
                 counts[cmd]["calls"] += 1
                 for key, miss in _MISSES[cmd].items():
-                    counts[cmd][key] += bool(stages.get(miss))
+                    counts[cmd][key] += stages.get(miss) == 1
     return bad, {
         "window_lines": window,
         "search": counts["search"],

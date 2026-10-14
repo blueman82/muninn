@@ -159,23 +159,24 @@ def _pool(
     env: Mapping[str, str],
     cwd: str,
     terms: list[str],
-) -> tuple[list[RecallEntry], list[RecallHit], int, dict[str, int]]:
+) -> tuple[list[RecallEntry], list[RecallHit], int, dict[str, int], bool]:
     """Page through search results for events that pass the term floor.
 
     Returns:
         The pushable knowledge, events matching at least ``MIN_TERMS``
         terms (possibly more than ``MAX_EVENTS``), how many events the
-        floor dropped, and page 1's stage counts (empty when page 1 failed).
+        floor dropped, page 1's stage counts (empty when page 1 failed),
+        and whether any page errored, leaving later events unread.
     """
     entries: list[RecallEntry] = []
     hits: list[RecallHit] = []
     dropped = 0
     stages: dict[str, int] = {}
+    unread = False
     for page in range(1, POOL_PAGES + 1):
         found = _search_page(conn, payload, env, cwd, page)
         if "error" in found:
-            if page > 1:  # later pages unread: the floor outcome is unknown
-                stages = stages | {"pool_error": 1}
+            unread = True  # the floor outcome is unknown
             break
         if page == 1:  # knowledge does not change between pages
             entries = _pushable(conn, found["knowledge"])
@@ -188,27 +189,29 @@ def _pool(
                 dropped += 1
         if len(hits) >= MAX_EVENTS or not found["has_more"]:
             break
-    return entries, hits, dropped, stages
+    return entries, hits, dropped, stages, unread
 
 
 def _outcome(
-    stages: dict[str, int], dropped: int, found: bool
+    stages: dict[str, int], dropped: int, found: bool, unread: bool
 ) -> dict[str, int]:
     """Count-only outcome keys: page 1's tallies and at most one miss.
 
     Returns:
-        ``matches`` and ``in_scope`` when page 1 answered, plus the miss
-        key (``miss_zero``, ``miss_outside`` or ``miss_floor``) when
-        nothing was returned. Empty when page 1 failed.
+        ``matches`` and ``in_scope`` when page 1 answered, ``pool_error``
+        when any page errored, plus the miss key (``miss_zero``,
+        ``miss_outside`` or ``miss_floor``) when nothing was returned.
+        ``miss_floor`` is left out when pages went unread.
     """
     out = {k: stages[k] for k in ("matches", "in_scope") if k in stages}
-    if found or not out:
+    if unread:
+        out["pool_error"] = 1
+    if found or "matches" not in out:
         return out
     if out["matches"] == 0:
         return out | {"miss_zero": 1}
     if out["in_scope"] == 0:
         return out | {"miss_outside": 1}
-    unread = "pool_error" in stages  # a later page failed: not a known miss
     return out | ({"miss_floor": 1} if dropped and not unread else {})
 
 
@@ -231,7 +234,7 @@ def recall_block(
     Returns:
         The framed block, or an empty string when nothing qualifies.
     """
-    entries, hits, dropped, page1 = _pool(
+    entries, hits, dropped, page1, unread = _pool(
         conn, payload, env, request.cwd, request.terms
     )
     hits = hits[:MAX_EVENTS]
@@ -239,7 +242,7 @@ def recall_block(
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
     stages = {"floor_dropped": dropped, "returned": len(hits)}
     with contextlib.suppress(Exception):  # logging must not fail recall
-        stages |= _outcome(page1, dropped, bool(entries or hits))
+        stages |= _outcome(page1, dropped, bool(entries or hits), unread)
     trace["stages"] = stages
     if not entries and not hits:
         return ""

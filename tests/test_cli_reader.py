@@ -175,6 +175,35 @@ class ReaderTests(CliCase):
         last = (self.home / "calls.jsonl").read_text().splitlines()[-1]
         self.assertEqual(json.loads(last).get("stages", {}), {})
 
+    def test_answer_without_stages_cannot_crash_a_search(self) -> None:
+        answer = {"hits": [], "knowledge": []}
+        with mock.patch("muninn.cli_read.read_store", return_value=answer):
+            code, _, _ = self.muninn("search", "alphaterm betaterm")
+        self.assertEqual(code, 0)
+        last = (self.home / "calls.jsonl").read_text().splitlines()[-1]
+        self.assertEqual(json.loads(last).get("stages", {}), {})
+        bare: dict[str, object] = {}
+        with mock.patch("muninn.cli_read.read_store", return_value=bare):
+            code, _, _ = self.muninn("search", "alphaterm betaterm")
+        self.assertEqual(code, 0)
+
+    def test_knowledge_without_hits_is_not_a_miss(self) -> None:
+        answer = {
+            "hits": [],
+            "knowledge": [{"id": "K1"}],
+            "stages": {"matches": 0, "in_scope": 0},
+        }
+        with mock.patch("muninn.cli_read.read_store", return_value=answer):
+            self.muninn("search", "alphaterm betaterm")
+        last = (self.home / "calls.jsonl").read_text().splitlines()[-1]
+        stages = json.loads(last)["stages"]
+        self.assertFalse([k for k in stages if k.startswith("miss_")])
+
+    def test_page_two_after_a_page_one_hit_is_not_a_miss(self) -> None:
+        self.assertEqual(self.logged_stages("search", CANARY)["matches"], 1)
+        stages = self.logged_stages("search", CANARY, "--page", "2")
+        self.assertFalse([k for k in stages if k.startswith("miss_")])
+
     def test_calls_log_has_no_text(self) -> None:
         self.muninn("search", CANARY)
         self.muninn("open", f"codex:{TID}:2.1")

@@ -72,12 +72,12 @@ def search(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     n_terms = fts.count(" OR ") + 1 if fts else 0
     stages: dict[str, int] = dict(out.get("stages", {}))
     # A miss is an answer with no hits and no knowledge; an error is not one.
-    if "error" not in out and not out["hits"] and not out["knowledge"]:
+    if "error" not in out and not out.get("hits") and not out.get("knowledge"):
         if not n_terms:
             stages["miss_noterms"] = 1
-        elif stages["matches"] == 0:
+        elif stages.get("matches") == 0:
             stages["miss_zero"] = 1
-        elif stages["in_scope"] == 0:
+        elif stages.get("in_scope") == 0:
             stages["miss_outside"] = 1
     # The call log gets a 12-hex digest of the query, never its text.
     record |= {
