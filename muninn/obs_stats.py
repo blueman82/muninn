@@ -11,6 +11,7 @@ import sqlite3
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from muninn import classify, store
 from muninn.knowledge_expiry import LIVE_SQL
@@ -73,9 +74,37 @@ def db_space(conn: sqlite3.Connection) -> dict[str, int | float]:
     }
 
 
-def _hash_mismatches(home: Path) -> int:
-    """Count open-time line hash failures recorded in the call logs."""
-    bad = 0
+_MISSES = {
+    "search": {
+        "zero": "miss_zero",
+        "outside": "miss_outside",
+        "noterms": "miss_noterms",
+    },
+    "hook prompt": {
+        "zero": "miss_zero",
+        "outside": "miss_outside",
+        "floor": "miss_floor",
+    },
+}
+
+
+def _scan_calls(home: Path) -> tuple[int, dict[str, object]]:
+    """Read both call logs once for hash failures and outcome counts.
+
+    Args:
+        home: Data directory.
+
+    Returns:
+        The count of open-time line hash failures and the
+        ``retrieval_outcomes`` report. A torn or foreign line is neither a
+        mismatch nor counted in ``window_lines``; a call without ``stages``
+        counts in ``calls`` only.
+    """
+    bad = window = 0
+    counts = {
+        cmd: {"calls": 0} | dict.fromkeys(misses, 0)
+        for cmd, misses in _MISSES.items()
+    }
     for name in ("calls.jsonl.1", "calls.jsonl"):
         try:
             lines = (home / name).read_text().splitlines()
@@ -83,10 +112,25 @@ def _hash_mismatches(home: Path) -> int:
             continue
         for line in lines:
             try:
-                bad += json.loads(line).get("hash_ok") is False
+                call = json.loads(line)
+                bad += call.get("hash_ok") is False
+                cmd = call.get("cmd")
+                raw: object = call.get("stages")
             except (ValueError, AttributeError):
                 continue  # a torn or foreign line is not a mismatch
-    return bad
+            window += 1
+            stages: dict[str, object] = (
+                cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
+            )
+            if cmd in counts:
+                counts[cmd]["calls"] += 1
+                for key, miss in _MISSES[cmd].items():
+                    counts[cmd][key] += bool(stages.get(miss))
+    return bad, {
+        "window_lines": window,
+        "search": counts["search"],
+        "hook_prompt": counts["hook prompt"],
+    }
 
 
 def _pairs(
@@ -259,7 +303,7 @@ def stats(
     out["reread"] = reread(conn)
     out["install_sha"] = install_sha(env) or status.get("install_sha")
     out["classifier_version"] = classify.CLASSIFIER_VERSION
-    out["hash_mismatches"] = _hash_mismatches(home)
+    out["hash_mismatches"], out["retrieval_outcomes"] = _scan_calls(home)
     if usage:
         out |= _usage(conn)
     return out
