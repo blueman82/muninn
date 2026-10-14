@@ -114,6 +114,16 @@ untouched; `know list --status expired` shows it, `--status all` and `know show`
 flagged, `know check` reports an `expired` count, and `stats` counts it under
 `knowledge.expired` instead of `knowledge.current`.
 
+**Retrieval outcomes are counted.** `stages` in a `search` or `hook prompt` line of
+`calls.jsonl` can carry 0/1 integer flags, left out when 0: `miss_zero` (searchable terms
+but no match), `miss_outside` (matches, none in scope), and for search `miss_noterms`
+(no searchable terms) or for the hook `miss_floor` (every match fell below the term
+floor). The hook also logs `matches` and `in_scope`, and logs no query hash or text. A
+flag is set only when the call returned no hit and no knowledge; a skipped or errored
+call never sets one. `MUNINN_NO_CALLLOG=1` stops the log. These are facts about a call,
+not proof that the answer was missing; only the labeled replay in
+`docs/REPLAY-BENCHMARK.md` shows true misses.
+
 **Withheld is counted.** The `hook session-start` line in `calls.jsonl` carries
 `withheld: {"expired": N, "restricted": N}` (counts of current entries in the repo and
 global scopes that the block left out, never text; the field passes the `obs_log`
@@ -226,7 +236,11 @@ active sources still read under an older classifier version, `of` all active sou
 the progress of the one-time re-read after a classifier change; it normally falls to 0,
 and a source that fails or is skipped stays pending, so look at `last_pass.failed`,
 `unreadable_files` and `skipped_files`); `install_sha`; `classifier_version`;
-`hash_mismatches` (open-time line hash failures seen in the call log). `--usage` adds
+`hash_mismatches` (open-time line hash failures seen in the call log);
+`retrieval_outcomes` (counts from the same call-log window: `window_lines`;
+`search` `calls`, `zero`, `outside`, `noterms`; `hook_prompt` `calls`, `zero`,
+`outside`, `floor`; calls without `stages` count in `calls` only; facts, not proof of a
+miss). `--usage` adds
 `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen in transcripts)
 and `usage_totals` per provider.
 
@@ -317,7 +331,7 @@ failed pass and are both cleared by the poller's next good pass (a manual `inges
 not clear them); `alive_at` is refreshed every few seconds while a pass runs, so a long
 re-read after a classifier change still shows `poller` `ok` while `index_age_s` keeps
 counting from the last finished pass); `calls.jsonl` and `calls.jsonl.1` one allowlisted
-line per CLI call (ids and counts, no text; rotated at 1 MiB); `poller.log` and
+line per CLI call (ids and counts, no text, including the 0/1 `miss_*` outcome flags in `stages`; rotated at 1 MiB); `poller.log` and
 `poller.log.1` poller events (rotated likewise; the plist sends launchd's own stdout and
 stderr to `/dev/null`, and a poller whose plist still sends them to the log silences
 them itself, so nothing reaches the log except allowlisted lines; launchd restarts the
