@@ -35,20 +35,31 @@ it reuses `stages` integer keys).
 
 | key | set when |
 |---|---|
-| `miss_zero` | searchable terms existed, `matches == 0` |
-| `miss_outside` | `in_scope == 0` and `matches > 0` |
+| `miss_zero` | searchable terms existed, `matches == 0`, no hits and no knowledge |
+| `miss_outside` | `in_scope == 0`, `matches > 0`, no hits and no knowledge |
 | `miss_noterms` | query had no searchable terms (search: `n_terms == 0`) |
-| `miss_floor` | hook prompt only: `floor_dropped > 0` and `returned == 0` |
+| `miss_floor` | hook prompt only: `floor_dropped > 0`, no hits and no entries |
+
+"No knowledge" matters: `search` returns knowledge separately (page 1) and a hook
+block can exist with zero event hits, so a call that returned anything is not a
+miss.
 
 Search: compute in `muninn/cli_read.py` (where `out` is in hand). Hook: compute
-in `muninn/hook_recall.py` `recall_block`, next to the existing trace writes, and
-add `query_sha12` (same hash as `cli_read.py:75`, so hook and CLI join) and the
-summed `matches` / `in_scope` of the pool pages. Reuse `found["stages"]`; add no
-SQL. Guard all new hook code so an error cannot reach `_build_text`'s
-`except Exception` (that would emit "memory unavailable" to the model).
+in `muninn/hook_recall.py` `recall_block`, next to the existing trace writes.
+`matches` / `in_scope` come from `tally()` over the whole query and are identical
+on every page, so take **page 1's `stages` only** (never sum pages). `_pool`
+currently discards `found`, so it returns page 1's stages too (a small return
+change). No new SQL. The hook does **not** log `query_sha12` (it would add a
+guessable-prompt hash for every prompt; the owner only wants counts).
+
+Wrap the new hook code in a narrow `try/except` inside `recall_block`'s trace
+writes so an error cannot reach `_build_text`'s `except Exception` (which would
+emit "memory unavailable" to the model); keep that handler as the backstop.
 
 A call that was skipped (`skipped` trace, `MUNINN_HOOK_DISABLE`, subagent,
-`recall_off`) or errored is never a miss.
+`recall_off`) or errored is never a miss. Error and no-terms paths return before
+`stages` exists, so "no stages" already means "no miss"; a pool break on `error`
+must leave `matches` absent, not 0 (test it).
 
 ### B. Stats surface
 
@@ -63,6 +74,8 @@ into one pass; do not add a second scan. Shape:
     }
 
 Calls without `stages` are counted in `calls` only. Torn lines are tolerated.
+`search` counts lines with `cmd == "search"`; `hook_prompt` counts only the
+UserPromptSubmit hook line (`cmd == "hook prompt"`, `cli_hook.py:95`).
 No doctor check (YAGNI); stats is the observability surface.
 
 ### C. Offline replay benchmark: `tools/replay_retrieval.py`
@@ -75,17 +88,27 @@ JSON to stdout). Input (user-owned file; outputs never echo query text):
                     "control": false}]}
 
 Reads a store **read-only**, never logs calls (set no-calllog), writes nothing
-under `MUNINN_HOME`. Per question it reports, as separate numbers: the rank of
-each required original in the raw candidate list (or null), whether all
-required originals are in the top 100 candidates, whether all are in the final
-12 results, and whether each required ref resolves and `hash_ok` (citation
-support). Controls pass only when 0 results return. Aggregates: candidate
-recall@100, complete-required-set@12, citation-resolves rate, controls passed.
-Output carries ids, ranks and counts only.
+under `MUNINN_HOME`. The cut-offs are parameters, because the real values are
+`CANDIDATES = 300` (`query/hits.py:13`), search page limit max 30, hook
+`MAX_EVENTS = 3`: `--candidates` (default 300) and `--final` (default 10).
+Per question it reports, as separate numbers: the rank of each required
+original in the bm25 candidate list (or null), whether all required originals
+are within the candidates, whether all are in the final results (search with
+limit `--final`), and whether each required ref resolves with `hash_ok`
+(citation support). Controls: report the result count; "pass" means 0 hits,
+documented as strict (FTS queries are OR queries). Aggregates: candidate recall,
+complete-required-set@final, citation-resolves rate, controls passed. Output
+carries ids, ranks and counts only. A hook-equivalent @3 line is optional.
 
-Use existing query internals read-only. If a small behaviour-neutral accessor is
-needed for the raw candidate ranks, add it with a test proving search output is
-unchanged.
+**Fidelity requirement.** Ranks must come from the same eligibility the real
+search applies (primary threads, default kinds, unflagged, scope, current-session
+exclusion); a whole-store rank would not be comparable to the owner's earlier
+34-question experiments. `_eligibility` and the scope helpers are private, and
+pyright strict forbids importing them from `tools/`, so extract one **public,
+behaviour-neutral** function in `muninn/query/ranked.py` that returns the bm25
+candidate rows for given args, and make `search` call it. Proof: the existing
+query test suite passes unchanged plus one new test asserting `search` output is
+identical before and after the extraction on a synthetic store.
 
 ### D. Documentation
 
@@ -122,7 +145,7 @@ field). Honest framing everywhere: outcome counts are facts, not proof of a miss
 |---|---|---|---|
 | A runtime keys | `feature/outcome-keys` | `cli_read.py`, `hook_recall.py`, tests | contract above only |
 | B stats | `feature/outcome-stats` | `obs_stats.py`, stats tests, skill mirrors | key names only |
-| C replay tool | `feature/outcome-replay` | `tools/replay_retrieval.py`, tests | query internals |
+| C replay tool | `feature/outcome-replay` | `tools/replay_retrieval.py`, `muninn/query/ranked.py` (public candidate accessor), tests | query internals |
 | D docs | `feature/outcome-docs` | docs listed in D | contract only |
 
 Merge A-D into `feature/retrieval-outcome-log`, run the full gate, independent
