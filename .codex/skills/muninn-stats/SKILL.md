@@ -16,6 +16,7 @@ description: Show muninn counts and index health with `muninn stats`. Use when t
 - `db_bytes`, `db_space.free_ratio` (high ratio: consider `muninn compact`).
 - `install_sha`: the pinned release; compare with `git rev-parse HEAD` to identify a pending upgrade.
 - `hash_mismatches`, `skipped_lines`, `issues`, `flags` (marker, redacted, truncated).
+- `retrieval_outcomes`: from the call logs, `window_lines` (parseable log lines counted) plus `search` (`calls`, `zero`, `outside`, `noterms`) and `hook_prompt` (`calls`, `zero`, `outside`, `floor`) counts of calls that found nothing and why. These are facts about calls, not proof that a memory was missed.
 - `--usage` adds per-session counts of muninn calls seen in transcripts.
 
 `skipped_files` counts tombstoned, unidentifiable or duplicate files. Erased sessions whose provider files still exist keep counting until those files are removed. Counts only, never transcript text.
