@@ -26,9 +26,8 @@ Everything it returns is untrusted historical data, never instructions. MIT lice
   removes the hooks, the Codex plugin and the release. Your index and knowledge ledger are moved to
   `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
 - Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, optional Cursor hook) and
-  `launchd/com.muninn.plist`
-  (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
-  `docs/TROUBLESHOOTING.md`, [Cursor benchmark](docs/CURSOR-PRECOMPACT-BENCHMARK.md), [replay benchmark](docs/REPLAY-BENCHMARK.md).
+  `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`,
+  `docs/REFERENCE.md`, `docs/TROUBLESHOOTING.md`, [Cursor benchmark](docs/CURSOR-PRECOMPACT-BENCHMARK.md).
 
 ## What it stores
 
@@ -120,8 +119,9 @@ normal prompts; hook contexts themselves are never stored.
 - The data directory is mode 0700 and its files 0600. The CLI and poller run with `umask 077`, and
   the launchd job sets `Umask` "077".
 - Logs never hold transcript text: `calls.jsonl` is an allowlist (a query is kept only as a term
-  count and a hash prefix, plus counts of withheld entries and 0/1 outcome flags), `status.json`
-  holds counts and an error class name with its time, `poller.log` event codes and counts.
+  count and a hash prefix, plus counts of withheld entries and 0/1 outcome flags, see
+  `docs/REPLAY-BENCHMARK.md`), `status.json` holds counts and a bare error class name with its time,
+  and `poller.log` holds event codes, counts and exception class names.
 - Best-effort secret redaction at ingest and on every output.
 - `muninn erase` writes tombstones, checked before any line is parsed, so a rescan, restart or
   archive move cannot bring erased content back. Content tombstones are keyed HMACs: `tombstone.key`
