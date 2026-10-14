@@ -24,7 +24,7 @@ Instructions for coding agents working in this repository. Any parent-directory
   `trust.py`, `rollback.py`, `snapshot.py` (pre-upgrade store copy), `record.py`,
   `probe.py`, `context.py`, `errors.py`, `constants.py`, `uninstall.py`,
   `configedit.py`, `tomledit.py`; the directory contains the complete module list.
-- `tools/`: the standards gate (`python3.13 -m tools.check`) and the offline replay benchmark
+- `tools/`: the standards gate (`python3.13 -m tools.check`). Also the offline replay benchmark
   (`tools.replay_retrieval`, `docs/REPLAY-BENCHMARK.md`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`. Linux and Windows
   services are rendered in `install/lifecycle.py`.

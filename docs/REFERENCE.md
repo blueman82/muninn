@@ -242,13 +242,12 @@ active sources still read under an older classifier version, `of` all active sou
 the progress of the one-time re-read after a classifier change; it normally falls to 0,
 and a source that fails or is skipped stays pending, so look at `last_pass.failed`,
 `unreadable_files` and `skipped_files`); `install_sha`; `classifier_version`;
-`hash_mismatches` (open-time line hash failures seen in the call log);
-`retrieval_outcomes` (counts from the same call-log window: `window_lines`;
-`search` `calls`, `zero`, `outside`, `noterms`; `hook_prompt` `calls`, `zero`,
-`outside`, `floor`; calls without `stages` count in `calls` only; facts, not proof of a
-miss). `--usage` adds
+`hash_mismatches` (open-time line hash failures seen in the call log). `--usage` adds
 `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen in transcripts)
-and `usage_totals` per provider.
+and `usage_totals` per provider. `stats` always reports `retrieval_outcomes` (counts from
+the same call-log window: `window_lines`; `search` `calls`, `zero`, `outside`, `noterms`;
+`hook_prompt` `calls`, `zero`, `outside`, `floor`; calls without `stages` count in `calls`
+only; facts, not proof of a miss).
 
 ## `muninn doctor`
 
@@ -337,7 +336,7 @@ failed pass and are both cleared by the poller's next good pass (a manual `inges
 not clear them); `alive_at` is refreshed every few seconds while a pass runs, so a long
 re-read after a classifier change still shows `poller` `ok` while `index_age_s` keeps
 counting from the last finished pass); `calls.jsonl` and `calls.jsonl.1` one allowlisted
-line per CLI call (ids and counts, no text, including the 0/1 `miss_*` outcome flags in `stages`; rotated at 1 MiB); `poller.log` and
+line per CLI call (ids and counts, no text; rotated at 1 MiB); `poller.log` and
 `poller.log.1` poller events (rotated likewise; the plist sends launchd's own stdout and
 stderr to `/dev/null`, and a poller whose plist still sends them to the log silences
 them itself, so nothing reaches the log except allowlisted lines; launchd restarts the
