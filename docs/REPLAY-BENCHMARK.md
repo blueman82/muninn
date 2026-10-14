@@ -42,6 +42,12 @@ and a control can match on one common word. A query with no terms gets
 `"no_terms": true`: a control with no terms is not passed, and a gold question
 with no terms is flagged for you to fix.
 
+Two practical notes from running it on a real store. Use fresh words in a
+control query: words from any indexed session, including the session that runs
+the replay, will match and fail the control. And pick required refs whose text
+contains your query's terms; a bare approval such as a one-word "yes" prompt
+cannot be found by a full-text query and reports `rank: null`.
+
 Aggregates: candidate recall, complete required set at final, citation-resolves
 rate, controls passed, `unresolved_refs` (required refs whose `resolves` is
 false) and `no_terms_questions`. Output holds ids, ranks and counts only.
