@@ -39,5 +39,7 @@ code 1; `warn` and `info` do not) and a `detail`. When asking for help, share `d
   `migrate_failed` for schema upgrades (`from_v`, `to_v`, `rows`, `ms`, and `exc` on a
   failure), and `quiet_failed` with the class of the error when the poller could not
   redirect launchd's output away from the log). Rotates at 1 MiB to `poller.log.1`.
-- `calls.jsonl`: one line per CLI call, IDs and counts only; rotates likewise.
+- `calls.jsonl`: one line per CLI call, IDs and counts only; rotates likewise. `stages` may carry
+  `miss_*` outcome flags (see `docs/REFERENCE.md`); they are facts, not proof of a miss.
+  `MUNINN_NO_CALLLOG=1` stops the log.
 - `status.json`: the last pass and heartbeat.
