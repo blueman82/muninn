@@ -4,7 +4,8 @@ Reads QUESTIONS.json, ``{"questions": [{"id", "query", "required": [refs],
 "control": bool}]}``, and a store opened read-only. Nothing is logged and
 nothing is written under MUNINN_HOME. Output is JSON with ids, ranks and
 counts only, never query text. A control passes only with 0 candidate hits;
-that is strict, because FTS queries are OR queries.
+that is strict, because FTS queries are OR queries. ``in_final`` reflects
+the real selector, including exact-repeat collapse and the per-session cap.
 
 Scope is explicit so ranks are reproducible: all projects by default,
 ``--no-all-projects`` scopes to ``--cwd`` (default: the current directory)

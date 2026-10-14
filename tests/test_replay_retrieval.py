@@ -152,3 +152,25 @@ class ReplayTests(OpenCase):
             ref, inside = report["questions"][0]["refs"]
             self.assertEqual((ref["rank"], ref["in_final"]), (None, False))
             self.assertIsNotNone(inside["rank"])
+
+    def final_flags(self, texts: list[str], query: str) -> list[bool]:
+        """Put the texts in one new session; return each one's in_final."""
+        source = self.add_source("thr-one")
+        ids = [self.add_event(source, self.repo, text) for text in texts]
+        question = [
+            {"id": "g", "query": query, "required": [str(i) for i in ids]}
+        ]
+        _, report, _ = self.replay(question, "--final", "10")
+        refs = report["questions"][0]["refs"]
+        self.assertTrue(all(r["rank"] for r in refs))  # all candidates
+        return [r["in_final"] for r in refs]
+
+    def test_in_final_follows_repeat_collapse(self) -> None:
+        # Identical text in one session collapses into the first hit.
+        got = self.final_flags(["quark one", "quark one"], "quark")
+        self.assertEqual(got, [True, False])
+
+    def test_in_final_follows_per_session_cap(self) -> None:
+        # At most two hits per session: the worst-ranked of three drops.
+        texts = ["quark quark quark", "quark quark pad", "quark pad pad pad"]
+        self.assertEqual(self.final_flags(texts, "quark"), [True, True, False])
