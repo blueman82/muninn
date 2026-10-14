@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from collections.abc import Mapping
-from typing import Any, Required, TypedDict, Unpack
+from typing import Any, NamedTuple, Required, TypedDict, Unpack
 
 from muninn.query.answers import Answer, BadArgumentError, error
 from muninn.query.constants import NOTICE, PREVIEW_NOTICE
@@ -92,6 +92,52 @@ def _eligibility(
         root,
         me,
     )
+
+
+class Candidates(NamedTuple):
+    """The bm25 candidate rows of one search and the filters behind them."""
+
+    root: str | None
+    rows: list[sqlite3.Row]
+    ids: list[int]
+    where: str
+    params: list[Any]
+    inside: tuple[str, list[Any]]
+
+
+def candidate_rows(
+    conn: sqlite3.Connection,
+    fts: str,
+    args: SearchArgs,
+    limit: int = CANDIDATES,
+) -> Candidates:
+    """Return the bm25 candidates ``search`` ranks, best first.
+
+    Applies the eligibility, scope and current-session rules of ``search``.
+
+    Args:
+        conn: Read-only store connection.
+        fts: The FTS5 MATCH string.
+        args: The keyword arguments of ``search``.
+        limit: How many candidate rows to fetch.
+
+    Returns:
+        The session root, the rows and the filters that produced them.
+
+    Raises:
+        BadArgumentError: If the session, a kind, the provider or a date is
+            invalid.
+    """
+    root, (clauses, params) = _eligibility(conn, args)
+    scope, everywhere = args.get("scope"), args.get("all_projects", False)
+    ids = scope_ids_for_read(conn, scope or args["cwd"])
+    inside = scope_clause(ids, scope, everywhere)
+    where = " AND ".join(clauses)
+    rows = conn.execute(
+        CANDIDATES_SQL.format(where=f"{where} AND {inside[0]}", limit=limit),
+        [fts, *params, *inside[1]],
+    ).fetchall()
+    return Candidates(root, rows, ids, where, params, inside)
 
 
 def _other_scopes(other: Counter[str]) -> dict[str, int]:
@@ -205,19 +251,11 @@ def search(
     if fts is None:
         return out | {"note": "no searchable terms", **freshness(status)}
     try:
-        root, (clauses, params) = _eligibility(conn, args)
+        found = candidate_rows(conn, fts, args)
     except BadArgumentError as bad:
         return error(str(bad))
+    root, rows, ids, where, params, inside = found
     scope, everywhere = args.get("scope"), args.get("all_projects", False)
-    ids = scope_ids_for_read(conn, scope or args["cwd"])
-    inside = scope_clause(ids, scope, everywhere)
-    where = " AND ".join(clauses)
-    rows = conn.execute(
-        CANDIDATES_SQL.format(
-            where=f"{where} AND {inside[0]}", limit=CANDIDATES
-        ),
-        [fts, *params, *inside[1]],
-    ).fetchall()
     total, other = tally(conn, fts, where, params, inside)
     entries, session_capped, tool_capped = compose(
         rows,
