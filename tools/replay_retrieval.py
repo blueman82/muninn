@@ -3,8 +3,9 @@
 Reads QUESTIONS.json, ``{"questions": [{"id", "query", "required": [refs],
 "control": bool}]}``, and a store opened read-only. Nothing is logged and
 nothing is written under MUNINN_HOME. Output is JSON with ids, ranks and
-counts only, never query text. A control passes only with 0 candidate hits;
-that is strict, because FTS queries are OR queries. ``in_final`` reflects
+counts only, never query text. A control passes only with 0 candidate hits
+and some FTS terms; that is strict, because FTS queries are OR queries. A
+query with no terms is flagged ``no_terms``. ``in_final`` reflects
 the real selector, including exact-repeat collapse and the per-session cap.
 
 Scope is explicit so ranks are reproducible: all projects by default,
@@ -24,9 +25,10 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from muninn import ingest, query, store
+from muninn.query.answers import BadArgumentError
 from muninn.query.hits import CANDIDATES
 from muninn.query.ranked import SearchArgs, candidate_rows
 
@@ -35,6 +37,16 @@ REAL_FINAL = 10  # the CLI search page limit default
 
 class _BadInputError(Exception):
     """The questions file is not valid; its text is never echoed."""
+
+
+def _refs_ok(value: object) -> bool:
+    """Say whether value is a list of distinct strings."""
+    if not isinstance(value, list):
+        return False
+    refs = cast("list[object]", value)
+    return all(isinstance(r, str) for r in refs) and len(set(refs)) == len(
+        refs
+    )
 
 
 def _load(path: Path) -> list[dict[str, Any]]:
@@ -64,8 +76,7 @@ def _load(path: Path) -> list[dict[str, Any]]:
                 or item["id"] in seen
                 or not isinstance(item["query"], str)
                 or not isinstance(control, bool)
-                or not all(isinstance(r, str) for r in required)
-                or not isinstance(required, list)
+                or not _refs_ok(required)
                 or (not required) != control
             ):
                 raise _BadInputError
@@ -111,10 +122,18 @@ def _replay(
     fts = query.build_fts_query(item["query"])
     rows = candidate_rows(conn, fts, base, args.candidates).rows if fts else []
     ranked = [row["id"] for row in rows]
+    no_terms = fts is None
     if item["control"]:
-        return {"id": item["id"], "control": True, "results": len(ranked)}
+        return {
+            "id": item["id"],
+            "control": True,
+            "no_terms": no_terms,
+            "results": len(ranked),
+        }
     final_args: SearchArgs = {**base, "limit": args.final}
     final = query.search(conn, item["query"], **final_args)
+    if "error" in final:
+        raise BadArgumentError(str(final["error"]))
     final_ids = [hit["id"] for hit in final["hits"]]
     refs: list[dict[str, Any]] = []
     for ref in item["required"]:
@@ -131,6 +150,7 @@ def _replay(
     return {
         "id": item["id"],
         "control": False,
+        "no_terms": no_terms,
         "refs": refs,
         "all_in_candidates": all(r["rank"] is not None for r in refs),
         "all_in_final": all(r["in_final"] for r in refs),
@@ -157,8 +177,12 @@ def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
         "citation_resolves_rate": _rate(
             sum(ref["resolves"] for ref in refs), len(refs)
         ),
-        "controls_passed": sum(r["results"] == 0 for r in controls),
+        "controls_passed": sum(
+            r["results"] == 0 and not r["no_terms"] for r in controls
+        ),
         "controls_total": len(controls),
+        "unresolved_refs": sum(not ref["resolves"] for ref in refs),
+        "no_terms_questions": sum(r["no_terms"] for r in results),
     }
 
 
@@ -189,8 +213,9 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments; defaults to ``sys.argv[1:]``.
 
     Returns:
-        0 on success, 2 for an invalid questions file or option, 4 when the
-        store cannot be read.
+        0 whenever a report is printed (report-only: misses never change the
+        exit code), 2 for an invalid questions file, option or scope, 4 when
+        the store cannot be read.
     """
     args = _parser().parse_args(argv)
     if not 1 <= args.final <= 30 or args.candidates < 1:
@@ -206,7 +231,10 @@ def main(argv: list[str] | None = None) -> int:
         roots = ingest.default_roots(os.environ)
         with contextlib.closing(store.connect_ro(store.db_path(home))) as conn:
             results = [_replay(conn, q, args, roots) for q in questions]
-    except store.StoreUnavailableError:
+    except BadArgumentError:
+        print("invalid option", file=sys.stderr)
+        return 2
+    except (store.StoreUnavailableError, sqlite3.Error):
         print("store unavailable", file=sys.stderr)
         return 4
     report = {

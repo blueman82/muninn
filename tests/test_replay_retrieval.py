@@ -6,11 +6,12 @@ import contextlib
 import io
 import json
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from tests.query_support import OpenCase
+from tests.query_support import OpenCase, sha
 from tools import replay_retrieval
 
 CANARY = "canaryneedle"
@@ -40,6 +41,12 @@ class ReplayTests(OpenCase):
         """Run the tool on a questions file; return code, report, stderr."""
         path = self.tmp / "q.json"
         path.write_text(json.dumps({"questions": questions}))
+        return self.run_file(path, *flags)
+
+    def run_file(
+        self, path: Path, *flags: str
+    ) -> tuple[int, dict[str, Any], str]:
+        """Run the tool on a file; return code, report, stderr."""
         out, err = io.StringIO(), io.StringIO()
         roots = json.dumps({"codex-sessions": str(self.sessions)})
         with (
@@ -77,6 +84,7 @@ class ReplayTests(OpenCase):
         self.assertTrue(gold["all_in_candidates"])
         self.assertFalse(gold["all_in_final"])
         self.assertTrue(all(r["resolves"] for r in gold["refs"]))
+        self.assertFalse(any(q["no_terms"] for q in report["questions"]))
         self.assertEqual(ghost["refs"][0]["rank"], None)
         self.assertFalse(ghost["refs"][0]["resolves"])
         self.assertEqual(ctl["results"], 0)
@@ -89,6 +97,8 @@ class ReplayTests(OpenCase):
                 "citation_resolves_rate": 0.75,
                 "controls_passed": 1,
                 "controls_total": 2,
+                "unresolved_refs": 1,
+                "no_terms_questions": 0,
             },
         )
         self.assertNotIn(CANARY, json.dumps(report))
@@ -109,6 +119,7 @@ class ReplayTests(OpenCase):
             {"id": "a", "query": CANARY, "required": ["x"], "control": True},
             {"id": 1, "query": CANARY, "required": ["x"]},
             {"id": "a", "query": CANARY, "required": ["x"], "extra": 1},
+            {"id": "a", "query": CANARY, "required": ["x", "x"]},
         ]
         for question in bad:
             code, report, err = self.replay([question])
@@ -122,18 +133,99 @@ class ReplayTests(OpenCase):
         self.assertNotIn(CANARY, err.getvalue())
         self.assertEqual(Path(path).read_text(), f"{{{CANARY}")
 
+    def test_duplicate_ids_alone_fail_closed(self) -> None:
+        one = {"id": "a", "query": CANARY, "required": ["x"]}
+        code, report, _ = self.replay([one, dict(one)])
+        self.assertEqual((code, report), (2, {}))
+
+    def test_other_malformed_documents_fail_closed(self) -> None:
+        path = self.tmp / "q.json"
+        for raw in (
+            b'{"other": []}',
+            b'{"questions": []}',
+            b'[{"id": "a"}]',
+            b'{"questions": [{"id": "\xff"}]}',
+        ):
+            path.write_bytes(raw)
+            code, report, err = self.run_file(path)
+            self.assertEqual((code, report), (2, {}))
+            self.assertEqual(err.strip(), "invalid questions file")
+
+    def test_bad_options_exit_2(self) -> None:
+        question = [{"id": "g", "query": "zephyr", "required": self.refs}]
+        for flags in (
+            ["--final", "0"],
+            ["--final", "31"],
+            ["--candidates", "0"],
+        ):
+            code, report, err = self.replay(question, *flags)
+            self.assertEqual((code, report), (2, {}))
+            self.assertEqual(err.strip(), "invalid option")
+
+    def test_missing_store_exits_4_without_text(self) -> None:
+        question = [{"id": "g", "query": CANARY, "required": ["x"]}]
+        empty = self.tmp / "nohome"
+        empty.mkdir()
+        code, report, err = self.replay(question, "--home", str(empty))
+        self.assertEqual((code, report), (4, {}))
+        self.assertEqual(err.strip(), "store unavailable")
+
+    def test_search_error_and_sqlite_error_exit_cleanly(self) -> None:
+        question = [{"id": "g", "query": "zephyr", "required": self.refs}]
+        with patch.object(replay_retrieval.query, "search") as search:
+            search.return_value = {"error": "bad_kind"}
+            code, report, err = self.replay(question)
+        self.assertEqual(
+            (code, report, err.strip()), (2, {}, "invalid option")
+        )
+        with patch.object(
+            replay_retrieval.store, "connect_ro", side_effect=sqlite3.Error
+        ):
+            code, report, err = self.replay(question)
+        self.assertEqual(
+            (code, report, err.strip()), (4, {}, "store unavailable")
+        )
+
+    def test_no_terms_control_is_not_passed_and_gold_is_flagged(
+        self,
+    ) -> None:
+        code, report, _ = self.replay(
+            [
+                {"id": "ctl", "query": "the of", "control": True},
+                {"id": "g", "query": "the of", "required": self.refs[:1]},
+            ]
+        )
+        self.assertEqual(code, 0)
+        ctl, gold = report["questions"]
+        self.assertTrue(ctl["no_terms"])
+        self.assertTrue(gold["no_terms"])
+        summary = report["summary"]
+        self.assertEqual(summary["controls_passed"], 0)
+        self.assertEqual(summary["controls_total"], 1)
+        self.assertEqual(summary["no_terms_questions"], 2)
+
+    def test_unresolved_ref_is_counted(self) -> None:
+        _, report, _ = self.replay(
+            [{"id": "g", "query": "zephyr", "required": ["codex:no:9.1"]}]
+        )
+        self.assertEqual(report["summary"]["unresolved_refs"], 1)
+        self.assertEqual(report["summary"]["citation_resolves_rate"], 0.0)
+
+    def cited_event(self, thread: str, scope: int, text: str, cwd: str) -> int:
+        """Add an event whose transcript line exists, in any scope."""
+        raw = json.dumps({"n": 1, "t": text}).encode()
+        (self.sessions / f"{thread}.jsonl").write_bytes(raw + b"\n")
+        return self.add_event(
+            self.add_source(thread), scope, text, cwd=cwd, digest=sha(raw)
+        )
+
     def test_scope_flags_change_ranks_and_default_is_all_projects(
         self,
     ) -> None:
         far = self.add_scope("/far")
-        outside = self.add_event(
-            self.add_source("thr-far"), far, "zephyr zephyr zephyr zephyr"
-        )
-        near = self.add_event(
-            self.add_source("thr-near"),
-            self.repo,
-            "zephyr zephyr",
-            cwd="/repo",
+        outside = self.cited_event("thr-far", far, "zephyr " * 4, "/far")
+        near = self.cited_event(
+            "thr-near", self.repo, "zephyr zephyr", "/repo"
         )
         question = [
             {
@@ -144,6 +236,7 @@ class ReplayTests(OpenCase):
         ]
         _, report, _ = self.replay(question)
         self.assertEqual(report["questions"][0]["refs"][0]["rank"], 1)
+        self.assertTrue(report["questions"][0]["refs"][0]["resolves"])
         for flags in (
             ["--no-all-projects", "--cwd", "/repo"],
             ["--scope", "/repo"],
@@ -151,6 +244,7 @@ class ReplayTests(OpenCase):
             _, report, _ = self.replay(question, *flags, "--final", "5")
             ref, inside = report["questions"][0]["refs"]
             self.assertEqual((ref["rank"], ref["in_final"]), (None, False))
+            self.assertTrue(ref["resolves"] and inside["resolves"])
             self.assertIsNotNone(inside["rank"])
 
     def final_flags(self, texts: list[str], query: str) -> list[bool]:
