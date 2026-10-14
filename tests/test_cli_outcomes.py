@@ -92,3 +92,33 @@ class OutcomeStatsTests(CliCase):
                 "hook_prompt": ZEROS | {"calls": 1, "floor": 0},
             },
         )
+
+    def test_odd_cmd_and_stages_types_never_crash_the_scan(self) -> None:
+        self.home.mkdir(parents=True, exist_ok=True)
+        rows = [
+            '{"cmd": ["x"]}',
+            '{"cmd": {"a": 1}}',
+            '{"cmd": 5}',
+            line("search", stages="miss_zero"),
+            line("search", stages=["miss_zero"]),
+            line("search", stages={"miss_zero": 0}),
+            line("search", stages={"miss_zero": "no"}),
+            line("search", stages={"miss_outside": 1}),
+        ]
+        (self.home / "calls.jsonl").write_text("\n".join(rows) + "\n")
+        out = self.stats()["retrieval_outcomes"]
+        assert isinstance(out, dict)
+        self.assertEqual(out["window_lines"], 8)
+        self.assertEqual(
+            out["search"],
+            ZEROS | {"calls": 5, "outside": 1} | {"noterms": 0},
+        )
+
+    def test_undecodable_bytes_and_lone_rotated_file(self) -> None:
+        self.home.mkdir(parents=True, exist_ok=True)
+        good = line("search", stages={"miss_zero": 1}).encode()
+        (self.home / "calls.jsonl.1").write_bytes(b"\xff\xfe\n" + good + b"\n")
+        out = self.stats()["retrieval_outcomes"]
+        assert isinstance(out, dict)
+        self.assertEqual(out["search"]["calls"], 1)
+        self.assertEqual(out["search"]["zero"], 1)
