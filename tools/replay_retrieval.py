@@ -5,6 +5,13 @@ Reads QUESTIONS.json, ``{"questions": [{"id", "query", "required": [refs],
 nothing is written under MUNINN_HOME. Output is JSON with ids, ranks and
 counts only, never query text. A control passes only with 0 candidate hits;
 that is strict, because FTS queries are OR queries.
+
+Scope is explicit so ranks are reproducible: all projects by default,
+``--no-all-projects`` scopes to ``--cwd`` (default: the current directory)
+and ``--scope`` restricts to events whose cwd equals it, as in ``muninn
+search``. The same arguments feed the candidate rows and the final search.
+No current session is passed and the environment is empty, so the caller's
+own session is never excluded.
 """
 
 from __future__ import annotations
@@ -94,9 +101,12 @@ def _replay(
     roots: dict[str, Path],
 ) -> dict[str, Any]:
     """Score one question; the result carries ids, ranks and counts only."""
-    base: SearchArgs = {"cwd": args.cwd or "/", "env": {}}
-    if not args.cwd:
-        base["all_projects"] = True
+    base: SearchArgs = {
+        "cwd": args.cwd or str(Path.cwd()),
+        "env": {},
+        "all_projects": args.all_projects,
+        "scope": args.scope,
+    }
     fts = query.build_fts_query(item["query"])
     rows = candidate_rows(conn, fts, base, args.candidates).rows if fts else []
     ranked = [row["id"] for row in rows]
@@ -156,7 +166,16 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("questions", type=Path)
     parser.add_argument("--home", type=Path, default=None)
-    parser.add_argument("--cwd", default=None, help="default: all projects")
+    parser.add_argument(
+        "--all-projects",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="search every project (default); --no-all-projects scopes",
+    )
+    parser.add_argument(
+        "--scope", help="only events whose cwd is exactly this"
+    )
+    parser.add_argument("--cwd", help="scope root when --no-all-projects")
     parser.add_argument("--candidates", type=int, default=REAL_CANDIDATES)
     parser.add_argument("--final", type=int, default=REAL_FINAL)
     return parser

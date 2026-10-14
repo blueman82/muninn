@@ -121,3 +121,34 @@ class ReplayTests(OpenCase):
             self.assertEqual(replay_retrieval.main([str(path)]), 2)
         self.assertNotIn(CANARY, err.getvalue())
         self.assertEqual(Path(path).read_text(), f"{{{CANARY}")
+
+    def test_scope_flags_change_ranks_and_default_is_all_projects(
+        self,
+    ) -> None:
+        far = self.add_scope("/far")
+        outside = self.add_event(
+            self.add_source("thr-far"), far, "zephyr zephyr zephyr zephyr"
+        )
+        near = self.add_event(
+            self.add_source("thr-near"),
+            self.repo,
+            "zephyr zephyr",
+            cwd="/repo",
+        )
+        question = [
+            {
+                "id": "g",
+                "query": "zephyr",
+                "required": [str(outside), str(near)],
+            }
+        ]
+        _, report, _ = self.replay(question)
+        self.assertEqual(report["questions"][0]["refs"][0]["rank"], 1)
+        for flags in (
+            ["--no-all-projects", "--cwd", "/repo"],
+            ["--scope", "/repo"],
+        ):
+            _, report, _ = self.replay(question, *flags, "--final", "5")
+            ref, inside = report["questions"][0]["refs"]
+            self.assertEqual((ref["rank"], ref["in_final"]), (None, False))
+            self.assertIsNotNone(inside["rank"])
