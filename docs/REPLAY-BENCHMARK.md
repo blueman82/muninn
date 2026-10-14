@@ -42,6 +42,11 @@ and a control can match on one common word. A query with no terms gets
 `"no_terms": true`: a control with no terms is not passed, and a gold question
 with no terms is flagged for you to fix.
 
+A required ref that ranks inside the candidates but is not in the final results
+is usually removed by the per-session cap or exact-repeat collapse: on a real
+store the cap removed over half of 300 candidates (see `session_capped` in a
+search's `stages`). That gap between candidates and final is the number to watch.
+
 Two practical notes from running it on a real store. Use fresh words in a
 control query: words from any indexed session, including the session that runs
 the replay, will match and fail the control. And pick required refs whose text
