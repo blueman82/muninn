@@ -145,7 +145,6 @@ def _replay(
     if "error" in final:
         raise BadArgumentError(str(final["error"]))
     final_ids = [hit["id"] for hit in final["hits"]]
-    cost = _diversity(final["hits"])
     if item["control"]:
         return {
             "id": item["id"],
@@ -174,7 +173,7 @@ def _replay(
         "all_in_candidates": all(r["rank"] is not None for r in refs),
         "all_in_final": all(r["in_final"] for r in refs),
         "final_hits": len(final_ids),
-        **cost,
+        **_diversity(final["hits"]),
     }
 
 

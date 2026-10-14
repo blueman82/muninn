@@ -82,13 +82,13 @@ def compose(
     *,
     per_session: bool,
     tools: bool,
-    per_session_cap: int = PER_SESSION,
+    per_session_cap: int,
 ) -> tuple[list[Entry], int, int]:
     """Turn rank-ordered rows into page-ready entries.
 
     Identical text within a session collapses into its first hit (repeats);
-    then at most ``per_session_cap`` (PER_SESSION) hits per session and
-    TOOLS_PER_PAGE tool_call hits in each ``limit``-sized page are kept.
+    then at most ``per_session_cap`` hits per session and TOOLS_PER_PAGE
+    tool_call hits in each ``limit``-sized page are kept.
 
     Args:
         rows: Candidate rows in rank order.
@@ -174,7 +174,7 @@ def render(
     shown: list[Entry],
     entries: list[Entry],
     total: Counter[str],
-    per_session_cap: int = PER_SESSION,
+    per_session_cap: int,
 ) -> list[Answer]:
     """Render the shown entries as hits.
 

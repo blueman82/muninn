@@ -67,16 +67,13 @@ def _terms(fts: str | None) -> list[str]:
 
 
 def prompt_terms(
-    payload: Mapping[str, object],
-    trace: dict[str, object],
-    min_terms: int = MIN_TERMS,
+    payload: Mapping[str, object], trace: dict[str, object]
 ) -> list[str] | None:
     """Extract the query terms of the prompt.
 
     Args:
         payload: The provider's hook payload.
         trace: Receives ``skipped`` and ``n_terms`` for the stage log.
-        min_terms: The term floor; the default is ``MIN_TERMS``.
 
     Returns:
         The terms, or None when the prompt recalls nothing: no prompt, a
@@ -88,7 +85,7 @@ def prompt_terms(
         return None
     terms = _terms(query.build_fts_query(prompt))
     trace["n_terms"] = len(terms)
-    if len(terms) < min_terms:
+    if len(terms) < MIN_TERMS:
         trace["skipped"] = "short"
         return None
     return terms
@@ -162,12 +159,12 @@ def _pool(
     env: Mapping[str, str],
     cwd: str,
     terms: list[str],
-    min_terms: int = MIN_TERMS,
+    min_terms: int,
 ) -> tuple[list[RecallEntry], list[RecallHit], int, dict[str, int], bool]:
     """Page through search results for events that pass the term floor.
 
     Returns:
-        The pushable knowledge, events matching at least ``MIN_TERMS``
+        The pushable knowledge, events matching at least ``min_terms``
         terms (possibly more than ``MAX_EVENTS``), how many events the
         floor dropped, page 1's stage counts (empty when page 1 failed),
         and whether any page errored, leaving later events unread.
