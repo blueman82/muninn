@@ -7,7 +7,7 @@ from unittest import mock
 
 from muninn import cli, store
 from tests.cli_support import ALWAYS, CANARY, CliCase
-from tests.test_classify import SK
+from tests.test_classify import SK, codex_meta, user_msg
 from tests.test_ingest import TID, rollout
 from tests.test_store import SPILLING_WRITER, Child
 
@@ -136,6 +136,44 @@ class ReaderTests(CliCase):
         (self.home / "calls.jsonl").chmod(0o400)
         _, out, _ = self.muninn("search", CANARY)
         self.assertIs(out["logged"], False)
+
+    def logged_stages(self, *argv: str) -> dict[str, int]:
+        """Run a search and return the stages of its call-log line."""
+        self.muninn(*argv)
+        last = (self.home / "calls.jsonl").read_text().splitlines()[-1]
+        return json.loads(last).get("stages", {})
+
+    def test_miss_keys_by_outcome(self) -> None:
+        hit = self.logged_stages("search", CANARY)
+        self.assertFalse([k for k in hit if k.startswith("miss_")])
+        zero = self.logged_stages("search", "zzqxnothing")
+        self.assertEqual(zero["miss_zero"], 1)
+        self.assertEqual(zero["matches"], 0)
+        far = self.tmp / "far"
+        far.mkdir()
+        meta = codex_meta("user", "far-1", cwd=str(far))
+        self.write(
+            rollout("far-1"), [meta, user_msg(2, "faraway wombatquux zone")]
+        )
+        self.run_ingest()
+        outside = self.logged_stages("search", "wombatquux")
+        self.assertEqual(outside["miss_outside"], 1)
+        self.assertGreater(outside["matches"], 0)
+        self.assertEqual(outside["in_scope"], 0)
+        self.assertNotIn("miss_zero", outside)
+        stop = self.logged_stages("search", "the of")
+        self.assertEqual(stop, {"miss_noterms": 1})
+        blob = (self.home / "calls.jsonl").read_text()
+        for text in ("zzqxnothing", "wombatquux"):
+            self.assertNotIn(text, blob)
+
+    def test_error_and_miss_keys_stay_out_of_stdout(self) -> None:
+        code, out, _ = self.muninn("search", "zzqxnothing")
+        self.assertEqual(code, 0)
+        self.assertFalse([k for k in out["stages"] if k.startswith("miss_")])
+        _, _, _ = self.muninn("search", CANARY, "--since", "garbage")
+        last = (self.home / "calls.jsonl").read_text().splitlines()[-1]
+        self.assertEqual(json.loads(last).get("stages", {}), {})
 
     def test_calls_log_has_no_text(self) -> None:
         self.muninn("search", CANARY)

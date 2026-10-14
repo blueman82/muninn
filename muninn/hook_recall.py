@@ -7,6 +7,7 @@ clearly relevant and stays silent otherwise.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -44,6 +45,7 @@ class SearchPage(TypedDict):
     knowledge: list[RecallEntry]
     hits: list[RecallHit]
     has_more: bool
+    stages: NotRequired[dict[str, int]]
     error: NotRequired[str]
 
 
@@ -157,23 +159,25 @@ def _pool(
     env: Mapping[str, str],
     cwd: str,
     terms: list[str],
-) -> tuple[list[RecallEntry], list[RecallHit], int]:
+) -> tuple[list[RecallEntry], list[RecallHit], int, dict[str, int]]:
     """Page through search results for events that pass the term floor.
 
     Returns:
         The pushable knowledge, events matching at least ``MIN_TERMS``
-        terms (possibly more than ``MAX_EVENTS``), and how many events the
-        floor dropped.
+        terms (possibly more than ``MAX_EVENTS``), how many events the
+        floor dropped, and page 1's stage counts (empty when page 1 failed).
     """
     entries: list[RecallEntry] = []
     hits: list[RecallHit] = []
     dropped = 0
+    stages: dict[str, int] = {}
     for page in range(1, POOL_PAGES + 1):
         found = _search_page(conn, payload, env, cwd, page)
         if "error" in found:
             break
         if page == 1:  # knowledge does not change between pages
             entries = _pushable(conn, found["knowledge"])
+            stages = found.get("stages", {})  # whole-query, same per page
         counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
         for hit in found["hits"]:
             if counts[hit["id"]] >= MIN_TERMS:
@@ -182,7 +186,27 @@ def _pool(
                 dropped += 1
         if len(hits) >= MAX_EVENTS or not found["has_more"]:
             break
-    return entries, hits, dropped
+    return entries, hits, dropped, stages
+
+
+def _outcome(
+    stages: dict[str, int], dropped: int, found: bool
+) -> dict[str, int]:
+    """Count-only outcome keys: page 1's tallies and at most one miss.
+
+    Returns:
+        ``matches`` and ``in_scope`` when page 1 answered, plus the miss
+        key (``miss_zero``, ``miss_outside`` or ``miss_floor``) when
+        nothing was returned. Empty when page 1 failed.
+    """
+    out = {k: stages[k] for k in ("matches", "in_scope") if k in stages}
+    if found or not out:
+        return out
+    if out["matches"] == 0:
+        return out | {"miss_zero": 1}
+    if out["in_scope"] == 0:
+        return out | {"miss_outside": 1}
+    return out | ({"miss_floor": 1} if dropped else {})
 
 
 def recall_block(
@@ -204,13 +228,16 @@ def recall_block(
     Returns:
         The framed block, or an empty string when nothing qualifies.
     """
-    entries, hits, dropped = _pool(
+    entries, hits, dropped, page1 = _pool(
         conn, payload, env, request.cwd, request.terms
     )
     hits = hits[:MAX_EVENTS]
     trace["returned_ids"] = [h["id"] for h in hits]
     trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
-    trace["stages"] = {"floor_dropped": dropped, "returned": len(hits)}
+    stages = {"floor_dropped": dropped, "returned": len(hits)}
+    with contextlib.suppress(Exception):  # logging must not fail recall
+        stages |= _outcome(page1, dropped, bool(entries or hits))
+    trace["stages"] = stages
     if not entries and not hits:
         return ""
     return recall_text(entries, hits, request.notes(), request.limit)
