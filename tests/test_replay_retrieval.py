@@ -95,6 +95,7 @@ class ReplayTests(OpenCase):
         self.assertEqual(
             summary,
             {
+                "questions_with_final_hits": 2,
                 "distinct_sessions_mean": 2.0,
                 "max_session_share_mean": 0.5,
                 "candidate_recall": 0.75,
@@ -162,10 +163,11 @@ class ReplayTests(OpenCase):
             ["--final", "0"],
             ["--final", "31"],
             ["--candidates", "0"],
+            ["--per-session", "0"],
         ):
             code, report, err = self.replay(question, *flags)
             self.assertEqual((code, report), (2, {}))
-            self.assertEqual(err.strip(), "invalid option")
+            self.assertEqual(err.strip(), "invalid option: " + flags[0][2:])
 
     def test_missing_store_exits_4_without_text(self) -> None:
         question = [{"id": "g", "query": CANARY, "required": ["x"]}]
@@ -181,7 +183,7 @@ class ReplayTests(OpenCase):
             search.return_value = {"error": "bad_kind"}
             code, report, err = self.replay(question)
         self.assertEqual(
-            (code, report, err.strip()), (2, {}, "invalid option")
+            (code, report, err.strip()), (2, {}, "invalid option: bad_kind")
         )
         with patch.object(
             replay_retrieval.store, "connect_ro", side_effect=sqlite3.Error
@@ -314,3 +316,49 @@ class ReplayTests(OpenCase):
             with self.subTest(value=value):
                 code, report, _ = self.replay(question, "--per-session", value)
                 self.assertEqual((code, report), (2, {}))
+
+    def test_means_share_one_denominator(self) -> None:
+        _, report, _ = self.replay(
+            [
+                {"id": "full", "query": "zephyr", "required": self.refs},
+                {"id": "empty", "query": CANARY, "required": ["x"]},
+            ]
+        )
+        empty = report["questions"][1]
+        self.assertEqual(empty["final_hits"], 0)
+        self.assertEqual(empty["distinct_sessions"], 0)
+        self.assertIsNone(empty["max_session_share"])
+        summary = report["summary"]
+        self.assertEqual(summary["questions_with_final_hits"], 1)
+        self.assertEqual(summary["distinct_sessions_mean"], 3.0)
+        self.assertEqual(summary["max_session_share_mean"], 0.3333)
+
+    def test_means_are_none_without_final_hits(self) -> None:
+        for questions in (
+            [{"id": "c", "query": "the of", "control": True}],
+            [{"id": "e", "query": CANARY, "required": ["x"]}],
+        ):
+            code, report, _ = self.replay(questions)
+            self.assertEqual(code, 0)
+            summary = report["summary"]
+            self.assertEqual(summary["questions_with_final_hits"], 0)
+            for key in (
+                "distinct_sessions_mean",
+                "max_session_share_mean",
+                "final_bytes_mean",
+            ):
+                self.assertIsNone(summary[key])
+        self.assertEqual(report["questions"][0]["final_hits"], 0)
+
+    def test_per_session_must_be_an_integer_and_huge_means_uncapped(
+        self,
+    ) -> None:
+        question = [{"id": "g", "query": "zephyr", "required": self.refs}]
+        with self.assertRaises(SystemExit) as stop:
+            self.replay(question, "--per-session", "abc")
+        self.assertEqual(stop.exception.code, 2)
+        _, huge, _ = self.replay(question, "--per-session", str(10**9))
+        _, big, _ = self.replay(question, "--per-session", "100")
+        for report in (huge, big):
+            report.pop("per_session")
+        self.assertEqual(huge, big)

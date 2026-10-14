@@ -60,6 +60,9 @@ class SearchArgs(TypedDict, total=False):
     current_session: str | None
     status: Mapping[str, Any] | None
     push_only: bool
+    # Hits one session may keep in the whole composed list. Default
+    # PER_SESSION; set by the replay benchmark, ignored when ``session`` is
+    # given, and callers pass >= 1 (anything lower is an error answer).
     per_session_cap: int
 
 
@@ -243,6 +246,10 @@ def search(
     _check_keywords(args)
     limit = min(max(args.get("limit", 10), 1), PAGE_MAX)
     page = max(args.get("page", 1), 1)
+    cap = args.get("per_session_cap")
+    cap = PER_SESSION if cap is None else cap
+    if cap < 1:
+        return error("per_session_cap must be >= 1")
     status = args.get("status")
     fts = build_fts_query(query)
     out: Answer = {
@@ -259,7 +266,6 @@ def search(
         return error(str(bad))
     scope, everywhere = args.get("scope"), args.get("all_projects", False)
     total, other = tally(conn, fts, found.where, found.params, found.inside)
-    cap = args.get("per_session_cap", PER_SESSION)
     entries, session_capped, tool_capped = compose(
         found.rows,
         limit,
@@ -274,7 +280,10 @@ def search(
             key=lambda e: e["row"]["ts"] or "",
             reverse=True,
         )
-    hits = render(conn, fts, pool, entries, total, cap)
+    # A session listing is not capped, so it must not annotate from a cap.
+    hits = render(
+        conn, fts, pool, entries, total, cap if found.root is None else 1 << 30
+    )
     out |= {
         "scope": scope_label(conn, found.ids, scope, everywhere),
         "hits": hits,

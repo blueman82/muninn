@@ -188,13 +188,25 @@ def _mean(values: list[float]) -> float | None:
 
 
 def _summary(results: list[dict[str, Any]]) -> dict[str, Any]:
-    """Aggregate the per-question results into the four headline numbers."""
+    """Aggregate the per-question results into the headline numbers.
+
+    The diversity and cost means share one set: gold questions whose final
+    list is not empty.
+
+    Args:
+        results: One result per question, from ``_replay``.
+
+    Returns:
+        The headline numbers, counts and ratios only.
+    """
     gold = [r for r in results if not r["control"]]
+    shown = [r for r in gold if r["final_hits"]]
     controls = [r for r in results if r["control"]]
     refs = [ref for r in gold for ref in r["refs"]]
     return {
+        "questions_with_final_hits": len(shown),
         **{
-            f"{key}_mean": _mean([r[key] for r in gold if r[key] is not None])
+            f"{key}_mean": _mean([r[key] for r in shown])
             for key in (
                 "distinct_sessions",
                 "max_session_share",
@@ -257,9 +269,14 @@ def main(argv: list[str] | None = None) -> int:
         the store cannot be read.
     """
     args = _parser().parse_args(argv)
-    if not 1 <= args.final <= 30 or min(args.candidates, args.per_session) < 1:
-        print("invalid option", file=sys.stderr)
-        return 2
+    for name, ok in (
+        ("final", 1 <= args.final <= 30),
+        ("candidates", args.candidates >= 1),
+        ("per-session", args.per_session >= 1),
+    ):
+        if not ok:
+            print(f"invalid option: {name}", file=sys.stderr)
+            return 2
     try:
         questions = _load(args.questions)
     except _BadInputError:
@@ -270,8 +287,8 @@ def main(argv: list[str] | None = None) -> int:
         roots = ingest.default_roots(os.environ)
         with contextlib.closing(store.connect_ro(store.db_path(home))) as conn:
             results = [_replay(conn, q, args, roots) for q in questions]
-    except BadArgumentError:
-        print("invalid option", file=sys.stderr)
+    except BadArgumentError as bad:
+        print(f"invalid option: {bad}", file=sys.stderr)
         return 2
     except (store.StoreUnavailableError, sqlite3.Error):
         print("store unavailable", file=sys.stderr)

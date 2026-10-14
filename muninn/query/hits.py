@@ -12,7 +12,7 @@ from muninn.query.answers import Answer, answer_citable, event_ref
 
 CANDIDATES = 300  # bm25 candidates per search, composed into pages
 SNIPPET_TOKENS = 32
-PER_SESSION = 2  # hits per session on a page
+PER_SESSION = 2  # hits per session in the whole composed list
 TOOLS_PER_PAGE = 4
 KNOWLEDGE_HITS = 3
 KNOWLEDGE_TEXT = 300  # chars of a knowledge entry shown before size trimming
@@ -87,8 +87,8 @@ def compose(
     """Turn rank-ordered rows into page-ready entries.
 
     Identical text within a session collapses into its first hit (repeats);
-    then at most ``per_session_cap`` hits per session and TOOLS_PER_PAGE
-    tool_call hits in each ``limit``-sized page are kept.
+    then at most ``per_session_cap`` hits per session across the whole list
+    and TOOLS_PER_PAGE tool_call hits in each ``limit``-sized page are kept.
 
     Args:
         rows: Candidate rows in rank order.

@@ -67,17 +67,20 @@ def _terms(fts: str | None) -> list[str]:
 
 
 def prompt_terms(
-    payload: Mapping[str, object], trace: dict[str, object]
+    payload: Mapping[str, object],
+    trace: dict[str, object],
+    min_terms: int = MIN_TERMS,
 ) -> list[str] | None:
     """Extract the query terms of the prompt.
 
     Args:
         payload: The provider's hook payload.
         trace: Receives ``skipped`` and ``n_terms`` for the stage log.
+        min_terms: The term floor (default ``MIN_TERMS``); below 1 acts as 1.
 
     Returns:
         The terms, or None when the prompt recalls nothing: no prompt, a
-        slash command, or fewer than ``MIN_TERMS`` terms.
+        slash command, or fewer than ``min_terms`` terms.
     """
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or prompt.lstrip().startswith("/"):
@@ -85,7 +88,7 @@ def prompt_terms(
         return None
     terms = _terms(query.build_fts_query(prompt))
     trace["n_terms"] = len(terms)
-    if len(terms) < MIN_TERMS:
+    if len(terms) < max(1, min_terms):
         trace["skipped"] = "short"
         return None
     return terms
@@ -232,13 +235,14 @@ def recall_block(
         env: Environment, for the caller's own session.
         trace: Receives ids and stage counts for the stage log.
         request: Terms, scope, notes and size limit.
-        min_terms: The term floor; the default is ``MIN_TERMS``.
+        min_terms: The term floor (default ``MIN_TERMS``); below 1 acts
+            as 1, so the hook never raises on it.
 
     Returns:
         The framed block, or an empty string when nothing qualifies.
     """
     entries, hits, dropped, page1, unread = _pool(
-        conn, payload, env, request.cwd, request.terms, min_terms
+        conn, payload, env, request.cwd, request.terms, max(1, min_terms)
     )
     hits = hits[:MAX_EVENTS]
     trace["returned_ids"] = [h["id"] for h in hits]

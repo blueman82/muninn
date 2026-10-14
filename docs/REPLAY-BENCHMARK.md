@@ -7,7 +7,7 @@ questions. The replay tool runs your question set against a store, read-only.
 ```sh
 python3.13 -m tools.replay_retrieval QUESTIONS.json [--home DIR] \
   [--all-projects | --no-all-projects] [--scope DIR] [--cwd DIR] \
-  [--candidates 300] [--final 10]
+  [--candidates 300] [--final 10] [--per-session 2]
 ```
 
 `QUESTIONS.json` is your own file; the tool never echoes query text:
@@ -28,7 +28,7 @@ true while `rank` is null. The tool opens the store read-only, logs no calls and
 writes nothing under `MUNINN_HOME`. Ranks use the same eligibility as
 `muninn search` (primary threads, default kinds, unflagged), with no current
 session excluded, so runs are reproducible. `in_final` comes from the real final
-selector, including exact-repeat collapse and the per-session cap of 2: a
+selector, including exact-repeat collapse and the per-session cap of 2 (the default; see --per-session): a
 required event that is collapsed or capped counts as not in final.
 
 Per question it reports, as separate numbers: the rank of each required ref in
@@ -77,6 +77,9 @@ and the hits it drops are gone for good: paging does not bring them back.
 Each question reports `final_hits` (controls too), and each question that has
 required refs also reports `distinct_sessions` (sessions in the final list),
 `max_session_share` (the largest fraction of the final list that one session
-supplies) and `final_bytes` (bytes of the returned hits as search reports
-them). The summary adds the mean of each over those questions. Counts and
-ratios only, as before.
+supplies) and `final_bytes` (bytes of the returned hits list serialised as the
+CLI prints it, not the whole answer or the hook block). `distinct_sessions`
+counts 8-character session prefixes. The summary adds
+`questions_with_final_hits` and the mean of each of the three over those same
+questions: gold questions whose final list is not empty. All three means are
+null when there are none. Counts and ratios only, as before.
