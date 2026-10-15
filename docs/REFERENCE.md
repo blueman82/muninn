@@ -337,6 +337,9 @@ within two minutes supplies `request_ref` and `request_preview`; otherwise
 `request_status` is `unresolved`. `assessment` contains the model's matching
 `Memory R<number>` rating before the next prompt, its source ref and reason preview,
 or `unassessed`. Previews require opening originals before factual claims.
+Both request and assessment previews are redacted again before printing, including
+text indexed before a redaction rule existed. A store that becomes unavailable
+during request or assessment resolution returns a JSON error with exit code 4.
 The historical full block text is not retained, and current knowledge may differ.
 `--ack` requires `--batch`, a completed batch, and sequential review. Invalid
 arguments exit 2; unavailable metadata or transcript store exits 4. Acknowledgement

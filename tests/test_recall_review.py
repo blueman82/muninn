@@ -6,13 +6,15 @@ import contextlib
 import io
 import json
 import os
+import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 from unittest import mock
 
 from muninn import cli, hook, recall_audit
+from muninn import cli_recall_review as review_command
 from muninn.cli_recall_review import _assessment
-from tests.hook_support import RecallCase
+from tests.hook_support import AKIA, RecallCase
 
 
 class RecallReviewTests(RecallCase):
@@ -158,3 +160,52 @@ class RecallReviewTests(RecallCase):
         self.assertEqual(
             _assessment(self.ro(), row, 1)["rating"], "unassessed"
         )
+
+    def test_legacy_request_and_reason_previews_are_redacted(self) -> None:
+        prompt = f"alphaterm betaterm gammaterm {AKIA}"
+        now = datetime.now(UTC).isoformat()
+        number = self.talk("legacy", prompt, ts=now)
+        source = self.rw.execute(
+            "SELECT source_id FROM event WHERE id=?", (number,)
+        ).fetchone()[0]
+        self.talk("older", "alphaterm betaterm gammaterm evidence")
+        self.noise(self.repo)
+        self.ask(prompt, provider="codex", session_id="legacy")
+        self.add_event(
+            source,
+            self.repo,
+            f"Memory R1: noise — {AKIA}",
+            kind="reply",
+            role="assistant",
+            ts=now,
+        )
+        code, report = self.reviewed()
+        self.assertEqual(code, 0)
+        self.assertNotIn(AKIA, json.dumps(report))
+        delivery = report["deliveries"][0]
+        self.assertIn("[redacted:secret]", delivery["request_preview"])
+        self.assertIn(
+            "[redacted:secret]", delivery["assessment"]["reason_preview"]
+        )
+
+    def test_statement_lock_after_open_returns_json_error(self) -> None:
+        self.talk("old", "alphaterm betaterm gammaterm evidence")
+        self.noise(self.repo)
+        self.ask()
+        request = review_command._request
+
+        def locked(
+            conn: sqlite3.Connection, delivery: dict[str, Any]
+        ) -> sqlite3.Row | None:
+            conn.execute("PRAGMA busy_timeout=1")
+            self.rw.execute("BEGIN EXCLUSIVE")
+            try:
+                return request(conn, delivery)
+            finally:
+                self.rw.execute("ROLLBACK")
+
+        with mock.patch.object(review_command, "_request", side_effect=locked):
+            code, report = self.reviewed()
+        self.assertEqual(code, 4)
+        self.assertEqual(report["error"], "store_unavailable")
+        self.assertIn("SQLITE_BUSY", report["detail"])
