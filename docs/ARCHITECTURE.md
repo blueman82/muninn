@@ -15,6 +15,7 @@ flowchart LR
   H["hooks<br/>SessionStart,<br/>UserPromptSubmit"]
   A["Claude Code / Codex<br/>session"]
   L["status.json, poller.log,<br/>calls.jsonl"]
+  R[("recall-review.sqlite<br/>delivery ids, refs,<br/>hashes, checkpoints")]
   CC --> P
   CX --> P
   P -->|"ingest: classify, redact"| DB
@@ -25,15 +26,26 @@ flowchart LR
   P --> L
   DB --> CLI
   DB --> H
+  H -->|"nonempty recall metadata"| R
+  R -->|"recall-review"| CLI
   H -->|"bounded, framed,<br/>untrusted-data"| A
   A -->|"runs"| CLI
   CLI --> L
 ```
 
-- **One writer at a time.** The poller, `ingest`, `erase`, `compact`, `rebuild` and
+- **One transcript-store writer at a time.** The poller, `ingest`, `erase`, `compact`, `rebuild` and
   `know add` take an exclusive lock on `writer.lock`: `fcntl.flock` on macOS and Linux,
   `msvcrt.locking` on Windows. Readers open the database read-only. The journal mode is
   DELETE, so a crash leaves a journal that the next writer rolls back.
+- **Recall review.** Nonempty generated recall blocks have sequential delivery ids.
+  A separate private metadata database serializes counter and checkpoint updates in
+  SQLite transactions, independently of the transcript-store writer lock. It records
+  final source refs after shortening, request/session fingerprints and excerpt caps,
+  never conversation text. Unavailable or busy audit storage preserves recall with
+  an explicit uncounted-delivery warning. Every 50 recorded deliveries triggers a
+  persistent review reminder; `recall-review` resolves requests and model assessments
+  from the transcript index. Reviews open originals, distinguish model self-ratings
+  from validated usefulness, and acknowledge completed batches explicitly.
 - **Native poller.** macOS uses launchd, Linux a systemd user service, and Windows Task
   Scheduler. Each runs `muninn serve --interval 60`.
 - **Pinned release.** Services and provider hooks run the installed launcher. On macOS

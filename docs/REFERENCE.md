@@ -416,7 +416,9 @@ PowerShell `Remove-Item -LiteralPath` with a literal path array on Windows), and
 `doctor` warns (`aside_files`) while one exists. It is not deleted automatically;
 salvage what you need, then run that command; `muninn.sqlite-journal` SQLite's rollback
 journal, allowed by `unexpected_files` but a leftover one fails `unowned_journal`;
-`recall.off` if present, the prompt hook prints `{}` (must be mode 0600). During an
+`recall-review.sqlite` private delivery metadata and review checkpoints, with
+`recall-review.sqlite-journal` its transient SQLite journal; neither stores transcript
+text. `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). During an
 upgrade that migrates the schema, `muninn.sqlite.pre-upgrade-<sha>` (mode 0600) exists
 briefly and is allowed. Anything else fails `unexpected_files`.
 

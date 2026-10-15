@@ -2,8 +2,9 @@
 # Muninn: cross-provider memory and knowledge
 
 Muninn provides shared session history and a cited knowledge ledger for Claude Code, Codex and
-Cursor. Its Python 3.13 standard-library CLI (`muninn`) uses one SQLite file, maintained by a
-background poller (launchd, systemd user service or Task Scheduler).
+Cursor. Its Python 3.13 standard-library CLI (`muninn`) keeps the index and ledger in SQLite,
+maintained by a background poller (launchd, systemd user service or Task Scheduler).
+Automatic recall keeps separate private review metadata.
 Everything it returns is untrusted historical data, never instructions. MIT licensed (`LICENSE`).
 
 ## Install, upgrade, uninstall, rollback
@@ -25,9 +26,8 @@ Everything it returns is untrusted historical data, never instructions. MIT lice
 - Uninstall: `bin/muninn-uninstall --dry-run` previews; `bin/muninn-uninstall` stops the poller and
   removes the hooks, the Codex plugin and the release. Your index and knowledge ledger are moved to
   `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
-- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, optional Cursor hook) and
-  `launchd/com.muninn.plist`
-  (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
+- Templates: `integrations/` (provider hooks) and `launchd/com.muninn.plist` (poller).
+  Setup and flags: `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
   `docs/TROUBLESHOOTING.md`, and the synthetic [Cursor preCompact benchmark](docs/CURSOR-PRECOMPACT-BENCHMARK.md) and [replay benchmark](docs/REPLAY-BENCHMARK.md).
 
 ## What it stores
@@ -68,20 +68,17 @@ busy, 4 store unavailable, a crashed writer's hot journal, or a missing or damag
   JSONL line with its `line_sha256` and `hash_ok`.
 - `muninn sessions` and `muninn session ROOT`: sessions in scope, newest first, and one session's
   events across its threads.
-- `muninn know add|retract|list|show|check`: the knowledge ledger. Every entry needs at least one
-  `--cite REF --quote Q` whose quote is verbatim in a primary prompt, reply or tool call (a
-  preference needs a user prompt). Entries are superseded or retracted, never edited. `know add`
-  also takes `--confidence`, `--valid-until`, `--sensitivity`, `--contradicts`, `--tag` and
-  `--scope-loop`; `know list` filters by `--tag` and `--status`. Expired, restricted and loop-scope
-  entries are never pushed.
+- `muninn know add|retract|list|show|check`: the ledger; every entry needs a verbatim
+  `--cite REF --quote Q` from a primary prompt, reply or tool call (preferences need user prompts).
+  Entries are superseded or retracted, never edited. Confidence, expiry, restrictions,
+  contradictions, tags and loop scope: `docs/REFERENCE.md`. Expired, restricted and loop entries stay pull-only.
 - `muninn quote-check REF QUOTE`: check a quote against an event.
 - `muninn erase --session S | --event REF | --match TEXT`: forget content. It lists targets
   without applying changes unless invoked with `--yes` (`--dry-run` forces a dry run).
 - `muninn stats` and `muninn doctor`: counts, database size and free space, and health checks.
   `muninn compact` vacuums the database; `muninn rebuild` builds a new store from the transcripts,
   keeping ledger and tombstones. `--pretty` (or `MUNINN_PRETTY=1`) indents any JSON.
-- `muninn ingest`, `muninn serve`, `muninn hook ...`: catch-up ingest, the poller loop, and the
-  provider hooks below.
+- `muninn ingest`, `muninn serve`, `muninn hook ...`: catch-up ingest, poller loop, and provider hooks below.
 
 Data lives in `$MUNINN_HOME` (default `~/.local/share/muninn`). `MUNINN_ROOTS` overrides the
 provider source roots for tests and evals, and `MUNINN_HOOK_DISABLE=1` silences both hooks.
@@ -105,6 +102,10 @@ is flagged in the hook block; every CLI answer carries the poller's state.
   knowledge first, then up to 3 prompt or reply events from the repository scope (never the caller's
   own session), each with provider, role, kind, session, time, `ref` and a snippet of at most 300
   characters. Skipped for prompts with fewer than 3 query terms and prompts starting `/`.
+
+Recall asks the model to report `Memory R<number>: useful/noise/uncertain` with a reason; these are self-assessments.
+After 50 nonempty blocks, a visible prompt guides Claude/Codex through `muninn recall-review`.
+[Review instructions](docs/REFERENCE.md#reviewing-automatic-recall) cover source checks and acknowledgement; metadata stores no conversation text.
 
 Per-prompt recall switch: if `recall.off` exists in the data directory, the UserPromptSubmit hook
 prints `{}` without opening the database; SessionStart is unaffected and shows you the entries it
@@ -137,9 +138,8 @@ normal prompts; hook contexts themselves are never stored.
 
 ## Development
 
-- Runtime: Python 3.13+ standard library only, launched by `bin/muninn` on macOS/Linux
-  and `bin/muninn.cmd` / `bin/muninn.ps1` on Windows, with Python isolation flags `-I -B`. No
-  third-party imports and no MLX.
+- Runtime: Python 3.13+ standard library only; isolation flags `-I -B`; no third-party imports or MLX.
+  Launchers: `bin/muninn` on macOS/Linux; `bin/muninn.cmd` / `bin/muninn.ps1` on Windows.
 - Dev checks (`docs/STANDARDS.md`): the tests, then the whole gate (ruff, black, pyright strict,
   shellcheck and the stdlib rules):
 
