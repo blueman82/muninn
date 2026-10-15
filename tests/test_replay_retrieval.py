@@ -119,6 +119,35 @@ class ReplayTests(OpenCase):
         refs = report["questions"][0]["refs"]
         self.assertEqual([r["rank"] for r in refs], [1, 2, None])
 
+    def test_kind_filters_candidates_and_final_hits(self) -> None:
+        self.write_source("owner", [(f"{CANARY} " + "padding " * 10, {})])
+        self.write_source(
+            "assistant",
+            [(CANARY, {"kind": "reply", "role": "assistant"})],
+        )
+        questions = [
+            {"id": "g", "query": CANARY, "required": ["codex:owner:1.1"]}
+        ]
+        reports = [self.replay(questions, "--final", "1")[1]]
+        for kind in ("prompt", "reply"):
+            code, report, err = self.replay(
+                questions, "--final", "1", "--kind", kind
+            )
+            self.assertEqual((code, err, report["kind"]), (0, "", kind))
+            reports.append(report)
+        gold = [report["questions"][0] for report in reports]
+        self.assertIsNone(reports[0]["kind"])
+        self.assertEqual(
+            [q["all_in_final"] for q in gold], [False, True, False]
+        )
+        self.assertEqual([q["refs"][0]["rank"] for q in gold], [2, 1, None])
+        self.assertTrue(all(q["refs"][0]["resolves"] for q in gold))
+
+    def test_kind_rejects_non_conversational_events(self) -> None:
+        with self.assertRaises(SystemExit) as bad:
+            self.replay([], "--kind", "tool_call")
+        self.assertEqual(bad.exception.code, 2)
+
     def test_malformed_input_fails_closed(self) -> None:
         bad: list[Any] = [
             {"id": "a", "query": CANARY, "required": []},
@@ -210,6 +239,35 @@ class ReplayTests(OpenCase):
         self.assertEqual(summary["controls_passed"], 0)
         self.assertEqual(summary["controls_total"], 1)
         self.assertEqual(summary["no_terms_questions"], 2)
+
+    def test_terms_rule_changes_results_and_reports_terms_kept(self) -> None:
+        self.write_source("thr-stop", [("the of and more", {})])
+        questions = [
+            {"id": "ctl", "query": "the of", "control": True},
+            {"id": "g", "query": "the zephyr", "required": self.refs[:1]},
+        ]
+        _, listed, _ = self.replay(questions)
+        _, none, _ = self.replay(questions, "--terms", "none")
+        _, df, _ = self.replay(questions, "--terms", "df:0.5")
+        self.assertEqual(
+            [(q["no_terms"], q["results"]) for q in listed["questions"][:1]],
+            [(True, 0)],
+        )
+        self.assertGreater(none["questions"][0]["results"], 0)
+        self.assertFalse(none["questions"][0]["no_terms"])
+        self.assertEqual(
+            [q["terms_kept"] for q in listed["questions"]], [0, 1]
+        )
+        self.assertEqual([q["terms_kept"] for q in none["questions"]], [2, 2])
+        # A store under MIN_EVENTS: df behaves as the list rule.
+        self.assertEqual(df["questions"], listed["questions"])
+
+    def test_bad_terms_exit_2(self) -> None:
+        question = [{"id": "g", "query": "zephyr", "required": self.refs}]
+        for value in ("", "x", "df:0", "df:2", "df:"):
+            code, report, err = self.replay(question, "--terms", value)
+            self.assertEqual((code, report), (2, {}))
+            self.assertEqual(err.strip(), "invalid option: terms")
 
     def test_unresolved_ref_is_counted(self) -> None:
         _, report, _ = self.replay(

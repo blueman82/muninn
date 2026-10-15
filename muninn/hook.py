@@ -455,4 +455,14 @@ def prompt_submit(
         terms=terms,
         limit=_limits(provider)[1],
     )
-    return _respond("UserPromptSubmit", payload, provider, env, trace, build)
+    native = dict(as_payload(payload)) | {"muninn_provider": provider}
+    out = _respond("UserPromptSubmit", native, provider, env, trace, build)
+    if isinstance(batch := trace.get("review_due_batch"), int):
+        out["systemMessage"] = (
+            "muninn: recall review due. Ask Claude or Codex: "
+            f'"Run muninn recall-review --batch {batch}'
+            " and follow review_prompt."
+            " Show ratings, examples and missing evidence; acknowledge only"
+            ' after review."'
+        )
+    return out

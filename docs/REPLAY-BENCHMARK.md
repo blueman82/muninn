@@ -7,7 +7,7 @@ questions. The replay tool runs your question set against a store, read-only.
 ```sh
 python3.13 -m tools.replay_retrieval QUESTIONS.json [--home DIR] \
   [--all-projects | --no-all-projects] [--scope DIR] [--cwd DIR] \
-  [--candidates 300] [--final 10] [--per-session 2]
+  [--candidates 300] [--final 10] [--per-session 2] [--kind prompt|reply]
 ```
 
 `QUESTIONS.json` is your own file; the tool never echoes query text:
@@ -25,8 +25,12 @@ are the cut-offs. `--final` is an upper bound: the page byte budget can return
 fewer hits, and those missing from them are not in final. A `--candidates` below
 300 makes `rank` use a smaller pool than the real selector, so `in_final` can be
 true while `rank` is null. The tool opens the store read-only, logs no calls and
-writes nothing under `MUNINN_HOME`. Ranks use the same eligibility as
-`muninn search` (primary threads, default kinds, unflagged), with no current
+writes nothing under `MUNINN_HOME`. `--kind prompt` measures recall of owner
+requests; `--kind reply` measures assistant reports. Without it both kinds
+are searched. The report's `kind` is the selected kind, or null for both.
+Choose it from the question's purpose before running retrieval, not from a
+gold ref's kind after seeing results. Ranks use the same eligibility as
+`muninn search` (primary threads, selected kinds, unflagged), with no current
 session excluded, so runs are reproducible. `in_final` comes from the real final
 selector, including exact-repeat collapse and the per-session cap of 2 (the default; see --per-session): a
 required event that is collapsed or capped counts as not in final.
@@ -83,3 +87,17 @@ counts 8-character session prefixes. The summary adds
 `questions_with_final_hits` and the mean of each of the three over those same
 questions: gold questions whose final list is not empty. All three means are
 null when there are none. Counts and ratios only, as before.
+
+### Trying a different query-term rule (experiment knob)
+
+`--terms RULE` (default `list`) chooses how the query terms are picked, for the
+candidate rows, the `no_terms` check and the final search alike. It is an
+experiment knob only: `muninn search`, the hooks and every default are
+unchanged. The rules are `list` (today's fixed stopword list), `none` (no
+stopword list) and `df:R` (R above 0 and at most 1): drop a single-word term
+held by more than R of all events. Quoted phrases and identifier phrases are
+never dropped. If `df:R` would drop every single word, the one with the lowest
+document frequency is kept, so a query still searches. A store with fewer than
+1000 events uses the `list` rule for `df:R`, so tiny stores behave as before.
+An invalid value exits 2 with `invalid option: terms`. Each question also
+reports `terms_kept`, the number of single-word terms in the query.

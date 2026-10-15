@@ -11,7 +11,16 @@ __all__ = ["redacted"]
 
 # Fields known to carry transcript or user text; only these are redacted.
 _TEXT_KEYS = frozenset(
-    {"text", "snippet", "preview", "quote", "first_prompt", "retract_reason"}
+    {
+        "text",
+        "snippet",
+        "preview",
+        "quote",
+        "first_prompt",
+        "retract_reason",
+        "request_preview",
+        "reason_preview",
+    }
 )
 
 

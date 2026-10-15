@@ -11,6 +11,8 @@ Returns ranked knowledge entries and events from earlier sessions in this reposi
 
 Search terms match stored text. Use distinctive words from the source.
 
+When recalling what the owner said, requested or decided, start with `--kind prompt`. For what an assistant reported, use `--kind reply`. Add `--provider` when the user names a provider. If the first pass misses, widen the kinds and open the surrounding conversation; an assistant's report alone does not prove an owner instruction. Verify authorship after opening: prompt events can contain pasted text or local command output.
+
 ## Flags
 
 - `--all-projects` widen beyond this repo (use when the repo scope returns nothing; `other_scopes` in the answer hints at where matches live).

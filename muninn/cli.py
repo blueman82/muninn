@@ -29,6 +29,7 @@ from muninn import (
     cli_maint,
     cli_read,
     cli_rebuild,
+    cli_recall_review,
     cli_serve,
     obs,
     store,
@@ -63,6 +64,7 @@ _HANDLERS: dict[str, Handler] = {
     "compact": cli_maint.compact,
     "rebuild": cli_rebuild.rebuild,
     "know": cli_know.know,
+    "recall-review": cli_recall_review.recall_review,
 }
 
 

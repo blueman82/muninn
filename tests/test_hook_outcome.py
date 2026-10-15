@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 from typing import Any
 from unittest import mock
@@ -180,7 +181,10 @@ class HookOutcomeTests(RecallCase):
             hook_recall, "_outcome", side_effect=RuntimeError("boom")
         ):
             trace, out = self.traced()
-        self.assertEqual(out, expected)
+        self.assertEqual(
+            re.sub(r"Memory R\d+:", "Memory R:", json.dumps(out)),
+            re.sub(r"Memory R\d+:", "Memory R:", json.dumps(expected)),
+        )
         self.assertIn("hookSpecificOutput", out)
         self.assertEqual(trace["stages"]["returned"], 1)
         self.assertFalse(MISSES & set(trace["stages"]))

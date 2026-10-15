@@ -105,6 +105,13 @@ To turn recall on: `unlink ~/.local/share/muninn/recall.off`. To turn it off aga
 `install -m 600 /dev/null ~/.local/share/muninn/recall.off`. Details in
 `docs/REFERENCE.md`. An `--upgrade` never changes the file.
 
+With recall enabled, supplied context asks the model for a short `Memory R<number>:
+useful/noise/uncertain` assessment. At 50 recorded nonempty blocks, the hook gives you
+a prompt to paste into Claude or Codex for a source-backed batch review. The reminder
+continues until that complete batch is acknowledged. See
+[reviewing automatic recall](REFERENCE.md#reviewing-automatic-recall); model ratings
+alone don't prove that answers improved.
+
 ## Verify the installation
 
     muninn doctor            # exit 0 = healthy

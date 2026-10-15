@@ -17,6 +17,24 @@ from typing import cast
 from muninn import platform_io, query, store
 from muninn.platform_paths import read_selection, windows_base
 
+DATA_FILES = frozenset(
+    {
+        "muninn.sqlite",
+        "writer.lock",
+        "status.json",
+        "calls.jsonl",
+        "calls.jsonl.1",
+        "poller.log",
+        "poller.log.1",
+        "tombstones.jsonl",
+        "tombstone.key",
+        "recall.off",
+        "recall-review.sqlite",
+        "recall-review.sqlite-journal",
+        "stop.json",
+    }
+)
+
 
 def read_status(home: Path) -> dict[str, object]:
     """Read ``status.json``.
