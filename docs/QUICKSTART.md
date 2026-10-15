@@ -110,7 +110,7 @@ useful/noise/uncertain` assessment. At 50 recorded nonempty blocks, the hook giv
 a prompt to paste into Claude or Codex for a source-backed batch review. The reminder
 continues until that complete batch is acknowledged. See
 [reviewing automatic recall](REFERENCE.md#reviewing-automatic-recall); model ratings
-alone do not prove that answers improved.
+alone don't prove that answers improved.
 
 ## Verify the installation
 

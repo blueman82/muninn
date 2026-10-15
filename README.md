@@ -103,7 +103,7 @@ is flagged in the hook block; every CLI answer carries the poller's state.
   own session), each with provider, role, kind, session, time, `ref` and a snippet of at most 300
   characters. Skipped for prompts with fewer than 3 query terms and prompts starting `/`.
 
-Recall asks the model to report `Memory R<number>: useful/noise/uncertain` with a reason; these are self-assessments.
+Recall asks the model to report `Memory R<number>: useful/noise/uncertain` with a reason; they're self-assessments.
 After 50 nonempty blocks, a visible prompt guides Claude/Codex through `muninn recall-review`.
 [Review instructions](docs/REFERENCE.md#reviewing-automatic-recall) cover source checks and acknowledgement; metadata stores no conversation text.
 

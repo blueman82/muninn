@@ -302,7 +302,7 @@ four fields:
 
 ### Reviewing automatic recall
 
-Every nonempty generated recall block asks the model to tell the human
+Each nonempty recall block asks the model to tell you
 `Memory R<number>: useful/noise/uncertain — reason`. This is a model assessment,
 not a correctness guarantee. The hook still searches both prompts and replies;
 its session-start guidance tells agents to use `search --kind prompt` for owner
@@ -315,8 +315,8 @@ nonempty blocks, a `systemMessage` gives the human a prompt to paste into Claude
 or Codex to run the review command and follow `review_prompt`. The model
 context retains a review reminder until
 `muninn recall-review --batch N --ack` acknowledges that next complete batch.
-The count combines Claude and Codex; the report separates model ratings by provider.
-No timer or background model runs. The reminder takes effect when a hook runs.
+Counts combine Claude and Codex; ratings are split by provider.
+No timer or background model runs. The reminder appears when a hook runs.
 
 The separate private `recall-review.sqlite` holds only ids, timestamps, source
 references, excerpt caps, request/session fingerprints and context hashes; never
@@ -324,7 +324,7 @@ conversation text. It survives restarts, ordinary log rotation, upgrades and
 index rebuilds. Source refs remain authoritative when event ids change. It counts
 generated context, not proof that the host accepted it or the model read it.
 `MUNINN_NO_CALLLOG=1` disables the ordinary call log, not this review metadata.
-If metadata cannot be written, recall stays available with a review-unavailable
+If metadata can't be written, recall stays available with a review-unavailable
 instruction; the call log carries `review_error: 1` and that delivery is uncounted.
 
 The report includes `total`, `reviewed_batches`, `batch`, `complete`, `deliveries`,
@@ -340,7 +340,7 @@ or `unassessed`. Previews require opening originals before factual claims.
 Both request and assessment previews are redacted again before printing, including
 text indexed before a redaction rule existed. A store that becomes unavailable
 during request or assessment resolution returns a JSON error with exit code 4.
-The historical full block text is not retained, and current knowledge may differ.
+Historical full block text isn't retained, and current knowledge may differ.
 `--ack` requires `--batch`, a completed batch, and sequential review. Invalid
 arguments exit 2; unavailable metadata or transcript store exits 4. Acknowledgement
 records review, not approval of recall quality. Follow `review_prompt` and report

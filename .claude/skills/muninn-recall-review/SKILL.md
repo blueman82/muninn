@@ -18,13 +18,13 @@ Previews are navigation only. A request stays unresolved until uniquely matched
 in its indexed session by fingerprint and a timestamp within two minutes of the
 hook. Missing ratings count as unassessed. `self_assessments` counts model ratings,
 not validated usefulness. Review examples and disagreements, separated by provider.
-Historical full block text is not retained; current knowledge may have changed.
+Historical full block text isn't retained; current knowledge may have changed.
 
 After reviewing a complete batch, acknowledge it explicitly:
 
     muninn recall-review --batch 1 --ack
 
 Only the next unreviewed complete batch can be acknowledged. This records that the
-review happened; it does not certify quality or turn recall off. The reminder stays
-in subsequent nonempty recall blocks until acknowledgement. Do not acknowledge
-before performing the review. Report missing evidence and limits to the owner.
+review happened; it doesn't certify quality or turn recall off. The reminder stays
+in subsequent nonempty recall blocks until acknowledgement. Don't acknowledge
+before reviewing. Report missing evidence and limits to the owner.
