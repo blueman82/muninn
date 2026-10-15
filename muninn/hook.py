@@ -459,8 +459,10 @@ def prompt_submit(
     out = _respond("UserPromptSubmit", native, provider, env, trace, build)
     if isinstance(batch := trace.get("review_due_batch"), int):
         out["systemMessage"] = (
-            "muninn: recall review due; run muninn recall-review"
-            f" --batch {batch}"
-            " and give its review_prompt to Claude or Codex."
+            "muninn: recall review due. Ask Claude or Codex: "
+            f'"Run muninn recall-review --batch {batch}'
+            " and follow review_prompt."
+            " Show ratings, examples and missing evidence; acknowledge only"
+            ' after review."'
         )
     return out

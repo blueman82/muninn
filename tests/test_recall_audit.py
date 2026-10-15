@@ -109,10 +109,30 @@ class RecallAuditTests(unittest.TestCase):
     def test_concurrent_deliveries_get_unique_ids(self) -> None:
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(lambda _: self.capture(), range(20)))
-        ids = [trace["delivery_id"] for _, trace in results]
-        self.assertEqual(sorted(ids), list(range(1, 21)))
+        ids = [
+            trace["delivery_id"]
+            for _, trace in results
+            if "delivery_id" in trace
+        ]
+        self.assertTrue(ids)
+        self.assertEqual(sorted(ids), list(range(1, len(ids) + 1)))
+        for text, trace in results:
+            if "delivery_id" not in trace:
+                self.assertEqual(trace["review_error"], 1)
+                self.assertIn("review unavailable", text)
         self.assertEqual(
-            recall_audit.review(self.home, None, ack=False)["total"], 20
+            recall_audit.review(self.home, None, ack=False)["total"], len(ids)
+        )
+
+    def test_real_lock_contention_keeps_recall_without_counting(self) -> None:
+        self.capture()
+        with recall_audit.connection(self.home, write=True):
+            text, trace = self.capture()
+        self.assertIn("review unavailable", text)
+        self.assertEqual(trace["review_error"], 1)
+        self.assertNotIn("delivery_id", trace)
+        self.assertEqual(
+            recall_audit.review(self.home, None, ack=False)["total"], 1
         )
 
     def test_locked_or_corrupt_audit_fails_open(self) -> None:

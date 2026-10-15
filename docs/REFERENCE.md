@@ -311,7 +311,8 @@ requests and `--kind reply` for assistant reports, widening when necessary.
 `muninn recall-review [--batch N] [--ack] [--pretty]` reads a batch of at most
 50 deliveries. The default is the oldest unreviewed batch, or the current partial
 batch (the latest batch if everything is acknowledged). On delivery 50 and later
-nonempty blocks, a `systemMessage` tells the human review is due and the model
+nonempty blocks, a `systemMessage` gives the human a prompt to paste into Claude
+or Codex to run the review command and follow `review_prompt`. The model
 context retains a review reminder until
 `muninn recall-review --batch N --ack` acknowledges that next complete batch.
 The count combines Claude and Codex; the report separates model ratings by provider.
