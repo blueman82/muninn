@@ -83,3 +83,17 @@ counts 8-character session prefixes. The summary adds
 `questions_with_final_hits` and the mean of each of the three over those same
 questions: gold questions whose final list is not empty. All three means are
 null when there are none. Counts and ratios only, as before.
+
+### Trying a different query-term rule (experiment knob)
+
+`--terms RULE` (default `list`) chooses how the query terms are picked, for the
+candidate rows, the `no_terms` check and the final search alike. It is an
+experiment knob only: `muninn search`, the hooks and every default are
+unchanged. The rules are `list` (today's fixed stopword list), `none` (no
+stopword list) and `df:R` (R above 0 and at most 1): drop a single-word term
+held by more than R of all events. Quoted phrases and identifier phrases are
+never dropped. If `df:R` would drop every single word, the one with the lowest
+document frequency is kept, so a query still searches. A store with fewer than
+1000 events uses the `list` rule for `df:R`, so tiny stores behave as before.
+An invalid value exits 2 with `invalid option: terms`. Each question also
+reports `terms_kept`, the number of single-word terms in the query.

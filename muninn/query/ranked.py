@@ -32,7 +32,7 @@ from muninn.query.hits import (
 )
 from muninn.query.index_age import freshness
 from muninn.query.paging import paginate
-from muninn.query.terms import build_fts_query
+from muninn.query.terms import fts_terms
 from muninn.scope import scope_ids_for_read
 
 PAGE_MAX = 30
@@ -64,6 +64,9 @@ class SearchArgs(TypedDict, total=False):
     # PER_SESSION; set by the replay benchmark, ignored when ``session`` is
     # given, and callers pass >= 1 (anything lower is an error answer).
     per_session_cap: int
+    # Query-term rule: "list" (default), "none" or "df:R"; set by the replay
+    # benchmark, see ``fts_terms``. An invalid rule is an error answer.
+    terms: str
 
 
 def _eligibility(
@@ -205,6 +208,24 @@ def _check_keywords(args: Mapping[str, object]) -> None:
         )
 
 
+def _stages(
+    total: Counter[str],
+    other: Counter[str],
+    candidates: int,
+    capped: tuple[int, int],
+    hits: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Count one search's matches, candidates, capped and returned hits."""
+    return {
+        "matches": sum(total.values()) + sum(other.values()),
+        "in_scope": sum(total.values()),
+        "candidates": candidates,
+        "session_capped": capped[0],
+        "tool_capped": capped[1],
+        "returned": len(hits),
+    }
+
+
 @guarded
 def search(
     conn: sqlite3.Connection, query: str, **args: Unpack[SearchArgs]
@@ -229,7 +250,8 @@ def search(
             ``recent``, ``limit`` (default 10), ``page`` (default 1),
             ``include_current``, ``scope``, ``include_subagents``,
             ``current_session``, ``per_session_cap`` (default PER_SESSION; a
-            tuning knob, not a CLI flag), ``push_only`` (knowledge a hook may
+            tuning knob, not a CLI flag), ``terms`` (query-term rule, default
+            ``list``; also a tuning knob), ``push_only`` (knowledge a hook may
             push; the CLI also gets restricted entries, flagged) and
             ``status`` (a parsed status.json).
 
@@ -251,7 +273,10 @@ def search(
     if cap < 1:
         return error("per_session_cap must be >= 1")
     status = args.get("status")
-    fts = build_fts_query(query)
+    try:
+        fts, _ = fts_terms(conn, query, args.get("terms", "list"))
+    except ValueError as bad:
+        return error(str(bad))
     out: Answer = {
         "notice": NOTICE,
         "preview_notice": PREVIEW_NOTICE,
@@ -290,14 +315,9 @@ def search(
         "page": page,
         "limit": limit,
         "other_scopes": _other_scopes(other),
-        "stages": {
-            "matches": sum(total.values()) + sum(other.values()),
-            "in_scope": sum(total.values()),
-            "candidates": len(found.rows),
-            "session_capped": session_capped,
-            "tool_capped": tool_capped,
-            "returned": len(hits),
-        },
+        "stages": _stages(
+            total, other, len(found.rows), (session_capped, tool_capped), hits
+        ),
     }
     if found.root is None:
         out |= _knowledge_part(

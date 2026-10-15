@@ -25,7 +25,13 @@ from muninn.query.listing import session, sessions
 from muninn.query.opening import open_event
 from muninn.query.quotes import quote_check
 from muninn.query.ranked import search
-from muninn.query.terms import STOPWORDS, build_fts_query, parse_ref
+from muninn.query.terms import (
+    STOPWORDS,
+    build_fts_query,
+    fts_terms,
+    parse_ref,
+    parse_rule,
+)
 
 __all__ = [
     "ALL_KINDS",
@@ -36,9 +42,11 @@ __all__ = [
     "build_fts_query",
     "caller_root",
     "freshness",
+    "fts_terms",
     "guarded",
     "open_event",
     "parse_ref",
+    "parse_rule",
     "quote_check",
     "search",
     "session",

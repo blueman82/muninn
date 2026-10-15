@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 
 from muninn.query.constants import PROVIDERS
 
 MAX_TERMS = 16
 MAX_PHRASES = 8
 MAX_PHRASE_PARTS = 12  # words in one phrase; a longer one keeps its start
+MIN_EVENTS = 1000  # below this a df rule is noise; the list rule applies
 MAX_TERM_LEN = 100  # a longer "word" is a blob, not something to search for
 
 _REF = re.compile(r"(\w+):(\S+):(\d+)(?:\.(\d+))?")
@@ -86,6 +88,41 @@ def parse_ref(ref: str) -> tuple[str, str, int, int]:
     return found[1], found[2], line, part
 
 
+def _extract(text: str) -> tuple[list[str], list[str]]:
+    """Split text into its deduped single words and its phrases.
+
+    Args:
+        text: The user's search text.
+
+    Returns:
+        The lower-case words (1 < length <= MAX_TERM_LEN, no stopword
+        filtering, no cap) and the phrases, in order.
+    """
+    phrases: list[str] = []
+
+    def phrase(text: str) -> str:
+        parts = _PART.findall(text)
+        if len(parts) > 1:
+            phrases.append(" ".join(parts[:MAX_PHRASE_PARTS]))
+        return " " if len(parts) > 1 else f" {text} "
+
+    rest = _QUOTED.sub(lambda found: phrase(found[1]), text.lower())
+    for ident in _IDENT.findall(rest):
+        phrase(ident)
+    words = dict.fromkeys(
+        w
+        for w in _WORD.findall(rest)
+        if 1 < len(w) <= MAX_TERM_LEN and _PART.search(w)
+    )
+    return list(words), list(dict.fromkeys(phrases))
+
+
+def _match(words: list[str], phrases: list[str]) -> str | None:
+    """Join the capped words and phrases into a MATCH string, or None."""
+    elements = words[:MAX_TERMS] + phrases[:MAX_PHRASES]
+    return " OR ".join(f'"{e}"' for e in elements) or None
+
+
 def build_fts_query(text: str) -> str | None:
     """Build an FTS5 MATCH string: quoted terms joined by OR.
 
@@ -102,24 +139,67 @@ def build_fts_query(text: str) -> str | None:
     Returns:
         The MATCH string, or None when the text has no searchable terms.
     """
-    phrases: list[str] = []
+    words, phrases = _extract(text)
+    return _match([w for w in words if w not in STOPWORDS], phrases)
 
-    def phrase(text: str) -> str:
-        parts = _PART.findall(text)
-        if len(parts) > 1:
-            phrases.append(" ".join(parts[:MAX_PHRASE_PARTS]))
-        return " " if len(parts) > 1 else f" {text} "
 
-    rest = _QUOTED.sub(lambda found: phrase(found[1]), text.lower())
-    for ident in _IDENT.findall(rest):
-        phrase(ident)
-    words = dict.fromkeys(
-        w
-        for w in _WORD.findall(rest)
-        if 1 < len(w) <= MAX_TERM_LEN
-        and w not in STOPWORDS
-        and _PART.search(w)
-    )
-    elements = list(words)[:MAX_TERMS]
-    elements += list(dict.fromkeys(phrases))[:MAX_PHRASES]
-    return " OR ".join(f'"{e}"' for e in elements) or None
+def parse_rule(rule: str) -> float | None:
+    """Validate a term rule: ``list``, ``none`` or ``df:R`` with 0 < R <= 1.
+
+    Args:
+        rule: The rule text.
+
+    Returns:
+        The ratio R for a df rule, None for ``list`` and ``none``.
+
+    Raises:
+        ValueError: If the rule is anything else.
+    """
+    if rule in ("list", "none"):
+        return None
+    ratio = float(rule[3:]) if rule.startswith("df:") else 0.0
+    if not 0 < ratio <= 1:
+        raise ValueError("terms must be list, none or df:R (0 < R <= 1)")
+    return ratio
+
+
+def _doc_freq(conn: sqlite3.Connection, word: str) -> int:
+    """Count the events whose text holds word (a MATCH count, read-only)."""
+    sql = "SELECT count(*) FROM event_fts WHERE event_fts MATCH ?"
+    return int(conn.execute(sql, (f'"{word}"',)).fetchone()[0])
+
+
+def fts_terms(
+    conn: sqlite3.Connection, text: str, rule: str = "list"
+) -> tuple[str | None, list[str]]:
+    """Build the MATCH string and the kept single words under a term rule.
+
+    ``list`` is ``build_fts_query``; ``none`` applies no stopword list;
+    ``df:R`` drops a single word held by more than R of all events, and
+    keeps the rarest word when that would drop them all. Phrases are never
+    filtered. A store under MIN_EVENTS events uses the list rule for df.
+
+    Args:
+        conn: Read-only store connection.
+        text: The user's search text.
+        rule: ``list``, ``none`` or ``df:R``.
+
+    Returns:
+        The MATCH string (None when nothing is searchable) and the kept
+        single words, capped at MAX_TERMS.
+
+    Raises:
+        ValueError: If the rule is invalid.
+    """
+    ratio = parse_rule(rule)
+    words, phrases = _extract(text)
+    kept = [w for w in words if rule == "none" or w not in STOPWORDS]
+    if ratio is not None and words:
+        total = conn.execute("SELECT count(*) FROM event_fts_docsize")
+        events = int(total.fetchone()[0])
+        # ponytail: one MATCH count per word; cap the words if a hook uses it.
+        if events >= MIN_EVENTS:
+            freq = {w: _doc_freq(conn, w) for w in words}
+            kept = [w for w in words if freq[w] <= ratio * events]
+            kept = kept or [min(words, key=lambda w: freq[w])]
+    return _match(kept, phrases), kept[:MAX_TERMS]

@@ -211,6 +211,35 @@ class ReplayTests(OpenCase):
         self.assertEqual(summary["controls_total"], 1)
         self.assertEqual(summary["no_terms_questions"], 2)
 
+    def test_terms_rule_changes_results_and_reports_terms_kept(self) -> None:
+        self.write_source("thr-stop", [("the of and more", {})])
+        questions = [
+            {"id": "ctl", "query": "the of", "control": True},
+            {"id": "g", "query": "the zephyr", "required": self.refs[:1]},
+        ]
+        _, listed, _ = self.replay(questions)
+        _, none, _ = self.replay(questions, "--terms", "none")
+        _, df, _ = self.replay(questions, "--terms", "df:0.5")
+        self.assertEqual(
+            [(q["no_terms"], q["results"]) for q in listed["questions"][:1]],
+            [(True, 0)],
+        )
+        self.assertGreater(none["questions"][0]["results"], 0)
+        self.assertFalse(none["questions"][0]["no_terms"])
+        self.assertEqual(
+            [q["terms_kept"] for q in listed["questions"]], [0, 1]
+        )
+        self.assertEqual([q["terms_kept"] for q in none["questions"]], [2, 2])
+        # A store under MIN_EVENTS: df behaves as the list rule.
+        self.assertEqual(df["questions"], listed["questions"])
+
+    def test_bad_terms_exit_2(self) -> None:
+        question = [{"id": "g", "query": "zephyr", "required": self.refs}]
+        for value in ("", "x", "df:0", "df:2", "df:"):
+            code, report, err = self.replay(question, "--terms", value)
+            self.assertEqual((code, report), (2, {}))
+            self.assertEqual(err.strip(), "invalid option: terms")
+
     def test_unresolved_ref_is_counted(self) -> None:
         _, report, _ = self.replay(
             [{"id": "g", "query": "zephyr", "required": ["codex:no:9.1"]}]

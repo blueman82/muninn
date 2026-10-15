@@ -132,7 +132,7 @@ def _replay(
         "all_projects": args.all_projects,
         "scope": args.scope,
     }
-    fts = query.build_fts_query(item["query"])
+    fts, kept = query.fts_terms(conn, item["query"], args.terms)
     rows = candidate_rows(conn, fts, base, args.candidates).rows if fts else []
     ranked = [row["id"] for row in rows]
     no_terms = fts is None
@@ -140,6 +140,7 @@ def _replay(
         **base,
         "limit": args.final,
         "per_session_cap": args.per_session,
+        "terms": args.terms,
     }
     final = query.search(conn, item["query"], **final_args)
     if "error" in final:
@@ -150,6 +151,7 @@ def _replay(
             "id": item["id"],
             "control": True,
             "no_terms": no_terms,
+            "terms_kept": len(kept),
             "results": len(ranked),
             "final_hits": len(final_ids),
         }
@@ -169,6 +171,7 @@ def _replay(
         "id": item["id"],
         "control": False,
         "no_terms": no_terms,
+        "terms_kept": len(kept),
         "refs": refs,
         "all_in_candidates": all(r["rank"] is not None for r in refs),
         "all_in_final": all(r["in_final"] for r in refs),
@@ -254,6 +257,11 @@ def _parser() -> argparse.ArgumentParser:
         default=PER_SESSION,
         help="hits one session may keep in the final list (>= 1)",
     )
+    parser.add_argument(
+        "--terms",
+        default="list",
+        help="query-term rule: list (default), none or df:R (0 < R <= 1)",
+    )
     return parser
 
 
@@ -278,6 +286,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"invalid option: {name}", file=sys.stderr)
             return 2
     try:
+        query.parse_rule(args.terms)
+    except ValueError:
+        print("invalid option: terms", file=sys.stderr)
+        return 2
+    try:
         questions = _load(args.questions)
     except _BadInputError:
         print("invalid questions file", file=sys.stderr)
@@ -297,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         "candidates": args.candidates,
         "final": args.final,
         "per_session": args.per_session,
+        "terms": args.terms,
         "summary": _summary(results),
         "questions": results,
     }
