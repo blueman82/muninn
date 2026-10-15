@@ -114,6 +114,22 @@ untouched; `know list --status expired` shows it, `--status all` and `know show`
 flagged, `know check` reports an `expired` count, and `stats` counts it under
 `knowledge.expired` instead of `knowledge.current`.
 
+**Retrieval outcomes are counted.** `stages` in a `search` or `hook prompt` line of
+`calls.jsonl` can carry 0/1 integer flags, present only when 1: `miss_zero` (searchable terms
+but no match), `miss_outside` (matches, none in scope), and for search `miss_noterms`
+(no searchable terms; `stages` then holds only this key) or for the hook `miss_floor`
+(every event read was dropped by the term floor; pages not read when the pool stopped at its
+page limit). The hook's `stages` holds `floor_dropped`, `returned`, `pool_error` (set when
+any result page errored; `miss_floor` is then left out) and, when its search answered,
+`matches` and `in_scope` plus at most one miss key;
+it logs `n_terms` but no query hash or text. `miss_outside` depends on the working
+directory: a search run from outside the repo's scope counts as outside even though
+`--all-projects` would find hits. A flag is set only when the call returned no hit
+and no knowledge; an errored call never sets one. A prompt the hook skips (fewer than
+3 query terms, or starting with `/`) logs no `stages` and so no flag. `MUNINN_NO_CALLLOG=1` stops the log. These are facts about a call,
+not proof that the answer was missing; only the labeled replay in
+`docs/REPLAY-BENCHMARK.md` shows true misses.
+
 **Withheld is counted.** The `hook session-start` line in `calls.jsonl` carries
 `withheld: {"expired": N, "restricted": N}` (counts of current entries in the repo and
 global scopes that the block left out, never text; the field passes the `obs_log`
@@ -228,7 +244,10 @@ and a source that fails or is skipped stays pending, so look at `last_pass.faile
 `unreadable_files` and `skipped_files`); `install_sha`; `classifier_version`;
 `hash_mismatches` (open-time line hash failures seen in the call log). `--usage` adds
 `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen in transcripts)
-and `usage_totals` per provider.
+and `usage_totals` per provider. `stats` always reports `retrieval_outcomes` (counts from
+the same call-log window: `window_lines`; `search` `calls`, `zero`, `outside`, `noterms`;
+`hook_prompt` `calls`, `zero`, `outside`, `floor`; calls without `stages` count in `calls`
+only; facts, not proof of a miss).
 
 ## `muninn doctor`
 

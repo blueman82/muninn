@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter
 from collections.abc import Mapping
-from typing import Any, Required, TypedDict, Unpack
+from typing import Any, NamedTuple, Required, TypedDict, Unpack
 
 from muninn.query.answers import Answer, BadArgumentError, error
 from muninn.query.constants import NOTICE, PREVIEW_NOTICE
@@ -23,6 +23,7 @@ from muninn.query.guard import guarded
 from muninn.query.hits import (
     CANDIDATES,
     CANDIDATES_SQL,
+    PER_SESSION,
     compose,
     expired_omitted,
     knowledge,
@@ -59,6 +60,10 @@ class SearchArgs(TypedDict, total=False):
     current_session: str | None
     status: Mapping[str, Any] | None
     push_only: bool
+    # Hits one session may keep in the whole composed list. Default
+    # PER_SESSION; set by the replay benchmark, ignored when ``session`` is
+    # given, and callers pass >= 1 (anything lower is an error answer).
+    per_session_cap: int
 
 
 def _eligibility(
@@ -92,6 +97,52 @@ def _eligibility(
         root,
         me,
     )
+
+
+class Candidates(NamedTuple):
+    """The bm25 candidate rows of one search and the filters behind them."""
+
+    root: str | None
+    rows: list[sqlite3.Row]
+    ids: list[int]
+    where: str
+    params: list[Any]
+    inside: tuple[str, list[Any]]
+
+
+def candidate_rows(
+    conn: sqlite3.Connection,
+    fts: str,
+    args: SearchArgs,
+    limit: int = CANDIDATES,
+) -> Candidates:
+    """Return the bm25 candidates ``search`` ranks, best first.
+
+    Applies the eligibility, scope and current-session rules of ``search``.
+
+    Args:
+        conn: Read-only store connection.
+        fts: The FTS5 MATCH string.
+        args: The keyword arguments of ``search``.
+        limit: How many candidate rows to fetch.
+
+    Returns:
+        The session root, the rows and the filters that produced them.
+
+    Raises:
+        BadArgumentError: If the session, a kind, the provider or a date is
+            invalid.
+    """
+    root, (clauses, params) = _eligibility(conn, args)
+    scope, everywhere = args.get("scope"), args.get("all_projects", False)
+    ids = scope_ids_for_read(conn, scope or args["cwd"])
+    inside = scope_clause(ids, scope, everywhere)
+    where = " AND ".join(clauses)
+    rows = conn.execute(
+        CANDIDATES_SQL.format(where=f"{where} AND {inside[0]}", limit=limit),
+        [fts, *params, *inside[1]],
+    ).fetchall()
+    return Candidates(root, rows, ids, where, params, inside)
 
 
 def _other_scopes(other: Counter[str]) -> dict[str, int]:
@@ -177,9 +228,10 @@ def search(
             ``kinds``, ``provider``, ``since``, ``until``, ``session``,
             ``recent``, ``limit`` (default 10), ``page`` (default 1),
             ``include_current``, ``scope``, ``include_subagents``,
-            ``current_session``, ``push_only`` (knowledge a hook may push; the
-            CLI also gets restricted entries, flagged) and ``status`` (a
-            parsed status.json).
+            ``current_session``, ``per_session_cap`` (default PER_SESSION; a
+            tuning knob, not a CLI flag), ``push_only`` (knowledge a hook may
+            push; the CLI also gets restricted entries, flagged) and
+            ``status`` (a parsed status.json).
 
     Returns:
         The answer, or ``{"error": code}`` for bad input.
@@ -194,6 +246,10 @@ def search(
     _check_keywords(args)
     limit = min(max(args.get("limit", 10), 1), PAGE_MAX)
     page = max(args.get("page", 1), 1)
+    cap = args.get("per_session_cap")
+    cap = PER_SESSION if cap is None else cap
+    if cap < 1:
+        return error("per_session_cap must be >= 1")
     status = args.get("status")
     fts = build_fts_query(query)
     out: Answer = {
@@ -205,25 +261,17 @@ def search(
     if fts is None:
         return out | {"note": "no searchable terms", **freshness(status)}
     try:
-        root, (clauses, params) = _eligibility(conn, args)
+        found = candidate_rows(conn, fts, args)
     except BadArgumentError as bad:
         return error(str(bad))
     scope, everywhere = args.get("scope"), args.get("all_projects", False)
-    ids = scope_ids_for_read(conn, scope or args["cwd"])
-    inside = scope_clause(ids, scope, everywhere)
-    where = " AND ".join(clauses)
-    rows = conn.execute(
-        CANDIDATES_SQL.format(
-            where=f"{where} AND {inside[0]}", limit=CANDIDATES
-        ),
-        [fts, *params, *inside[1]],
-    ).fetchall()
-    total, other = tally(conn, fts, where, params, inside)
+    total, other = tally(conn, fts, found.where, found.params, found.inside)
     entries, session_capped, tool_capped = compose(
-        rows,
+        found.rows,
         limit,
-        per_session=root is None,
-        tools=not args.get("kinds") and root is None,
+        per_session=found.root is None,
+        tools=not args.get("kinds") and found.root is None,
+        per_session_cap=cap,
     )
     pool = entries
     if args.get("recent"):
@@ -232,9 +280,12 @@ def search(
             key=lambda e: e["row"]["ts"] or "",
             reverse=True,
         )
-    hits = render(conn, fts, pool, entries, total)
+    # A session listing is not capped, so it must not annotate from a cap.
+    hits = render(
+        conn, fts, pool, entries, total, cap if found.root is None else 1 << 30
+    )
     out |= {
-        "scope": scope_label(conn, ids, scope, everywhere),
+        "scope": scope_label(conn, found.ids, scope, everywhere),
         "hits": hits,
         "page": page,
         "limit": limit,
@@ -242,15 +293,15 @@ def search(
         "stages": {
             "matches": sum(total.values()) + sum(other.values()),
             "in_scope": sum(total.values()),
-            "candidates": len(rows),
+            "candidates": len(found.rows),
             "session_capped": session_capped,
             "tool_capped": tool_capped,
             "returned": len(hits),
         },
     }
-    if root is None:
+    if found.root is None:
         out |= _knowledge_part(
-            conn, fts, ids, everywhere, args.get("push_only", False)
+            conn, fts, found.ids, everywhere, args.get("push_only", False)
         )
     if not total and other:
         out["note"] = _outside_note(sum(other.values()))

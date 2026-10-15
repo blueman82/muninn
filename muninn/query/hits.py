@@ -12,7 +12,7 @@ from muninn.query.answers import Answer, answer_citable, event_ref
 
 CANDIDATES = 300  # bm25 candidates per search, composed into pages
 SNIPPET_TOKENS = 32
-PER_SESSION = 2  # hits per session on a page
+PER_SESSION = 2  # hits per session in the whole composed list
 TOOLS_PER_PAGE = 4
 KNOWLEDGE_HITS = 3
 KNOWLEDGE_TEXT = 300  # chars of a knowledge entry shown before size trimming
@@ -82,18 +82,20 @@ def compose(
     *,
     per_session: bool,
     tools: bool,
+    per_session_cap: int,
 ) -> tuple[list[Entry], int, int]:
     """Turn rank-ordered rows into page-ready entries.
 
     Identical text within a session collapses into its first hit (repeats);
-    then at most PER_SESSION hits per session and TOOLS_PER_PAGE tool_call
-    hits in each ``limit``-sized page are kept.
+    then at most ``per_session_cap`` hits per session across the whole list
+    and TOOLS_PER_PAGE tool_call hits in each ``limit``-sized page are kept.
 
     Args:
         rows: Candidate rows in rank order.
         limit: Hits per page, which sets where the tool budget resets.
         per_session: Cap the hits any one session may contribute.
         tools: Cap the tool_call hits on each page.
+        per_session_cap: Hits one session may contribute when ``per_session``.
 
     Returns:
         The entries, how many the session cap dropped and how many the tool
@@ -111,7 +113,7 @@ def compose(
         if key in seen:
             seen[key]["repeats"] += 1
             continue
-        if per_session and shown[root] >= PER_SESSION:
+        if per_session and shown[root] >= per_session_cap:
             session_capped += 1
             continue
         is_tool = row["kind"] == "tool_call"
@@ -172,10 +174,11 @@ def render(
     shown: list[Entry],
     entries: list[Entry],
     total: Counter[str],
+    per_session_cap: int,
 ) -> list[Answer]:
     """Render the shown entries as hits.
 
-    A session with at least PER_SESSION hits reports how many of its
+    A session with at least ``per_session_cap`` hits reports how many of its
     in-scope matches no hit stands for (``more_in_session``).
 
     Args:
@@ -184,6 +187,7 @@ def render(
         shown: Entries to render, in display order.
         entries: Every composed entry, which defines what hits cover.
         total: In-scope match counts per session.
+        per_session_cap: The cap ``compose`` applied.
 
     Returns:
         One hit per shown entry.
@@ -201,7 +205,7 @@ def render(
         hit = _hit(row, snippets.get(row["id"], ""), entry["repeats"])
         root = row["session_root"]
         more = total[root] - covered[root]
-        if hits_in[root] >= PER_SESSION and more > 0:
+        if hits_in[root] >= per_session_cap and more > 0:
             hit["more_in_session"] = more
         hits.append(hit)
     return hits

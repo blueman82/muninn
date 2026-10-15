@@ -6,6 +6,7 @@ root.
 
 from __future__ import annotations
 
+from typing import cast
 from unittest import mock
 
 from muninn import hook_frame, hook_recall, knowledge
@@ -32,6 +33,32 @@ class RecallStressTests(RecallCase):
         self.assertTrue(rows[0].startswith("- K"))  # knowledge survived
         self.assertEqual(len(rows), 2)
         self.assertIn(self.ref(passing), rows[1])  # found on the second page
+
+    def test_min_terms_default_is_three_and_a_lower_floor_keeps_more(
+        self,
+    ) -> None:
+        self.talk("two", "rareone raretwo filler")
+        self.noise(self.repo)
+        prompt = "rareone raretwo commonone"
+        payload = {"prompt": prompt, "session_id": "sess-now"}
+        request = hook_recall.RecallRequest(
+            terms=["rareone", "raretwo", "commonone"],
+            cwd="/repo",
+            notes=lambda: (),
+            limit=4000,
+        )
+
+        def kept(**kw: int) -> list[object]:
+            """Return the event ids a recall with these knobs keeps."""
+            trace: dict[str, object] = {}
+            hook_recall.recall_block(
+                self.ro(), payload, self.env, trace, request, **kw
+            )
+            return cast("list[object]", trace["returned_ids"])
+
+        self.assertEqual(kept(), [])
+        self.assertEqual(kept(min_terms=3), [])
+        self.assertEqual(len(kept(min_terms=2)), 1)
 
     def test_recall_stops_paging_when_the_results_end(self) -> None:
         self.talk("a", "alphaterm betaterm gammaterm deltaterm all here")
