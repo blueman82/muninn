@@ -48,6 +48,27 @@ class ObsCase(unittest.TestCase):
 class CallLogTests(ObsCase):
     """The call log keeps only allowlisted fields and stays bounded."""
 
+    def test_final_recall_fields_keep_only_counts_and_ids(self) -> None:
+        obs.log_call(
+            self.home,
+            {
+                "cmd": "hook prompt",
+                "delivery_id": 50,
+                "review_due_batch": 1,
+                "review_error": 1,
+                "delivered_ids": [2, CANARY],
+                "delivered_knowledge_ids": [3, CANARY],
+                "delivered_sources": [{"text": CANARY}],
+            },
+        )
+        (line,) = self.lines()
+        self.assertEqual(line["delivery_id"], 50)
+        self.assertEqual(line["review_due_batch"], 1)
+        self.assertEqual(line["delivered_ids"], [2])
+        self.assertEqual(line["delivered_knowledge_ids"], [3])
+        self.assertNotIn(CANARY, self.log.read_text())
+        self.assertNotIn("delivered_sources", line)
+
     def test_allowlist_drops_text_and_unknown_fields(self) -> None:
         ok = obs.log_call(
             self.home,

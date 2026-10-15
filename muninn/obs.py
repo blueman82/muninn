@@ -20,6 +20,7 @@ from muninn import ingest, obs_service, platform_io, store, tombstone_key
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_stats import db_space, human_bytes, reread, stats
 from muninn.obs_status import (
+    DATA_FILES,
     count_field,
     freshness,
     install_sha,
@@ -58,23 +59,6 @@ LABEL = "com.muninn"
 # deletes it (install/steps_release.py names the same string; the
 # installer is not importable from the runtime).
 PRUNING = ".pruning-"
-# Everything muninn itself puts in the data directory; anything else is
-# reported by ``unexpected_files``.
-DATA_FILES = frozenset(
-    {
-        "muninn.sqlite",
-        "writer.lock",
-        "status.json",
-        "calls.jsonl",
-        "calls.jsonl.1",
-        "poller.log",
-        "poller.log.1",
-        "tombstones.jsonl",
-        "tombstone.key",
-        "recall.off",
-        "stop.json",
-    }
-)
 
 
 class CheckResult(TypedDict):

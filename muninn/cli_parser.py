@@ -177,6 +177,13 @@ def _add_maintenance(cmd: _Commands) -> None:
     cmd.add("compact", "VACUUM the store to return free space")
     cmd.add("doctor", "health checks (exit 1 when unhealthy)")
     cmd.add("rebuild", "rebuild the store from the transcripts")
+    p = cmd.add("recall-review", "review a batch of 50 recall deliveries")
+    p.add_argument("--batch", type=int, help="one-based delivery batch")
+    p.add_argument(
+        "--ack",
+        action="store_true",
+        help="acknowledge the reviewed complete batch",
+    )
 
 
 def _add_knowledge(cmd: _Commands) -> None:

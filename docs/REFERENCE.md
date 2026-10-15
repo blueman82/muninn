@@ -49,6 +49,12 @@ when `has_more` is true, repeat with N+1, even if a page has no hits. **open fla
 flags:** `--all-projects`, `--since`, `--limit`; `session --from N` continue with
 `next_from`.
 
+For what the owner said, requested or decided, start with `--kind prompt`.
+For an assistant's report, use `--kind reply`; add `--provider` when known.
+If that pass misses, widen the kinds and open the surrounding conversation.
+An assistant's report alone does not prove an owner instruction. Verify authorship
+after opening: prompt events can contain pasted text or local command output.
+
 **Hit fields:** `ref` stable reference; `id`; `kind`; `role` user|assistant; `provider`;
 `session`; `thread`; `cwd`; `scope`; `ts`; `snippet` (navigation only); `answer_citable`
 (false means it may not support a factual answer); `source_status` active|missing;
@@ -294,6 +300,55 @@ four fields:
 
 ## Per-prompt recall switch (`recall.off`)
 
+### Reviewing automatic recall
+
+Every nonempty generated recall block asks the model to tell the human
+`Memory R<number>: useful/noise/uncertain — reason`. This is a model assessment,
+not a correctness guarantee. The hook still searches both prompts and replies;
+its session-start guidance tells agents to use `search --kind prompt` for owner
+requests and `--kind reply` for assistant reports, widening when necessary.
+
+`muninn recall-review [--batch N] [--ack] [--pretty]` reads a batch of at most
+50 deliveries. The default is the oldest unreviewed batch, or the current partial
+batch (the latest batch if everything is acknowledged). On delivery 50 and later
+nonempty blocks, a `systemMessage` tells the human review is due and the model
+context retains a review reminder until
+`muninn recall-review --batch N --ack` acknowledges that next complete batch.
+The count combines Claude and Codex; the report separates model ratings by provider.
+No timer or background model runs. The reminder takes effect when a hook runs.
+
+The separate private `recall-review.sqlite` holds only ids, timestamps, source
+references, excerpt caps, request/session fingerprints and context hashes; never
+conversation text. It survives restarts, ordinary log rotation, upgrades and
+index rebuilds. Source refs remain authoritative when event ids change. It counts
+generated context, not proof that the host accepted it or the model read it.
+`MUNINN_NO_CALLLOG=1` disables the ordinary call log, not this review metadata.
+If metadata cannot be written, recall stays available with a review-unavailable
+instruction; the call log carries `review_error: 1` and that delivery is uncounted.
+
+The report includes `total`, `reviewed_batches`, `batch`, `complete`, `deliveries`,
+`review_prompt`, `acknowledged`, and (for nonempty batches) `self_assessments`.
+Each delivery holds its `id`, `at`, `provider`, `session`, `prompt_sha256`,
+`scope_ids`, final `sources` (ref and excerpt cap), final `knowledge` (id, cited refs,
+excerpt cap and text hash), `context_sha256`, and `characters`. Once indexed, a
+unique request matching its redacted text hash, provider/session and timestamp
+within two minutes supplies `request_ref` and `request_preview`; otherwise
+`request_status` is `unresolved`. `assessment` contains the model's matching
+`Memory R<number>` rating before the next prompt, its source ref and reason preview,
+or `unassessed`. Previews require opening originals before factual claims.
+The historical full block text is not retained, and current knowledge may differ.
+`--ack` requires `--batch`, a completed batch, and sequential review. Invalid
+arguments exit 2; unavailable metadata or transcript store exits 4. Acknowledgement
+records review, not approval of recall quality. Follow `review_prompt` and report
+missing evidence before acknowledging.
+
+The ordinary call log now distinguishes selected `returned_ids`/`knowledge_ids`
+from `delivered_ids`/`delivered_knowledge_ids` that survive shortening. A recorded
+block also has its numeric `delivery_id` and, when due, `review_due_batch`. No query text or fingerprints enter the
+prompt-hook call log; request fingerprints live only in the review database.
+
+### Switch behavior
+
 **Function.** Before each prompt, the UserPromptSubmit hook (`muninn hook prompt`) can
 add a short block of up to 1,500 characters: matching knowledge entries first, then up
 to 3 earlier prompts or replies from this repo. If a file named `recall.off` exists in
@@ -309,7 +364,8 @@ it in the transcript; Codex records it as a `warning` hook entry). At SessionSta
 lists every pushed knowledge entry's headline (its `text`, in full, control characters
 replaced by spaces), one per line under `muninn: memory loaded (N knowledge entries)`;
 when the store cannot be read it is `muninn: memory unavailable (<code>)`. The entry
-text is never written to the call log. Per-prompt recall adds no line.
+text is never written to the call log. Per-prompt recall adds a human-facing line
+only when a 50-delivery review is due.
 
 **Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints
 how to turn recall on. `--upgrade` never creates or removes it, so an existing machine

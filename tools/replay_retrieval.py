@@ -30,6 +30,7 @@ from typing import Any, cast
 
 from muninn import ingest, query, store
 from muninn.query.answers import BadArgumentError
+from muninn.query.constants import DEFAULT_KINDS
 from muninn.query.hits import CANDIDATES, PER_SESSION
 from muninn.query.ranked import SearchArgs, candidate_rows
 
@@ -131,6 +132,7 @@ def _replay(
         "env": {},
         "all_projects": args.all_projects,
         "scope": args.scope,
+        "kinds": {args.kind} if args.kind else None,
     }
     fts, kept = query.fts_terms(conn, item["query"], args.terms)
     rows = candidate_rows(conn, fts, base, args.candidates).rows if fts else []
@@ -249,6 +251,11 @@ def _parser() -> argparse.ArgumentParser:
         "--scope", help="only events whose cwd is exactly this"
     )
     parser.add_argument("--cwd", help="scope root when --no-all-projects")
+    parser.add_argument(
+        "--kind",
+        choices=DEFAULT_KINDS,
+        help="search only prompts or replies (default: both)",
+    )
     parser.add_argument("--candidates", type=int, default=CANDIDATES)
     parser.add_argument("--final", type=int, default=REAL_FINAL)
     parser.add_argument(
@@ -311,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         "final": args.final,
         "per_session": args.per_session,
         "terms": args.terms,
+        "kind": args.kind,
         "summary": _summary(results),
         "questions": results,
     }

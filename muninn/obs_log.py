@@ -41,10 +41,19 @@ _NUMBERS = frozenset(
         "rows",
         "from_v",
         "to_v",
+        "delivery_id",
+        "review_error",
+        "review_due_batch",
     }
 )
 _FLAGS = frozenset({"hash_ok", "logged"})
-_ID_LISTS = ("returned_ids", "knowledge_ids", "ids")
+_ID_LISTS = (
+    "returned_ids",
+    "knowledge_ids",
+    "ids",
+    "delivered_ids",
+    "delivered_knowledge_ids",
+)
 _COUNTS = frozenset({"stages", "counts", "withheld"})
 # String fields are accepted only in shapes that cannot carry free text.
 _CODES = {

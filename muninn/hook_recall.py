@@ -14,8 +14,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import NotRequired, Protocol, TypedDict, cast
 
-from muninn import knowledge, query
+from muninn import knowledge, query, recall_audit, store
 from muninn.hook_frame import RecallEntry, RecallHit, recall_text
+from muninn.scope import scope_ids_for_read
 
 # A prompt with fewer query terms recalls nothing; the search ORs terms, so
 # the floor keeps one or two common words from recalling loose matches.
@@ -253,4 +254,19 @@ def recall_block(
     trace["stages"] = stages
     if not entries and not hits:
         return ""
-    return recall_text(entries, hits, request.notes(), request.limit)
+    notes = request.notes()
+
+    def render(feedback: str) -> str:
+        return recall_text(
+            entries, hits, notes, request.limit, feedback=feedback, trace=trace
+        )
+
+    if "muninn_provider" not in payload:
+        return render("")
+    return recall_audit.capture(
+        store.data_home(env),
+        payload,
+        scope_ids_for_read(conn, request.cwd),
+        render,
+        trace,
+    )

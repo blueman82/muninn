@@ -7,6 +7,7 @@ close the frame early, and cut to a character limit.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Sequence
 from typing import TypedDict
@@ -27,6 +28,8 @@ USAGE = (
     " only if the owner said it: `muninn know add --kind decision --text …"
     ' --cite REF --quote "<verbatim>"` (REF from `muninn search`; check the'
     " quote with `muninn quote-check`; see `muninn know add --help`)."
+    " For owner requests use search --kind prompt; for assistant reports"
+    " use --kind reply. Widen if needed; verify authorship in the original."
 )
 OPEN_HINT = (
     "Open a hit with `muninn open <ref> --context 3`;"
@@ -35,8 +38,8 @@ OPEN_HINT = (
     + query.PREVIEW_NOTICE
 )
 RECALL_HINT = (
-    "Previews are navigation only. Support claims with opened, cited eligible"
-    " originals; omit unsupported claims or label them unknown.\n"
+    "Previews: navigation only; use opened, cited eligible originals or"
+    " say unknown.\n"
     "Open a hit with `muninn open <ref> --context 3`."
 )
 
@@ -177,13 +180,13 @@ def render_block(
     return block[: limit - len(CLOSE) - 1] + "\n" + CLOSE
 
 
-def _knowledge_line(entry: RecallEntry) -> str:
+def _knowledge_line(entry: RecallEntry, cap: int = ENTRY_TEXT) -> str:
     """Format one matched knowledge entry with its citations."""
     cites = ", ".join(clean(c, 120) for c in entry["cites"])
     return (
         f"- {entry['id']} [{entry['kind']} {entry['date']}"
         f" by:{clean(entry['actor'], 40)}]"
-        f" {clean(entry['text'], ENTRY_TEXT)}"
+        f" {clean(entry['text'], min(cap, ENTRY_TEXT))}"
         + (f" (cites: {cites})" if cites else "")
     )
 
@@ -209,6 +212,9 @@ def recall_text(
     hits: Sequence[RecallHit],
     notes: Sequence[str],
     limit: int = RECALL_LIMIT,
+    *,
+    feedback: str = "",
+    trace: dict[str, object] | None = None,
 ) -> str:
     """Render the prompt-time recall block within a limit.
 
@@ -220,19 +226,53 @@ def recall_text(
         hits: Matched events.
         notes: Extra lines, such as a stale-index or failed-sources warning.
         limit: Maximum characters.
+        feedback: Native delivery identifier and assessment instruction.
+        trace: Receives the sources that survive rendering.
 
     Returns:
         The framed block, or an empty string when there are no items or
         not even one fits.
     """
-    tail = [*(clean(n, 200) for n in notes), RECALL_HINT]
+    if trace is not None:
+        trace.update(
+            delivered_ids=[],
+            delivered_knowledge_ids=[],
+            delivered_sources=[],
+            delivered_knowledge=[],
+        )
+    tail = [
+        *(clean(n, 200) for n in notes),
+        *([feedback] if feedback else []),
+        RECALL_HINT,
+    ]
     for cap in (SNIPPET, 200, 120):
-        items = [_knowledge_line(e) for e in entries]
+        items = [_knowledge_line(e, cap) for e in entries]
         items += [_hit_line(h, cap) for h in hits]
         for count in range(len(items), 0, -1):
             lines = [classify.NOTICE, *items[:count], *tail]
             block = frame(' kind="recall"', lines)
             if len(block) <= limit:
+                if trace is not None:
+                    kept_entries = entries[:count]
+                    kept_hits = hits[: max(0, count - len(entries))]
+                    trace["delivered_ids"] = [h["id"] for h in kept_hits]
+                    trace["delivered_knowledge_ids"] = [
+                        int(e["id"][1:]) for e in kept_entries
+                    ]
+                    trace["delivered_sources"] = [
+                        {"ref": h["ref"], "cap": cap} for h in kept_hits
+                    ]
+                    trace["delivered_knowledge"] = [
+                        {
+                            "id": e["id"],
+                            "cites": e["cites"],
+                            "cap": cap,
+                            "sha256": hashlib.sha256(
+                                e["text"].encode()
+                            ).hexdigest(),
+                        }
+                        for e in kept_entries
+                    ]
                 return block
     # ponytail: a lone item over the cap gives no block; the longest
     # realistic one is about 470 characters against Codex's 900

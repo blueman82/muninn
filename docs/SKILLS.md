@@ -2,7 +2,8 @@
 
 `.claude/skills/muninn-*` and `.codex/skills/muninn-*/SKILL.md` hold one skill per
 user-facing command: `search`, `open`, `sessions` (also `session`), `know`,
-`quote-check`, `stats`, `doctor`, `compact`, `ingest`, `erase` and `rebuild`. They
+`quote-check`, `stats`, `doctor`, `compact`, `ingest`, `erase`, `rebuild` and
+`recall-review`. They
 define command triggers and interpretation of each answer (snippets are navigation; open
 before citing). `erase` and `rebuild` are destructive: their Codex skills set
 `allow_implicit_invocation: false`, and their Claude skills set

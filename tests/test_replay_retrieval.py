@@ -119,6 +119,35 @@ class ReplayTests(OpenCase):
         refs = report["questions"][0]["refs"]
         self.assertEqual([r["rank"] for r in refs], [1, 2, None])
 
+    def test_kind_filters_candidates_and_final_hits(self) -> None:
+        self.write_source("owner", [(f"{CANARY} " + "padding " * 10, {})])
+        self.write_source(
+            "assistant",
+            [(CANARY, {"kind": "reply", "role": "assistant"})],
+        )
+        questions = [
+            {"id": "g", "query": CANARY, "required": ["codex:owner:1.1"]}
+        ]
+        reports = [self.replay(questions, "--final", "1")[1]]
+        for kind in ("prompt", "reply"):
+            code, report, err = self.replay(
+                questions, "--final", "1", "--kind", kind
+            )
+            self.assertEqual((code, err, report["kind"]), (0, "", kind))
+            reports.append(report)
+        gold = [report["questions"][0] for report in reports]
+        self.assertIsNone(reports[0]["kind"])
+        self.assertEqual(
+            [q["all_in_final"] for q in gold], [False, True, False]
+        )
+        self.assertEqual([q["refs"][0]["rank"] for q in gold], [2, 1, None])
+        self.assertTrue(all(q["refs"][0]["resolves"] for q in gold))
+
+    def test_kind_rejects_non_conversational_events(self) -> None:
+        with self.assertRaises(SystemExit) as bad:
+            self.replay([], "--kind", "tool_call")
+        self.assertEqual(bad.exception.code, 2)
+
     def test_malformed_input_fails_closed(self) -> None:
         bad: list[Any] = [
             {"id": "a", "query": CANARY, "required": []},
