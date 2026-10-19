@@ -49,7 +49,7 @@ def _native(ctx: Ctx) -> None:
 def _verified(ctx: Ctx) -> int:
     """Bind the actual writer to its owned unit and loaded release SHA."""
     healthy, pid = service_status(ctx.data, {"HOME": str(ctx.home)}, obs.run)
-    assert healthy is True and isinstance(pid, int) and pid > 0
+    assert healthy is True and isinstance(pid, int) and pid > 0, (healthy, pid)
     assert obs_status.read_status(ctx.data)["writer_install_sha"] == (
         ctx.release.resolve().name
     )
@@ -62,7 +62,7 @@ def busy_stop(ctx: Ctx) -> None:
     write("lifecycle", "busy_stop")
     database = store.db_path(ctx.data)
     started = time.time()
-    lifecycle.start(ctx, (ctx.lib / "python").resolve(), ctx.release)
+    lifecycle.start(ctx, (ctx.lib / "python").readlink(), ctx.release)
     wait(ctx, lambda: _completed(ctx, started), 20, "idle managed pass absent")
     with (
         snapshot_io.validated(database),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import tempfile
 import unittest
 from contextlib import closing
@@ -19,6 +20,65 @@ from tests.review_quiescence_support import initialize
 
 class NativeWriterProofTests(unittest.TestCase):
     """Keep journal and committed-row evidence separate from process state."""
+
+    def test_writer_verification_reports_service_failure_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = Ctx(Path(temporary), run_real, "busy", platform="linux")
+            with (
+                patch.object(
+                    lifecycle_native_writer,
+                    "service_status",
+                    return_value=(False, "writer_command_mismatch"),
+                ),
+                self.assertRaisesRegex(
+                    AssertionError, "writer_command_mismatch"
+                ),
+            ):
+                lifecycle_native_writer._verified(ctx)
+
+    @unittest.skipIf(sys.platform == "win32", "POSIX interpreter symlinks")
+    def test_busy_restart_preserves_recorded_virtualenv_interpreter(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = Ctx(
+                Path(temporary).resolve(), run_real, "busy", platform="linux"
+            )
+            executable = ctx.home / "base-python"
+            executable.write_bytes(b"synthetic executable")
+            recorded = ctx.lib / "release/.venv/bin/python3"
+            recorded.parent.mkdir(parents=True)
+            recorded.symlink_to(executable)
+            (ctx.lib / "python").symlink_to(recorded)
+
+            def start(ctx: Ctx, python: Path, release: Path) -> None:
+                rendered = lifecycle_native_writer.lifecycle.linux_unit(
+                    ctx, python, release
+                )
+                self.assertTrue(
+                    lifecycle_native_writer.obs_linux_service.unit_matches(
+                        rendered,
+                        recorded,
+                        release,
+                        ctx.data,
+                        {
+                            "HOME": str(ctx.home),
+                            "MUNINN_HOME": str(ctx.data),
+                            "CODEX_HOME": str(ctx.codex_home),
+                            "CLAUDE_CONFIG_DIR": str(ctx.settings.parent),
+                        },
+                    )
+                )
+                raise LookupError("restart verified")
+
+            with (
+                patch.object(lifecycle_native_writer.sys, "platform", "linux"),
+                patch.object(
+                    lifecycle_native_writer.lifecycle, "start", start
+                ),
+                self.assertRaisesRegex(LookupError, "restart verified"),
+            ):
+                lifecycle_native_writer.busy_stop(ctx)
 
     def test_busy_reader_starts_after_actual_owner_startup_replay(
         self,
@@ -37,6 +97,9 @@ class NativeWriterProofTests(unittest.TestCase):
 
             with (
                 patch.object(lifecycle_native_writer.sys, "platform", "linux"),
+                patch.object(
+                    Path, "readlink", return_value=Path(sys.executable)
+                ),
                 patch.object(
                     lifecycle_native_writer.lifecycle, "start", start
                 ),
