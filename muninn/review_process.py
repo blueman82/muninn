@@ -238,6 +238,9 @@ class ProcessMonitor:
 
     def _step(self, slot: _Slot, stopping: bool) -> None:
         """Exchange bounded pipe chunks without holding the state mutex."""
+        if slot.finished:
+            self._finish(slot, slot.error)
+            return
         with self.lock:
             error, activation = slot.error, slot.activation
         if stopping or error or time.monotonic() >= slot.handle.deadline:
@@ -354,7 +357,15 @@ class ProcessMonitor:
             return
         try:
             contain(slot.handle)
-        except (OSError, subprocess.TimeoutExpired):
+        except subprocess.TimeoutExpired:
+            # A killed wrapper can still be exiting; retry without changing
+            # the outcome that its terminal frame or prior error established.
+            with self.lock:
+                slot.finished = True
+                if error is not None:
+                    slot.error = error
+            return
+        except OSError:
             with self.lock:
                 slot.error = error or "process_cleanup_failed"
             return

@@ -221,6 +221,29 @@ class PathTests(StoreCase):
 class InitializationTests(StoreCase):
     """Atomic and concurrent creation of an empty store."""
 
+    def test_existing_store_opens_for_writing_behind_read_snapshot(
+        self,
+    ) -> None:
+        self.rw().close()
+        reader = self.ro()
+        reader.execute("BEGIN")
+        self.assertEqual(
+            reader.execute("SELECT count(*) FROM scope").fetchone()[0], 0
+        )
+        writer = self.rw()
+        self.assertFalse(writer.in_transaction)
+        writer.execute("BEGIN IMMEDIATE")
+        insert_scope(writer)
+        self.assertGreater(Path(str(self.db) + "-journal").stat().st_size, 0)
+        self.assertEqual(
+            reader.execute("SELECT count(*) FROM scope").fetchone()[0], 0
+        )
+        reader.rollback()
+        writer.execute("COMMIT")
+        self.assertEqual(
+            reader.execute("SELECT count(*) FROM scope").fetchone()[0], 1
+        )
+
     def test_initialization_failure_rolls_back_all_ddl(self) -> None:
         with contextlib.closing(
             sqlite3.connect(":memory:", isolation_level=None)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -47,6 +48,66 @@ class ReviewProcessCleanupTests(unittest.TestCase):
         self.monitor.stop_all()
         if self.child.returncode is None:
             process.contain(self.handle)
+
+    def test_transient_reap_timeout_keeps_successful_terminal_outcome(
+        self,
+    ) -> None:
+        slot = process._Slot(self.handle)
+        slot.finished = True
+        slot.exit_code = 0
+        real_contain = process.contain
+        attempts = 0
+
+        def delayed_reap(handle: process.RunningProcess) -> int:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise subprocess.TimeoutExpired("worker", 0.01)
+            return real_contain(handle)
+
+        observed = process.ObservedConfig(
+            runner=None, version=None, model=None, reasoning=None
+        )
+        with (
+            mock.patch.object(process, "contain", side_effect=delayed_reap),
+            mock.patch.object(
+                self.monitor,
+                "_decode",
+                return_value=(b"success", observed, None),
+            ),
+        ):
+            self.monitor._finish(slot, None)
+            self.assertIsNone(slot.terminal)
+            self.assertIsNone(slot.error)
+            self.monitor._step(slot, False)
+        self.assertEqual(attempts, 2)
+        self.assertIsNotNone(slot.terminal)
+        assert slot.terminal is not None
+        self.assertIsNone(slot.terminal.error_code)
+        self.assertEqual(slot.terminal.stdout, b"success")
+
+    def test_transient_reap_timeout_keeps_prior_protocol_error(self) -> None:
+        slot = process._Slot(self.handle)
+        real_contain = process.contain
+        attempts = 0
+
+        def delayed_reap(handle: process.RunningProcess) -> int:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise subprocess.TimeoutExpired("worker", 0.01)
+            return real_contain(handle)
+
+        with mock.patch.object(process, "contain", side_effect=delayed_reap):
+            self.monitor._finish(slot, "invalid_worker_protocol")
+            self.assertIsNone(slot.terminal)
+            self.assertTrue(slot.finished)
+            self.assertEqual(slot.error, "invalid_worker_protocol")
+            self.monitor._step(slot, False)
+        self.assertEqual(attempts, 2)
+        self.assertIsNotNone(slot.terminal)
+        assert slot.terminal is not None
+        self.assertEqual(slot.terminal.error_code, "invalid_worker_protocol")
 
     @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_transient_permission_error_preserves_deadline_after_reap(
