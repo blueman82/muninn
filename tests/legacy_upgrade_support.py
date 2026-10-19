@@ -8,6 +8,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
 import tarfile
 import unittest
 from collections.abc import Mapping, Sequence
@@ -60,6 +61,8 @@ class LegacyCase(unittest.TestCase):
     """Preserve a real baseline installation beneath a disposable home."""
 
     def setUp(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires the exact POSIX legacy installation")
         self.world = World(self)
         self.ctx = self.world.ctx(upgrade=True)
         self.ctx.settings.unlink()

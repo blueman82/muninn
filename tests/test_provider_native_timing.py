@@ -87,7 +87,9 @@ class MachineCodesTest(unittest.TestCase):
                 mock.patch("tests.provider_native.configedit.atomic_write"),
                 mock.patch(
                     "tests.provider_native.hook_invocations",
-                    return_value=[["synthetic"]],
+                    return_value=[
+                        ["synthetic", "session-start", "--provider", "claude"]
+                    ],
                 ),
                 mock.patch(
                     "tests.provider_native.subprocess.run",
@@ -172,7 +174,9 @@ class MachineCodesTest(unittest.TestCase):
                 mock.patch("tests.provider_native.configedit.atomic_write"),
                 mock.patch(
                     "tests.provider_native.hook_invocations",
-                    return_value=[["synthetic"]],
+                    return_value=[
+                        ["synthetic", "session-start", "--provider", "claude"]
+                    ],
                 ),
                 mock.patch(
                     "tests.provider_native.subprocess.run",
@@ -205,6 +209,20 @@ class MachineCodesTest(unittest.TestCase):
 
 class NativeFixtureTests(unittest.TestCase):
     """Keep fixture content checked without claiming native host acceptance."""
+
+    def test_rendered_context_routes_accept_native_lifecycle_payloads(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Ctx(
+                Path(tmp).resolve() / "space café 雪 owner's $ % home",
+                run_real,
+                "synthetic",
+            )
+            env = fixture(ctx, lambda phase: None)
+            results = prove_hooks(ctx, env)
+            self.assertEqual(len(results), 2)
+            self.assertEqual([item["route"] for item in results], [0, 1])
 
     def test_fixture_retains_real_normalized_support_and_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

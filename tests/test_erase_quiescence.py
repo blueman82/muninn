@@ -65,7 +65,7 @@ def owner_fixture(control: Path, replacement: bool) -> None:
             "cli_pid": int((control / "cli-started").read_text()),
         }
         del pending
-        (control / "ready.json").write_text(json.dumps(ready))
+        store.write_json_atomic(control / "ready.json", ready)
         assert supervisor.stop_generation is not None
         assert poller_stop.wait(
             fixture.home, os.getpid(), supervisor.stop_generation, 8
@@ -211,7 +211,14 @@ class EraseQuiescenceTests(IngestCase):
         proc = subprocess.Popen(
             [sys.executable, "-c", code],
             cwd=Path(__file__).resolve().parent.parent,
-            env={"HOME": str(self.tmp)},
+            env={
+                "HOME": str(self.tmp),
+                **{
+                    key: os.environ[key]
+                    for key in ("LD_LIBRARY_PATH", "SYSTEMROOT")
+                    if key in os.environ
+                },
+            },
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

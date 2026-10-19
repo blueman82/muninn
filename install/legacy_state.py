@@ -49,7 +49,9 @@ def operation(ctx: Ctx) -> Generator[OperationCheck]:
         identity = (opened.st_dev, opened.st_ino)
         if expected and (expected.st_dev, expected.st_ino) != identity:
             raise StepFailedError("install_lock_changed")
-        file_sync.sync_path(ctx.lib)
+        file_sync.sync_fd(fd)
+        if os.name != "nt":
+            file_sync.sync_path(ctx.lib)
         check_lock(path, identity)
         yield lambda: check_lock(path, identity)
         check_lock(path, identity)

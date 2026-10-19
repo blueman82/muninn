@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import sqlite3
+import sys
 from contextlib import ExitStack, closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -321,6 +322,8 @@ def erase_attempt_material(home: Path, attempt_id: AttemptId) -> int:
 
 def _unlink_children(fd: int) -> int:
     """Unlink entries relative to held directories, never through symlinks."""
+    if sys.platform == "win32":
+        raise OSError("attempt_erasure_platform")
     count = 0
     with os.scandir(fd) as entries:
         for entry in entries:
@@ -343,6 +346,8 @@ def _unlink_children(fd: int) -> int:
 
 def _remove_attempt_posix(home: Path, attempt_id: AttemptId) -> int:
     """Bind every parent descriptor so a swapped pathname cannot escape."""
+    if sys.platform == "win32":
+        raise OSError("attempt_erasure_platform")
     with ExitStack() as stack:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         parent = os.open(home, flags)

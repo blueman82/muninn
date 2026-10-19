@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
@@ -15,6 +16,7 @@ from pydantic import ValidationError, field_validator
 
 from muninn import review_codex_launch
 from muninn.knowledge_models import Digest, SchemaVersion, StrictModel, Text
+from muninn.platform_io import open_regular
 from muninn.review_json import (
     finite_float,
     reject_constant,
@@ -104,6 +106,8 @@ def _canonical(path: Path) -> None:
 
 def check_private_path(path: Path, *, directory: bool) -> None:
     """Verify private same-user POSIX ownership at a trusted boundary."""
+    if sys.platform == "win32":
+        raise ValueError("capability_platform")
     _canonical(path)
     info = path.lstat()
     kind = stat.S_ISDIR if directory else stat.S_ISREG
@@ -131,6 +135,8 @@ def _identity(info: os.stat_result) -> tuple[int, ...]:
 
 def read_private_file(path: Path, limit: int) -> bytes:
     """Read a bounded regular proof without following a final symlink."""
+    if sys.platform == "win32":
+        raise ValueError("capability_platform")
     before_path = path.lstat()
     with os.fdopen(
         os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK),
@@ -159,11 +165,10 @@ def read_private_file(path: Path, limit: int) -> bytes:
 def file_digest(path: Path, limit: int) -> tuple[str, int]:
     """Stream a bounded file and refuse observable concurrent changes."""
     _canonical(path)
-    with os.fdopen(
-        os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK),
-        "rb",
-        buffering=0,
-    ) as stream:
+    with (
+        open_regular(path) as checked,
+        os.fdopen(os.dup(checked.fileno()), "rb", buffering=0) as stream,
+    ):
         before = os.fstat(stream.fileno())
         if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
             raise ValueError("capability_limit")

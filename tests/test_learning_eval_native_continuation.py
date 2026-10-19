@@ -58,7 +58,9 @@ class NativeContinuationTests(unittest.TestCase):
             update={"config_digest": config_digest(f.config)}
         )
         f.executable.write_text(
-            "#!" + sys.executable + "\nraise SystemExit(1)\n"
+            "#!"
+            + sys.executable
+            + "\nimport sys\nsys.stdin.buffer.read()\nraise SystemExit(1)\n"
         )
         patch = mock.patch.object(
             f.native, "PINNED_EXECUTABLE_SHA256", self.sha(f.executable)

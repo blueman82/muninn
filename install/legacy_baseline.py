@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 import stat
+import sys
 import tarfile
 import tomllib
 from contextlib import closing
@@ -27,6 +28,13 @@ from muninn.obs_linux_service import require_interpreter, unit_matches
 BASELINE = "5c1a69b0edff81df80836d72a80971a91a8f9520"
 
 
+def owner_uid() -> int:
+    """Require POSIX ownership checks for the inventoried legacy release."""
+    if sys.platform == "win32":
+        raise StepFailedError("legacy_unsupported_platform")
+    return os.getuid()
+
+
 def inventory() -> dict[str, Any]:
     """Read the committed exact-byte inventory as data only."""
     return json.loads(Path(__file__).with_suffix(".json").read_bytes())
@@ -37,7 +45,7 @@ def directory(path: Path, *, private: bool = False) -> list[int]:
     info = path.lstat()
     if (
         not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != os.getuid()
+        or info.st_uid != owner_uid()
         or info.st_mode & (0o077 if private else 0o022)
         or path.resolve(strict=True) != path
     ):
@@ -50,7 +58,7 @@ def file_state(path: Path, *, private: bool = False) -> dict[str, Any]:
     expected = path.lstat()
     if (
         not stat.S_ISREG(expected.st_mode)
-        or expected.st_uid not in (0, os.getuid())
+        or expected.st_uid not in (0, owner_uid())
         or expected.st_mode & (0o077 if private else 0o022)
     ):
         raise StepFailedError("legacy_file_unsafe")
@@ -163,7 +171,7 @@ def links(ctx: Ctx) -> dict[str, Any]:
     found: dict[str, Any] = {}
     for name, path in paths.items():
         info = path.lstat()
-        if not stat.S_ISLNK(info.st_mode) or info.st_uid != os.getuid():
+        if not stat.S_ISLNK(info.st_mode) or info.st_uid != owner_uid():
             raise StepFailedError("legacy_selection_mismatch")
         text = link_text(path)
         if name in expected and text != expected[name]:

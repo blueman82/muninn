@@ -35,7 +35,18 @@ class BaselineBoundaryTests(unittest.TestCase):
             ).hexdigest()
         }
 
+    def test_windows_child_refuses_before_opening_posix_source(self) -> None:
+        with (
+            mock.patch.object(child.sys, "platform", "win32"),
+            mock.patch.object(child.os, "open") as opened,
+            self.assertRaisesRegex(OSError, "posix_baseline_required"),
+        ):
+            child.read_file(self.module, 1024)
+        opened.assert_not_called()
+
     def test_snapshot_rejects_changed_missing_extra_and_symlink(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires the POSIX baseline source reader")
         child.verify_snapshot(self.snapshot, self.root, self.files)
         self.module.write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "source_binding"):
@@ -85,12 +96,16 @@ class BaselineBoundaryTests(unittest.TestCase):
         self.assertEqual(output.getvalue(), "abcd")
 
     def test_runtime_pin_cannot_be_replaced(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires the POSIX baseline source reader")
         pin = self.root / "pin.json"
         pin.write_text(json.dumps({"source_commit": "anything"}))
         with self.assertRaisesRegex(ValueError, "pin_binding"):
             child.verify_pin(pin, self.snapshot, self.root)
 
     def test_runtime_binary_hash_refuses_and_launch_guard_blocks(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires the POSIX baseline source reader")
         pin = self.root / "runtime-pin.json"
         raw = json.dumps(
             {

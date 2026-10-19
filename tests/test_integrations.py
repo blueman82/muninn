@@ -421,7 +421,6 @@ class HomeSubstitutionTest(unittest.TestCase):
                 ignore=shutil.ignore_patterns("__pycache__"),
             )
             (release.parent / "current").symlink_to(release)
-            # The installer pins its resolved interpreter at this path.
             (release.parent / "python").symlink_to(PYTHON)
             program = plist["ProgramArguments"][0].replace(HOME, home)
             self.assertEqual(
@@ -431,7 +430,8 @@ class HomeSubstitutionTest(unittest.TestCase):
             proc = subprocess.run(
                 [program, "--version"],
                 cwd="/",
-                env=plist["EnvironmentVariables"] | {"HOME": home},
+                env=plist["EnvironmentVariables"]
+                | {"HOME": home, "MUNINN_PYTHON": PYTHON},
                 capture_output=True,
                 text=True,
                 timeout=30,

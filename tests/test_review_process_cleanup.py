@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import signal
+import sys
 import threading
 import time
 import unittest
@@ -47,9 +48,12 @@ class ReviewProcessCleanupTests(unittest.TestCase):
         if self.child.returncode is None:
             process.contain(self.handle)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_transient_permission_error_preserves_deadline_after_reap(
         self,
     ) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         retry_entered = threading.Event()
         allow_retry = threading.Event()
         real_killpg = os.killpg
@@ -89,6 +93,7 @@ class ReviewProcessCleanupTests(unittest.TestCase):
         self.assertEqual(self.child.returncode, -signal.SIGKILL)
         self.assertEqual(self.monitor.drain(), ())
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_persistent_permission_error_keeps_cleanup_incomplete(
         self,
     ) -> None:
@@ -111,6 +116,7 @@ class ReviewProcessCleanupTests(unittest.TestCase):
             self.assertIsNone(self.child.returncode)
             self.assertEqual(identify(self.child.pid), self.handle.identity)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_uncertain_identity_keeps_cleanup_incomplete_without_signals(
         self,
     ) -> None:

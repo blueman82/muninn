@@ -124,7 +124,10 @@ class ReviewWorkerTests(unittest.TestCase):
             cast(process.ProcessOutcome, events[-1]).error_code, None
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_parent_eof_stops_descendants(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         running = self.worker()
         self.events("ready")
         self.monitor.activate(
@@ -139,7 +142,10 @@ class ReviewWorkerTests(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.killpg(running.wrapper.pid, 0)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_dead_wrapper_group_killed_before_reap(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         running = self.worker()
         self.events("ready")
         witness = self.home / "descendant"
@@ -244,6 +250,7 @@ class ReviewWorkerTests(unittest.TestCase):
         )
         self.assertIsNotNone(child.returncode)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_unrelated_identity_is_refused_without_poll_or_signal(
         self,
     ) -> None:

@@ -75,6 +75,8 @@ def confined(path: Path, boundary: Path) -> Path:
 
 def read_file(path: Path, limit: int) -> bytes:
     """Read a bounded regular file without following its final symlink."""
+    if sys.platform == "win32":
+        raise OSError("posix_baseline_required")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):

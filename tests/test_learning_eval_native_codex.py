@@ -58,6 +58,12 @@ class NativeCodexTests(PilotFixture):
         self.native = importlib.import_module(
             "tools.learning_eval.native_codex"
         )
+        for name, value in (("system", "Darwin"), ("machine", "arm64")):
+            host = mock.patch.object(
+                self.native.platform, name, return_value=value
+            )
+            host.start()
+            self.addCleanup(host.stop)
         self.terms_module = importlib.import_module(
             "tools.learning_eval.native_terms"
         )
