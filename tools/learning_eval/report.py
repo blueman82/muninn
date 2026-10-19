@@ -20,6 +20,7 @@ from tools.learning_eval.models import (
     MetricResult,
     Trial,
 )
+from tools.learning_eval.native_terms import LIMITATIONS
 from tools.learning_eval.pilot_evidence import SavedOutput
 from tools.learning_eval.pilot_models import (
     PilotManifest,
@@ -99,7 +100,7 @@ def report_status(
 
 
 def with_account(
-    report: EvaluationReport, account: Account
+    report: EvaluationReport, account: Account, *, native: bool = False
 ) -> EvaluationReport:
     """Attach retained schedules and uncertainty without claiming proof."""
     if (
@@ -118,7 +119,12 @@ def with_account(
     uncertain = uncertain or any(
         code.startswith("budget_") for _, code in schedules
     )
-    limitations = [*report.limitations, "synthetic_harness_not_native_proof"]
+    limitations = [
+        *report.limitations,
+        *(LIMITATIONS if native else ("synthetic_harness_not_native_proof",)),
+    ]
+    if native and any(c.outcome == "native_tool_event" for c in calls):
+        limitations.append("observed_native_tool_event_stopped_trial")
     if any(code == "comparator_unsupported" for _, code in schedules):
         limitations.append("unsupported_comparators_unmeasured")
     if uncertain:
@@ -172,9 +178,13 @@ def pilot_report(
         conditions = Conditions(
             evidence_available_digest=source.sha256,
             evidence_selected_digest=source.sha256,
-            native_state="synthetic",
+            native_state=manifest.origin,
             cache_state="isolated",
-            approval_mode="synthetic",
+            approval_mode=(
+                "native_trial_unverified"
+                if manifest.native_terms is not None
+                else "synthetic"
+            ),
         )
         calls = [
             c for c in account.calls() if c.schedule.trial_id == result.id
@@ -204,7 +214,23 @@ def pilot_report(
                 evidence_paths=result.output_paths,
             )
         )
+    result = score.score_trials(
+        material.cases, tuple(trials), manifest.assessment
+    )
+    if (
+        manifest.native_terms is not None
+        and manifest.native_terms.carried_launches == 2
+    ):
+        result = result.model_copy(
+            update={
+                "limitations": (
+                    *result.limitations,
+                    "correction_rerun_same_population_predecessor_failed_history_retained",
+                )
+            }
+        )
     return with_account(
-        score.score_trials(material.cases, tuple(trials), manifest.assessment),
+        result,
         account,
+        native=manifest.origin == "native_codex_trial",
     )

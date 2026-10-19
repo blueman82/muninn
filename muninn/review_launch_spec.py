@@ -57,14 +57,54 @@ def cli_argv(
     )
 
 
+def codex_cli_argv(
+    requested: RunnerConfig, cwd: Path, schema_path: Path
+) -> tuple[str, ...]:
+    """Fix the native trial options without arbitrary arguments or fallback."""
+    return (
+        requested.executable,
+        "exec",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--disable",
+        "hooks",
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
+        "-C",
+        str(cwd),
+        "--output-schema",
+        str(schema_path),
+        "--json",
+        "--color",
+        "never",
+        "--model",
+        requested.model,
+        "-c",
+        "model_reasoning_effort=" + requested.reasoning,
+        "-",
+    )
+
+
 def launch_spec(
     context: ReviewContext,
     cwd: Path,
     environment: dict[str, str],
     prompt: bytes,
     schema: dict[str, object] | None = None,
+    *,
+    schema_path: Path | None = None,
 ) -> LaunchSpec:
     """Build the fixed idle wrapper and explicit isolated CLI environment."""
+    if context.policy.runner.runner == "codex_cli" and schema_path is None:
+        raise ValueError("native_schema_required")
+    argv = (
+        codex_cli_argv(context.policy.runner, cwd, schema_path)
+        if context.policy.runner.runner == "codex_cli"
+        and schema_path is not None
+        else cli_argv(context.policy.runner, schema)
+    )
     return LaunchSpec(
         (
             sys.executable,
@@ -81,7 +121,7 @@ def launch_spec(
         ),
         Path(__file__).resolve().parent.parent,
         {},
-        cli_argv(context.policy.runner, schema),
+        argv,
         cwd,
         environment,
         prompt,

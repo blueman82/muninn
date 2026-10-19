@@ -6,13 +6,15 @@ import json
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
+
 from muninn.knowledge_models import Digest, SchemaVersion, StrictModel, Text
 from muninn.review_evidence_models import (
     EvidenceWindow,
     NonnegativeInt,
     PositiveInt,
 )
-from muninn.review_models import Receipt
+from muninn.review_models import CostDecimal, Receipt
 from muninn.review_runner import RunnerCapability
 from tools.learning_eval.cases import digest
 from tools.learning_eval.models import (
@@ -24,7 +26,7 @@ from tools.learning_eval.models import (
     TrialAuthorization,
 )
 from tools.learning_eval.task_protocol import protocol_schema
-from tools.learning_eval.trial_models import ScheduledCall
+from tools.learning_eval.trial_models import NativeTerms, ScheduledCall
 
 
 class RunnerBinding(StrictModel):
@@ -80,7 +82,8 @@ class PilotManifest(StrictModel):
     """Bind declared synthetic dependencies before opening pilot material."""
 
     schema_version: SchemaVersion
-    origin: Literal["synthetic"]
+    origin: Literal["synthetic", "native_codex_trial"]
+    native_terms: NativeTerms | None = None
     phase: Literal["pilot"]
     assessment: Assessment
     material_path: Path
@@ -153,9 +156,14 @@ class PilotTrial(StrictModel):
 class PilotResult(StrictModel):
     """Report scripted synthetic outcomes without native or measured claims."""
 
-    origin: Literal["synthetic"] = "synthetic"
+    origin: Literal["synthetic", "native_codex_trial"] = "synthetic"
     trials: tuple[PilotTrial, ...]
-    model_calls: NonnegativeInt
+    predecessor_trials: tuple[PilotTrial, ...] = ()
+    predecessor_trial_map: dict[Text, Text] = Field(default_factory=dict)
+    predecessor_receipt_digest: Digest | None = None
+    model_calls: NonnegativeInt | None
+    cli_launches: NonnegativeInt | None = None
+    reserved_cost_decimal: CostDecimal | None = None
     report: EvaluationReport
 
 

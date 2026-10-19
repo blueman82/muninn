@@ -150,6 +150,18 @@ class CodexContractTest(unittest.TestCase):
         }
         self.assertEqual(got, REAL_CODEX)
 
+    def test_session_end_matches_codex_three_second_timeout(self) -> None:
+        data = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
+        handler = json.loads(data)["hooks"]["SessionEnd"][0]["hooks"][0]
+        self.assertEqual(handler["timeout"], 3)
+        hooks = co.codex_hooks(data, platform="darwin")
+        end = next(hook for hook in hooks if hook["event"] == "session_end")
+        self.assertEqual(
+            end["hash"],
+            "sha256:"
+            "cadf850d333ac166436ed2dde9bc6144441dfc0012c3fdf379d8e7071be0a728",
+        )
+
     def test_marketplace_catalog_names_plugin_0_2_0(self) -> None:
         root = ROOT / "integrations/codex"
         cat = json.loads(

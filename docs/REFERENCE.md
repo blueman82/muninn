@@ -729,8 +729,9 @@ refusal and retains the previous state.
 The installer renders hook JSON with native paths rather than inserting raw paths into
 JSON text. On Windows, Claude uses a real Windows PowerShell executable with an `args`
 array; Codex uses its `command_windows` override with an encoded PowerShell command.
-Both invoke the validated Muninn bootstrap without Git Bash. Their configured timeout
-remains five seconds. Changing a hook definition requires the owner's provider approval.
+Both invoke the validated Muninn bootstrap without Git Bash.
+Codex SessionEnd uses a three-second configured timeout; the other Claude and Codex
+hooks use five seconds. Changing a hook definition requires the owner's provider approval.
 
 Windows installer calls prefer a trusted `codex.exe` on `PATH`. An official npm
 `codex.cmd` installation is dispatched through its existing

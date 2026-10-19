@@ -6,8 +6,10 @@ import hashlib
 import json
 import os
 import re
+import time
 from pathlib import Path
 
+from muninn import review_codex_output
 from muninn.review_json import canonical_json, result_schema
 from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_launch_spec import LaunchSpec, launch_spec
@@ -23,6 +25,14 @@ from muninn.review_runner import (
 )
 from tools.learning_eval.cases import digest, strict_json
 from tools.learning_eval.models import TrialAuthorization
+from tools.learning_eval.native_codex import (
+    native_environment,
+    native_fingerprint,
+    require_json_instruction,
+    validate_native_prompt,
+    wire_schema,
+)
+from tools.learning_eval.native_terms import validate_terms
 from tools.learning_eval.pilot_models import PilotManifest
 from tools.learning_eval.task_protocol import protocol_schema, task_schema
 from tools.learning_eval.trial_models import (
@@ -35,6 +45,8 @@ from tools.learning_eval.trial_models import (
 
 def candidate_environment(candidate: Candidate, home: Path) -> dict[str, str]:
     """Select only named environment values and bind disposable paths."""
+    if candidate.kind == "native_codex_trial":
+        return native_environment(candidate, home)
     check_private_path(home, directory=True)
     check_private_path(candidate.cli_cwd, directory=True)
     if home not in candidate.cli_cwd.parents:
@@ -79,7 +91,7 @@ def prepare_capability_trial(
     check_round(context)
     if (
         os.name != "posix"
-        or capability.runner != "claude_cli"
+        or capability.runner not in {"claude_cli", "codex_cli"}
         or capability.status == "unsupported"
     ):
         raise ValueError("runner_unsupported")
@@ -94,6 +106,8 @@ def prepare_capability_trial(
         raise ValueError("capability_changed")
     strict_json(raw)
     candidate = Candidate.model_validate_json(raw)
+    if candidate.kind == "native_codex_trial":
+        validate_native_prompt(prompt, protocol)
     if (
         candidate.assessment_id != authorization.assessment_id
         or candidate.budget_account_id != authorization.budget.account_id
@@ -108,6 +122,8 @@ def prepare_capability_trial(
         if protocol == "muninn-review-round-v1"
         else task_schema()
     )
+    if candidate.kind == "native_codex_trial":
+        schema = wire_schema()
     requested = context.policy.runner
     if (
         candidate.protocol != protocol
@@ -119,7 +135,8 @@ def prepare_capability_trial(
         or candidate.schema_digest != capability.schema_digest
         or candidate.schema_digest != digest(schema)
         or context.policy.result_schema_digest != digest(result_schema())
-        or candidate.output_contract_digest != output_contract_digest()
+        or candidate.output_contract_digest
+        != candidate_output_digest(candidate)
         or candidate.config_digest != capability.config_digest
         or candidate.config_digest != authorization.config_digest
     ):
@@ -131,21 +148,24 @@ def prepare_capability_trial(
     if (
         hashed != candidate.executable_sha256
         or not os.access(requested.executable, os.X_OK)
-        or config_fingerprint(
-            candidate.config_roots,
-            candidate.environment_sha256,
-            candidate.cli_cwd,
-        )
-        != candidate.config_digest
+        or candidate_config_digest(candidate) != candidate.config_digest
     ):
         raise ValueError("capability_changed")
     check_round(context)
-    return launch_spec(context, candidate.cli_cwd, environment, prompt, schema)
+    return launch_spec(
+        context,
+        candidate.cli_cwd,
+        environment,
+        prompt,
+        schema,
+        schema_path=candidate.schema_path,
+    )
 
 
 def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
     """Validate phase, budget and candidates before reading cases."""
     assessment = checked_assessment(manifest.assessment)
+    native = _manifest_origin(manifest)
     if (
         assessment.phase != "pilot"
         or len(assessment.policies) != 1
@@ -184,6 +204,7 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
             raw = read_private_file(capability.proof_path, 1024 * 1024)
             strict_json(raw)
             candidate = Candidate.model_validate_json(raw)
+            _candidate_origin(candidate, manifest, native)
             environment = candidate_environment(
                 candidate, auth.disposable_home
             )
@@ -191,8 +212,12 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
                 hashlib.sha256(raw).hexdigest() != auth.candidate_digest
                 or candidate.protocol != protocol
                 or capability.status != "unverified"
-                or candidate.output_contract_digest != output_contract_digest()
-                or candidate.schema_digest != digest(protocol_schema(protocol))
+                or candidate.output_contract_digest
+                != candidate_output_digest(candidate)
+                or candidate.schema_digest
+                != digest(
+                    wire_schema() if native else protocol_schema(protocol)
+                )
                 or capability.schema_digest != candidate.schema_digest
                 or candidate.requested != policy.runner
                 or candidate.assessment_id != assessment.id
@@ -200,11 +225,7 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
                 or candidate.config_digest != capability.config_digest
                 or candidate.config_digest != auth.config_digest
                 or candidate.config_digest
-                != config_fingerprint(
-                    candidate.config_roots,
-                    candidate.environment_sha256,
-                    candidate.cli_cwd,
-                )
+                != candidate_config_digest(candidate)
                 or candidate.executable_sha256
                 != file_digest(
                     Path(policy.runner.executable), 256 * 1024 * 1024
@@ -232,15 +253,7 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
                 for path in (manifest.account_path, manifest.artifact_path)
             ):
                 raise ValueError("pilot_path_binding")
-    check_private_path(manifest.learner_prompt_path, directory=False)
-    prompt = read_private_file(
-        manifest.learner_prompt_path, policy.max_input_bytes
-    )
-    strict_json(prompt)
-    PromptArtifact.model_validate_json(prompt)
-    if hashlib.sha256(prompt).hexdigest() != policy.prompt_digest:
-        raise ValueError("pilot_prompt_binding")
-    return prompt
+    return _pilot_prompt(manifest)
 
 
 def _validation_schedule(
@@ -281,3 +294,61 @@ def _validation_schedule(
             }
         )
     )
+
+
+def candidate_output_digest(candidate: Candidate) -> str:
+    """Select the decoder contract from the validated requested recipe."""
+    return (
+        review_codex_output.output_contract_digest()
+        if candidate.kind == "native_codex_trial"
+        else output_contract_digest()
+    )
+
+
+def candidate_config_digest(candidate: Candidate) -> str:
+    """Keep native selections separate from synthetic config-root proof."""
+    if candidate.kind == "native_codex_trial":
+        return native_fingerprint(candidate)
+    return config_fingerprint(
+        candidate.config_roots, candidate.environment_sha256, candidate.cli_cwd
+    )
+
+
+def _manifest_origin(manifest: PilotManifest) -> bool:
+    """Separate native authority from synthetic provenance before claims."""
+    native = manifest.origin == "native_codex_trial"
+    if native != (manifest.native_terms is not None):
+        raise ValueError("pilot_origin_binding")
+    if manifest.native_terms is not None:
+        validate_terms(manifest.native_terms, manifest.assessment, time.time())
+        if manifest.native_terms.account_path != manifest.account_path:
+            raise ValueError("native_account_binding")
+    return native
+
+
+def _candidate_origin(
+    candidate: Candidate, manifest: PilotManifest, native: bool
+) -> None:
+    """Refuse candidate origin or authority mixed across one population."""
+    if (
+        candidate.kind == "native_codex_trial"
+    ) != native or candidate.native_terms != manifest.native_terms:
+        raise ValueError("pilot_origin_binding")
+
+
+def _pilot_prompt(manifest: PilotManifest) -> bytes:
+    """Require the frozen bounded prompt and native no-action instruction."""
+    policy = manifest.assessment.policies[0]
+    native = manifest.origin == "native_codex_trial"
+    check_private_path(manifest.learner_prompt_path, directory=False)
+    prompt = read_private_file(
+        manifest.learner_prompt_path, policy.max_input_bytes
+    )
+    strict_json(prompt)
+    template = PromptArtifact.model_validate_json(prompt)
+    if native:
+        require_json_instruction(template.instructions)
+        require_json_instruction(manifest.task_instructions)
+    if hashlib.sha256(prompt).hexdigest() != policy.prompt_digest:
+        raise ValueError("pilot_prompt_binding")
+    return prompt

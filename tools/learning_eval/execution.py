@@ -22,6 +22,8 @@ from tools.learning_eval.account import Account
 from tools.learning_eval.capability import prepare_capability_trial
 from tools.learning_eval.cases import digest
 from tools.learning_eval.models import TrialAuthorization
+from tools.learning_eval.native_codex import execution_terms, native_prompt
+from tools.learning_eval.native_terms import assessment_deadline
 from tools.learning_eval.pilot_bridge import LearnerBridge
 from tools.learning_eval.pilot_evidence import (
     ExecutionResult,
@@ -82,9 +84,16 @@ def execute_result(
     artifacts = evidence.root if evidence is not None else None
     learner = evidence.learner if evidence is not None else None
     try:
+        if capability.runner == "codex_cli":
+            prompt = native_prompt(
+                prompt, schedule.protocol, context.policy.max_input_bytes
+            )
         validate_execution(account, context, authorization, schedule)
         prepare_capability_trial(
             context, capability, prompt, authorization, schedule.protocol
+        )
+        terms = execution_terms(
+            account, capability, schedule.id, authorization.candidate_digest
         )
     except (ValueError, OSError) as exc:
         code = (
@@ -110,12 +119,19 @@ def execute_result(
     remaining = min(
         account.remaining_wall(time.time()), context.policy.deadline_seconds
     )
+    if terms is not None:
+        remaining = min(
+            remaining,
+            assessment_deadline(terms, account.assessment) - time.time(),
+        )
     context = context.model_copy(
         update={
             "deadline": min(context.deadline, time.monotonic() + remaining),
         }
     )
-    monitor = ProcessMonitor(context.policy)
+    monitor = ProcessMonitor(
+        context.policy, runner=context.policy.runner.runner
+    )
     try:
         fresh = prepare_capability_trial(
             context, capability, prompt, authorization, schedule.protocol
@@ -212,6 +228,9 @@ def _activation_frame(
     validate_execution(account, context, authorization, schedule)
     fresh = prepare_capability_trial(
         context, capability, prompt, authorization, schedule.protocol
+    )
+    execution_terms(
+        account, capability, schedule.id, authorization.candidate_digest
     )
     frame = activation(
         fresh.cli_argv,

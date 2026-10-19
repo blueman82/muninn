@@ -234,8 +234,9 @@ four-operation `RoundRequest` schema, including its final-result branch.
 
 The conditional adapter prepares only Claude CLI data with fixed JSON/schema,
 empty tools, strict empty MCP (`{"mcpServers":{}}`), no session persistence,
-safe mode, disabled slash commands and explicit model/effort flags. Codex and
-Cursor remain unsupported. There is no bare-mode, read-only or weaker-flags
+safe mode, disabled slash commands and explicit model/effort flags. Production
+Codex and Cursor remain unsupported; the separately authorized native Codex
+assessment recipe below does not change production admission. There is no bare-mode, read-only or weaker-flags
 fallback. A capability label or this repository's synthetic fixture cannot
 admit a real executable.
 
@@ -427,3 +428,148 @@ post-hoc frozen-rule judgments. Missing judgments remain unknown. Reports retain
 all scheduled rows and are synthetic/unverified unless a reliability blocker
 requires `revise`. No pilot summary, production assessment freeze, native proof,
 policy approval or activation record is issued by this controller.
+
+
+## Harness-only native Codex trial
+
+A `PilotManifest` with `origin="native_codex_trial"` may select the fixed
+`codex-exec-macos-trial-v1` candidate. Source material remains explicitly synthetic.
+Production `prepare_launch` rejects Codex, including a forged `verified` label.
+This recipe is restricted to the bound Darwin arm64 host and Codex 0.163.0 with
+executable SHA256 `8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31`.
+Requested model and effort must be frozen explicitly; they are not observations.
+
+`tools.learning_eval.native_codex.create_binding` writes the canonical program
+wire schema privately before fingerprinting each learning/task candidate:
+`{"type":"object","properties":{"payload_json":{"type":"string"}},"required":["payload_json"],"additionalProperties":false}`.
+Both protocols use this strict object envelope. The serialized inner object must
+match the original round/task schema included in `payload_schema` in the actual
+stdin. The ScheduledCall digest remains the semantic protocol schema digest;
+native candidates bind that digest separately from their CLI wire schema. Native
+candidate fingerprints include the fixed argv, wire/semantic schema and decoder digests,
+selected auth home, minimal environment, disposable cwd state and native terms.
+The fixed command uses ephemeral `exec`, ignores user config and rules, disables
+hooks, selects the read-only sandbox, skips Git-root discovery, and supplies
+explicit cwd/schema/model/effort plus JSON output and stdin `-`. The shared idle
+wrapper sends the bounded prompt on its stdin PIPE. Both declared instruction
+strings must include `native_codex.JSON_ONLY_INSTRUCTION`; candidate activation
+also checks that instruction. Before validation or any claim, execution adds
+program-owned envelope instructions and the exact domain schema to the native
+prompt. These same bounded bytes are used for launch, activation and saved input
+digests. Claude prompt assembly is unchanged.
+`CODEX_HOME` selects existing normal CLI sign-in. No credential contents or
+provider transcripts are read, copied, logged or fingerprinted by the adapter.
+Managed config/tool-source completeness remains unverified.
+
+`NativeTerms.guarantee_set="cli-launch-reservation-only-v1"` binds the full owner
+boundary and canary-ledger digests, this host, assessment/account identity,
+original start, one carried launch and its $5 reservation. Terms also select one
+private import-receipt path outside the Account. Under the existing non-reentrant
+Account owner, import writes that durable receipt, binds its digest through the
+Account result API, and retains the exact carry-in beside the Account. Conflicting
+identity, changed/missing authority, additional canary rows, replaced/reset
+Account files, or an incomplete import refuse. An incomplete import needs manual
+reconciliation; it never silently starts over. Preserve the receipt, Account and
+authority together. This is local crash/reset detection, not tamper-proof remote
+accounting.
+
+The remaining Account and every policy must permit at most 49 launch claims,
+$245 reserved charges and 14400 seconds, with at least $5 reserved per unknown
+launch. Native accounting retains the greater of each reservation and known
+charge. Unknown claims remain spent. Every clock ceiling starts at the original
+canary timestamp; it is checked before claim and activation and bounds the running
+context deadline. Native policies use one attempt and serialized execution, so
+there is no automatic retry. The root freezes a small scored population before
+live execution, using this same Account for every proof/fault/comparator launch.
+
+The Codex decoder accepts exactly thread start, turn start, one final agent-message
+item and successful turn completion. It rejects duplicate keys, nonfinite values,
+malformed/extra events, failures, extra answers and oversized output. Downstream
+round/task schemas still validate the body. Final message text must contain only
+`payload_json`, a string holding one strict JSON object. Outer and inner JSON
+reject duplicate keys, nonfinite values, trailing values and wrong types; native
+bytes and decoded bytes remain bounded. A recognized tool/command/MCP/web/file
+event immediately triggers containment when read, even before turn completion,
+and stops later native launches. Detection is post-hoc: the event may report an
+action that already happened. Timeout or unresolved containment also stops later
+launches. Native overflow, malformed/truncated output or worker-protocol failure
+also stops later launches: missing output cannot establish absence of actions.
+Complete tool events in a bounded limit-crossing frame retain the explicit tool
+failure; otherwise the original uncertainty code is retained without claiming a
+tool event. All planned population rows remain visible, including unsupported
+comparators and refused stages.
+
+Native `PilotResult.cli_launches` includes the carried canary; `model_calls` is
+null because internal request count is unknown. `reserved_cost_decimal` reports
+combined reservations, not provider billing. Native reports retain actual token
+counters, leave absent cost/currency/model/version/effort unknown, and explicitly
+state launch-only accounting, no hard provider-side spend guarantee, no universal
+no-tools proof, unmeasured native capture and unverified production qualification.
+A successful fake-process test or live pilot does not qualify production C6 or
+complete Task16. The offline CLI and synthetic recipe retain their behavior.
+
+
+### One explicit native schema correction continuation
+
+The stopped first assessment remains immutable, including its cleaned unknown
+`worker_failed` claim, saved output, six trial rows, Account and import receipt.
+The exit-1 cause was not established because stderr was unavailable. The
+non-object learner schema was independently incompatible with native Structured
+Outputs and is corrected by the envelope above.
+
+A successor may set `NativeTerms.predecessor_path` and `predecessor_digest` to
+an explicitly frozen controller ruling binding the prior manifest, result,
+Account bytes, import receipt, declared schedule, failed output and original
+canary. Validation reads exact private hashes, inspects a SQLite byte snapshot
+in memory, verifies the actual cleaned unknown failed claim and its reservation,
+and checks the old Account identity, import binding, scheduled identities and
+saved trial digests. It never opens the predecessor Account for mutation.
+Missing/changed evidence, unresolved cleanup, omitted claims or later start
+refuse. A continuation of a continuation is unsupported.
+
+This successor carries two launches/$10 and permits at most 48 further claims
+and $240 reserved charges under the same original four-hour clock. The correction
+population has at most six rows and eighteen new launch claims. Its material,
+labels, rubric, exposures, model/effort, repetition and logical row identities
+must match the predecessor. The current `PilotResult.trials` and score inputs
+contain only successor rows. `predecessor_trials`, `predecessor_trial_map` and
+`predecessor_receipt_digest` retain the original failed/stopped history and its
+explicit old-to-new mapping without increasing the logical sample denominator.
+Combined launch/reservation totals include both histories. The successor keeps
+its own immutable import receipt and existing Account replacement protection;
+it does not clear or refund the predecessor stop condition.
+
+
+### Supplemental task-only control from one learned state
+
+`tools.learning_eval.task_only.prepare_task_only` freezes a strict private
+manifest and six task-call rows using the completed native successor's three
+present-arm exposures. `run_task_only` uses that existing Assessment, candidates,
+import receipt and Account with `initialize=False`. The literal, paraphrase and
+omitted pairs share one learned-state and exposure digest each; only the supplied
+knowledge differs. Instructions, query, model/effort, semantic schema and limits
+are identical within each pair. The recorded paraphrase had lexical hits; this
+control does not demonstrate recovery from an FTS miss.
+
+The manifest binds the original result/manifest, twelve completed Account calls,
+pre-spend Account bytes, import receipt, saved learner outputs/mappings and
+read-only request/attempt/input records. Each transport context is reconstructed
+from those actual completed records. No new learner request, attempt, generation,
+Supervisor, store copy, learning run or commit is created. The only mutable
+accounting uses normal Account APIs; new evidence stays in a separate directory.
+
+All six task slots and their final native-input digests are frozen before claims.
+The first import requires the exact Account preimage; resume uses its durable
+identity, bound manifest, known calls and immutable supplemental rows instead of
+requiring obsolete pre-spend bytes. Spent output is restored without launch;
+stopped/refused rows remain terminal. Any uncertain outcome stops later calls.
+The same native eighteen-claim ceiling and original deadline allow at most six
+additional launches, twenty carry-inclusive launches and $100 reservations.
+Actual provider cost and internal model request count remain unknown.
+
+Supplemental results retain all six rows, shared-state identities, observed
+usage/timing and cumulative/incremental accounting. They do not amend original
+pilot rows, add heldout samples or invent independent judgments, confidence
+intervals or acceptance criteria. The sanitized [pilot summary](pilot-summary.md)
+records the existing observations; supplemental measurement is pending until
+separately executed and reported by the controller.

@@ -143,7 +143,9 @@ class CodexPluginTest(unittest.TestCase):
             seen.add(event)
             with self.subTest(event=event):
                 self.assertEqual(hook["type"], "command")
-                self.assertEqual(hook["timeout"], 5)
+                self.assertEqual(
+                    hook["timeout"], 3 if event == "SessionEnd" else 5
+                )
                 self.assertEqual(
                     hook.get("additionalContextLimit"), limits.get(event)
                 )

@@ -32,7 +32,7 @@
           {
             "type": "command",
             "command": "@HOME@/.local/bin/muninn hook session-end --provider codex",
-            "timeout": 5
+            "timeout": 3
           }
         ]
       }

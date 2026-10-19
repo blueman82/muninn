@@ -36,6 +36,26 @@ from tools.learning_eval.models import (
 )
 
 
+class NativeTerms(StrictModel):
+    """Freeze authority, original clock and account identity without tokens."""
+
+    assessment_id: Text
+    account_id: Text
+    account_path: Path
+    receipt_path: Path
+    owner_boundary_path: Path
+    owner_boundary_digest: Digest
+    carry_in_path: Path
+    carry_in_digest: Digest
+    started_at: UtcSeconds
+    guarantee_set: Literal["cli-launch-reservation-only-v1"]
+    predecessor_path: Path | None = None
+    predecessor_digest: Digest | None = None
+    carried_launches: Literal[1, 2]
+    carried_charge: CostDecimal
+    host_identity: Digest
+
+
 class Candidate(StrictModel):
     """Bind static inputs without asserting observed native coverage."""
 
@@ -43,18 +63,42 @@ class Candidate(StrictModel):
         "muninn-review-round-v1"
     )
     schema_version: SchemaVersion
-    kind: Literal["synthetic_candidate"]
-    recipe: Literal["claude-static-posix-v1"]
+    kind: Literal["synthetic_candidate", "native_codex_trial"]
+    recipe: Literal["claude-static-posix-v1", "codex-exec-macos-trial-v1"]
     assessment_id: Text
     budget_account_id: Text
     requested: RunnerConfig
     executable_sha256: Digest
     schema_digest: Digest
+    semantic_schema_digest: Digest | None = None
     output_contract_digest: Digest
     cli_cwd: Path
     config_roots: tuple[Path, ...]
     environment_sha256: dict[str, Digest]
     config_digest: Digest
+    native_terms: NativeTerms | None = None
+    schema_path: Path | None = None
+    auth_home: Path | None = None
+
+    @model_validator(mode="after")
+    def origin_binding(self) -> Self:
+        """Refuse native and synthetic recipe cross-combinations."""
+        native = self.kind == "native_codex_trial"
+        if (
+            (self.recipe == "codex-exec-macos-trial-v1") != native
+            or (self.requested.runner == "codex_cli") != native
+            or any(
+                (value is not None) != native
+                for value in (
+                    self.native_terms,
+                    self.schema_path,
+                    self.auth_home,
+                    self.semantic_schema_digest,
+                )
+            )
+        ):
+            raise ValueError("candidate_origin_binding")
+        return self
 
 
 class ScheduledCall(StrictModel):

@@ -236,13 +236,18 @@ class ReviewRunnerTests(unittest.TestCase):
             self.prepare()
 
     def test_codex_and_cursor_not_silently_supported(self) -> None:
+        requested = self.context.policy.runner.model_copy(
+            update={"runner": "codex_cli"}
+        )
+        policy = self.context.policy.model_copy(update={"runner": requested})
+        context = self.context.model_copy(update={"policy": policy})
         for runner in ("codex_cli", "cursor_cli"):
             with (
                 self.subTest(runner=runner),
                 self.assertRaisesRegex(ValueError, "runner_unsupported"),
             ):
                 review_runner.prepare_launch(
-                    self.context,
+                    context,
                     self.capability.model_copy(update={"runner": runner}),
                     b"prompt",
                 )

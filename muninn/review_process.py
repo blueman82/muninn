@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from muninn.knowledge_models import AttemptId
+from muninn.review_codex_output import decode_codex_output, tool_event_seen
 from muninn.review_models import (
     ObservedConfig,
     ProcessIdentity,
@@ -133,9 +134,20 @@ def contain(handle: RunningProcess) -> int:
 class ProcessMonitor:
     """Own process pipes and cleanup without SQLite or process creation."""
 
-    def __init__(self, limits: ReviewPolicy) -> None:
+    def __init__(
+        self,
+        limits: ReviewPolicy,
+        *,
+        runner: Literal["claude_cli", "codex_cli"] = "claude_cli",
+    ) -> None:
         """Start one independent monitor with explicit retained capacity."""
         self.limits = limits
+        self._native_codex = runner == "codex_cli"
+        self._decode = (
+            decode_codex_output
+            if runner == "codex_cli"
+            else decode_claude_output
+        )
         self.lock = threading.Lock()
         self.slots: dict[tuple[str, int], _Slot] = {}
         self._stopping = False
@@ -274,13 +286,23 @@ class ProcessMonitor:
             body = bytes(slot.buffer[5 : 5 + size])
             del slot.buffer[: 5 + size]
             self._frame(slot, tag, body)
+            if self._native_codex and slot.error is not None:
+                return
 
     def _output(self, slot: _Slot, tag: bytes, body: bytes) -> None:
         """Count aggregate native bytes while discarding stderr content."""
         if slot.phase != 2:
             raise ValueError("invalid_worker_phase")
         slot.output_count += len(body)
-        if slot.output_count > slot.handle.output_limit:
+        # Inspect the bounded incoming frame before discarding an overflow;
+        # its complete event may report an action that already occurred.
+        if (
+            self._native_codex
+            and tag == b"O"
+            and tool_event_seen(bytes(slot.output) + body)
+        ):
+            slot.error, slot.finished = "native_tool_event", True
+        elif slot.output_count > slot.handle.output_limit:
             slot.error, slot.finished = "output_limit", True
         elif tag == b"O":
             slot.output.extend(body)
@@ -343,11 +365,15 @@ class ProcessMonitor:
         usage = None
         if error is None:
             try:
-                stdout, observed, usage = decode_claude_output(
+                stdout, observed, usage = self._decode(
                     bytes(slot.output), slot.handle.output_limit
                 )
-            except ValueError:
-                error = "invalid_native_output"
+            except ValueError as exc:
+                error = (
+                    "native_tool_event"
+                    if str(exc) == "native_tool_event"
+                    else "invalid_native_output"
+                )
         outcome = ProcessOutcome(
             slot.handle.attempt_id,
             slot.handle.round_index,

@@ -61,7 +61,7 @@ class Usage(StrictModel):
 class RunnerConfig(StrictModel):
     """Require every requested runner setting explicitly."""
 
-    runner: Literal["claude_cli"]
+    runner: Literal["claude_cli", "codex_cli"]
     executable: Text
     version: Text
     model: Text

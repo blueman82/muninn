@@ -13,6 +13,13 @@ from muninn.review_supervisor import Supervisor
 from tools.learning_eval.account import Account
 from tools.learning_eval.capability import validate_pilot_manifest
 from tools.learning_eval.execution import ExecutionEvidence, execute_result
+from tools.learning_eval.native_predecessor import continuation_history
+from tools.learning_eval.native_terms import (
+    NATIVE_FAILURES,
+    account_totals,
+    bind_account,
+    stop_reason,
+)
 from tools.learning_eval.new_muninn import learn
 from tools.learning_eval.pilot_evidence import (
     immutable,
@@ -159,6 +166,7 @@ def run_pilot(
     prompt = validate_pilot_manifest(manifest)
     material = load_material(manifest)
     plans = schedule(manifest, material)
+    predecessor, trial_map = continuation_history(manifest, plans)
     frozen = json.dumps(
         {
             "manifest": manifest.model_dump(
@@ -175,6 +183,8 @@ def run_pilot(
     with Account(
         manifest.account_path, manifest.assessment, initialize=initialize
     ) as account:
+        if manifest.native_terms is not None:
+            bind_account(account, manifest.native_terms, time.time())
         for plan in plans:
             for call in plan.calls:
                 binding = (
@@ -185,8 +195,24 @@ def run_pilot(
                 account.plan(call, binding.authorization)
         trials = _population(manifest, material, plans, account, prompt)
         report = pilot_report(manifest, material, trials, account)
+        native = manifest.native_terms
+        launches, charge = (
+            account_totals(account, native)
+            if native is not None
+            else (None, None)
+        )
         return PilotResult(
-            trials=trials, model_calls=len(account.calls()), report=report
+            origin=manifest.origin,
+            trials=trials,
+            predecessor_trials=predecessor.trials if predecessor else (),
+            predecessor_trial_map=trial_map,
+            predecessor_receipt_digest=(
+                native.predecessor_digest if native is not None else None
+            ),
+            model_calls=None if native is not None else len(account.calls()),
+            cli_launches=launches,
+            reserved_cost_decimal=charge,
+            report=report,
         )
 
 
@@ -226,6 +252,21 @@ def _population(
                         for c in account.calls()
                         if c.schedule.trial_id == plan.id
                     ]
+                    native_failure = next(
+                        (
+                            c.outcome
+                            for c in charged
+                            if c.outcome in NATIVE_FAILURES
+                        ),
+                        None,
+                    )
+                    if (
+                        manifest.native_terms is not None
+                        and native_failure is not None
+                    ):
+                        result = result.model_copy(
+                            update={"outcome": native_failure}
+                        )
                     result = result.model_copy(
                         update={
                             "call_ids": tuple(c.schedule.id for c in charged),
@@ -254,6 +295,11 @@ def _execute_plan(
     blocked: bool,
 ) -> tuple[PilotTrial, Supervisor | None, bool]:
     """Keep refused stages explicit without replacing a prior started trial."""
+    stopped = (
+        stop_reason(account) if manifest.native_terms is not None else None
+    )
+    if stopped is not None:
+        return plan.result(stopped), owner, True
     if blocked:
         return plan.result("account_recovery_required"), owner, True
     if plan.comparator not in {"new_present", "new_withheld"}:
