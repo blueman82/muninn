@@ -21,6 +21,49 @@ from tests.review_quiescence_support import initialize
 class NativeWriterProofTests(unittest.TestCase):
     """Keep journal and committed-row evidence separate from process state."""
 
+    def test_crash_proof_waits_for_replacement_exit(self) -> None:
+        def service(**overrides: str) -> bytes:
+            fields = {
+                "NRestarts": "1",
+                "ExecMainPID": "101",
+                "ExecMainCode": "1",
+                "ExecMainStatus": "1",
+                "ExecMainExitTimestampMonotonic": "12345",
+                "MainPID": "0",
+                "Result": "exit-code",
+            }
+            fields.update(overrides)
+            return "".join(
+                f"{key}={value}\n" for key, value in fields.items()
+            ).encode()
+
+        refused = lifecycle_native_writer.replacement_refused
+        self.assertFalse(refused(service(ExecMainPID="100"), 100))
+        self.assertFalse(
+            refused(
+                service(
+                    ExecMainPID="100",
+                    ExecMainCode="2",
+                    ExecMainStatus="9",
+                    Result="signal",
+                ),
+                100,
+            )
+        )
+        self.assertFalse(
+            refused(
+                service(
+                    ExecMainCode="0",
+                    ExecMainStatus="0",
+                    ExecMainExitTimestampMonotonic="0",
+                    MainPID="101",
+                    Result="success",
+                ),
+                100,
+            )
+        )
+        self.assertTrue(refused(service(), 100))
+
     def test_writer_verification_reports_service_failure_code(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             ctx = Ctx(Path(temporary), run_real, "busy", platform="linux")
