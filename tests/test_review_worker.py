@@ -39,30 +39,35 @@ def policy() -> ReviewPolicy:
     )
 
 
-def start_worker(deadline: float) -> subprocess.Popen[bytes]:
+def start_worker(
+    deadline: float, stderr_path: Path | None = None
+) -> subprocess.Popen[bytes]:
     """Start only the finite wrapper with no inherited descriptors."""
-    return subprocess.Popen(
-        [
-            sys.executable,
-            "-E",
-            "-s",
-            "-m",
-            "muninn.review_worker",
-            "--deadline",
-            str(deadline),
-            "--max-input-bytes",
-            "8192",
-            "--max-output-bytes",
-            "4096",
-        ],
-        cwd=ROOT,
-        env={},
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        start_new_session=True,
-    )
+    with (
+        stderr_path.open("wb") if stderr_path else Path(os.devnull).open("wb")
+    ) as errors:
+        return subprocess.Popen(
+            [
+                sys.executable,
+                "-E",
+                "-s",
+                "-m",
+                "muninn.review_worker",
+                "--deadline",
+                str(deadline),
+                "--max-input-bytes",
+                "8192",
+                "--max-output-bytes",
+                "4096",
+            ],
+            cwd=ROOT,
+            env={},
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=errors,
+            close_fds=True,
+            start_new_session=True,
+        )
 
 
 def frame(script: str, cwd: Path) -> bytes:
@@ -79,13 +84,14 @@ class ReviewWorkerTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name)
+        self.worker_stderr = self.home / "worker-stderr.txt"
         self.monitor = process.ProcessMonitor(policy())
         self.addCleanup(self.monitor.stop_all)
 
     def worker(self, seconds: float = 5.0) -> process.RunningProcess:
         """Adopt a local wrapper before any activation bytes are sent."""
         deadline = time.monotonic() + seconds
-        child = start_worker(deadline)
+        child = start_worker(deadline, self.worker_stderr)
         running = process.RunningProcess(
             ATTEMPT, 1, child, identity.identify(child.pid), deadline, 4096
         )
@@ -101,7 +107,18 @@ class ReviewWorkerTests(unittest.TestCase):
             if any(event.kind == kind for event in found):
                 return tuple(found)
             time.sleep(0.01)
-        raise AssertionError(f"missing lifecycle phase {kind}")
+        detail = (
+            self.worker_stderr.read_text(errors="replace")[:4096]
+            if self.worker_stderr.exists()
+            else ""
+        )
+        phases = [
+            (event.kind, getattr(event, "error_code", None)) for event in found
+        ]
+        raise AssertionError(
+            f"missing lifecycle phase {kind}; events={phases!r}; "
+            f"worker stderr={detail!r}"
+        )
 
     def test_registration_precedes_first_cli_launch(self) -> None:
         self.worker()
@@ -187,6 +204,7 @@ class ReviewWorkerTests(unittest.TestCase):
         time.sleep(0.05)
         self.assertEqual(witness.read_bytes(), last)
 
+    @unittest.skipIf(sys.platform == "win32", "fcntl is POSIX-only")
     def test_cli_launch_inherits_no_writer_descriptor(self) -> None:
         from_script = (
             "import fcntl, os; "

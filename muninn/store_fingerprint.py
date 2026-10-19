@@ -60,6 +60,24 @@ def _stamp(metadata: os.stat_result) -> tuple[tuple[int, int], int, int, int]:
     )
 
 
+def _same_discovery(opened: os.stat_result, expected: os.stat_result) -> bool:
+    """Compare path and descriptor views using a shared creation timestamp."""
+    if sys.platform != "win32":
+        return _stamp(opened) == _stamp(expected)
+    # Windows path ctime is creation time; descriptor ctime is change time.
+    return (
+        _identity(opened),
+        opened.st_size,
+        opened.st_mtime_ns,
+        opened.st_birthtime_ns,
+    ) == (
+        _identity(expected),
+        expected.st_size,
+        expected.st_mtime_ns,
+        expected.st_birthtime_ns,
+    )
+
+
 def _private_stat(
     metadata: os.stat_result, *, directory: bool = False
 ) -> None:
@@ -109,7 +127,7 @@ def _read(path: Path, expected: os.stat_result) -> FileFingerprint:
         platform_io.assert_private_fd(handle.fileno())
         opened = os.fstat(handle.fileno())
         _private_stat(opened)
-        if _stamp(opened) != _stamp(expected):
+        if not _same_discovery(opened, expected):
             raise SourceChangedError
         digest = hashlib.sha256()
         count = 0
@@ -117,7 +135,7 @@ def _read(path: Path, expected: os.stat_result) -> FileFingerprint:
             digest.update(block)
             count += len(block)
         if count != expected.st_size or (
-            _stamp(os.fstat(handle.fileno())) != _stamp(expected)
+            _stamp(os.fstat(handle.fileno())) != _stamp(opened)
             or _stamp(_metadata(path)) != _stamp(expected)
         ):
             raise SourceChangedError

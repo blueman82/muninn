@@ -17,6 +17,7 @@ from muninn import platform_io
 from tests.ingest_support import ROOT
 
 if sys.platform == "win32":
+    TRUSTED_PYTHON = os.environ.get("MUNINN_PYTHON", sys.executable)
 
     def delete_access_error(path: Path) -> int:
         """Request real directory DELETE access and return its refusal code."""
@@ -71,7 +72,7 @@ if sys.platform == "win32":
                 manifest = lib / "selection.json"
                 fd = platform_io.open_private(manifest, os.O_CREAT | os.O_RDWR)
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump({"sha": sha, "python": sys.executable}, handle)
+                    json.dump({"sha": sha, "python": TRUSTED_PYTHON}, handle)
                 unvalidated = Path(temp) / "unvalidated.exe"
                 compile_marker(self, unvalidated, marker)
                 forged = Path(temp) / "forged.json"
@@ -115,7 +116,7 @@ if sys.platform == "win32":
                     self.assertFalse(marker.exists())
                     self.assertEqual(
                         json.loads(manifest.read_bytes())["python"],
-                        sys.executable,
+                        TRUSTED_PYTHON,
                     )
                     stop.touch()
                     out, err = process.communicate(timeout=20)

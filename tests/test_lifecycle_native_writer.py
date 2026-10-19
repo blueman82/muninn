@@ -80,6 +80,7 @@ class NativeWriterProofTests(unittest.TestCase):
             ):
                 lifecycle_native_writer.busy_stop(ctx)
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX native writer fixture")
     def test_busy_reader_starts_after_actual_owner_startup_replay(
         self,
     ) -> None:

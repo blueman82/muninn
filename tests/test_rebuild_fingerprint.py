@@ -6,13 +6,14 @@ import hashlib
 import os
 import sqlite3
 import tempfile
+import types
 import unittest
 from contextlib import closing
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 from unittest import mock
 
-from muninn import platform_io, store
+from muninn import platform_io, platform_windows, store
 from muninn import store_fingerprint as fingerprint
 from muninn.tombstone_key import KEY_FILE, TOMBSTONE_FILE
 from tests.store_support import public_read
@@ -76,6 +77,51 @@ class FingerprintTests(unittest.TestCase):
                 for p in (self.db, self.key, self.journal)
             },
         )
+
+    def test_windows_path_and_descriptor_ctime_use_their_own_baselines(
+        self,
+    ) -> None:
+        """Keep unchanged files despite Windows path and fd ctime views."""
+        original_lstat = Path.lstat
+        original_fstat = os.fstat
+
+        def view(actual: os.stat_result, ctime_ns: int) -> os.stat_result:
+            return cast(
+                os.stat_result,
+                types.SimpleNamespace(
+                    st_dev=actual.st_dev,
+                    st_ino=actual.st_ino,
+                    st_size=actual.st_size,
+                    st_mode=actual.st_mode,
+                    st_uid=actual.st_uid,
+                    st_mtime_ns=actual.st_mtime_ns,
+                    st_ctime_ns=ctime_ns,
+                    st_birthtime_ns=30,
+                ),
+            )
+
+        def path_stat(path: Path) -> os.stat_result:
+            actual = original_lstat(path)
+            if path != self.db:
+                return actual
+            return view(actual, 10)
+
+        def descriptor_stat(fd: int) -> os.stat_result:
+            return view(original_fstat(fd), 20)
+
+        with (
+            mock.patch.object(
+                fingerprint, "sys", types.SimpleNamespace(platform="win32")
+            ),
+            mock.patch.object(platform_windows, "assert_private", create=True),
+            mock.patch.object(Path, "lstat", path_stat),
+            mock.patch.object(os, "fstat", descriptor_stat),
+        ):
+            result = fingerprint.capture_file(self.db)
+        self.assertEqual(
+            result.digest, hashlib.sha256(self.db.read_bytes()).hexdigest()
+        )
+        self.assertEqual(result.ctime_ns, 10)
 
     def test_real_commit_with_same_size_and_mtime_is_detected(self) -> None:
         original = fingerprint.capture(self.home)

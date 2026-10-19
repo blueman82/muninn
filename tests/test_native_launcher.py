@@ -18,6 +18,7 @@ from tests.ingest_support import ROOT
 from tests.test_bootstrap_guards import compile_marker, diagnose_bootstrap
 
 if sys.platform == "win32":
+    TRUSTED_PYTHON = os.environ.get("MUNINN_PYTHON", sys.executable)
 
     class NativeLauncherTests(unittest.TestCase):
         """Run the actual native wrappers, including quoting and exit codes."""
@@ -48,7 +49,7 @@ if sys.platform == "win32":
                 for key, value in os.environ.items()
                 if not key.startswith("MUNINN_")
             } | {
-                "MUNINN_PYTHON": sys.executable,
+                "MUNINN_PYTHON": TRUSTED_PYTHON,
                 "MUNINN_HOME": str(self.root / "data"),
                 "HOME": str(self.root),
             }
@@ -93,6 +94,11 @@ if sys.platform == "win32":
             self,
         ) -> None:
             self.env["MUNINN_PYTHON"] = str(self.root / "missing.exe")
+            self.env["PATH"] = (
+                str(Path(TRUSTED_PYTHON).parent)
+                + os.pathsep
+                + self.env["PATH"]
+            )
             done = self.run_cmd(["stats"])
             self.assertEqual(done.returncode, 17, done.stderr)
             self.assertEqual(done.stderr, "")
@@ -136,7 +142,7 @@ if sys.platform == "win32":
             )
             self.env.pop("MUNINN_PYTHON")
             self.env["PATH"] = (
-                str(Path(sys.executable).parent)
+                str(Path(TRUSTED_PYTHON).parent)
                 + os.pathsep
                 + self.env["PATH"]
             )
@@ -163,7 +169,7 @@ if sys.platform == "win32":
             self.env["PATH"] = os.pathsep.join(
                 [
                     str(first),
-                    str(Path(sys.executable).parent),
+                    str(Path(TRUSTED_PYTHON).parent),
                     self.env["PATH"],
                 ]
             )

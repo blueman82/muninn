@@ -83,7 +83,19 @@ class TaskOnlyTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.pilot = self.fixture.successor()
         self.result = run_pilot(self.pilot, initialize=True)
-        self.assertEqual(self.result.cli_launches, 14)
+        self.assertEqual(
+            self.result.cli_launches,
+            14,
+            [
+                (
+                    trial.case_id,
+                    trial.comparator,
+                    trial.outcome,
+                    trial.call_ids,
+                )
+                for trial in self.result.trials
+            ],
+        )
         self.assertEqual(len(self.result.trials), 6)
         self.root = self.fixture.directory
         self.manifest_path = self.root / "completed-manifest.json"

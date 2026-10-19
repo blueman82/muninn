@@ -45,8 +45,18 @@ def directory(path: Path, *, private: bool = False) -> list[int]:
     info = path.lstat()
     if (
         not stat.S_ISDIR(info.st_mode)
-        or info.st_uid != owner_uid()
-        or info.st_mode & (0o077 if private else 0o022)
+        or (
+            sys.platform == "win32"
+            and private
+            and not platform_io.is_private(path, directory=True)
+        )
+        or (
+            sys.platform != "win32"
+            and (
+                info.st_uid != owner_uid()
+                or info.st_mode & (0o077 if private else 0o022)
+            )
+        )
         or path.resolve(strict=True) != path
     ):
         raise StepFailedError("legacy_directory_unsafe")
@@ -58,8 +68,18 @@ def file_state(path: Path, *, private: bool = False) -> dict[str, Any]:
     expected = path.lstat()
     if (
         not stat.S_ISREG(expected.st_mode)
-        or expected.st_uid not in (0, owner_uid())
-        or expected.st_mode & (0o077 if private else 0o022)
+        or (
+            sys.platform == "win32"
+            and private
+            and not platform_io.is_private(path)
+        )
+        or (
+            sys.platform != "win32"
+            and (
+                expected.st_uid not in (0, owner_uid())
+                or expected.st_mode & (0o077 if private else 0o022)
+            )
+        )
     ):
         raise StepFailedError("legacy_file_unsafe")
     digest = hashlib.sha256()
@@ -71,18 +91,41 @@ def file_state(path: Path, *, private: bool = False) -> dict[str, Any]:
     fields = (
         "st_dev",
         "st_ino",
-        "st_mode",
         "st_size",
         "st_mtime_ns",
-        "st_ctime_ns",
     )
-    stamp = [getattr(opened, key) for key in fields]
-    if any(
-        [getattr(value, key) for key in fields] != stamp
-        for value in (expected, after, path.lstat())
+    current = path.lstat()
+    stamp = [
+        expected.st_dev,
+        expected.st_ino,
+        expected.st_mode,
+        expected.st_size,
+        expected.st_mtime_ns,
+    ]
+    # Windows path and descriptor views disagree on executable bits and ctime.
+    if (
+        any(
+            [getattr(value, key) for key in fields]
+            != [getattr(expected, key) for key in fields]
+            for value in (opened, after, current)
+        )
+        or expected.st_mode != current.st_mode
+        or opened.st_mode != after.st_mode
+        or opened.st_ctime_ns != after.st_ctime_ns
+        or expected.st_ctime_ns != current.st_ctime_ns
+        or (
+            sys.platform != "win32"
+            and (
+                expected.st_mode != opened.st_mode
+                or expected.st_ctime_ns != opened.st_ctime_ns
+            )
+        )
     ):
         raise StepFailedError("legacy_file_changed")
-    return {"stamp": stamp, "sha256": digest.hexdigest()}
+    return {
+        "stamp": [*stamp, expected.st_ctime_ns],
+        "sha256": digest.hexdigest(),
+    }
 
 
 def tree_state(
