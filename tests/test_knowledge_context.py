@@ -292,6 +292,8 @@ class KnowledgeContextTests(KnowledgeContextCase):
         self.assertEqual(self.context_view().notes, [])
 
     def test_unknown_and_global_scope_fail_closed(self) -> None:
+        self.assertNotEqual(self.scope.project_id, "unknown")
+        self.assertIsNotNone(self.scope.project_id)
         self.add()
         unknown = Scope(project_id="unknown", task=None)
         self.assertEqual(

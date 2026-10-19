@@ -34,13 +34,13 @@ class RequestCase(IngestCase):
         )
         patch.start()
         self.addCleanup(patch.stop)
-        self.records = primary()
+        cwd = str(self.tmp / "repo") if os.name == "nt" else None
+        self.records = primary(cwd=cwd)
         self.path = self.write(rollout(), self.records)
         self.run_ingest()
         data = policy_data()
-        data.update(
-            projection_version="permitted-fields-v2", max_input_bytes=4096
-        )
+        data["projection_version"] = "permitted-fields-v2"
+        data["max_input_bytes"] = 4096
         self.policy = ReviewPolicy.model_validate(data)
         key = self.conn.execute(
             "SELECT sc.key FROM scope sc JOIN event e ON sc.id=e.scope_id "

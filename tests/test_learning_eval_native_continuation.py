@@ -15,6 +15,7 @@ from typing import Any
 from unittest import mock
 
 from tests import test_learning_eval_native_codex as fixtures
+from tests.learning_eval_diagnostics import launch_diagnostic
 from tools.learning_eval.account import Account
 from tools.learning_eval.cases import config_digest
 from tools.learning_eval.native_codex import (
@@ -32,7 +33,11 @@ from tools.learning_eval.native_terms import (
     validate_terms,
 )
 from tools.learning_eval.pilot import run_pilot
-from tools.learning_eval.pilot_models import PilotMaterial, schedule
+from tools.learning_eval.pilot_models import (
+    PilotMaterial,
+    PilotResult,
+    schedule,
+)
 from tools.learning_eval.task_protocol import protocol_schema
 
 
@@ -127,6 +132,10 @@ class NativeContinuationTests(unittest.TestCase):
         """Create a private artificial authority artifact."""
         path.write_bytes(raw)
         path.chmod(0o600)
+
+    def launch_diagnostic(self, result: PilotResult) -> dict[str, Any]:
+        """Show synthetic phases only after a launch count failure."""
+        return launch_diagnostic(self.directory, result)
 
     def make_ruling(self) -> dict[str, Any]:
         """Bind the stopped pipeline's actual output and Account bytes."""
@@ -225,7 +234,10 @@ class NativeContinuationTests(unittest.TestCase):
         self.assertEqual(prior, self.result)
         self.assertEqual(len(mapping), len(self.old_plans))
         result = run_pilot(manifest, initialize=True)
-        self.assertEqual(result.cli_launches, 8)
+        if result.cli_launches != 8:
+            self.fail(
+                f"{result.cli_launches} != 8: {self.launch_diagnostic(result)}"
+            )
         self.assertEqual(result.reserved_cost_decimal, "40")
         self.assertEqual(result.predecessor_trials, self.result.trials)
         self.assertEqual(len(result.trials), len(self.result.trials))

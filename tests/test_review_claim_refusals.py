@@ -140,7 +140,7 @@ class ClaimRefusalTests(RequestCase):
 
     def test_later_healthy_request_remains_claimable(self) -> None:
         tid = "0199aaaa-bbbb-4ccc-8ddd-ffffffffffff"
-        self.write(rollout(tid), primary(tid))
+        self.write(rollout(tid), primary(tid, cwd=self.scope.project_id))
         self.run_ingest()
         later = self.transaction(
             lambda: review_requests.enqueue_review(
