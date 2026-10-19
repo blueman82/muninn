@@ -86,7 +86,7 @@ class MachineCodesTest(unittest.TestCase):
             with (
                 mock.patch("tests.provider_native.configedit.atomic_write"),
                 mock.patch(
-                    "tests.provider_native.hook_invocations",
+                    "tests.provider_native._context_calls",
                     return_value=[
                         ["synthetic", "session-start", "--provider", "claude"]
                     ],
@@ -173,7 +173,7 @@ class MachineCodesTest(unittest.TestCase):
             with (
                 mock.patch("tests.provider_native.configedit.atomic_write"),
                 mock.patch(
-                    "tests.provider_native.hook_invocations",
+                    "tests.provider_native._context_calls",
                     return_value=[
                         ["synthetic", "session-start", "--provider", "claude"]
                     ],
@@ -220,7 +220,10 @@ class NativeFixtureTests(unittest.TestCase):
                 "synthetic",
             )
             env = fixture(ctx, lambda phase: None)
-            results = prove_hooks(ctx, env)
+            with mock.patch(
+                "install.provider_paths.installed", return_value=False
+            ):
+                results = prove_hooks(ctx, env)
             self.assertEqual(len(results), 2)
             self.assertEqual([item["route"] for item in results], [0, 1])
 

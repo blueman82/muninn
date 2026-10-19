@@ -175,7 +175,8 @@ def initialize_store(conn: sqlite3.Connection) -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if empty is not None or version != 0:
             assert_store_format(conn)
-            conn.execute("COMMIT")
+            # Read-only validation need not exclude readers.
+            conn.execute("ROLLBACK")
             return
         # executescript commits a pending transaction. Put each complete SQL
         # statement through execute so the check, DDL and marker stay atomic.

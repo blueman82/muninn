@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 import threading
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -160,12 +161,18 @@ def inspect(home: Path, name: str) -> tuple[bytes, Fingerprint | None]:
     latest = _private(path)
 
     def fields(value: os.stat_result) -> tuple[int, ...]:
+        # Windows path ctime is creation time; descriptor ctime is change time.
+        timestamp = (
+            value.st_birthtime_ns
+            if sys.platform == "win32"
+            else value.st_ctime_ns
+        )
         return (
             value.st_dev,
             value.st_ino,
             value.st_size,
             value.st_mtime_ns,
-            value.st_ctime_ns,
+            timestamp,
             value.st_mode,
             value.st_uid,
         )
@@ -174,6 +181,8 @@ def inspect(home: Path, name: str) -> tuple[bytes, Fingerprint | None]:
         fields(before) != fields(initial)
         or fields(initial) != fields(after)
         or (fields(after) != fields(latest))
+        or before.st_ctime_ns != latest.st_ctime_ns
+        or initial.st_ctime_ns != after.st_ctime_ns
     ):
         raise QuiescenceRefusedError("quiescence_unverified")
     return bytes(result), Fingerprint(

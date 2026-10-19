@@ -16,13 +16,13 @@ from typing import Any
 
 from install import configedit
 from install.context import Ctx, run_real
-from install.provider_paths import hook_invocations, powershell, render_pinned
-from install.trust import codex_hooks
+from install.provider_paths import powershell, render_pinned
 from muninn import ingest, obs, platform_io, platform_windows
 from tests.ingest_support import ROOT, TID, line, rollout
 from tests.knowledge_retirement_support import native_note
 from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
+from tests.provider_native_routes import context_calls as _context_calls
 from tests.provider_native_security import probe
 from tests.provider_native_stages import launcher_stages
 from tests.provider_native_stderr import classify
@@ -187,39 +187,6 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
             )
         raise
     return results
-
-
-def _context_calls(ctx: Ctx, env: dict[str, str]) -> list[str | list[str]]:
-    """Select only startup and prompt routes that return cited context."""
-    calls: list[str | list[str]] = [
-        call
-        for call in hook_invocations(ctx)
-        if "claude" in call
-        and any(verb in call for verb in ("session-start", "prompt"))
-    ]
-    for hooks_path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
-        for hook in codex_hooks(
-            hooks_path.read_bytes(), platform=ctx.platform
-        ):
-            if hook["suffix"].split(":")[0] not in {
-                "session_start",
-                "user_prompt_submit",
-            }:
-                continue
-            if sys.platform == "win32":
-                comspec = env.get("COMSPEC", "cmd.exe")
-                platform_windows.assert_executable(Path(comspec))
-                calls.append(
-                    subprocess.list2cmdline([comspec])
-                    + ' /C "'
-                    + hook["command"]
-                    + '"'
-                )
-            else:
-                calls.append(
-                    [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
-                )
-    return calls
 
 
 def _hook_result(
@@ -400,6 +367,9 @@ def main() -> None:
             metrics = probe(ctx.codex_home / "synthetic-security-probe.json")
             codex = prove_codex(ctx, env, checkpoint)
             timings = prove_hooks(ctx, env)
+            assert (
+                len(timings) == 4
+            ), "rendered provider context routes missing"
             metrics.update(baselines(env))
             write(
                 "provider",

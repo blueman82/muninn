@@ -30,8 +30,12 @@ from tests.native_diagnostics import write
 _ANCHOR = (
     "        if empty is not None or version != 0:\n"
     "            assert_store_format(conn)\n"
+    "            # Read-only validation need not exclude readers.\n"
+    '            conn.execute("ROLLBACK")\n'
 )
 _WRITE = (
+    "        if empty is not None or version != 0:\n"
+    "            assert_store_format(conn)\n"
     "            conn.execute(\n"
     '                "CREATE TABLE IF NOT EXISTS native_upgrade_marker("\n'
     '                "value INTEGER PRIMARY KEY CHECK(value=1))"\n'
@@ -39,6 +43,7 @@ _WRITE = (
     "            conn.execute(\n"
     '                "INSERT OR IGNORE INTO native_upgrade_marker VALUES(1)"\n'
     "            )\n"
+    '            conn.execute("COMMIT")\n'
 )
 
 
@@ -46,7 +51,7 @@ def mutation_source(source: str) -> str:
     """Add a fixture write inside the existing current-store transaction."""
     if source.count(_ANCHOR) != 1:
         raise ValueError("fixture_source_changed")
-    return source.replace(_ANCHOR, _ANCHOR + _WRITE)
+    return source.replace(_ANCHOR, _WRITE)
 
 
 def fixture_release(parent: Path, root: Path) -> tuple[Path, str]:

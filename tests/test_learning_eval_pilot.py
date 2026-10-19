@@ -292,7 +292,36 @@ class PilotControllerTests(PilotFixture):
         module = importlib.import_module("tools.learning_eval.pilot")
         result = module.run_pilot(manifest, initialize=True)
         self.assertEqual(len(result.trials), 4)
-        self.assertEqual(result.model_calls, 6)
+        call_codes = []
+        if result.model_calls != 6:
+            with closing(
+                sqlite3.connect(self.account / "account.sqlite3")
+            ) as conn:
+                for (raw,) in conn.execute(
+                    "SELECT record FROM calls ORDER BY rowid"
+                ):
+                    call = json.loads(raw)
+                    scheduled = call["schedule"]
+                    call_codes.append(
+                        (
+                            scheduled["comparator"],
+                            scheduled["purpose"],
+                            scheduled["round_index"],
+                            call["outcome"],
+                            call["state"],
+                        )
+                    )
+        self.assertEqual(
+            result.model_calls,
+            6,
+            (
+                [
+                    (t.comparator, t.outcome, len(t.call_ids))
+                    for t in result.trials
+                ],
+                call_codes,
+            ),
+        )
         present = next(
             t for t in result.trials if t.comparator == "new_present"
         )
