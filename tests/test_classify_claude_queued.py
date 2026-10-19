@@ -5,7 +5,6 @@ from __future__ import annotations
 import unittest
 
 from muninn import classify as c
-from muninn import knowledge
 from muninn.claude_events import (
     CHANNEL_HUMAN_FLAG,
     CLAUDE_HARNESS_PREFIXES,
@@ -13,6 +12,8 @@ from muninn.claude_events import (
     OWNER_ORIGIN_KIND,
     QUEUED_COMMAND_TYPE,
 )
+from muninn.query.opening import open_event
+from muninn.query.quotes import quote_check
 from tests.classify_claude_support import (
     MAIN,
     SESSION,
@@ -145,8 +146,13 @@ class QueuedIngestTests(IngestCase):
 
     def test_quote_check_finds_the_owner_words(self) -> None:
         self.run_ingest()
-        cite = knowledge.check_citation(self.conn, self.ref(), OWNER_TEXT)
-        self.assertEqual(cite["quote"], OWNER_TEXT)
+        cite = quote_check(self.conn, self.ref(), OWNER_TEXT)
+        self.assertEqual(cite, {"match": True, "span": [0, len(OWNER_TEXT)]})
+        opened = open_event(self.conn, self.ref(), roots=self.roots)
+        self.assertIs(opened["answer_citable"], True)
+        self.assertIs(opened["hash_ok"], True)
+        self.assertEqual(opened["provenance"]["kind"], "prompt")
+        self.assertEqual(opened["provenance"]["role"], "user")
         self.assertEqual(
             [e[:3] for e in self.events(SESSION)][1], (2, 1, "prompt")
         )

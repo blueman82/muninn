@@ -13,6 +13,7 @@ from muninn.cli_core import Result
 from muninn.cli_maint import heartbeat
 from muninn.ingest import PassStats
 from tests.cli_support import CliCase
+from tests.review_quiescence_support import initialize
 
 STOPPED = "the last pass stopped with"
 
@@ -95,12 +96,16 @@ class CrashTests(CliCase):
             )
 
     def test_a_crash_records_the_error_in_the_status(self) -> None:
+        self.conn.close()
+        initialize(self.home)
         self.assertEqual(self.crash(), (1, None))
         status = obs.read_status(self.home)
         self.assertEqual(status["last_error"], "RuntimeError")
         self.assertIsInstance(status["last_error_at"], float)
 
     def test_a_crash_survives_a_log_that_cannot_be_written(self) -> None:
+        self.conn.close()
+        initialize(self.home)
         with mock.patch.object(obs, "log_poller", side_effect=OSError):
             result = self.crash()
         self.assertEqual(result, (1, None))

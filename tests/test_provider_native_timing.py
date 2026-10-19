@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
 from install.context import Ctx, run_real
-from muninn import platform_windows
+from muninn import knowledge_read, platform_windows, store
+from muninn.knowledge_models import Scope
 from tests.provider_native import (
     baselines,
     emitter_baseline,
+    fixture,
     pe_machine,
     prove_hooks,
 )
@@ -197,3 +201,33 @@ class MachineCodesTest(unittest.TestCase):
         ):
             self.assertEqual(emitter_baseline({}), {})
             run.assert_not_called()
+
+
+class NativeFixtureTests(unittest.TestCase):
+    """Keep fixture content checked without claiming native host acceptance."""
+
+    def test_fixture_retains_real_normalized_support_and_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve() / "home"
+            ctx = Ctx(home, run_real, "synthetic", platform=sys.platform)
+            phases: list[str] = []
+            fixture(ctx, phases.append)
+            with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
+                views = knowledge_read.search_knowledge(
+                    conn, "nativealpha", Scope(project_id=str(home), task=None)
+                )
+                self.assertEqual(len(views), 1)
+                self.assertIsNotNone(views[0].body)
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM review_receipt"
+                    ).fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM knowledge_support"
+                    ).fetchone()[0],
+                    1,
+                )
+            self.assertIn("fixture_knowledge", phases)

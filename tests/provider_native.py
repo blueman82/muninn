@@ -18,13 +18,15 @@ from install import configedit
 from install.context import Ctx, run_real
 from install.provider_paths import hook_invocations, powershell, render_pinned
 from install.trust import codex_hooks
-from muninn import ingest, knowledge, obs, platform_io, platform_windows
+from muninn import ingest, obs, platform_io, platform_windows
 from tests.ingest_support import ROOT, TID, line, rollout
+from tests.knowledge_retirement_support import native_note
 from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
 from tests.provider_native_security import probe
 from tests.provider_native_stages import launcher_stages
 from tests.provider_native_stderr import classify
+from tests.review_quiescence_support import initialize
 from tests.test_classify import codex_meta, user_msg
 
 _SHA = "a" * 40
@@ -77,26 +79,18 @@ def fixture(ctx: Ctx, checkpoint: Callable[[str], None]) -> dict[str, str]:
         ctx.muninn.symlink_to(ROOT / "bin/muninn")
     source = ctx.home / "synthetic transcripts"
     source.mkdir()
-    records = [codex_meta("user", TID), user_msg(1, _WORDS)]
+    records = [codex_meta("user", TID), user_msg(1, f"Use {_WORDS}.")]
     records[0]["payload"]["cwd"] = str(ctx.home)
     path = source / rollout()
     path.parent.mkdir(parents=True)
     path.write_bytes(b"".join(map(line, records)))
     roots = {"codex-sessions": source}
     checkpoint("fixture_ingest")
+    initialize(ctx.data)
     stats = ingest.run_pass(ctx.data, roots)
     assert stats.events_added == 1
     checkpoint("fixture_knowledge")
-    knowledge.run_add(
-        ctx.data,
-        kind="decision",
-        text=_WORDS,
-        cites=[(f"codex:{TID}:2.1", _WORDS)],
-        cwd=str(ctx.home),
-        actor="user",
-        roots=roots,
-        env={},
-    )
+    native_note(ctx.data, roots, _WORDS)
     checkpoint("fixture_status")
     obs.write_status(ctx.data, {"last_pass_at": time.time(), "interval_s": 60})
     env = {

@@ -11,9 +11,11 @@ one place to import from.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
@@ -367,3 +369,34 @@ def json_check(before: bytes, after: bytes, paths: Sequence[JsonPath]) -> None:
         masked.append(obj)
     if masked[0] != masked[1]:
         raise RefusedError("keys outside the edited paths changed")
+
+
+def tree_snapshot(root: Path) -> dict[str, tuple[str, int]]:
+    """Fingerprint a complete ordinary tree while rejecting unsafe aliases."""
+    for parent in (root, *root.parents):
+        if parent.is_symlink() or parent.is_junction():
+            raise OSError("cache path contains an unsafe alias")
+    if not root.exists():
+        return {}
+    if not root.is_dir():
+        raise OSError("cache root is not a directory")
+    manifest: dict[str, tuple[str, int]] = {}
+    for path in sorted((root, *root.rglob("*"))):
+        status = path.lstat()
+        if path.is_symlink() or path.is_junction():
+            raise OSError("cache contains an unsafe alias")
+        if sys.platform != "win32" and (
+            status.st_uid != os.getuid() or status.st_mode & 0o022
+        ):
+            raise OSError("cache ownership or permissions are unsafe")
+        if stat.S_ISDIR(status.st_mode):
+            digest = ""
+        elif stat.S_ISREG(status.st_mode):
+            digest = hashlib.sha256(read_file(path)).hexdigest()
+        else:
+            raise OSError("cache contains an unsupported file type")
+        manifest[path.relative_to(root).as_posix()] = (
+            digest,
+            status.st_mode & 0o777,
+        )
+    return manifest

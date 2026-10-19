@@ -31,7 +31,10 @@ _SUMMARY_FIELDS = (
     "failed",
     "sweep_failed",
     "snapshot",
+    "store",
+    "recovery_required",
     "cursor_hooks",
+    "policy_status",
 )
 
 
@@ -110,8 +113,17 @@ def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
     ]
     keys += [e["header"] for e in rec["codex"] if rec["has_codex"]]
     if rec.get("cursor_hooks"):
-        keys.append("hooks.preCompact")
+        keys.extend(
+            ".".join(entry["path"])
+            for entry in rec["cursor"]
+            if entry["path"][0] == "hooks"
+        )
     out = {k: rec.get(k) for k in _SUMMARY_FIELDS}
+    if "legacy" in rec:
+        out["legacy"] = {
+            key: rec["legacy"].get(key)
+            for key in ("version", "baseline", "phase", "publication")
+        }
     out |= {
         "outcome": outcome,
         "config_keys": keys,

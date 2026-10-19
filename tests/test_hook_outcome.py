@@ -42,7 +42,7 @@ class HookOutcomeTests(RecallCase):
         trace: dict[str, Any] = {}
         payload = {
             "hook_event_name": "UserPromptSubmit",
-            "cwd": "/repo",
+            "cwd": self.scope.project_id,
             "session_id": "sess-now",
             "prompt": prompt,
         } | kw
@@ -114,7 +114,7 @@ class HookOutcomeTests(RecallCase):
         self.assertGreater(trace["stages"]["matches"], 0)
 
     def test_knowledge_only_block_is_not_a_miss(self) -> None:
-        self.add(text="alphaterm betaterm gammaterm decision")
+        self.add(content="alphaterm betaterm gammaterm decision")
         self.noise(self.repo)
         trace, out = self.traced()
         self.assertIn("hookSpecificOutput", out)
@@ -192,7 +192,7 @@ class HookOutcomeTests(RecallCase):
     def test_knowledge_with_events_only_out_of_scope_is_not_a_miss(
         self,
     ) -> None:
-        self.add(text="alphaterm betaterm gammaterm decision")
+        self.add(content="alphaterm betaterm gammaterm decision")
         other = self.add_scope("/elsewhere")
         self.talk("far", "alphaterm betaterm gammaterm far", scope_id=other)
         trace, out = self.traced()
@@ -221,7 +221,7 @@ class HookOutcomeTests(RecallCase):
         self.noise(self.repo)
         payload: dict[str, object] = {
             "hook_event_name": "UserPromptSubmit",
-            "cwd": "/repo",
+            "cwd": self.scope.project_id,
             "prompt": "alphaterm betaterm gammaterm",
         }
         self.env["MUNINN_HOOK_DISABLE"] = "1"
@@ -236,7 +236,7 @@ class HookOutcomeTests(RecallCase):
         call = self.calls(
             {
                 "hook_event_name": "UserPromptSubmit",
-                "cwd": "/repo",
+                "cwd": self.scope.project_id,
                 "session_id": "sess-now",
                 "prompt": f"{CANARY} betaterm gammaterm",
             }
@@ -263,7 +263,12 @@ class HookOutcomeTests(RecallCase):
             log.unlink(missing_ok=True)
             obs.log_call(
                 self.home,
-                {"cmd": "search", "stages": stages, key: [1] * 999},
+                {
+                    "cmd": "search",
+                    "stages": stages,
+                    key: (["K_" + "a" * 32] if key == "knowledge_ids" else [1])
+                    * 999,
+                },
             )
             raw = log.read_bytes()
             self.assertLessEqual(len(raw), 1024)
@@ -276,7 +281,7 @@ class HookOutcomeTests(RecallCase):
             {
                 "cmd": "search",
                 "stages": stages,
-                "knowledge_ids": list(range(500)),
+                "knowledge_ids": [f"K_{n:032x}" for n in range(500)],
                 "returned_ids": list(range(500)),
             },
         )

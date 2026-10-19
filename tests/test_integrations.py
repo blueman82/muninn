@@ -32,6 +32,7 @@ PYRIGHT = ROOT / "pyrightconfig.json"
 
 HOME = "@HOME@"
 SESSION_MATCHER = "startup|resume|clear|compact"
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "SessionEnd", "PreCompact")
 PYTHON = sys.executable
 ENV_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 
@@ -49,6 +50,10 @@ def hook_command(event: str, provider: str) -> str:
     verb = {
         "SessionStart": "session-start",
         "UserPromptSubmit": "prompt",
+        "SessionEnd": "session-end",
+        "PreCompact": "pre-compact",
+        "sessionStart": "session-start",
+        "sessionEnd": "session-end",
         "preCompact": "pre-compact",
     }
     return f"{HOME}/.local/bin/muninn hook {verb[event]} --provider {provider}"
@@ -126,9 +131,9 @@ class CodexPluginTest(unittest.TestCase):
         self.assertLessEqual(set(interface), allowed)
         self.assertEqual(interface["capabilities"], ["Lifecycle hooks"])
 
-    def test_hooks_are_session_start_and_prompt_only(self) -> None:
+    def test_hooks_cover_lifecycle_and_prompt(self) -> None:
         hooks = load(CODEX_HOOKS)["hooks"]
-        self.assertEqual(set(hooks), {"SessionStart", "UserPromptSubmit"})
+        self.assertEqual(set(hooks), set(HOOK_EVENTS))
         self.assertNotIn("PreToolUse", hooks)
 
     def test_hook_settings(self) -> None:
@@ -139,23 +144,23 @@ class CodexPluginTest(unittest.TestCase):
             with self.subTest(event=event):
                 self.assertEqual(hook["type"], "command")
                 self.assertEqual(hook["timeout"], 5)
-                self.assertEqual(hook["additionalContextLimit"], limits[event])
+                self.assertEqual(
+                    hook.get("additionalContextLimit"), limits.get(event)
+                )
                 self.assertEqual(hook["command"], hook_command(event, "codex"))
                 # Codex ignores matchers on UserPromptSubmit; keep it absent.
                 expected = SESSION_MATCHER if event == "SessionStart" else None
                 self.assertEqual(matcher, expected)
-        self.assertEqual(seen, set(limits))
+        self.assertEqual(seen, set(HOOK_EVENTS))
 
 
 class ClaudeFragmentTest(unittest.TestCase):
-    """The Claude settings fragment wires exactly two hook events."""
+    """The Claude settings fragment wires lifecycle and prompt events."""
 
-    def test_fragment_has_exactly_the_two_events(self) -> None:
+    def test_fragment_has_lifecycle_and_prompt_events(self) -> None:
         doc = load(CLAUDE_HOOKS)
         self.assertEqual(set(doc), {"hooks"})
-        self.assertEqual(
-            set(doc["hooks"]), {"SessionStart", "UserPromptSubmit"}
-        )
+        self.assertEqual(set(doc["hooks"]), set(HOOK_EVENTS))
 
     def test_hook_settings(self) -> None:
         seen = set()
@@ -172,24 +177,24 @@ class ClaudeFragmentTest(unittest.TestCase):
                 )
                 expected = SESSION_MATCHER if event == "SessionStart" else None
                 self.assertEqual(matcher, expected)
-        self.assertEqual(seen, {"SessionStart", "UserPromptSubmit"})
+        self.assertEqual(seen, set(HOOK_EVENTS))
 
 
 class CursorHooksTest(unittest.TestCase):
-    """Cursor runs one native preCompact history refresh."""
+    """Cursor wires native lifecycle events."""
 
-    def test_precompact_hook_uses_cursor_provider(self) -> None:
+    def test_lifecycle_hooks_use_cursor_provider(self) -> None:
         doc = load(CURSOR_HOOKS)
         self.assertEqual(doc["version"], 1)
-        self.assertEqual(set(doc["hooks"]), {"preCompact"})
-        [hook] = doc["hooks"]["preCompact"]
         self.assertEqual(
-            hook,
-            {
-                "command": hook_command("preCompact", "cursor"),
-                "timeout": 90,
-            },
+            set(doc["hooks"]), {"sessionStart", "sessionEnd", "preCompact"}
         )
+        for event, hooks in doc["hooks"].items():
+            [hook] = hooks
+            self.assertEqual(
+                hook,
+                {"command": hook_command(event, "cursor"), "timeout": 90},
+            )
 
 
 class PlistTest(unittest.TestCase):
@@ -253,7 +258,7 @@ class PlistTest(unittest.TestCase):
 
 def _event_position(event: str) -> int:
     """Return the shipped hook's file-order position."""
-    return 0 if event == "SessionStart" else 1
+    return HOOK_EVENTS.index(event)
 
 
 def all_commands() -> Iterator[tuple[str, str]]:
@@ -265,8 +270,9 @@ def all_commands() -> Iterator[tuple[str, str]]:
     for path in (CODEX_HOOKS, CLAUDE_HOOKS):
         for _, _, hook in handlers(load(path)):
             yield path.name, hook["command"]
-    for hook in load(CURSOR_HOOKS)["hooks"]["preCompact"]:
-        yield CURSOR_HOOKS.name, hook["command"]
+    for hooks in load(CURSOR_HOOKS)["hooks"].values():
+        for hook in hooks:
+            yield CURSOR_HOOKS.name, hook["command"]
     yield PLIST.name, load_plist()["ProgramArguments"][0]
 
 
@@ -275,7 +281,7 @@ class CommandContractTest(unittest.TestCase):
 
     def test_every_command_starts_at_the_home_placeholder(self) -> None:
         commands = list(all_commands())
-        self.assertEqual(len(commands), 6)
+        self.assertEqual(len(commands), 12)
         for name, command in commands:
             with self.subTest(file=name, command=command):
                 self.assertTrue(
@@ -389,11 +395,7 @@ class HomeSubstitutionTest(unittest.TestCase):
                         timeout=30,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    verb = (
-                        "session-start"
-                        if event == "SessionStart"
-                        else "prompt"
-                    )
+                    verb = hook_command(event, provider).split()[2]
                     self.assertEqual(
                         result.stdout.strip(),
                         f"hook|{verb}|--provider|{provider}",

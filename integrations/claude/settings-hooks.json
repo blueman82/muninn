@@ -22,6 +22,28 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/muninn hook session-end --provider claude",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/muninn hook pre-compact --provider claude",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

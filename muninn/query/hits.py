@@ -7,8 +7,14 @@ import time
 from collections import Counter
 from typing import Any
 
-from muninn.knowledge_expiry import LIVE_SQL, PUSH_SQL
-from muninn.query.answers import Answer, answer_citable, event_ref
+from muninn import knowledge_read
+from muninn.query.answers import (
+    Answer,
+    answer_citable,
+    event_ref,
+    knowledge_preview,
+    knowledge_scopes,
+)
 
 CANDIDATES = 300  # bm25 candidates per search, composed into pages
 SNIPPET_TOKENS = 32
@@ -211,23 +217,6 @@ def render(
     return hits
 
 
-def _cites(conn: sqlite3.Connection, knowledge_id: int) -> list[str]:
-    """Return up to two live citations of a knowledge entry."""
-    rows = conn.execute(
-        "SELECT provider, thread_id, line, part FROM citation"
-        " WHERE knowledge_id = ? AND state = 'live' ORDER BY id LIMIT 2",
-        (knowledge_id,),
-    )
-    return [event_ref(row) for row in rows]
-
-
-def _knowledge_scope(ids: list[int], everywhere: bool) -> str:
-    """Return the scope predicate of a knowledge query."""
-    if everywhere:
-        return ""
-    return f"AND k.scope_id IN ({','.join('?' * len(ids))})"
-
-
 def knowledge(
     conn: sqlite3.Connection,
     fts: str,
@@ -236,62 +225,42 @@ def knowledge(
     *,
     push_only: bool = False,
 ) -> list[Answer]:
-    """Return the top current knowledge entries in scope, with citations.
-
-    The CLI is a pull path, so a restricted entry is returned and marked
-    ``restricted``; an expired one is not current and is left out (see
-    ``expired_omitted``).  A hook asks with ``push_only`` and gets neither,
-    so restricted entries cannot crowd out pushable ones.
-
-    Args:
-        conn: Read-only store connection.
-        fts: The FTS5 query.
-        ids: Scope ids to search; ignored when ``everywhere``.
-        everywhere: Search every scope, loop scopes included.
-        push_only: Keep only entries that may be pushed unprompted.
-
-    Returns:
-        Up to ``KNOWLEDGE_HITS`` entries, best match first.
-    """
-    if not everywhere and not ids:
-        return []
-    rows = conn.execute(
-        "SELECT k.id, k.kind, k.text, k.actor, k.created_at, k.sensitivity,"
-        " sc.label"
-        " FROM knowledge_fts JOIN knowledge k ON k.id = knowledge_fts.rowid"
-        " JOIN scope sc ON sc.id = k.scope_id"
-        " WHERE knowledge_fts MATCH ? AND k.status = 'current'"
-        f" AND {PUSH_SQL if push_only else LIVE_SQL}"
-        f" {_knowledge_scope(ids, everywhere)}"
-        f" ORDER BY bm25(knowledge_fts), k.id LIMIT {KNOWLEDGE_HITS}",
-        [fts, time.time(), *([] if everywhere else ids)],
-    ).fetchall()
-    return [
-        {
-            "id": f"K{row['id']}",
-            "kind": row["kind"],
-            "text": row["text"][:KNOWLEDGE_TEXT],
-            "scope": row["label"],
-            "actor": row["actor"],
-            "date": time.strftime("%Y-%m-%d", time.gmtime(row["created_at"])),
-            "cites": _cites(conn, row["id"]),
-            "restricted": row["sensitivity"] == "restricted",
+    """Preview only current eligible revisions using authoritative joins."""
+    with knowledge_read.read_snapshot(conn):
+        found = {
+            view.id: view
+            for scope in knowledge_scopes(conn, ids, everywhere)
+            for view in knowledge_read.current_knowledge(
+                conn, scope, time.time(), fts
+            )
         }
-        for row in rows
-    ]
+        views = sorted(
+            found.values(),
+            key=lambda view: (view.created_at, view.id),
+            reverse=True,
+        )
+        return [knowledge_preview(view) for view in views[:KNOWLEDGE_HITS]]
 
 
 def expired_omitted(
     conn: sqlite3.Connection, fts: str, ids: list[int], everywhere: bool
 ) -> int:
-    """Count matching current entries left out of a search for expiry."""
-    if not everywhere and not ids:
-        return 0
-    row = conn.execute(
-        "SELECT count(*) FROM knowledge_fts JOIN knowledge k"
-        " ON k.id = knowledge_fts.rowid"
-        " WHERE knowledge_fts MATCH ? AND k.status = 'current'"
-        f" AND NOT {LIVE_SQL} {_knowledge_scope(ids, everywhere)}",
-        [fts, time.time(), *([] if everywhere else ids)],
-    ).fetchone()
-    return int(row[0])
+    """Count otherwise eligible current matches omitted by supported expiry."""
+    omitted: set[str] = set()
+    now = time.time()
+    with knowledge_read.read_snapshot(conn):
+        for scope in knowledge_scopes(conn, ids, everywhere):
+            for row in knowledge_read.candidate_rows(conn, scope, fts):
+                try:
+                    view, _ = knowledge_read.eligible_current(
+                        conn, row, scope, 0.0
+                    )
+                except ValueError:
+                    continue
+                if (
+                    view.expiry is not None
+                    and view.expiry.at is not None
+                    and view.expiry.at <= now
+                ):
+                    omitted.add(view.id)
+    return len(omitted)

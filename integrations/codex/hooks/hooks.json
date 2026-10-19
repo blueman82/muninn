@@ -25,6 +25,28 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/muninn hook session-end --provider codex",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "@HOME@/.local/bin/muninn hook pre-compact --provider codex",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

@@ -43,13 +43,14 @@ from install.constants import (
 from install.context import Ctx, StepFailedError, job, link_text, run_real
 from install.errors import RacedError, RefusedError
 from install.lifecycle import preflight_service, remove
-from install.provider_paths import cursor_command
+from install.provider_paths import cursor_commands
 from install.rollback import bootout
 from install.transforms import (
     claude_paths,
     codex_check,
+    cursor_paths,
     drop_cursor_settings,
-    ours,
+    foreign_groups,
 )
 from muninn import platform_io
 from muninn.platform_paths import read_selection
@@ -97,8 +98,8 @@ def drop_hooks(data: bytes) -> bytes:
         if not isinstance(current, list):
             raise RefusedError(f"settings.json hooks.{event} is not a list")
         groups = cast(list[dict[str, Any]], current)
-        keep = [g for g in groups if not ours(g)]
-        if len(keep) == len(groups):
+        keep = foreign_groups(groups)
+        if keep == groups:
             continue
         touched = True
         if keep:
@@ -137,8 +138,8 @@ def _settings_check(before: bytes, after: bytes) -> None:
 
 
 def _cursor_settings_check(before: bytes, after: bytes) -> None:
-    """Prove Cursor unhooking changed only the preCompact handlers."""
-    ce.json_check(before, after, [("hooks", "preCompact")])
+    """Prove Cursor unhooking changed only the lifecycle handlers."""
+    ce.json_check(before, after, cursor_paths()[1:])
 
 
 def _preflight(ctx: Ctx, purge: bool) -> None:
@@ -165,7 +166,7 @@ def _preflight(ctx: Ctx, purge: bool) -> None:
             raise RefusedError("Cursor hooks.json must not be a symlink")
         before = ce.read_file(ctx.cursor_settings)
         _cursor_settings_check(
-            before, drop_cursor_settings(before, cursor_command(ctx))
+            before, drop_cursor_settings(before, cursor_commands(ctx))
         )
     if not purge and ctx.data.exists() and ctx.removed.exists():
         raise StepFailedError(
@@ -188,18 +189,18 @@ def _unhook_claude(ctx: Ctx) -> bool:
 
 
 def _unhook_cursor(ctx: Ctx) -> bool:
-    """Remove Muninn's Cursor preCompact hook, preserving other hooks."""
+    """Remove Muninn's Cursor lifecycle hooks, preserving other hooks."""
     if not ctx.cursor_settings.exists():
         return False
     before = ce.read_file(ctx.cursor_settings)
-    if drop_cursor_settings(before, cursor_command(ctx)) == before:
+    if drop_cursor_settings(before, cursor_commands(ctx)) == before:
         return False
     return _act(
         ctx,
         f"remove the muninn hook from {ctx.cursor_settings}",
         lambda: ce.edit_file(
             ctx.cursor_settings,
-            lambda data: drop_cursor_settings(data, cursor_command(ctx)),
+            lambda data: drop_cursor_settings(data, cursor_commands(ctx)),
             _cursor_settings_check,
         ),
     )

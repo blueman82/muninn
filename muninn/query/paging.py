@@ -68,7 +68,8 @@ def _new_page(
 def _shrink_knowledge(current: Answer) -> None:
     """Halve the longest knowledge text until the page fits or none is left.
 
-    Knowledge navigation stays on page one; only its previews get shorter.
+    Knowledge IDs, revisions and evidence identities stay on page one;
+    only the text previews get shorter.
     """
     while _too_big(current) and any(k["text"] for k in current["knowledge"]):
         entry = max(current["knowledge"], key=lambda k: len(k["text"]))

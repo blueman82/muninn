@@ -35,6 +35,7 @@ from muninn.obs_service import (
     task_matches,
 )
 from muninn.obs_service_commands import render_unit
+from muninn.platform_lock import released
 from muninn.platform_paths import read_selection
 
 _NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
@@ -351,7 +352,7 @@ def stop(ctx: Ctx) -> None:
             ) from exc
     elif ctx.platform != "linux":
         ctx.run(["launchctl", "bootout", ctx.target])
-        wait(ctx, lambda: job(ctx) is None, 30, "job still loaded")
+        wait(ctx, lambda: not job(ctx) and released(ctx.data), 30, "busy")
 
 
 def start(ctx: Ctx, python: Path, release: Path) -> None:

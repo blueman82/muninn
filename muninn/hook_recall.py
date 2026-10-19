@@ -14,8 +14,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import NotRequired, Protocol, TypedDict, cast
 
-from muninn import knowledge, query, recall_audit, store
+from muninn import knowledge_read, query, recall_audit, store
 from muninn.hook_frame import RecallEntry, RecallHit, recall_text
+from muninn.query.answers import event_ref
 from muninn.scope import scope_ids_for_read
 
 # A prompt with fewer query terms recalls nothing; the search ORs terms, so
@@ -37,7 +38,7 @@ class RecallRequest:
     # only once something is recalled, so a prompt with no hit never reads
     # the heartbeat file.
     notes: Callable[[], tuple[str, ...]]
-    limit: int  # maximum characters of the block
+    limit: int  # maximum UTF-8 bytes of the block
 
 
 class SearchPage(TypedDict):
@@ -118,23 +119,6 @@ def _matched(
     return counts
 
 
-def _pushable(
-    conn: sqlite3.Connection, entries: list[RecallEntry]
-) -> list[RecallEntry]:
-    """Keep the entries a hook may push without being asked.
-
-    Those that may be pushed as at SessionStart (``knowledge.user_cited``):
-    not expired, not restricted, and with a live user-prompt citation whose
-    quote backs the text; the others stay pull-only.
-
-    Returns:
-        The entries with a live user-prompt citation, in input order.
-    """
-    ids = [int(e["id"][1:]) for e in entries]
-    allowed = knowledge.user_cited(conn, ids)
-    return [e for e, kid in zip(entries, ids, strict=True) if kid in allowed]
-
-
 def _search_page(
     conn: sqlite3.Connection,
     payload: Mapping[str, object],
@@ -168,10 +152,10 @@ def _pool(
     """Page through search results for events that pass the term floor.
 
     Returns:
-        The pushable knowledge, events matching at least ``min_terms``
-        terms (possibly more than ``MAX_EVENTS``), how many events the
-        floor dropped, page 1's stage counts (empty when page 1 failed),
-        and whether any page errored, leaving later events unread.
+        The eligible current previews, events matching at least
+        ``min_terms`` terms (possibly more than ``MAX_EVENTS``), how many
+        events the floor dropped, page 1's stage counts (empty when page 1
+        failed), and whether any page errored, leaving later events unread.
     """
     entries: list[RecallEntry] = []
     hits: list[RecallHit] = []
@@ -184,7 +168,7 @@ def _pool(
             unread = True  # the floor outcome is unknown
             break
         if page == 1:  # knowledge does not change between pages
-            entries = _pushable(conn, found["knowledge"])
+            entries = found["knowledge"]
             stages = found.get("stages", {})  # whole-query, same per page
         counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
         for hit in found["hits"]:
@@ -195,6 +179,31 @@ def _pool(
         if len(hits) >= MAX_EVENTS or not found["has_more"]:
             break
     return entries, hits, dropped, stages, unread
+
+
+def _evidence_sources(
+    conn: sqlite3.Connection, entries: list[RecallEntry]
+) -> None:
+    """Attach text-free locators bound to the selected knowledge revision."""
+    for entry in entries:
+        entry["evidence_sources"] = []
+        for ident in entry["evidence_refs"]:
+            row = conn.execute(
+                "SELECT provider,thread_id,line,part,line_sha256 "
+                "FROM review_evidence e WHERE e.id=? AND e.state='live' "
+                "AND EXISTS (SELECT 1 FROM knowledge_support s WHERE "
+                "s.evidence_id=e.id AND s.knowledge_id=? AND s.revision=?)",
+                (ident, entry["id"], entry["revision"]),
+            ).fetchone()
+            entry["evidence_sources"].append(
+                {
+                    "evidence_id": ident,
+                    "ref": event_ref(row) if row is not None else None,
+                    "line_sha256": (
+                        row["line_sha256"] if row is not None else None
+                    ),
+                }
+            )
 
 
 def _outcome(
@@ -242,12 +251,14 @@ def recall_block(
     Returns:
         The framed block, or an empty string when nothing qualifies.
     """
-    entries, hits, dropped, page1, unread = _pool(
-        conn, payload, env, request.cwd, request.terms, max(1, min_terms)
-    )
+    with knowledge_read.read_snapshot(conn):
+        entries, hits, dropped, page1, unread = _pool(
+            conn, payload, env, request.cwd, request.terms, max(1, min_terms)
+        )
+        _evidence_sources(conn, entries)
     hits = hits[:MAX_EVENTS]
     trace["returned_ids"] = [h["id"] for h in hits]
-    trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
+    trace["knowledge_ids"] = [e["id"] for e in entries]
     stages = {"floor_dropped": dropped, "returned": len(hits)}
     with contextlib.suppress(Exception):  # logging must not fail recall
         stages |= _outcome(page1, dropped, bool(entries or hits), unread)

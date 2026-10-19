@@ -124,8 +124,12 @@ def _exercise(parent: Path, metrics: dict[str, int]) -> dict[str, object]:
         write("lifecycle", "upgrade_stop", metrics=metrics)
         if sys.platform == "linux":
             lifecycle_native_writer.crash_restart(upgraded, upgraded_started)
-            lifecycle_native_rollback.rollback(upgraded, ROOT)
-            lifecycle_native_entry.maintenance_checks(upgraded, ROOT)
+            retained_source = lifecycle_native_rollback.rollback(
+                upgraded, ROOT
+            )
+            lifecycle_native_entry.maintenance_checks(
+                upgraded, retained_source
+            )
         else:
             lifecycle.stop(upgraded)
     result = {
@@ -137,7 +141,7 @@ def _exercise(parent: Path, metrics: dict[str, int]) -> dict[str, object]:
         "key_retained": True,
         "managed_busy_commit": sys.platform == "linux",
         "managed_crash_restart": sys.platform == "linux",
-        "migration_rollback": sys.platform == "linux",
+        "current_store_recovery": sys.platform == "linux",
         "source_wrappers": sys.platform == "linux",
         "native_seconds": round(time.monotonic() - started, 3),
     }

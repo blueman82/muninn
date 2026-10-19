@@ -40,7 +40,7 @@ class HookCommandTests(HookCliCase):
             for g in groups
             for h in g["hooks"]
         ]
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(len(commands), 4)
         env = self.env | {"MUNINN_HOOK_DISABLE": "1"}
         env["MUNINN_HOME"] = str(self.tmp / "no-such-dir")
         for event, provider in (
@@ -51,6 +51,11 @@ class HookCommandTests(HookCliCase):
             ("prompt", "codex"),
             ("prompt", "cursor"),
             ("pre-compact", "cursor"),
+            ("pre-compact", "claude"),
+            ("pre-compact", "codex"),
+            ("session-end", "claude"),
+            ("session-end", "codex"),
+            ("session-end", "cursor"),
         ):
             with self.subTest(event, provider=provider):
                 done = subprocess.run(
@@ -110,7 +115,9 @@ class HookCommandTests(HookCliCase):
                 trace=trace,
             )
         self.assertEqual(out, {})
-        self.assertEqual(trace, {"counts": counts})
+        self.assertEqual(
+            trace, {"counts": counts, "error": "cursor_import_empty"}
+        )
         self.assertEqual(importer.call_args.args[2], project)
         self.assertEqual(importer.call_args.kwargs["max_bubbles"], 7)
 
@@ -227,7 +234,9 @@ class HookCommandTests(HookCliCase):
     def test_unknown_extra_flags_are_ignored_not_fatal(self) -> None:
         done = subprocess.run(
             launcher_args("hook", "session-start", "--provider=claude", "--x"),
-            input=b"{}",
+            input=json.dumps(
+                self.payload(hook_event_name="SessionStart", source="startup")
+            ).encode(),
             capture_output=True,
             env=self.env,
         )
@@ -241,7 +250,7 @@ class HookCommandTests(HookCliCase):
             with self.subTest(raw):
                 done = self.run_hook("session-start", "claude", {}, raw=raw)
                 out = self.parsed(done)
-                self.assertIn("hookSpecificOutput", out)
+                self.assertEqual(out, {})
         gone = {"MUNINN_HOME": str(self.tmp / "gone")}
         done = self.run_hook(
             "prompt",
@@ -258,12 +267,16 @@ class HookCommandTests(HookCliCase):
     def test_an_oversize_payload_is_ignored_not_read_on(self) -> None:
         sub = self.tmp / "sub.jsonl"
         sub.write_text(json.dumps(tc.subagent_meta("thr-sub")) + "\n")
-        small = {"cwd": str(self.repo), "transcript_path": str(sub)}
+        small = self.payload(
+            hook_event_name="SessionStart",
+            source="startup",
+            transcript_path=str(sub),
+        )
         done = self.run_hook("session-start", "codex", small)
         self.assertEqual(self.parsed(done), {})  # a subagent: silent
         big = small | {"pad": "x" * (hook.MAX_INPUT + 10)}
         done = self.run_hook("session-start", "codex", big)
-        self.assertIn("hookSpecificOutput", self.parsed(done))  # unread
+        self.assertEqual(self.parsed(done), {})  # unread native identity
 
 
 class HookCliEdgeTests(HookCliCase):
@@ -368,9 +381,12 @@ class HookCliEdgeTests(HookCliCase):
             """
             return json.loads(text)["hookSpecificOutput"]["additionalContext"]
 
-        code, text = self.main_hook(patches=[log])
+        payload = json.dumps(
+            self.payload(hook_event_name="SessionStart", source="startup")
+        ).encode()
+        code, text = self.main_hook(stdin=payload, patches=[log])
         self.assertEqual(code, 0)
         self.assertIn(USAGE, context(text))  # printed before the log ran
         code, text = self.main_hook(stdin=None)  # sys.stdin is None
         self.assertEqual(code, 0)
-        self.assertIn(USAGE, context(text))
+        self.assertEqual(json.loads(text), {})

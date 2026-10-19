@@ -130,6 +130,9 @@ def register(tc: unittest.TestCase, home: Path) -> None:
         tc: Test case that owns patch cleanup.
         home: The World home, assigned before registration.
     """
+    runtime = mock.patch("install.runtime.verify_runtime")
+    runtime.start()
+    tc.addCleanup(runtime.stop)
     identity = mock.patch(
         "install.steps_config.codex_identity",
         return_value=("synthetic-codex-candidate",),
@@ -162,3 +165,21 @@ def register(tc: unittest.TestCase, home: Path) -> None:
         boundary = mock.patch(name, owned_relink)
         boundary.start()
         tc.addCleanup(boundary.stop)
+
+
+def provision_runtime(home: Path, argv: list[str]) -> bool:
+    """Model venv/pip effects only inside the fixture's owned home."""
+    if argv[1:5] == ["-I", "-B", "-m", "venv"]:
+        venv = Path(argv[5])
+        assert venv.is_relative_to(home), argv
+        for relative in ("bin/python3", "Scripts/python.exe"):
+            python = venv / relative
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"fixture interpreter")
+            python.chmod(0o700)
+        return True
+    if argv[1:5] == ["-I", "-B", "-m", "pip"]:
+        assert Path(argv[0]).is_relative_to(home), argv
+        assert "--require-hashes" in argv, argv
+        return True
+    return False

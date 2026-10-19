@@ -13,14 +13,18 @@ from pathlib import Path
 from typing import Any, cast
 
 from install import configedit as ce
-from install.constants import CLAUDE_EVENTS, GIT_ENV, PINNED
+from install import review_policy
+from install.constants import CLAUDE_EVENTS, CURSOR_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.lifecycle import preflight_service
 from install.provider_apps import installed
-from install.provider_paths import codex_argv, cursor_command, render_pinned
+from install.provider_paths import codex_argv, cursor_commands, render_pinned
 from install.record import Record
 from install.snapshot import release_schema
 from install.transforms import (
+    cursor_handlers,
+    cursor_ours,
+    cursor_paths,
     drop_trust,
     edit_cursor_settings,
     edit_settings,
@@ -43,7 +47,7 @@ def _git(ctx: Ctx, repo: Path, *args: str) -> bytes:
 
 
 def _check_cursor_fragment(data: bytes, ctx: Ctx) -> None:
-    """Verify the pinned Cursor fragment contains Muninn's single hook.
+    """Verify the pinned Cursor fragment contains all managed hooks.
 
     Args:
         data: The pinned Cursor hooks.json bytes.
@@ -57,17 +61,16 @@ def _check_cursor_fragment(data: bytes, ctx: Ctx) -> None:
     if not isinstance(hooks, dict):
         raise StepFailedError("Cursor hook fragment must be an object")
     hook_map = cast(dict[str, Any], hooks)
-    if set(hook_map) != {"preCompact"}:
-        raise StepFailedError("Cursor hook fragment must be preCompact only")
-    handlers: Any = hook_map["preCompact"]
-    if not isinstance(handlers, list):
-        raise StepFailedError("Cursor hook fragment must contain one handler")
-    handler_list = cast(list[Any], handlers)
-    if len(handler_list) != 1 or not isinstance(handler_list[0], dict):
-        raise StepFailedError("Cursor hook fragment must contain one handler")
-    handler = cast(dict[str, Any], handler_list[0])
-    if handler.get("command") != cursor_command(ctx):
-        raise StepFailedError("Cursor hook fragment has an unexpected command")
+    if fragment.get("version") != 1 or set(hook_map) != set(CURSOR_EVENTS):
+        raise StepFailedError(
+            "Cursor hook fragment must contain lifecycle events"
+        )
+    for event, command in cursor_commands(ctx).items():
+        handlers = cursor_handlers(fragment, event)
+        if len(handlers) != 1 or handlers[0].get("command") != command:
+            raise StepFailedError(
+                "Cursor hook fragment has an unexpected handler"
+            )
 
 
 def _check_repo(
@@ -118,7 +121,7 @@ def _check_repo(
     fragment = json.loads(files[PINNED[0]])["hooks"]
     if set(fragment) != set(CLAUDE_EVENTS):
         raise StepFailedError(
-            "Claude hook fragment must be SessionStart+UserPromptSubmit"
+            "Claude hook fragment must contain lifecycle and prompt events"
         )
     _check_cursor_fragment(files[CURSOR_HOOKS_FILE], ctx)
     return files, fragment
@@ -236,9 +239,22 @@ def _dry_apply(
             else EMPTY_CURSOR_CONFIG
         )
         fragment = json.loads(files[CURSOR_HOOKS_FILE])
-        [handler] = fragment["hooks"]["preCompact"]
-        changed = edit_cursor_settings(doc, cursor_command(ctx), handler)
-        ce.json_check(doc, changed, [("version",), ("hooks", "preCompact")])
+        changed = edit_cursor_settings(
+            doc, cursor_commands(ctx), fragment["hooks"]
+        )
+        ce.json_check(doc, changed, cursor_paths())
+
+
+def _managed_cursor(ctx: Ctx) -> bool:
+    """Recognize prior Cursor ownership before reconciling an upgrade."""
+    if not ctx.cursor_settings.exists():
+        return False
+    obj = ce.load_json(ce.read_file(ctx.cursor_settings))
+    return any(
+        cursor_ours(handler, command)
+        for event, command in cursor_commands(ctx).items()
+        for handler in cursor_handlers(obj, event)
+    )
 
 
 def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
@@ -263,22 +279,19 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     files, fragment = _check_repo(ctx, repo, sha)
     _check_machine(ctx)
     preflight_service(ctx)
-    # An upgrade re-pins only; provider config was set up by the fresh run.
-    ctx.cursor_hooks = ctx.cursor_hooks and installed(ctx, "cursor")
-    touch = not ctx.upgrade
-    if touch or ctx.cursor_hooks:
-        _dry_apply(ctx, files, fragment, touch)
+    ctx.cursor_hooks = installed(ctx, "cursor") and (
+        ctx.cursor_hooks or (ctx.upgrade and _managed_cursor(ctx))
+    )
+    _dry_apply(ctx, files, fragment, True)
     schema = release_schema(ctx, repo, sha) if ctx.upgrade else None
     selection = None
     if ctx.platform == "win32" and ctx.upgrade:
         selection = (ctx.lib / "selection.json").read_text()
-    return {
+    rec: Record = {
         "fresh": ctx.fresh,
         "upgrade": ctx.upgrade,
-        "has_claude": touch
-        and installed(ctx, "claude")
-        and ctx.settings.exists(),
-        "has_codex": touch and installed(ctx, "codex") and ctx.config.exists(),
+        "has_claude": installed(ctx, "claude") and ctx.settings.exists(),
+        "has_codex": installed(ctx, "codex") and ctx.config.exists(),
         "cursor_hooks": ctx.cursor_hooks,
         "schema": 1,
         "ts": ctx.ts,
@@ -290,4 +303,14 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
         "python": {"path": sys.executable, "version": sys.version.split()[0]},
         "rdir": str(ctx.rdir),
         "steps": [],
+        "policy_input": review_policy.capture(ctx, sha),
     }
+    review_policy.preflight(ctx, rec)
+    return rec
+
+
+def validate_resume_repo(ctx: Ctx, repo: Path, sha: str) -> None:
+    """Revalidate the candidate while managed launch paths are blocked."""
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise StepFailedError("--sha must be a full 40-hex commit id")
+    _check_repo(ctx, repo, sha)

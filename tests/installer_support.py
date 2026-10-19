@@ -1,9 +1,4 @@
-"""Fakes and fixtures shared by the installer test modules.
-
-launchctl, ps, muninn, codex and the Codex hooks/list probe are fakes; git and
-cp run for real, but only on temp dirs. Config files are synthetic and carry
-a fake credential that must never be recorded.
-"""
+"""Isolated installer fakes over temporary homes and real Git repositories."""
 
 from __future__ import annotations
 
@@ -24,7 +19,7 @@ from install import configedit as ce
 from install import installer as co
 from install.context import Ctx
 from muninn import store
-from tests.installer_fakes import register
+from tests.installer_fakes import provision_runtime, register
 
 ROOT = Path(__file__).resolve().parent.parent
 CRED = "sk-fake-" + "feedface" * 5
@@ -37,6 +32,7 @@ PINNED = (
     "integrations/cursor/hooks.json",
     "launchd/com.muninn.plist",
     "muninn/store_schema.py",
+    "requirements-runtime.lock",
 )
 # Real Codex 0.160.0 `hooks/list` currentHash values for the shipped
 # hooks.json (literal @HOME@ commands), from an isolated CODEX_HOME probe
@@ -187,6 +183,8 @@ class Fake:
         """
         args = [str(a) for a in argv]
         self.calls.append(args)
+        if provision_runtime(self.home, args):
+            return done()
         name = Path(args[0]).name
         return getattr(self, "_" + name)(args[1:], env or {}, input)
 

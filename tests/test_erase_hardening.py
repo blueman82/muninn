@@ -18,14 +18,13 @@ from install.provider_paths import powershell
 from muninn import (
     cli,
     erase,
-    knowledge,
     knowledge_push,
     tombstone_key,
     tombstones,
 )
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
-from tests.knowledge_support import KnowCase
+from tests.knowledge_context_support import KnowledgeContextCase
 from tests.provider_native_stderr import classify
 from tests.store_support import assert_private
 from tests.test_classify import PARENT, codex_meta, reply, user_msg
@@ -283,13 +282,13 @@ class AsideDoctorTests(CliCase):
         self.assertEqual(got["detail"], ASIDE)
 
 
-class BoundedBlockTests(KnowCase):
+class BoundedBlockTests(KnowledgeContextCase):
     """The SessionStart query reads a bounded number of rows."""
 
     def test_rows_read_are_capped_whatever_the_ledger_size(self) -> None:
-        user = [(self.ref(self.prompt), "use the zebra cache")]
         for i in range(6):
-            self.add(text=f"use the zebra cache {i}", cites=user)
+            self.add(content=f"use the zebra cache {i}")
         with mock.patch.object(knowledge_push, "_SCAN_CAP", 2):
-            got = knowledge.block_entries(self.ro(), [self.repo], limit=8)
-        self.assertEqual(len(got), 2)
+            got = self.context_view()
+        self.assertEqual(len(got.notes), 2)
+        self.assertTrue(got.truncated)

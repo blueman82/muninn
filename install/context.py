@@ -62,6 +62,7 @@ class Ctx:
         ts: UTC timestamp that names this run's directories.
         platform: Native platform, overridden only by isolated tests.
         default_home: Use native environment paths when HOME was omitted.
+        review_policy: Explicit policy input; never discovered automatically.
         log_path: Optional CLI log activated only after successful preflight.
         uid: User id for launchd's per-user ``gui/<uid>`` domain.
         dry_run: Plan and report without changing anything.
@@ -93,6 +94,7 @@ class Ctx:
     uid: int = getattr(os, "getuid", lambda: 0)()
     platform: str = sys.platform
     default_home: bool = False
+    review_policy: Path | None = None
     log_path: Path | None = None
     dry_run: bool = False
     cursor_hooks: bool = False

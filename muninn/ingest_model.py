@@ -7,9 +7,10 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from muninn import classify
+from muninn.scope import CommitLookup
 
 # A decoded JSON object.  Transcript records come from other tools and have
 # no schema we control, so their values are genuinely untyped; classify and
@@ -37,22 +38,21 @@ INDEXED = ("primary", "subagent")
 
 @dataclass
 class PassStats:
-    """Counters for one ingest pass.
+    """Invocation work totals across fresh ingest passes.
 
     Attributes:
-        files_seen: Regular transcript files found under the roots.
-        files_changed: Sources committed this pass.
+        files_seen: Discovery visits, including repeated visits.
+        files_changed: Source transactions committed, including replacements.
         events_added: Events inserted.
         events_removed: Events deleted by a replace.
         skipped_lines: Lines recorded as source issues.
         missing: Sources newly marked missing.
-        duration_s: Wall time of the pass.
-        skipped_files: Tombstoned, unidentifiable or duplicate files, and
-            files that vanished or could not be opened (the latter also
-            count in ``unreadable_files``).
-        unreadable_files: Files that could not be opened (not vanished).
-        failed: Sources rolled back by an error; redone next pass.
-        errors: Exception class name to count, for the failed sources.
+        duration_s: Outer wall time, including preparation and waits.
+        skipped_files: Skipped visits: tombstones, duplicates, unidentified or
+            vanished files, and failed opens (also ``unreadable_files``).
+        unreadable_files: Failed open attempts (not vanished files).
+        failed: Ordinary failed source read attempts; may later recover.
+        errors: Exception class counts, excluding preparation outcomes.
     """
 
     files_seen: int = 0
@@ -66,6 +66,39 @@ class PassStats:
     unreadable_files: int = 0
     failed: int = 0
     errors: dict[str, int] = field(default_factory=dict[str, int])
+
+    def accumulate(self, other: PassStats) -> None:
+        """Add committed work and visits; the outer caller owns wall time."""
+        self.files_seen += other.files_seen
+        self.files_changed += other.files_changed
+        self.events_added += other.events_added
+        self.events_removed += other.events_removed
+        self.skipped_lines += other.skipped_lines
+        self.missing += other.missing
+        self.skipped_files += other.skipped_files
+        self.unreadable_files += other.unreadable_files
+        self.failed += other.failed
+        for kind, count in other.errors.items():
+            self.errors[kind] = self.errors.get(kind, 0) + count
+
+
+class IngestPreparationRequiredError(Exception):
+    """End an incomplete pass with committed work and one missing Git fact."""
+
+    def __init__(self, lookup: CommitLookup, stats: PassStats) -> None:
+        """Preserve exact work totals before discarding this pass's state."""
+        super().__init__("ingest_preparation_required")
+        self.lookup = lookup
+        self.stats = stats
+
+
+class Written(NamedTuple):
+    """The counts one source's transaction produced."""
+
+    source_id: int
+    added: int
+    removed: int
+    skipped: int
 
 
 @dataclass(frozen=True)

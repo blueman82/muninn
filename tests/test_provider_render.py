@@ -117,12 +117,22 @@ class ProviderRenderTest(unittest.TestCase):
                         b'[{"command":"other"}],"afterFileEdit":'
                         b'[{"command":"keep"}]}}'
                     )
-                    after = edit_cursor_settings(before, command, handler)
-                    restored = drop_cursor_settings(after, command)
+                    after = edit_cursor_settings(
+                        before,
+                        {"preCompact": command},
+                        {"preCompact": [handler]},
+                    )
+                    restored = drop_cursor_settings(
+                        after, {"preCompact": command}
+                    )
                     self.assertEqual(json.loads(restored), json.loads(before))
                     self.assertEqual(
                         json.loads(
-                            edit_cursor_settings(after, command, handler)
+                            edit_cursor_settings(
+                                after,
+                                {"preCompact": command},
+                                {"preCompact": [handler]},
+                            )
                         ),
                         json.loads(after),
                     )

@@ -7,6 +7,7 @@ import os
 import subprocess
 from typing import Any
 
+from muninn import ingest
 from tests.ingest_support import (
     FAILED,
     TID,
@@ -205,7 +206,7 @@ class AmendmentTests(IngestCase):
                 user_msg(3, "in gone"),
             ],
         )
-        self.run_ingest()
+        ingest.run_pass(self.home, self.roots, fullfsync=False)
         rows = self.conn.execute(
             "SELECT e.cwd, s.key FROM event e"
             " JOIN scope s ON s.id = e.scope_id ORDER BY e.line"
@@ -217,7 +218,7 @@ class AmendmentTests(IngestCase):
         )
         claude = [claude_rec("user", "hi", cwd=str(self.tmp / "plain"))]
         self.write("-p/sess-2.jsonl", claude, root="claude-projects")
-        self.run_ingest()
+        ingest.run_pass(self.home, self.roots, fullfsync=False)
         row = self.conn.execute(
             "SELECT e.cwd FROM event e JOIN source s ON s.id = e.source_id"
             " WHERE s.provider = 'claude'"

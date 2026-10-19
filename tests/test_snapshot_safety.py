@@ -13,7 +13,9 @@ from typing import BinaryIO
 from unittest import mock
 
 from install import snapshot
-from muninn import platform_io
+from muninn import cli_rebuild, platform_io, platform_rebuild, store
+from tests.cli_support import CliCase
+from tests.review_quiescence_support import initialize
 
 
 class SnapshotSafetyTests(unittest.TestCase):
@@ -41,44 +43,6 @@ class SnapshotSafetyTests(unittest.TestCase):
             connection.execute(f"PRAGMA user_version={version}")
             connection.commit()
 
-    def test_existing_backup_temporary_is_retained(self) -> None:
-        temporary = self.data / "copy.tmp"
-        temporary.write_bytes(b"unknown private copy")
-        with self.assertRaises(FileExistsError):
-            snapshot._copy(self.live, temporary, 2)
-        self.assertEqual(temporary.read_bytes(), b"unknown private copy")
-
-    def test_each_residual_sidecar_refuses_before_restore(self) -> None:
-        before = self.live.read_bytes(), self.saved.read_bytes()
-        for suffix in ("-journal", "-wal", "-shm"):
-            with self.subTest(suffix=suffix):
-                sidecar = self.data / f"muninn.sqlite{suffix}"
-                sidecar.write_bytes(b"unknown transaction")
-                with self.assertRaises(OSError):
-                    snapshot._swap(self.data, self.saved)
-                self.assertEqual(
-                    (self.live.read_bytes(), self.saved.read_bytes()), before
-                )
-                self.assertEqual(sidecar.read_bytes(), b"unknown transaction")
-                sidecar.unlink()
-
-    def test_uncertain_publication_retains_original_snapshot(self) -> None:
-        real = snapshot.publish
-        original = self.saved.read_bytes()
-
-        def uncertain(source: Path, target: Path, **kwargs: bool) -> None:
-            real(source, target, **kwargs)
-            raise OSError("synthetic durability uncertainty")
-
-        with (
-            mock.patch.object(snapshot, "publish", uncertain),
-            self.assertRaises(OSError),
-        ):
-            snapshot._swap(self.data, self.saved)
-        self.assertTrue(self.saved.exists())
-        self.assertEqual(self.saved.read_bytes(), original)
-        self.assertEqual(snapshot.store_version(self.live), 1)
-
     def test_validated_descriptor_remains_open_during_sqlite_access(
         self,
     ) -> None:
@@ -105,19 +69,6 @@ class SnapshotSafetyTests(unittest.TestCase):
             mock.patch.object(sqlite3, "connect", connect),
         ):
             self.assertEqual(snapshot.store_version(self.live), 2)
-
-    def test_unsafe_source_refuses_before_creating_a_copy(self) -> None:
-        temporary = self.data / "copy.tmp"
-        with (
-            mock.patch.object(
-                snapshot.snapshot_io,
-                "_private",
-                side_effect=PermissionError("unsafe"),
-            ),
-            self.assertRaises(PermissionError),
-        ):
-            snapshot._copy(self.live, temporary, 2)
-        self.assertFalse(temporary.exists())
 
     def test_source_identity_change_refuses_after_sqlite_read(self) -> None:
         real = snapshot.snapshot_io._unchanged
@@ -157,21 +108,114 @@ class SnapshotSafetyTests(unittest.TestCase):
             self.live.chmod(0o600)
         self.assertEqual(self.live.stat().st_ino, before.st_ino)
 
-    def test_restore_cleanup_uses_only_supported_directory_sync(self) -> None:
-        def move(source: Path, target: Path) -> None:
-            source.replace(target)
 
-        with (
-            mock.patch.object(snapshot, "publish", move),
-            mock.patch.object(snapshot.file_sync, "sync_path") as sync,
+class RebuildSnapshotSafetyTests(CliCase):
+    """Exercise snapshot safety through actual current replacement paths."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.conn.close()
+        initialize(self.home)
+        self.db = store.db_path(self.home)
+
+    def archives(self) -> list[Path]:
+        """List retained copies without selecting automatic restore state."""
+        return sorted(self.home.glob(store.RECOVERY_PREFIX + "*"))
+
+    def test_existing_candidate_is_retained_without_resume(self) -> None:
+        candidate = self.home / cli_rebuild.REBUILD
+        candidate.write_bytes(b"unknown private copy")
+        candidate.chmod(0o600)
+        before = self.db.read_bytes()
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(
+            (code, out["reason"]), (2, "rebuild_candidate_exists")
+        )
+        self.assertTrue(out["recovery_required"])
+        self.assertTrue(out["publication_possible"])
+        self.assertEqual(candidate.read_bytes(), b"unknown private copy")
+        self.assertEqual(self.db.read_bytes(), before)
+        self.assertEqual(self.archives(), [])
+
+    def test_each_residual_sidecar_refuses_before_material_access(
+        self,
+    ) -> None:
+        before = self.db.read_bytes()
+        for suffix in ("-journal", "-wal", "-shm"):
+            with self.subTest(suffix=suffix):
+                sidecar = self.home / f"muninn.sqlite{suffix}"
+                sidecar.write_bytes(b"unknown transaction")
+                code, out, _ = self.muninn("rebuild")
+                self.assertEqual((code, out["reason"]), (2, "source_changed"))
+                self.assertEqual(self.db.read_bytes(), before)
+                self.assertEqual(sidecar.read_bytes(), b"unknown transaction")
+                self.assertEqual(self.archives(), [])
+                sidecar.unlink()
+
+    def test_uncertain_publication_retains_original_archive(self) -> None:
+        publish = platform_rebuild.publish_replacement
+        archive_bytes: list[bytes] = []
+        original = self.db.stat().st_ino
+
+        def uncertain(home: Path, db: Path, new: Path) -> None:
+            archive_bytes.append(self.archives()[0].read_bytes())
+            publish(home, db, new)
+            raise OSError("synthetic durability uncertainty")
+
+        with mock.patch.object(
+            platform_rebuild, "publish_replacement", uncertain
         ):
-            snapshot._swap(self.data, self.saved)
-        if sys.platform == "win32":
-            sync.assert_not_called()
-        else:
-            sync.assert_called_once_with(self.data)
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["error"]), (4, "replace_failed"))
+        self.assertTrue(out["publication_possible"])
+        self.assertNotIn("old_restored", out)
+        self.assertEqual(self.archives()[0].read_bytes(), archive_bytes[0])
+        self.assertNotEqual(self.db.stat().st_ino, original)
+        with closing(store.connect_ro(self.db)) as conn:
+            store.assert_store_format(conn)
 
-    def test_healthy_restore_publishes_then_removes_original(self) -> None:
-        snapshot._swap(self.data, self.saved)
-        self.assertFalse(self.saved.exists())
-        self.assertEqual(snapshot.store_version(self.live), 1)
+    def test_unsafe_source_refuses_before_creating_a_copy(self) -> None:
+        with mock.patch.object(
+            cli_rebuild.fingerprint,
+            "capture",
+            side_effect=cli_rebuild.fingerprint.SourceChangedError,
+        ):
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["reason"]), (2, "source_changed"))
+        self.assertEqual(self.archives(), [])
+        self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
+
+    def test_actual_publication_uses_supported_directory_sync(self) -> None:
+        sync = platform_rebuild._sync_parent
+        with mock.patch.object(
+            platform_rebuild, "_sync_parent", wraps=sync
+        ) as observed:
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        if sys.platform == "win32":
+            observed.assert_not_called()
+        else:
+            self.assertEqual(
+                observed.call_args_list,
+                [mock.call(self.home), mock.call(self.home)],
+            )
+
+    def test_success_publishes_candidate_and_retains_fenced_original(
+        self,
+    ) -> None:
+        original = self.db.stat().st_ino
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        self.assertNotEqual(self.db.stat().st_ino, original)
+        self.assertEqual(len(self.archives()), 1)
+        self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
+        with closing(store.connect_ro(self.archives()[0])) as conn:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT admission FROM review_control"
+                ).fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute("PRAGMA quick_check").fetchone()[0], "ok"
+            )

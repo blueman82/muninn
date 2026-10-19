@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from muninn.tombstones import role_digest
+from muninn.tombstone_intent import event_tag, role_digest
 
-__all__ = ["copies_of"]
+__all__ = ["copies_of", "replayed_run"]
 
 
 def _fork_sources(
@@ -57,14 +57,22 @@ def _ancestors(
     return found
 
 
-def _replayed_run(
-    conn: sqlite3.Connection, member: sqlite3.Row
+def replayed_run(
+    conn: sqlite3.Connection,
+    member: sqlite3.Row,
+    *,
+    tags: frozenset[str] = frozenset(),
+    hashes: frozenset[str] = frozenset(),
+    key: bytes | None = None,
 ) -> list[tuple[int, str, str]]:
     """Return a fork's leading events that repeat its ancestors' history.
 
     Args:
         conn: Read connection.
         member: A source that may be a fork.
+        tags: Supplemental erased ancestor content identities.
+        hashes: Supplemental erased ancestor physical line hashes.
+        key: Existing content key, never created by this classifier.
 
     Returns:
         ``(line, role, text)`` of the events before the first one that no
@@ -80,12 +88,16 @@ def _replayed_run(
             )
         }
     run: list[tuple[int, str, str]] = []
-    for line, role, text in conn.execute(
-        "SELECT line, role, text FROM event WHERE source_id = ?"
+    for line, role, text, digest in conn.execute(
+        "SELECT line, role, text, line_sha256 FROM event WHERE source_id = ?"
         " ORDER BY line, part",
         (member["id"],),
     ):
-        if role_digest(role, text) not in known:
+        if not (
+            role_digest(role, text) in known
+            or digest in hashes
+            or (key is not None and event_tag(key, role, text) in tags)
+        ):
             break
         run.append((line, role, text))
     return run
@@ -133,7 +145,7 @@ def copies_of(
         else:
             lines = {
                 line
-                for line, role, text in _replayed_run(conn, member)
+                for line, role, text in replayed_run(conn, member)
                 if (role, text) in pairs
             }
         found += [(member, line) for line in sorted(lines)]

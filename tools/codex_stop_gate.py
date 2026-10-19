@@ -1,4 +1,4 @@
-"""Block Codex completion until this worktree passes the full gate."""
+"""Report the full gate result from the Codex Stop hook."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ GATE_TIMEOUT = 540
 
 
 def main() -> int:
-    """Run the gate on every Stop, including stops after a blocked turn.
+    """Run the gate on every Stop, including repeated turns.
 
     Returns:
-        Zero with compact JSON when the gate passes; 2 with a blocking reason
+        Zero with compact JSON when the gate passes; 2 with a failure reason
         on stderr when it fails or cannot complete.
     """
     # Hook input never selects a checkout or bypasses a previous failure.

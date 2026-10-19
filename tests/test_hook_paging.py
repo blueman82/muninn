@@ -6,11 +6,11 @@ root.
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import cast
 from unittest import mock
 
-from muninn import hook_frame, hook_recall, knowledge
-from tests import test_knowledge as tk
+from muninn import hook_frame, hook_recall, knowledge_read, store
 from tests.hook_support import CLOSE, RecallCase
 
 
@@ -27,7 +27,7 @@ class RecallStressTests(RecallCase):
             for i in range(20):
                 self.talk(f"{term}{i}", f"{term} filler")
         passing = self.talk("pass", "commonone commontwo commonthree both")
-        self.add(text="Notes on rareone raretwo")
+        self.add(content="Notes on rareone raretwo")
         out = self.ask(prompt)
         rows = self.lines(out)
         self.assertTrue(rows[0].startswith("- K"))  # knowledge survived
@@ -43,7 +43,7 @@ class RecallStressTests(RecallCase):
         payload = {"prompt": prompt, "session_id": "sess-now"}
         request = hook_recall.RecallRequest(
             terms=["rareone", "raretwo", "commonone"],
-            cwd="/repo",
+            cwd=str(self.scope.project_id),
             notes=lambda: (),
             limit=4000,
         )
@@ -51,9 +51,10 @@ class RecallStressTests(RecallCase):
         def kept(**kw: int) -> list[object]:
             """Return the event ids a recall with these knobs keeps."""
             trace: dict[str, object] = {}
-            hook_recall.recall_block(
-                self.ro(), payload, self.env, trace, request, **kw
-            )
+            with closing(store.connect_ro(store.db_path(self.home))) as conn:
+                hook_recall.recall_block(
+                    conn, payload, self.env, trace, request, **kw
+                )
             return cast("list[object]", trace["returned_ids"])
 
         self.assertEqual(kept(), [])
@@ -90,141 +91,134 @@ class RecallStressTests(RecallCase):
     def test_recall_text_drops_from_the_end_first(self) -> None:
         entries: list[hook_frame.RecallEntry] = [
             {
-                "id": f"K{n}", "kind": "fact", "date": "2026-09-30",
-                "actor": "user", "text": "e" * 300, "cites": ["codex:t:1.1"],
+                "id": self.add(content=f"note {n}"),
+                "revision": 1,
+                "state": "active",
+                "form": "note",
+                "kind": "fact",
+                "text": "e" * 200,
+                "scope": self.scope.model_dump(),
+                "evidence_refs": [self.evidence[0].id],
             }
             for n in (3, 2, 1)
-        ]  # fmt: skip
+        ]
         hits: list[hook_frame.RecallHit] = [
             {
-                "id": n, "provider": "codex", "role": "user",
-                "kind": "prompt", "session": "abcd1234",
-                "ts": "2026-01-01T00:00:00Z", "ref": f"codex:thr:{n}.1",
+                "id": n,
+                "provider": "codex",
+                "role": "user",
+                "kind": "prompt",
+                "session": "abcd1234",
+                "ts": "2026-01-01T00:00:00Z",
+                "ref": f"codex:thr:{n}.1",
                 "snippet": "«h»" + "s" * 400,
             }
             for n in (1, 2, 3)
-        ]  # fmt: skip
+        ]
 
         def rows(text: str) -> list[str]:
-            """Return the id column of every bullet line.
-
-            Args:
-                text: Rendered recall block.
-
-            Returns:
-                The second word of each line that starts with ``- ``.
-            """
             return [
                 x.split(" ")[1] for x in text.split("\n") if x.startswith("- ")
             ]
 
         full = hook_frame.recall_text(entries, hits, ())
-        self.assertLessEqual(len(full), 1500)
-        self.assertEqual(rows(full), ["K3", "K2", "K1"])  # hits went first
+        self.assertLessEqual(len(full.encode()), 1500)
+        self.assertEqual(rows(full), [item["id"] for item in entries])
         text = hook_frame.recall_text(entries[:1], hits, ())
-        self.assertLessEqual(len(text), 1500)
-        self.assertEqual(len(rows(text)), 3)  # K3 and the two best hits
+        self.assertLessEqual(len(text.encode()), 1500)
+        self.assertEqual(len(rows(text)), 3)
+        self.assertEqual(rows(text)[0], entries[0]["id"])
         self.assertNotIn("codex:thr:3.1", text)
         self.assertNotIn("«", text)
         self.assertTrue(
             text.endswith("`muninn open <ref> --context 3`.\n" + CLOSE)
         )
-        shrunk = hook_frame.recall_text(entries[:1], hits[:3], ("x" * 180,))
-        self.assertLessEqual(len(shrunk), 1500)
+        shrunk = hook_frame.recall_text(entries[:1], hits, ("x" * 180,))
+        self.assertLessEqual(len(shrunk.encode()), 1500)
         self.assertIn("x" * 180, shrunk)
 
-    def test_prompt_hook_lines_carry_actor_and_cites(self) -> None:
-        self.add(text="Decision on alphaterm betaterm gammaterm")
+    def test_prompt_hook_lines_carry_current_revision_scope_and_support(
+        self,
+    ) -> None:
+        ident = self.add(content="Decision on alphaterm betaterm gammaterm")
         self.talk("a", "alphaterm betaterm gammaterm deltaterm")
         self.noise(self.repo)
         text = self.body(self.ask())
-        self.assertIn("by:claude:abc123]", text)
-        self.assertIn("(cites: codex:thr-main:1.1)", text)
+        self.assertIn(f"{ident} revision 1", text)
+        self.assertIn(str(self.scope.project_id), text)
+        self.assertIn(f"(evidence: {self.evidence[0].id})", text)
         self.assertNotIn("«", text)
         self.assertNotIn("»", text)
 
 
 class UserCitedKnowledgeTests(RecallCase):
-    """Only entries with a live user-prompt citation are pushed.
+    """Only current applicable guidance with live support is pushed."""
 
-    The others stay pull-only (``muninn search``, ``muninn know``).
-    """
+    def via(self, evidence: int, *, content: str) -> str:
+        """Create a note using selected prompt or reply support."""
+        return self.add(
+            evidence_refs=[self.evidence[evidence].id], content=content
+        )
 
-    def via(self, event_id: int | None, quote: str, **kw: object) -> int:
-        """Add an entry cited to one event.
-
-        Args:
-            event_id: Event the entry cites.
-            quote: Verbatim words quoted from that event.
-            **kw: Extra fields for the new entry.
-
-        Returns:
-            The new knowledge id.
-        """
-        assert event_id is not None
-        return tk.kid(self.add(cites=[(self.ref(event_id), quote)], **kw))
-
-    def test_user_cited_names_entries_with_a_live_user_prompt_cite(
+    def test_current_eligibility_uses_live_support_not_actor_or_role_aliases(
         self,
     ) -> None:
-        reply = self.via(self.reply, "wire the zebra cache", text="a reply")
-        call = self.via(self.call, "pytest -q tests/test_lookup.py", text="c")
-        user = self.via(self.prompt, "use the zebra cache", text="a prompt")
-        both = tk.kid(
-            self.add(
-                cites=[
-                    (self.ref(self.reply), "wire the zebra cache"),
-                    (self.ref(self.prompt), "use the zebra cache"),
-                ],
-                text="both",
-            )
+        reply = self.via(1, content="reply supported")
+        user = self.via(0, content="prompt supported")
+        both = self.add(
+            content="both supported",
+            evidence_refs=[e.id for e in self.evidence],
         )
-        # both halves of "role user, kind prompt" count, not either alone
-        odd_a = self.talk(
-            "oa", "an assistant wrote this prompt", role="assistant"
+        unsupported = self.add(content="unsupported")
+        self.conn.execute(
+            "DELETE FROM knowledge_support WHERE knowledge_id=?",
+            (unsupported,),
         )
-        odd_b = self.talk("ob", "a user wrote this reply", kind="reply")
-        a = self.via(odd_a, "an assistant wrote this", text="odd a")
-        b = self.via(odd_b, "a user wrote this", text="odd b")
-        ids = [reply, call, user, both, a, b]
-        self.assertEqual(knowledge.user_cited(self.ro(), ids), {user, both})
-        self.assertEqual(knowledge.user_cited(self.ro(), []), set())
-        self.assertEqual(knowledge.user_cited(self.ro(), [999]), set())
-        self.rw.execute(
-            "UPDATE citation SET state = 'erased', quote = NULL"
-            " WHERE knowledge_id = ?",
-            (user,),
-        )
-        self.assertEqual(knowledge.user_cited(self.ro(), ids), {both})
 
-    def test_prompt_hook_pushes_only_user_cited_knowledge(self) -> None:
-        said = self.talk(
-            "r",
-            "alphaterm betaterm gammaterm deltaterm noted",
-            kind="reply",
-            role="assistant",
+        def ids() -> set[str]:
+            return {
+                view.id
+                for view in knowledge_read.current_knowledge(
+                    self.conn, self.scope, 20.0
+                )
+            }
+
+        self.assertEqual(ids(), {reply, user, both})
+        self.conn.execute(
+            "UPDATE review_evidence SET state='erased' WHERE id=?",
+            (self.evidence[0].id,),
         )
-        hidden = self.via(
-            said,
-            "alphaterm betaterm gammaterm",
-            text="Reply note on alphaterm",
+        self.assertEqual(ids(), {reply})
+        self.assertNotIn(unsupported, ids())
+
+    def test_prompt_hook_pushes_supported_and_withholds_unresolved(
+        self,
+    ) -> None:
+        reply = self.via(1, content="Reply note on alphaterm")
+        shown = self.via(0, content="User decision on alphaterm")
+        hidden = self.add(content="Withheld note on alphaterm")
+        self.conn.execute(
+            "UPDATE knowledge SET state='withheld' WHERE id=?", (hidden,)
         )
-        shown = tk.kid(self.add(text="User decision on alphaterm"))
         self.noise(self.repo)
         text = self.body(self.ask())
-        self.assertIn(f"- K{shown} ", text)
-        self.assertNotIn(f"K{hidden} ", text)
-        self.assertNotIn("Reply note", text)
-        listed = knowledge.list_entries(self.ro(), cwd="/repo")["entries"]
-        self.assertIn(f"K{hidden}", [e["id"] for e in listed])  # pull-only
+        self.assertIn(f"- {shown} ", text)
+        self.assertIn(f"- {reply} ", text)
+        self.assertNotIn(hidden, text)
+        listed = knowledge_read.show_knowledge(self.conn, hidden, None)
+        self.assertEqual(listed.state, "withheld")
+        self.assertIsNotNone(listed.body)
 
-    def test_only_reply_cited_matches_push_nothing_at_prompt_time(
+    def test_only_erased_support_matches_push_nothing_at_prompt_time(
         self,
     ) -> None:
-        self.via(
-            self.reply,
-            "wire the zebra cache",
-            text="Note on alphaterm betaterm gammaterm",
+        ident = self.via(1, content="Note on alphaterm betaterm gammaterm")
+        self.conn.execute(
+            "UPDATE review_evidence SET state='erased' WHERE id=?",
+            (self.evidence[1].id,),
         )
         self.noise(self.repo)
         self.assertEqual(self.ask("alphaterm betaterm gammaterm"), {})
+        self.assertEqual(
+            knowledge_read.show_knowledge(self.conn, ident, None).id, ident
+        )

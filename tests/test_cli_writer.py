@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from collections.abc import Callable
+from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -20,6 +21,7 @@ from muninn import cli_core, obs, platform_io, poller_stop, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CANARY, CliCase
 from tests.hook_support import launcher_args
+from tests.review_quiescence_support import initialize
 from tests.test_ingest import TID
 
 
@@ -48,15 +50,23 @@ class WriterTests(CliCase):
         self.assertEqual(out["ingest"]["events_removed"], 2)
 
     def test_erase_command_needs_yes(self) -> None:
+        initialize(self.home)
         self.session(TID, "hello there", "hi")
         self.run_ingest()
+        self.conn.close()
         code, out, _ = self.muninn("erase", "--session", TID)
         self.assertEqual((code, out["dry_run"], out["events"]), (0, True, 2))
         self.assertIn("--yes", out["note"])
-        self.assertEqual(len(self.events()), 2)
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
+            self.assertEqual(
+                conn.execute("SELECT count(*) FROM event").fetchone()[0], 2
+            )
         code, out, _ = self.muninn("erase", "--session", TID, "--yes")
         self.assertEqual((code, out["dry_run"], out["residue"]), (0, False, 0))
-        self.assertEqual(self.events(), [])
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
+            self.assertEqual(
+                conn.execute("SELECT * FROM event").fetchall(), []
+            )
         self.assertEqual(
             self.muninn("erase", "--session", "a", "--match", "bcdef")[0], 2
         )
@@ -94,7 +104,7 @@ if sys.platform != "win32":
             """
             base = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
             return subprocess.run(
-                [str(LAUNCHER), "--version"],
+                [str(home / "release/bin/muninn"), "--version"],
                 env=base | env,
                 capture_output=True,
                 text=True,
@@ -116,6 +126,10 @@ if sys.platform != "win32":
         def test_resolution_order_and_missing(self) -> None:
             with tempfile.TemporaryDirectory() as tmp:
                 home = Path(tmp)
+                launcher = home / "release/bin/muninn"
+                launcher.parent.mkdir(parents=True)
+                launcher.write_bytes(LAUNCHER.read_bytes())
+                launcher.chmod(0o755)
                 lib = home / ".local/lib/muninn"
                 lib.mkdir(parents=True)
                 linked = self.fake_python(home / "linked-python")
@@ -124,6 +138,15 @@ if sys.platform != "win32":
                 env_py = self.fake_python(home / "env-python")
                 r = self.launch(home, MUNINN_PYTHON=str(env_py))
                 self.assertIn("env-python", r.stdout)
+                venv = home / "release/.venv/bin/python3"
+                venv.parent.mkdir(parents=True)
+                self.fake_python(venv)
+                self.assertIn(str(venv), self.launch(home).stdout)
+                self.assertIn(
+                    "env-python",
+                    self.launch(home, MUNINN_PYTHON=str(env_py)).stdout,
+                )
+                venv.unlink()
                 (lib / "python").unlink()
                 stubs = home / "stubs"  # pythons older than 3.13
                 stubs.mkdir()
@@ -289,6 +312,8 @@ class ServeTests(CliCase):
         )
 
     def test_serve_sigterm_during_idle_sleep(self) -> None:
+        self.conn.close()
+        initialize(self.home)
         self.session(TID, f"{CANARY} in a prompt", "a reply")
         # A long interval: after the pass line the poller can only be in
         # its idle sleep, so the signal lands there and not in a second pass.
@@ -355,6 +380,8 @@ class ServeTests(CliCase):
             conn.close()
 
     def test_serve_sigterm_mid_pass_leaves_no_journal(self) -> None:
+        self.conn.close()
+        initialize(self.home)
         total = 5000  # ~1 ms each to ingest: seconds of window to land in
         for n in range(total):
             self.session(f"thr-{n:04d}", f"prompt {n}", f"reply {n}")

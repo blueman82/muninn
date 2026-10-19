@@ -11,6 +11,7 @@ from typing import Any
 
 from muninn import classify, cli_core, cursor_import, erase, ingest, obs, store
 from muninn.cli_core import Env, Out, Record, Result, counts
+from muninn.review_quiescence import EraseStatus
 
 __all__ = ["compact", "erase_command", "heartbeat", "ingest_command"]
 
@@ -23,14 +24,14 @@ def heartbeat(
     clears_error: bool = False,
     **extra: Any,
 ) -> None:
-    """Write ``status.json`` after an ingest pass.
+    """Publish invocation work totals once a terminal ingest pass finishes.
 
     Only counts and versions go in: the file is read by ``doctor`` and by
     every answer's freshness fields, so it must never hold transcript text.
 
     Args:
         home: Data directory.
-        stats: The finished pass.
+        stats: Committed work and attempt totals, including recovered sources.
         env: Process environment, for the install revision.
         clears_error: Forget ``last_error``; only the poller's own good
             pass says its failure is over.
@@ -85,18 +86,21 @@ def ingest_command(
 
 
 def erase_command(
-    a: Namespace, env: Env, home: Path, record: Record
+    a: Namespace,
+    env: Env,
+    home: Path,
+    record: Record,
+    *,
+    status: EraseStatus | None = None,
 ) -> Result:
     """Run ``muninn erase``; without ``--yes`` it is always a dry run."""
     dry = a.dry_run or not a.yes
-    out: Out = erase.run_erase(
+    out: Out = erase.run_erase_request(
         home,
-        session=a.session,
-        event_ref=a.event,
-        match=a.match,
-        dry_run=dry,
+        erase.EraseRequest(a.session, a.event, a.match, dry),
         env=env,
         wait_s=cli_core.WRITER_WAIT_S,
+        status=status,
     )
     if dry and not a.dry_run:
         out["note"] = "dry run: add --yes to erase"

@@ -1,153 +1,247 @@
-"""The pre-upgrade store copy: taken, restored on rollback, then deleted."""
+"""Preserve marked stores and archives across isolated installer failures."""
 
 from __future__ import annotations
 
 import dataclasses
 import json
 import os
-import sqlite3
 import unittest
 from contextlib import closing
 from pathlib import Path
-from typing import Any
 from unittest import mock
 
+from install import cutover
 from install import installer as co
 from install import snapshot as sn
 from install.constants import PRE_UPGRADE_PREFIX
-from muninn import erase_residue, obs, platform_io, store
+from muninn import erase_residue, obs, platform_io, platform_rebuild, store
+from muninn import review_quiescence as q
+from muninn import review_quiescence_state as state
 from tests.cli_support import fake_run
 from tests.installer_support import ROOT, World, git, make_store
 from tests.store_support import assert_private
 
 TS = "20261002T000000Z"
-SNAP = PRE_UPGRADE_PREFIX
 
 
-def rows(path: Path) -> tuple[int, list[str]]:
-    """Return a store's ``user_version`` and its markers and tables."""
-    with closing(sqlite3.connect(path)) as conn:
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
-        names = [
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master ORDER BY name"
-            )
-        ]
-        names += [r[0] for r in conn.execute("SELECT x FROM t")]
-    return version, names
+def marked_store(data: Path, version: int, marker: str = "row") -> Path:
+    """Model ingest with a real marked store and a durable scope row."""
+    assert version == store.SCHEMA_VERSION
+    path = store.db_path(data)
+    with closing(store.connect_rw(path)) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO scope(key,label,kind) VALUES(?,?,'dir')",
+            (marker, marker),
+        )
+    return path
+
+
+def rows(path: Path) -> tuple[tuple[object, ...], ...]:
+    """Read every durable scope marker independently of installer records."""
+    with closing(store.connect_ro(path)) as conn:
+        return tuple(tuple(row) for row in conn.execute("SELECT * FROM scope"))
 
 
 class SnapshotCase(unittest.TestCase):
-    """A machine on schema v1 about to upgrade to a v2 release."""
+    """Own a never-exposed temp home with only fake service consumers."""
 
     def setUp(self) -> None:
         self.w = w = World(self)
-        w.fake.store_version = 1
+        patch = mock.patch("tests.installer_support.make_store", marked_store)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.first = co.install(w.ctx(fresh=True), w.repo, w.sha)["sha"]
-        (w.repo / "bin/note").write_text("v2\n")
+        (w.repo / "bin/note").write_text("next\n")
         git(w.repo, "add", "-A")
-        git(w.repo, "commit", "-qm", "v2")
+        git(w.repo, "commit", "-qm", "next")
         self.sha2 = git(w.repo, "rev-parse", "HEAD").decode().strip()
-        self.lib = w.home / ".local/lib/muninn"
-        self.data = w.home / ".local/share/muninn"
-        self.store = self.data / "muninn.sqlite"
         self.ctx = dataclasses.replace(w.ctx(upgrade=True), ts=TS)
-        w.fake.migrates = self.sha2
-        self.snap = self.data / f"{SNAP}{self.sha2[:12]}"
+        self.lib, self.data = self.ctx.lib, self.ctx.data
+        self.store = store.db_path(self.data)
+        self.snap = self.data / f"{PRE_UPGRADE_PREFIX}{self.sha2[:12]}"
 
-    def record(self) -> dict[str, Any]:
-        """Read the install record."""
+    def retained_copy(self) -> Path:
+        """Create actual private recovery evidence beneath fixture barriers."""
+        with (
+            q.maintenance_owner(
+                self.data, wait_s=0, status=q.EraseStatus()
+            ) as owner,
+            q.maintenance_writer(owner),
+        ):
+            with closing(store.connect_rw(self.store)) as conn:
+                q.verify_current(owner, conn)
+            return platform_rebuild.retain_store(self.data, self.store)
+
+    def record(self) -> co.Record:
+        """Read the durable public installer summary."""
         return json.loads((self.lib / co.INSTALL_RECORD).read_text())
 
-    def leftovers(self) -> list[str]:
-        """Return pre-upgrade files and journals in the data dir."""
-        return sorted(
-            p.name for p in self.data.iterdir() if p.name.startswith("muninn.")
-        )
+    def selection(self) -> Path:
+        """Read the release actually selected by the fixture launcher."""
+        return (self.lib / "current").readlink()
 
 
 class UpgradeFlowTests(SnapshotCase):
-    """The copy exists while the new poller runs, and is gone after."""
+    """Current maintenance has no format-copy or archive-deletion step."""
 
-    def test_good_upgrade_migrates_and_deletes_the_copy(self) -> None:
-        seen: list[tuple[bool, int]] = []
-        real = self.w.fake._migrate
-
-        def spy() -> None:
-            seen.append((self.snap.exists(), rows(self.snap)[0]))
-            real()
-
-        with mock.patch.object(self.w.fake, "_migrate", spy):
-            co.install(self.ctx, self.w.repo, self.sha2)
-        self.assertEqual(seen, [(True, 1)])  # copied before the poller ran
-        self.assertEqual(rows(self.store)[0], store.SCHEMA_VERSION)
-        self.assertEqual(self.leftovers(), ["muninn.sqlite"])
-        out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
-        self.assertEqual(out["snapshot"]["state"], "deleted")
-        self.assertEqual(
-            sorted(out["snapshot"]),
-            ["bytes", "from", "name", "state", "to"],
-        )
-
-    def test_copy_is_private_and_consistent(self) -> None:
-        sn.snapshot_store(
-            self.ctx, {"sha": self.sha2, "schema_to": 2, "steps": []}
-        )
-        assert_private(self, self.snap)
-        self.assertEqual(rows(self.snap), rows(self.store))
-
-    def test_existing_private_snapshot_is_never_overwritten(self) -> None:
-        self.snap.write_bytes(b"unknown prior snapshot")
-        before = self.store.read_bytes()
-        with self.assertRaises(co.StepFailedError):
-            sn.snapshot_store(
-                self.ctx, {"sha": self.sha2, "schema_to": 2, "steps": []}
+    def test_fresh_initializes_no_policy_before_consumers(self) -> None:
+        with closing(store.connect_ro(self.store)) as conn:
+            self.assertEqual(
+                tuple(conn.execute("SELECT * FROM review_control").fetchone()),
+                (1, 0, 0, None, None, None),
             )
-        self.assertEqual(self.snap.read_bytes(), b"unknown prior snapshot")
-        self.assertEqual(self.store.read_bytes(), before)
-        self.assertFalse(self.snap.with_suffix(".tmp").exists())
+        with (
+            q.maintenance_owner(
+                self.data, wait_s=0, status=q.EraseStatus()
+            ) as owner,
+            q.maintenance_writer(owner),
+            closing(store.connect_rw(self.store)) as conn,
+        ):
+            q.verify_current(owner, conn)
+        self.assertTrue((self.data / state.WITNESS).is_file())
+        self.assertLess(
+            co.FRESH_STEPS.index(co.prepare_store),
+            co.FRESH_STEPS.index(co.pin),
+        )
 
-    def test_no_copy_when_the_versions_match(self) -> None:
-        make_store(self.data, store.SCHEMA_VERSION)
-        with mock.patch.object(sn, "_copy") as copy:
+    def test_current_upgrade_keeps_file_key_and_existing_archive(self) -> None:
+        self.snap.write_bytes(b"existing recoverable archive")
+        self.snap.chmod(0o600)
+        key = self.data / "tombstone.key"
+        key.write_bytes(b"unchanged synthetic durable key")
+        key.chmod(0o600)
+        before = self.store.stat().st_ino, rows(self.store)
+        with mock.patch.object(platform_rebuild, "retain_store") as copy:
             co.install(self.ctx, self.w.repo, self.sha2)
         copy.assert_not_called()
-        self.assertIsNone(self.record()["snapshot"])
+        self.assertEqual((self.store.stat().st_ino, rows(self.store)), before)
+        self.assertEqual(key.read_bytes(), b"unchanged synthetic durable key")
+        self.assertEqual(
+            self.snap.read_bytes(), b"existing recoverable archive"
+        )
+        self.assertEqual(self.selection(), Path(self.sha2))
+        self.assertEqual(self.record()["store"]["phase"], "current_prepared")
+        self.assertEqual(self.record()["outcome"], "ok")
 
-    def test_failed_copy_aborts_before_anything_changes(self) -> None:
-        w = self.w
+    def test_native_stop_precedes_owner_and_restart_follows_release(
+        self,
+    ) -> None:
+        acquire = q.maintenance_owner
+
+        def stopped(home: Path, **kwargs: object) -> object:
+            self.assertIsNone(self.w.fake.loaded)
+            return acquire(home, wait_s=0, status=q.EraseStatus())
+
+        with mock.patch.object(q, "maintenance_owner", side_effect=stopped):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        os.close(state.acquire(self.data))
+        with store.writer_lock(self.data, wait_s=0):
+            pass
+        self.assertEqual(self.w.fake.loaded, "new")
+        calls = self.w.fake.calls
+        stop = ["launchctl", "bootout", self.ctx.target]
+        start = [
+            "launchctl",
+            "bootstrap",
+            f"gui/{self.ctx.uid}",
+            str(self.ctx.plist),
+        ]
+        self.assertLess(
+            calls.index(stop), len(calls) - 1 - calls[::-1].index(start)
+        )
+
+    def test_owner_spans_pin_and_config_without_holding_writer(self) -> None:
+        observed: list[str] = []
+
+        def checked(ctx: co.Ctx, rec: co.Record) -> None:
+            try:
+                fd = state.acquire(ctx.data)
+            except BlockingIOError:
+                pass
+            else:
+                os.close(fd)
+                self.fail("maintenance owner released before pin/config")
+            with store.writer_lock(ctx.data, wait_s=0):
+                observed.append("pin/config")
+
+        steps = list(co.UPGRADE_STEPS)
+        steps.insert(steps.index(co.pin), checked)
+        steps.insert(steps.index(co.restart), checked)
+        with mock.patch.object(co, "UPGRADE_STEPS", tuple(steps)):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertEqual(observed, ["pin/config", "pin/config"])
+        os.close(state.acquire(self.data))
+
+    def test_copy_is_private_consistent_and_does_not_consume_source(
+        self,
+    ) -> None:
+        before = self.store.read_bytes()
+        self.snap = self.retained_copy()
+        assert_private(self, self.snap)
+        self.assertEqual(rows(self.snap), rows(self.store))
+        self.assertEqual(self.store.read_bytes(), before)
+
+    def test_existing_private_copy_is_never_overwritten(self) -> None:
+        self.snap = self.data / (store.RECOVERY_PREFIX + "collision")
+        self.snap.write_bytes(b"unknown prior snapshot")
+        before = self.store.read_bytes()
+        with mock.patch.object(platform_rebuild.uuid, "uuid4") as ident:
+            ident.return_value.hex = "collision"
+            with self.assertRaises(FileExistsError):
+                self.retained_copy()
+        self.assertEqual(self.snap.read_bytes(), b"unknown prior snapshot")
+        self.assertEqual(self.store.read_bytes(), before)
+
+    def test_record_failure_aborts_before_material_mutation(self) -> None:
+        before = self.store.read_bytes(), self.ctx.config.read_bytes()
+        failure = OSError("record is not durable")
         with (
-            mock.patch.object(sn, "_copy", side_effect=OSError("disk full")),
-            self.assertRaises(co.StepFailedError) as caught,
+            mock.patch.object(cutover.record, "save", side_effect=failure),
+            self.assertRaises(OSError) as caught,
         ):
-            co.install(self.ctx, w.repo, self.sha2)
-        self.assertIn("nothing was changed", str(caught.exception))
-        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
-        self.assertEqual(rows(self.store)[0], 1)
-        self.assertEqual(self.leftovers(), ["muninn.sqlite"])
-        kick = ["launchctl", "kickstart", "-k", self.ctx.target]
-        self.assertNotIn(kick, w.fake.calls)
-        self.assertFalse((self.lib / self.sha2).exists())
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(
+            (self.store.read_bytes(), self.ctx.config.read_bytes()), before
+        )
+        self.assertEqual(self.selection(), Path(self.first))
+        self.assertIsNone(self.w.fake.loaded)
+        self.assertTrue((self.lib / self.sha2 / ".venv").is_dir())
 
-    def test_unreadable_store_aborts_too(self) -> None:
+    def test_unreadable_store_refuses_without_changing_content_or_selection(
+        self,
+    ) -> None:
         self.store.write_bytes(b"not a database" * 100)
+        before = self.store.read_bytes(), self.ctx.config.read_bytes()
         with self.assertRaises(co.StepFailedError):
             co.install(self.ctx, self.w.repo, self.sha2)
-        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
+        self.assertEqual(
+            (self.store.read_bytes(), self.ctx.config.read_bytes()), before
+        )
+        self.assertEqual(self.selection(), Path(self.first))
+        self.assertIsNone(self.w.fake.loaded)
 
-    def test_delete_failure_warns_and_doctor_flags_the_copy(self) -> None:
-        real = Path.unlink
-
-        def stuck(path: Path, missing_ok: bool = False) -> None:
-            if path.name.startswith(SNAP) and not path.name.endswith(".tmp"):
-                raise PermissionError("busy")
-            real(path, missing_ok=missing_ok)
-
-        with mock.patch.object(Path, "unlink", stuck):
+    def test_historical_numeric_one_is_refused_without_migration(self) -> None:
+        self.store.unlink()
+        make_store(self.data, 1)
+        before = self.store.read_bytes()
+        with self.assertRaisesRegex(
+            co.StepFailedError, "cutover_source_mismatch"
+        ):
             co.install(self.ctx, self.w.repo, self.sha2)
-        self.assertIn("remove it by hand", "\n".join(self.w.out))
-        self.assertEqual(self.record()["snapshot"]["state"], "kept")
+        self.assertEqual(self.store.read_bytes(), before)
+        self.assertEqual(self.selection(), Path(self.first))
+        self.assertIsNone(self.w.fake.loaded)
+
+    def test_retained_archive_is_reported_and_never_discarded(self) -> None:
+        self.snap.write_bytes(b"recoverable private data")
+        rec: co.Record = {"snapshot": {"name": self.snap.name}}
+        self.assertTrue(sn.discard(self.ctx, rec))
+        self.assertEqual(self.snap.read_bytes(), b"recoverable private data")
+        self.assertEqual(rec["snapshot"]["state"], "retained")
+        self.assertEqual(
+            erase_residue.aside_files(self.data), [str(self.snap)]
+        )
         with mock.patch.object(obs, "run", fake_run()):
             checks = {
                 c["check"]: c
@@ -159,120 +253,120 @@ class UpgradeFlowTests(SnapshotCase):
 
 
 class RollbackTests(SnapshotCase):
-    """A failed upgrade after the migration restores the old store."""
+    """Once current data may change, retain it and keep the service stopped."""
 
-    def check_back_on_v1(self) -> None:
-        """Assert the v1 store and the first release are live again."""
-        w = self.w
-        self.assertEqual(rows(self.store), (1, ["t", "row"]))
+    def assert_retained(self) -> None:
+        """Check recovery never points an old runtime at current state."""
+        self.assertEqual(self.selection(), Path(self.sha2))
+        self.assertTrue((self.lib / self.first).is_dir())
+        self.assertTrue((self.lib / self.sha2).is_dir())
+        self.assertIsNone(self.w.fake.loaded)
+        self.assertEqual(self.record()["outcome"], "recovery_required")
         assert_private(self, self.store)
-        self.assertEqual(self.leftovers(), ["muninn.sqlite"])
-        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
-        self.assertEqual(w.fake.loaded, "new")
-        self.assertTrue(
-            any(c[:2] == ["launchctl", "bootstrap"] for c in w.fake.calls)
-        )
 
-    def test_failed_verify_restores_the_v1_store(self) -> None:
-        self.w.fake.doctor = 1
-        with self.assertRaises(co.StepFailedError):
-            co.install(self.ctx, self.w.repo, self.sha2)
-        self.check_back_on_v1()
-        self.assertEqual(self.record()["snapshot"]["state"], "restored")
-        self.assertEqual(self.record()["outcome"], "rolled_back")
-
-    def test_residual_journal_retains_both_stores_and_release_selection(
+    def test_failed_verify_retains_current_store_and_runtime_selection(
         self,
     ) -> None:
-        fake = self.w.fake
-        fake.doctor = 1
-        real = fake._migrate
-        migrated: list[bytes] = []
-        prior_calls = len(fake.calls)
+        self.w.fake.doctor = 1
+        before = rows(self.store)
+        with self.assertRaises(co.StepFailedError):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertEqual(rows(self.store), before)
+        self.assert_retained()
 
-        def crash_mid_write() -> None:
-            real()
-            migrated.append(self.store.read_bytes())
-            journal = self.data / "muninn.sqlite-journal"
+    def test_failed_restart_retains_current_store_and_runtime_selection(
+        self,
+    ) -> None:
+        self.w.fake.heartbeat = False
+        self.w.fake.clock[0] += 1000
+        with self.assertRaises(co.StepFailedError):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assert_retained()
+
+    def test_after_new_writes_blind_restore_refused(self) -> None:
+        self.snap = self.retained_copy()
+        before = self.snap.read_bytes()
+        configs: list[bytes] = []
+
+        def new_write(ctx: co.Ctx, rec: co.Record) -> None:
+            marked_store(ctx.data, 1, "newer")
+            configs.append(ctx.config.read_bytes())
+            raise co.StepFailedError("verification failed after exposure")
+
+        steps = tuple(
+            new_write if step is co.verify else step
+            for step in co.UPGRADE_STEPS
+        )
+        with (
+            mock.patch.object(co, "UPGRADE_STEPS", steps),
+            self.assertRaises(co.StepFailedError),
+        ):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertIn("newer", [row[1] for row in rows(self.store)])
+        self.assertEqual(self.snap.read_bytes(), before)
+        self.assertEqual(self.ctx.config.read_bytes(), configs[0])
+        self.assert_retained()
+
+    def test_residual_journal_retains_both_stores_and_selection(self) -> None:
+        self.snap = self.retained_copy()
+        saved = self.snap.read_bytes()
+        written: list[bytes] = []
+        journal = self.data / "muninn.sqlite-journal"
+
+        def interrupted(ctx: co.Ctx, rec: co.Record) -> None:
+            marked_store(ctx.data, 1, "newer")
+            written.append(self.store.read_bytes())
             fd = platform_io.open_private(
                 journal, os.O_CREAT | os.O_EXCL | os.O_WRONLY
             )
             with os.fdopen(fd, "wb") as handle:
                 handle.write(b"stale")
+            raise co.StepFailedError("verification interrupted")
 
+        steps = tuple(
+            interrupted if step is co.verify else step
+            for step in co.UPGRADE_STEPS
+        )
         with (
-            mock.patch.object(fake, "_migrate", crash_mid_write),
-            self.assertRaisesRegex(OSError, "residual SQLite"),
+            mock.patch.object(co, "UPGRADE_STEPS", steps),
+            self.assertRaises(co.StepFailedError),
         ):
             co.install(self.ctx, self.w.repo, self.sha2)
-        self.assertEqual(self.store.read_bytes(), migrated[0])
-        self.assertEqual(rows(self.snap), (1, ["t", "row"]))
-        self.assertEqual(
-            (self.data / "muninn.sqlite-journal").read_bytes(), b"stale"
-        )
-        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
-        self.assertTrue((self.lib / self.first).is_dir())
-        self.assertTrue((self.lib / self.sha2).is_dir())
-        self.assertFalse(
-            any(
-                call[:2] == ["launchctl", "bootstrap"]
-                for call in fake.calls[prior_calls:]
-            )
-        )
-
-    def test_failed_restart_restores_the_v1_store(self) -> None:
-        self.w.fake.heartbeat = False
-        self.w.fake.clock[0] += 1000
-        with self.assertRaises(co.StepFailedError):
-            co.install(self.ctx, self.w.repo, self.sha2)
-        self.check_back_on_v1()
-
-    def test_unmigrated_store_is_kept_and_the_copy_deleted(self) -> None:
-        self.w.fake.migrates = None
-        self.w.fake.doctor = 1
-        make_store(self.data, 1, marker="newer")
-        with self.assertRaises(co.StepFailedError):
-            co.install(self.ctx, self.w.repo, self.sha2)
-        self.assertEqual(rows(self.store), (1, ["t", "newer"]))
-        self.assertEqual(self.leftovers(), ["muninn.sqlite"])
-        self.assertEqual(self.record()["snapshot"]["state"], "deleted")
+        self.assertEqual(self.store.read_bytes(), written[0])
+        self.assertEqual(self.snap.read_bytes(), saved)
+        self.assertEqual(journal.read_bytes(), b"stale")
+        self.assert_retained()
 
 
 class PlanAndNamesTests(SnapshotCase):
-    """Dry run, the schema constant, and the shared file name."""
+    """Dry run and archive naming stay consistent with runtime diagnostics."""
 
     def test_dry_run_says_so_and_writes_nothing(self) -> None:
-        before = sorted(p.name for p in self.data.iterdir())
+        before = {
+            p.name: p.read_bytes() for p in self.data.iterdir() if p.is_file()
+        }
         ctx = dataclasses.replace(self.ctx, dry_run=True)
         self.w.out.clear()
         co.install(ctx, self.w.repo, self.sha2)
-        said = "\n".join(self.w.out)
-        self.assertIn("would copy the store (schema v1", said)
-        self.assertIn(f"{SNAP}{self.sha2[:12]}", said)
-        self.assertEqual(sorted(p.name for p in self.data.iterdir()), before)
-        self.assertEqual(rows(self.store)[0], 1)
+        self.assertIn(
+            "would prepare the governed store", "\n".join(self.w.out)
+        )
+        self.assertEqual(
+            {
+                p.name: p.read_bytes()
+                for p in self.data.iterdir()
+                if p.is_file()
+            },
+            before,
+        )
 
     def test_release_schema_matches_the_runtime_constant(self) -> None:
-        w = self.w
         self.assertEqual(
-            sn.release_schema(self.ctx, w.repo, self.sha2),
+            sn.release_schema(self.ctx, self.w.repo, self.sha2),
             store.SCHEMA_VERSION,
         )
-        text = (ROOT / sn.SCHEMA_FILE).read_text()
-        found = sn._VERSION.findall(text.encode())
+        found = sn._VERSION.findall((ROOT / sn.SCHEMA_FILE).read_bytes())
         self.assertEqual([int(v) for v in found], [store.SCHEMA_VERSION])
 
-    def test_the_prefix_is_the_same_in_the_installer_and_the_runtime(
-        self,
-    ) -> None:
+    def test_the_prefix_is_the_same_in_installer_and_runtime(self) -> None:
         self.assertEqual(PRE_UPGRADE_PREFIX, store.PRE_UPGRADE_PREFIX)
-
-    def test_erase_reports_a_leftover_copy(self) -> None:
-        self.snap.write_bytes(b"x")
-        self.assertEqual(
-            erase_residue.aside_files(self.data), [str(self.snap)]
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()

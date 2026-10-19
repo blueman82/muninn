@@ -15,9 +15,12 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import obs, store
+from muninn import obs, obs_stats, review_evidence, review_requests, store
 from muninn.query.index_age import ALIVE_AT
+from tests.ingest_support import rollout
 from tests.store_support import assert_private, public_read
+from tests.test_classify import reply, user_msg
+from tests.test_review_requests import RequestCase
 
 CANARY = "CANARY-OBS-" + "z9" * 8
 
@@ -57,7 +60,7 @@ class CallLogTests(ObsCase):
                 "review_due_batch": 1,
                 "review_error": 1,
                 "delivered_ids": [2, CANARY],
-                "delivered_knowledge_ids": [3, CANARY],
+                "delivered_knowledge_ids": ["K_" + "a" * 32, 3, CANARY],
                 "delivered_sources": [{"text": CANARY}],
             },
         )
@@ -65,7 +68,7 @@ class CallLogTests(ObsCase):
         self.assertEqual(line["delivery_id"], 50)
         self.assertEqual(line["review_due_batch"], 1)
         self.assertEqual(line["delivered_ids"], [2])
-        self.assertEqual(line["delivered_knowledge_ids"], [3])
+        self.assertEqual(line["delivered_knowledge_ids"], ["K_" + "a" * 32])
         self.assertNotIn(CANARY, self.log.read_text())
         self.assertNotIn("delivered_sources", line)
 
@@ -277,3 +280,149 @@ class StatusTests(ObsCase):
         self.assertEqual(future["poller"], "stale")
         self.assertEqual(skewed["poller"], "ok")  # within the clock skew
         self.assertEqual(unseen, {"index_age_s": None, "poller": "stale"})
+
+
+class ReviewReceiptCase(RequestCase):
+    """Persist producer-selected input provenance before fixture completion."""
+
+    def receipt(self, request_id: str) -> None:
+        """Bind real selected records to this exact synthetic request."""
+        first, last = self.conn.execute(
+            "SELECT from_line,through_line FROM review_request WHERE id=?",
+            (request_id,),
+        ).fetchone()
+        records = review_evidence.initial_evidence(
+            self.home, self.window(first, last), 4096
+        ).excerpts
+        for record in records:
+            data = record.model_dump(mode="json")
+            for key in ("scope", "selector", "original_locator"):
+                data[f"{key}_json"] = json.dumps(data.pop(key))
+            self.conn.execute(
+                f"INSERT OR IGNORE INTO review_evidence({','.join(data)}) "
+                f"VALUES({','.join('?' for _ in data)})",
+                tuple(data.values()),
+            )
+            ident = self.conn.execute(
+                "SELECT id FROM review_evidence WHERE provider=? "
+                "AND thread_id=? "
+                "AND line=? AND part=? AND line_sha256=? "
+                "AND selector_digest=?",
+                (
+                    record.provider,
+                    record.thread_id,
+                    record.line,
+                    record.part,
+                    record.line_sha256,
+                    record.selector_digest,
+                ),
+            ).fetchone()[0]
+            self.conn.execute(
+                "INSERT OR IGNORE INTO review_input VALUES(?,?)",
+                (request_id, ident),
+            )
+        super().receipt(request_id)
+
+
+class ReviewProvenanceTests(ReviewReceiptCase):
+    """Expose changed and uncertain indexed record coverage."""
+
+    def counts(self) -> tuple[int, int]:
+        """Read current indexed logical eligibility and completion."""
+        got = obs_stats.review_stats(self.conn, 20.0)
+        return got.eligible_records, got.completed_records
+
+    def gaps(self) -> dict[str, obs.CheckResult]:
+        """Read durable health after removing all best-effort logs."""
+        for name in ("calls.jsonl", "calls.jsonl.1"):
+            (self.home / name).unlink(missing_ok=True)
+        return {c["check"]: c for c in obs.review_checks(self.conn, 20.0)}
+
+    def test_same_length_rewrite_refusal_keeps_receipt_but_loses_coverage(
+        self,
+    ) -> None:
+        request = self.enqueue()
+        self.receipt(request.id)
+        self.assertEqual(self.counts(), (2, 2))
+        receipts = tuple(
+            tuple(r) for r in self.conn.execute("SELECT * FROM review_receipt")
+        )
+        baseline = tuple(
+            self.conn.execute(
+                "SELECT activation_line FROM review_source"
+            ).fetchone()
+        )
+        size = self.path.stat().st_size
+        self.records[-1] = reply(2, "b two")
+        self.write(rollout(), self.records)
+        self.assertEqual(self.path.stat().st_size, size)
+        self.run_ingest()
+        with mock.patch("muninn.review_progress.log_call") as log:
+            ids = self.transaction(
+                lambda: review_requests.reconcile_sources(
+                    self.conn, self.policy, 18.0
+                )
+            )
+        self.assertEqual(ids, ())
+        self.assertTrue(
+            any(
+                call.args[1].get("error_code") == "rejected_evidence"
+                for call in log.call_args_list
+            )
+        )
+        self.assertEqual(self.counts(), (2, 0))
+        for key in ("review_capture_gaps", "review_coverage_gaps"):
+            self.assertIs(self.gaps()[key]["ok"], False)
+        self.assertEqual(
+            receipts,
+            tuple(
+                tuple(r)
+                for r in self.conn.execute("SELECT * FROM review_receipt")
+            ),
+        )
+        self.assertEqual(
+            baseline,
+            tuple(
+                self.conn.execute(
+                    "SELECT activation_line FROM review_source"
+                ).fetchone()
+            ),
+        )
+
+    def test_unchanged_endpoint_does_not_prove_rewritten_interior(
+        self,
+    ) -> None:
+        request = self.enqueue()
+        self.receipt(request.id)
+        self.records[1] = user_msg(1, "q two")
+        self.write(rollout(), self.records)
+        self.run_ingest(full=True)
+        self.assertEqual(self.counts(), (2, 1))
+        self.assertIs(self.gaps()["review_coverage_gaps"]["ok"], False)
+
+    def test_append_valid_preserves_matching_provenance(self) -> None:
+        request = self.enqueue()
+        self.receipt(request.id)
+        self.append(self.path, [user_msg(4, "new content")])
+        self.run_ingest()
+        self.assertEqual(self.counts(), (2, 2))
+        self.assertTrue(self.gaps()["review_coverage_gaps"]["ok"])
+        self.assertIs(self.gaps()["review_capture_gaps"]["ok"], False)
+
+    def test_missing_or_other_request_input_is_not_interior_proof(
+        self,
+    ) -> None:
+        request = self.enqueue()
+        self.receipt(request.id)
+        self.conn.execute(
+            "DELETE FROM review_input WHERE request_id=?", (request.id,)
+        )
+        other = self.enqueue(self.window(2, 2))
+        ident = self.conn.execute(
+            "SELECT id FROM review_evidence WHERE line=2"
+        ).fetchone()[0]
+        self.conn.execute(
+            "INSERT INTO review_input VALUES(?,?)", (other.id, ident)
+        )
+        self.assertEqual(self.counts(), (2, 1))
+        self.assertIs(self.gaps()["review_coverage_gaps"]["ok"], False)

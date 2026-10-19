@@ -19,6 +19,14 @@ in its indexed session by fingerprint and a timestamp within two minutes of the
 hook. Missing ratings count as unassessed. `self_assessments` counts model ratings,
 not validated usefulness. Review examples and disagreements, separated by provider.
 Historical full block text isn't retained; current knowledge may have changed.
+For knowledge, use `muninn know show K_ID --revision N` with its recorded UUID
+and revision. Open each recorded `evidence_sources[].ref` with `muninn open REF
+--context 3`; E_UUIDs are not open arguments. Require `hash_ok: true` and
+`provenance.line_sha256` equal to that mapping's recorded `line_sha256`. A locator
+does not prove the original still exists or matches. Missing/null mappings,
+unavailable originals and changed hashes stay unresolved; do not substitute a
+later knowledge revision or unrelated evidence. The knowledge `sha256` is the
+source preview hash, not the complete body or rendered block hash.
 
 After reviewing a complete batch, acknowledge it explicitly:
 

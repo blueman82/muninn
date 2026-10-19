@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
+from install import runtime
 from install.constants import CLAUDE_EVENTS, OWNER_STEP, PLUGIN_ID
 from install.context import Ctx, StepFailedError, dry, is_new, job
 from install.provider_apps import installed
@@ -129,6 +130,11 @@ def codex_checks(ctx: Ctx, rec: Record, check: Check) -> None:
         }
         for k, e in got.items()
     }
+    check(
+        "codex_hook_hashes_match",
+        all(value["hash_match"] for value in summary.values()),
+        "managed_hook_identity",
+    )
     rec["codex_hooks"] = summary
     if not all(v["trust"] == "trusted" for v in summary.values()):
         rec["trust"] = "owner"
@@ -159,6 +165,8 @@ def verify(ctx: Ctx, rec: Record) -> None:
             }
         )
 
+    runtime.verify_runtime(Path(rec["python"]["path"]), ctx.lib / rec["sha"])
+    check("runtime_bootstrap", True)
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
     check("heartbeat_fresh", fresh(ctx, 0))

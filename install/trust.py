@@ -18,6 +18,8 @@ from install.context import StepFailedError
 # Codex's internal event names, keyed by the names used in hooks.json.
 LABELS = {
     "SessionStart": "session_start",
+    "SessionEnd": "session_end",
+    "PreCompact": "pre_compact",
     "UserPromptSubmit": "user_prompt_submit",
     "PreToolUse": "pre_tool_use",
 }

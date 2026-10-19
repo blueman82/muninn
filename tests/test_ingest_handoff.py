@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from muninn import classify as c
-from muninn import knowledge
 from muninn.codex_events import CHATGPT_HANDOFF, CHATGPT_REFERENCE_TAG
-from muninn.knowledge_model import RefusedError
+from muninn.query.opening import open_event
+from muninn.query.quotes import quote_check
 from tests.classify_support import codex_meta, user_msg
 from tests.ingest_support import IngestCase, rollout
 
@@ -69,11 +69,16 @@ class HandoffIngestTests(IngestCase):
         self,
     ) -> None:
         self.run_ingest()
-        with self.assertRaises(RefusedError):
-            knowledge.check_citation(
-                self.conn, self.ref_of("harness"), PASTED_WORDS
-            )
-        cite = knowledge.check_citation(
-            self.conn, self.ref_of("prompt"), OWNER_TEXT
-        )
-        self.assertEqual(cite["quote"], OWNER_TEXT)
+        for kind, words, citable in (
+            ("harness", PASTED_WORDS, False),
+            ("prompt", OWNER_TEXT, True),
+        ):
+            opened = open_event(self.conn, self.ref_of(kind), roots=self.roots)
+            cite = quote_check(self.conn, self.ref_of(kind), words)
+            self.assertIs(cite["match"], True)
+            first, last = cite["span"]
+            self.assertEqual(opened["text"][first:last], words)
+            self.assertIs(opened["answer_citable"], citable)
+            self.assertIs(opened["hash_ok"], True)
+            self.assertEqual(opened["provenance"]["kind"], kind)
+            self.assertEqual(opened["provenance"]["role"], "user")

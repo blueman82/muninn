@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
@@ -17,8 +18,11 @@ from muninn import (
     tombstone_key,
 )
 from muninn.file_sync import sync_fd
+from muninn.review_evidence_models import EvidenceWindow, SourceRef
 from tests import test_platform_windows
 from tests.cli_support import CliCase, fake_run
+from tests.knowledge_retirement_support import window_note
+from tests.review_quiescence_support import initialize
 from tests.test_ingest import ROOT, TID
 
 if sys.platform == "win32":
@@ -123,53 +127,65 @@ if sys.platform == "win32":
             db, new = self.write("muninn.sqlite", b"old ledger"), self.write(
                 "new", b"new"
             )
+            archive = platform_rebuild.retain_store(self.home, db)
             real = platform_windows.publish
+            moves: list[tuple[Path, bool, bool]] = []
 
             def fail_after_move(
-                source: Path, target: Path, *, replace: bool
+                source: Path,
+                target: Path,
+                *,
+                replace: bool,
+                retry_move: bool = False,
+                directory: bool = False,
             ) -> None:
-                real(source, target, replace=replace)
+                moves.append((source, replace, retry_move))
+                real(
+                    source,
+                    target,
+                    replace=replace,
+                    retry_move=retry_move,
+                    directory=directory,
+                )
                 if source == new:
                     raise OSError("injected post-publication failure")
 
-            with mock.patch.object(
-                platform_windows, "publish", fail_after_move
+            with (
+                mock.patch.object(
+                    platform_windows, "publish", fail_after_move
+                ),
+                self.assertRaisesRegex(OSError, "post-publication"),
             ):
-                success, kept, restored = platform_rebuild.publish_store(
-                    self.home, db, new, readable=True
-                )
-            self.assertFalse(success)
-            self.assertTrue(restored)
-            self.assertIsNotNone(kept)
-            self.assertEqual(db.read_bytes(), b"old ledger")
-            self.assertEqual(
-                (self.home / str(kept)).read_bytes(), b"old ledger"
-            )
+                platform_rebuild.publish_replacement(self.home, db, new)
+            self.assertEqual(moves, [(new, True, False)])
+            self.assertEqual(db.read_bytes(), b"new")
+            self.assertFalse(new.exists())
+            self.assertEqual(archive.read_bytes(), b"old ledger")
+            platform_windows.assert_private(archive)
 
-        def test_failed_restoration_retains_durable_prior_copy(self) -> None:
+        def test_sharing_failure_retains_live_and_durable_prior_copy(
+            self,
+        ) -> None:
             db, new = self.write("muninn.sqlite", b"old ledger"), self.write(
                 "new", b"new"
             )
-            real = platform_windows.publish
-
-            def fail_target(
-                source: Path, target: Path, *, replace: bool
-            ) -> None:
-                if target == db:
-                    raise OSError("injected sharing failure")
-                real(source, target, replace=replace)
-
-            with mock.patch.object(platform_windows, "publish", fail_target):
-                success, kept, restored = platform_rebuild.publish_store(
-                    self.home, db, new, readable=True
-                )
-            self.assertFalse(success)
-            self.assertFalse(restored)
-            self.assertEqual(db.read_bytes(), b"old ledger")
-            self.assertEqual(
-                (self.home / str(kept)).read_bytes(), b"old ledger"
+            archive = platform_rebuild.retain_store(self.home, db)
+            failure = OSError("injected sharing failure")
+            with (
+                mock.patch.object(
+                    platform_windows, "publish", side_effect=failure
+                ) as publish,
+                self.assertRaises(OSError) as caught,
+            ):
+                platform_rebuild.publish_replacement(self.home, db, new)
+            self.assertIs(caught.exception, failure)
+            publish.assert_called_once_with(
+                new, db, replace=True, retry_move=False
             )
-            platform_windows.assert_private(self.home / str(kept))
+            self.assertEqual(db.read_bytes(), b"old ledger")
+            self.assertEqual(new.read_bytes(), b"new")
+            self.assertEqual(archive.read_bytes(), b"old ledger")
+            platform_windows.assert_private(archive)
 
 
 class PortableCliTests(CliCase):
@@ -180,11 +196,12 @@ class PortableCliTests(CliCase):
     ) -> None:
         text = 'nativecanary café 雪 & quoted "answer"'
         source = self.session(TID, text, "native reply")
-        quote = "ledger evidence must survive replacement"
+        quote = "Please retain ledger evidence after replacement."
         self.session("thr-ledger", quote, "noted")
         source.write_bytes(source.read_bytes().replace(b"\n", b"\r\n"))
         original = source.read_bytes()
         self.conn.close()
+        initialize(self.home)
         code, out, err = self.muninn("ingest")
         self.assertEqual((code, err), (0, ""), out)
         code, out, err = self.muninn("search", "nativecanary")
@@ -192,19 +209,23 @@ class PortableCliTests(CliCase):
         self.assertEqual(
             out["hits"][0]["snippet"].replace("«", "").replace("»", ""), text
         )
-        code, out, err = self.muninn(
-            "know",
-            "add",
-            "--kind",
-            "decision",
-            "--text",
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
+            row = conn.execute(
+                "SELECT e.line,e.line_sha256 FROM event e JOIN source s "
+                "ON s.id=e.source_id WHERE s.thread_id='thr-ledger' "
+                "AND e.kind='prompt'"
+            ).fetchone()
+        knowledge_id = window_note(
+            self.home,
+            self.roots,
+            EvidenceWindow(
+                source=SourceRef(provider="codex", thread_id="thr-ledger"),
+                from_line=row[0],
+                through_line=row[0],
+                boundary_hash=row[1],
+            ),
             "retain ledger",
-            "--cite",
-            "codex:thr-ledger:2.1",
-            "--quote",
-            quote,
         )
-        self.assertEqual((code, err), (0, ""), out)
         code, out, err = self.muninn("open", f"codex:{TID}:2.1", "--raw")
         self.assertEqual((code, err), (0, ""), out)
         self.assertEqual(out["text"], text)
@@ -217,6 +238,9 @@ class PortableCliTests(CliCase):
         code, out, err = self.muninn("rebuild")
         self.assertEqual((code, err), (0, ""), out)
         self.assertEqual(tombstone_key.load_key(self.home, create=False), key)
+        code, note, err = self.muninn("know", "show", knowledge_id)
+        self.assertEqual((code, err), (0, ""), note)
+        self.assertEqual(note["body"]["content"], "retain ledger")
         code, out, err = self.muninn("search", "nativecanary")
         self.assertEqual((code, err), (0, ""), out)
         self.assertNotIn(text, str(out))
@@ -268,8 +292,9 @@ if sys.platform == "win32":
             os.close(fd)
             self.broaden(journal)
             code, out, err = self.muninn("rebuild")
-            self.assertEqual((code, err), (4, ""))
-            self.assertEqual(out["error"], "store_unavailable")
+            self.assertEqual((code, err), (2, ""))
+            self.assertEqual(out["reason"], "source_changed")
+            self.assertFalse(out["publication_possible"])
             self.assertEqual(db.read_bytes(), before)
             self.assertEqual(
                 journal.read_bytes(), b"original synthetic journal"

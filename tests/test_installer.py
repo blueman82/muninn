@@ -6,7 +6,7 @@ import dataclasses
 import json
 import os
 import shlex
-import sys
+import shutil
 import unittest
 from pathlib import Path
 from typing import Any
@@ -15,6 +15,7 @@ from unittest import mock
 from install import installer as co
 from install import rollback as rb
 from install.provider_paths import cursor_command
+from tests import test_install_cursor_ingest
 from tests.installer_support import (
     CRED,
     World,
@@ -51,11 +52,12 @@ class FreshInstallTest(unittest.TestCase):
         rec = self.install()
         self.assertEqual(w.fake.loaded, "new")
         python = (self.lib / "python").readlink()
-        self.assertTrue(python.samefile(sys.executable))
+        selected = self.lib / w.sha / ".venv/bin/python3"
+        self.assertEqual(python, selected)
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(
             (out["outcome"], out["fresh"], out["sha"], out["python"]["path"]),
-            ("ok", True, w.sha, sys.executable),
+            ("ok", True, w.sha, str(selected)),
         )
         self.assertIn("hooks.SessionStart", out["config_keys"])
         # The record is shared with colleagues, so it must hold no secret.
@@ -71,7 +73,7 @@ class FreshInstallTest(unittest.TestCase):
         text = (h / ".codex/config.toml").read_text()
         self.assertEqual(
             codex_view(text),
-            (str(self.lib / "current/integrations/codex"), True, 2),
+            (str(self.lib / "current/integrations/codex"), True, 4),
         )
         record = Path(rec["rdir"]) / "rollback-record.json"
         assert_private(self, record)
@@ -97,28 +99,27 @@ class FreshInstallTest(unittest.TestCase):
 
     def test_history_checklist_indexes_detected_providers(self) -> None:
         w = self.w
-        claude = w.home / ".claude/projects/project/session.jsonl"
-        codex = w.home / ".codex/archived_sessions/rollout-one.jsonl"
-        cursor = w.home / "synthetic-cursor.sqlite"
-        for path in (claude, codex, cursor):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.touch()
-
-        with mock.patch(
-            "install.steps_release.default_database", return_value=cursor
+        cursor = test_install_cursor_ingest.history(w.home, w.repo)
+        with (
+            mock.patch(
+                "install.steps_release.default_database", return_value=cursor
+            ),
+            mock.patch(
+                "muninn.cursor_import.default_database", return_value=cursor
+            ),
         ):
             self.install()
 
         said = "\n".join(w.out)
-        self.assertIn("Claude: found; indexing...", said)
-        self.assertIn("Codex: found; indexing...", said)
-        self.assertIn("Cursor: found; indexing...", said)
+        self.assertIn("Claude: found; indexed", said)
+        self.assertIn("Codex: found; indexed", said)
+        self.assertIn("Cursor: found; indexed", said)
         self.assertIn(
             "History indexing complete: Claude 2 events · Codex 3 events · "
             "Cursor 1 event.",
             said,
         )
-        self.assertIn(
+        self.assertNotIn(
             [str(w.home / ".local/bin/muninn"), "ingest", "--full"],
             w.fake.calls,
         )
@@ -290,8 +291,15 @@ class UpgradeTest(unittest.TestCase):
         co.install(self.ctx, w.repo, self.sha2)
         self.assertEqual(self.releases(), [self.sha2])
         self.assertEqual((self.lib / "current").readlink(), Path(self.sha2))
-        kick = ["launchctl", "kickstart", "-k", self.ctx.target]
-        self.assertIn(kick, w.fake.calls)
+        stop = ["launchctl", "bootout", self.ctx.target]
+        start = [
+            "launchctl",
+            "bootstrap",
+            f"gui/{self.ctx.uid}",
+            str(self.ctx.plist),
+        ]
+        self.assertIn(stop, w.fake.calls)
+        self.assertIn(start, w.fake.calls)
         for rel, data in configs.items():
             self.assertEqual((h / rel).read_bytes(), data, rel)
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
@@ -336,7 +344,7 @@ class UpgradeTest(unittest.TestCase):
         co.install(self.ctx, w.repo, self.sha2)
         self.assertFalse(flag.exists())
 
-    def test_failed_upgrade_returns_to_the_old_release_and_keeps_running(
+    def test_failed_upgrade_retains_current_selection_and_stops(
         self,
     ) -> None:
         w = self.w
@@ -346,16 +354,18 @@ class UpgradeTest(unittest.TestCase):
         w.fake.clock[0] += 1000
         with self.assertRaises(co.StepFailedError):
             co.install(self.ctx, w.repo, self.sha2)
-        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
+        self.assertEqual((self.lib / "current").readlink(), Path(self.sha2))
         self.assertTrue((self.lib / self.first).is_dir())
-        self.assertEqual(w.fake.loaded, "new")  # the job was not left stopped
+        self.assertTrue((self.lib / self.sha2).is_dir())
+        self.assertIsNone(w.fake.loaded)
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
-        self.assertEqual(out["outcome"], "rolled_back")
+        self.assertEqual(out["outcome"], "recovery_required")
 
-    def test_prune_rename_failure_rolls_back_to_a_whole_old_release(
+    def test_prune_failure_retains_whole_releases_and_current_selection(
         self,
     ) -> None:
         w = self.w
+        shutil.rmtree(self.lib / self.first / ".venv")
         extra = self.lib / ("0" * 40)  # a second stale release to prune
         extra.mkdir()
         (extra / "f").write_text("x")
@@ -376,19 +386,28 @@ class UpgradeTest(unittest.TestCase):
             self.assertRaises(PermissionError),
         ):
             co.install(self.ctx, w.repo, self.sha2)
-        self.assertEqual((self.lib / "current").readlink(), Path(self.first))
+        self.assertEqual((self.lib / "current").readlink(), Path(self.sha2))
+        self.assertIsNone(w.fake.loaded)
         self.assertTrue((self.lib / self.first / "bin").is_dir())
         self.assertTrue((extra / "f").exists())
         self.assertEqual(list(self.lib.glob(".pruning-*")), [])
 
     def test_delete_failure_after_prune_only_warns(self) -> None:
         w = self.w
-        with mock.patch("install.steps_release.shutil.rmtree") as rm:
-            rm.side_effect = [PermissionError("busy"), None]
+        original = shutil.rmtree
+
+        def remove(path: Path) -> None:
+            if path == self.lib / self.first or (
+                path.parent == self.lib and path.name.startswith(".pruning-")
+            ):
+                raise PermissionError("busy")
+            original(path)
+
+        with mock.patch("install.steps_release.shutil.rmtree", remove):
             rec = co.install(self.ctx, w.repo, self.sha2)
         self.assertEqual(rec["sha"], self.sha2)
         self.assertEqual((self.lib / "current").readlink(), Path(self.sha2))
-        self.assertTrue(list(self.lib.glob(".pruning-*")))
+        self.assertTrue((self.lib / self.first / ".venv").is_dir())
         self.assertIn("remove it by hand", "\n".join(w.out))
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(out["outcome"], "ok")

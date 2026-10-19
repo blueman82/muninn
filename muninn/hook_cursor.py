@@ -6,7 +6,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from muninn import cli_core, cursor_import, hook_context, ingest, store
+from muninn import (
+    cli_core,
+    cursor_import,
+    hook_context,
+    hook_learn,
+    ingest,
+    store,
+)
 
 __all__ = ["pre_compact"]
 
@@ -129,8 +136,16 @@ def pre_compact(
             max_bubbles=message_count,
             conversation_id=conversation_id,
         )
-    except Exception:
+    except Exception as exc:
         trace["error"] = "cursor_import_failed"
+        code = (
+            "review_enqueue_busy"
+            if isinstance(exc, store.BusyError)
+            else "unavailable"
+        )
+        hook_learn.record_capture(
+            store.data_home(env), hook_learn.HookCapture(False, (), code), env
+        )
         return {
             "user_message": (
                 "Muninn could not refresh Cursor history before compaction;"
@@ -138,4 +153,103 @@ def pre_compact(
             )
         }
     trace["counts"] = counts
+    if counts["conversations_seen"] == 1:
+        hook_learn.capture_event(payload, provider, "pre-compact", env, trace)
+    else:
+        trace["error"] = "cursor_import_empty"
+        hook_learn.record_capture(
+            store.data_home(env),
+            hook_learn.HookCapture(False, (), "source_unavailable"),
+            env,
+        )
     return {}
+
+
+def _session_refresh(
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    event: str,
+    trace: dict[str, object],
+) -> bool:
+    """Finish one exact import before capture may own its writer root."""
+    if env.get("MUNINN_HOOK_DISABLE") == "1":
+        trace["skipped"] = "disabled"
+        return False
+    data = hook_context.as_payload(payload)
+    if provider != "cursor" or not hook_learn.valid_event(
+        provider, event, data
+    ):
+        trace["skipped"] = "native_event_unavailable"
+        return False
+    cwd = _workspace_cwd(data, env)
+    if cwd is None:
+        trace["skipped"] = "workspace_unavailable"
+        return False
+    try:
+        database = cursor_import.default_database(
+            ingest.provider_home(env), env=env
+        )
+        if database is None or not database.is_file():
+            raise ValueError("missing_cursor_db")
+        counts = cursor_import.run(
+            store.data_home(env),
+            database,
+            cwd,
+            cli_core.WRITER_WAIT_S,
+            max_bubbles=None,
+            conversation_id=cast(str, data["conversation_id"]),
+        )
+        trace["counts"] = counts
+        if counts["conversations_seen"] != 1:
+            raise ValueError("conversation_unavailable")
+    except Exception as exc:
+        trace["error"] = "cursor_import_failed"
+        code = (
+            "review_enqueue_busy"
+            if isinstance(exc, store.BusyError)
+            else "unavailable"
+        )
+        hook_learn.record_capture(
+            store.data_home(env), hook_learn.HookCapture(False, (), code), env
+        )
+        return False
+    return True
+
+
+def session_end(
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Import an exact ended conversation without inventing message_count."""
+    trace = {} if trace is None else trace
+    if _session_refresh(payload, provider, env, "session-end", trace):
+        hook_learn.capture_event(payload, provider, "session-end", env, trace)
+    return {}
+
+
+def refresh_start(
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> str | None:
+    """Bind startup context to its workspace independently of history."""
+    trace = {} if trace is None else trace
+    if env.get("MUNINN_HOOK_DISABLE") == "1":
+        trace["skipped"] = "disabled"
+        return None
+    data = hook_context.as_payload(payload)
+    if provider != "cursor" or not hook_learn.valid_event(
+        provider, "session-start", data
+    ):
+        trace["skipped"] = "native_event_unavailable"
+        return None
+    cwd = _workspace_cwd(data, env)
+    if cwd is None:
+        trace["skipped"] = "workspace_unavailable"
+    return cwd

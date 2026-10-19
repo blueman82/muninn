@@ -16,20 +16,21 @@ from __future__ import annotations
 import argparse
 import functools
 import os
+import shutil
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install import lifecycle
+from install import legacy_state, legacy_transition, lifecycle
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
-from install.provider_paths import cursor_command
-from install.record import Record, load_record
+from install.provider_paths import cursor_commands
+from install.record import Record, load_record, save
 from install.release_io import write_private
 from install.snapshot import start_again, undo_store
 from install.steps_release import PRUNING, relink
-from install.transforms import codex_check, restore_cursor_settings
+from install.transforms import codex_check, drop_trust, restore_cursor_settings
 
 
 def restore_json(data: bytes, entries: Sequence[Mapping[str, Any]]) -> bytes:
@@ -93,12 +94,13 @@ def bootout(ctx: Ctx) -> None:
     lifecycle.stop(ctx)
 
 
-def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
+def _undo_fresh(ctx: Ctx, j: Job | None, rec: Record) -> None:
     """Remove what a fresh install created, moving it aside, not deleting.
 
     Args:
         ctx: The run context.
         j: The launchd job as found at the start of the rollback.
+        rec: Recorded exclusive fresh-home identity.
     """
     if ctx.platform != "darwin" and ctx.plist.exists():
         _act(ctx, "remove the owned native job", lambda: lifecycle.remove(ctx))
@@ -106,9 +108,22 @@ def _undo_fresh(ctx: Ctx, j: Job | None) -> None:
         _act(ctx, f"bootout new job pid {j['pid']}", lambda: bootout(ctx))
     # Only a fresh install made these, so only then are they ours to move.
     if ctx.data.exists():
-        _act(
-            ctx, f"move {ctx.data} aside", lambda: aside(ctx, ctx.data, "data")
-        )
+        info = ctx.data.lstat()
+        expected = rec.get("store", {}).get("home_identity")
+        if (
+            not ctx.data.is_symlink()
+            and [info.st_dev, info.st_ino] == expected
+        ):
+            _act(
+                ctx,
+                f"move {ctx.data} aside",
+                lambda: aside(ctx, ctx.data, "data"),
+            )
+        else:
+            rec["recovery_required"] = True
+            ctx.say(
+                "rollback: retain data whose exclusive creation is unproven"
+            )
     if ctx.plist.exists():
         _act(
             ctx, "move new plist aside", lambda: aside(ctx, ctx.plist, "plist")
@@ -125,7 +140,7 @@ def _restore_cursor(
     ce.edit_file(
         ctx.cursor_settings,
         lambda data: restore_cursor_settings(
-            data, cursor_command(ctx), rec["cursor_ours"], entries[0]
+            data, cursor_commands(ctx), rec["cursor_ours"], entries[0]
         ),
         lambda before, after: ce.json_check(before, after, paths),
     )
@@ -134,6 +149,30 @@ def _restore_cursor(
         and ce.load_json(ce.read_file(ctx.cursor_settings)) == {}
     ):
         ctx.cursor_settings.unlink(missing_ok=True)
+
+
+def _restore_cache(ctx: Ctx, rec: Record) -> None:
+    """Restore only the exact owned plugin cache from a complete snapshot."""
+    snapshot = rec["codex_cache"]
+    backup = ctx.rdir / "codex-cache"
+    manifest = {
+        key: list(value) for key, value in ce.tree_snapshot(backup).items()
+    }
+    if (
+        snapshot.get("complete") is not True
+        or manifest != snapshot["manifest"]
+    ):
+        raise OSError("Codex cache snapshot is incomplete or changed")
+    ce.tree_snapshot(ctx.cache)
+    if ctx.cache.exists():
+        shutil.rmtree(ctx.cache)
+    if snapshot["present"]:
+        shutil.copytree(backup, ctx.cache)
+    restored = {
+        key: list(value) for key, value in ce.tree_snapshot(ctx.cache).items()
+    }
+    if restored != snapshot["manifest"]:
+        raise OSError("Codex cache restoration did not match its snapshot")
 
 
 def _undo_config(ctx: Ctx, rec: Record) -> None:
@@ -158,6 +197,21 @@ def _undo_config(ctx: Ctx, rec: Record) -> None:
             ctx,
             f"restore {len(paths)} keys in {ctx.cursor_settings.name}",
             lambda: _restore_cursor(ctx, rec, cursor, paths),
+        )
+    if rec.get("codex"):
+        _act(
+            ctx,
+            "revoke changed hook trust before restoring the owned cache",
+            lambda: ce.edit_file(
+                ctx.config,
+                lambda data: drop_trust(data.decode()).encode(),
+                codex_check,
+            ),
+        )
+        _act(
+            ctx,
+            "restore the previous owned Codex cache",
+            lambda: _restore_cache(ctx, rec),
         )
     if rec.get("codex"):
         _act(
@@ -219,7 +273,7 @@ def _undo_prune(ctx: Ctx) -> None:
             )
 
 
-def rollback(ctx: Ctx, rec: Record) -> list[str]:
+def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     """Undo whatever the install did.
 
     Args:
@@ -232,6 +286,21 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
         actions that should be survivable.
     """
     problems: list[str] = []
+    if rec.get("policy_activation") or (
+        rec.get("upgrade")
+        and (rec.get("quiesced") or rec.get("store") or rec.get("snapshot"))
+    ):
+        _act(
+            ctx,
+            "retain current data and leave the service stopped",
+            lambda: lifecycle.stop(ctx),
+        )
+        rec["recovery_required"] = True
+        if not ctx.dry_run:
+            save(ctx, rec)
+        return [
+            "current_store_retained: runtime/config recovery requires review"
+        ]
     # The copy of the store comes before anything is changed, so a failure
     # there has nothing to undo and must not restart the running job.
     if rec.get("failed", {}).get("step") in {"quiesce", "snapshot_store"}:
@@ -240,7 +309,7 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
     if ctx.platform != "darwin" and rec.get("upgrade"):
         lifecycle.stop(ctx)
     if rec.get("fresh"):
-        _undo_fresh(ctx, j)
+        _undo_fresh(ctx, j, rec)
     _undo_config(ctx, rec)
     _undo_prune(ctx)
     _undo_links(ctx, rec)
@@ -253,6 +322,17 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
         kick = ["launchctl", "kickstart", "-k", ctx.target]
         _act(ctx, "restart the job", lambda: must(ctx, kick))
     return problems
+
+
+def rollback(ctx: Ctx, rec: Record) -> list[str]:
+    """Serialize direct recovery before native or filesystem effects."""
+    with legacy_state.operation(ctx) as check:
+        pending = legacy_state.pending(ctx)
+        if pending is not None or "legacy" in rec:
+            if pending is None or pending[1] != rec:
+                raise ValueError("legacy_record_changed")
+            return legacy_transition.recover(ctx, rec, check)
+        return rollback_owned(ctx, rec)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -273,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ap.error("the record belongs to another HOME")
     os.umask(PRIVATE_UMASK)
     ctx = Ctx(Path(rec["home"]), run_real, rec["ts"], dry_run=args.dry_run)
-    if ctx.platform != "darwin":
+    if ctx.platform != "darwin" and "legacy" not in rec:
         lifecycle.preflight_service(ctx)
     problems = rollback(ctx, rec)
     for problem in problems:

@@ -21,6 +21,7 @@ from muninn import (
     obs,
     platform_io,
     platform_windows,
+    store,
     tombstone_key,
     tombstones,
 )
@@ -28,7 +29,8 @@ from muninn.file_sync import sync_fd
 from muninn.tombstone_key import KEY_FILE, TombstoneKeyError
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
-from tests.store_support import assert_private
+from tests.review_quiescence_support import initialize
+from tests.store_support import assert_private, public_read
 from tests.test_erase_hardening import (
     FORK,
     PARENT,
@@ -227,7 +229,7 @@ class DryRunKeyTests(EraseCase):
 
 
 class LogParseTests(EraseCase):
-    """A damaged log row is skipped, not trusted."""
+    """Reject malformed intent and retain valid legacy metadata."""
 
     def rows(self, *extra: dict[str, Any]) -> int:
         """Write the log with one good row plus ``extra``; reapply it."""
@@ -236,11 +238,13 @@ class LogParseTests(EraseCase):
             "level": "line",
             "thread_id": PARENT,
             "line": 2,
-            "line_sha256": "h",
+            "line_sha256": "a" * 64,
             "created_at": 1.0,
         }
         text = "\n".join(json.dumps(r) for r in (good, *extra)) + "\n"
-        (self.home / tombstones.TOMBSTONE_FILE).write_text(text)
+        path = self.home / tombstones.TOMBSTONE_FILE
+        path.write_text(text)
+        path.chmod(0o600)
         return erase.reapply_tombstones(self.conn, self.home)
 
     def test_bool_and_odd_fields_are_rejected(self) -> None:
@@ -248,7 +252,7 @@ class LogParseTests(EraseCase):
             "provider": "codex",
             "level": "line",
             "thread_id": PARENT,
-            "line_sha256": "x",
+            "line_sha256": "b" * 64,
         }
         bad = [
             base | {"line": True},
@@ -256,7 +260,19 @@ class LogParseTests(EraseCase):
             base | {"line": 3, "created_at": True},
             base | {"line": 3, "level": "file"},
         ]
-        self.assertEqual(self.rows(*bad), 1)  # only the good row went in
+        for row in bad:
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(
+                    ValueError, "^erasure_intent_invalid$"
+                ):
+                    self.rows(row)
+                self.assertEqual(
+                    self.conn.execute(
+                        "SELECT count(*) FROM tombstone"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertFalse(self.conn.in_transaction)
 
     def test_an_int_line_and_a_number_stamp_are_kept(self) -> None:
         more = {
@@ -264,7 +280,7 @@ class LogParseTests(EraseCase):
             "level": "line",
             "thread_id": "t",
             "line": 7,
-            "line_sha256": "y",
+            "line_sha256": "c" * 64,
             "created_at": 2,
         }
         self.assertEqual(self.rows(more), 2)
@@ -275,30 +291,129 @@ class KeyCliTests(CliCase):
 
     def setUp(self) -> None:
         super().setUp()
+        self.conn.close()
+        initialize(self.home)
+        self.conn = store.connect_rw(store.db_path(self.home))
+        self.addCleanup(self.conn.close)
         records = parent_records()
         self.write(rollout(PARENT), records)
         self.run_ingest()
         self.conn.close()
         code = self.muninn("erase", "--event", f"codex:{PARENT}:2.1", "--yes")
-        self.assertEqual(code[0], 0)
+        self.assertEqual(code[0], 0, code[1])
         self.key = self.home / KEY_FILE
+        self.assertEqual(len(self.key.read_bytes()), 32)
         self.key.unlink()
         self.write(rollout(FORK), fork_records())
+        self.before = {
+            name: (self.home / name).read_bytes()
+            for name in ("muninn.sqlite", tombstones.TOMBSTONE_FILE)
+        }
 
     def test_ingest_fails_loudly(self) -> None:
         code, out, _ = self.muninn("ingest")
         self.assertEqual((code, out["error"]), (4, "tombstone_key"))
         self.assertFalse(self.key.exists())
+        self.assertEqual(
+            {name: (self.home / name).read_bytes() for name in self.before},
+            self.before,
+        )
 
     def test_rebuild_stops_before_replacing_anything(self) -> None:
+        self.assert_rebuild_refusal()
+
+    def assert_rebuild_refusal(
+        self, key: bytes | None = None, *, source_changed: bool = False
+    ) -> None:
+        """Require key refusal before any store mutation."""
         db = self.home / "muninn.sqlite"
         inode = db.stat().st_ino
+        with contextlib.closing(store.connect_ro(db)) as conn:
+            control = tuple(
+                conn.execute("SELECT * FROM review_control").fetchone()
+            )
         code, out, _ = self.muninn("rebuild")
-        self.assertEqual((code, out["error"]), (4, "tombstone_key"))
+        expected = (2, "refused") if source_changed else (4, "tombstone_key")
+        self.assertEqual((code, out["error"]), expected)
+        if source_changed:
+            self.assertEqual(out["reason"], "source_changed")
+        self.assertFalse(out["publication_possible"])
+        self.assertFalse(out["recovery_required"])
         self.assertEqual(db.stat().st_ino, inode)
         names = [p.name for p in self.home.iterdir()]
         self.assertFalse(any("rebuild" in n for n in names), names)
-        self.assertFalse(self.key.exists())
+        self.assertFalse(
+            any(n.startswith(store.RECOVERY_PREFIX) for n in names)
+        )
+        if key is None:
+            self.assertFalse(self.key.exists())
+        else:
+            self.assertEqual(self.key.read_bytes(), key)
+        self.assertEqual(
+            {name: (self.home / name).read_bytes() for name in self.before},
+            self.before,
+        )
+        with contextlib.closing(store.connect_ro(db)) as conn:
+            self.assertEqual(
+                tuple(conn.execute("SELECT * FROM review_control").fetchone()),
+                control,
+            )
+
+    def test_table_only_keyed_history_refuses_before_mutation(self) -> None:
+        (self.home / tombstones.TOMBSTONE_FILE).unlink()
+        del self.before[tombstones.TOMBSTONE_FILE]
+        with contextlib.closing(
+            store.connect_ro(store.db_path(self.home))
+        ) as conn:
+            self.assertTrue(tombstone_key.table_has_keyed(conn))
+        self.assert_rebuild_refusal()
+
+    def test_journal_only_keyed_history_refuses_before_replay(self) -> None:
+        with contextlib.closing(
+            store.connect_rw(store.db_path(self.home))
+        ) as conn:
+            conn.execute("DELETE FROM tombstone")
+            self.assertFalse(tombstone_key.table_has_keyed(conn))
+        self.assertTrue(tombstone_key.log_has_keyed(self.home))
+        self.before["muninn.sqlite"] = store.db_path(self.home).read_bytes()
+        self.assert_rebuild_refusal()
+
+    def test_damaged_key_without_keyed_history_refuses_before_mutation(
+        self,
+    ) -> None:
+        (self.home / tombstones.TOMBSTONE_FILE).unlink()
+        del self.before[tombstones.TOMBSTONE_FILE]
+        with contextlib.closing(
+            store.connect_rw(store.db_path(self.home))
+        ) as conn:
+            conn.execute("DELETE FROM tombstone")
+            self.assertFalse(tombstone_key.table_has_keyed(conn))
+        self.before["muninn.sqlite"] = store.db_path(self.home).read_bytes()
+        self.assertFalse(tombstone_key.log_has_keyed(self.home))
+        self.key.write_bytes(b"damaged")
+        self.key.chmod(0o600)
+        self.assert_rebuild_refusal(key=b"damaged")
+
+    def test_unsafe_present_key_refuses_before_mutation(self) -> None:
+        self.key.write_bytes(b"k" * 32)
+        self.key.chmod(0o600)
+        with public_read(self, self.key):
+            self.assert_rebuild_refusal(key=b"k" * 32, source_changed=True)
+
+
+class FreshRebuildKeyTests(CliCase):
+    """Keep a never-keyed empty home eligible for ordinary maintenance."""
+
+    def test_no_key_or_history_does_not_require_or_create_a_key(self) -> None:
+        self.conn.close()
+        initialize(self.home)
+        key = self.home / KEY_FILE
+        self.assertFalse(key.exists())
+        self.assertFalse((self.home / tombstones.TOMBSTONE_FILE).exists())
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(out["rebuilt"])
+        self.assertFalse(key.exists())
 
 
 if __name__ == "__main__":

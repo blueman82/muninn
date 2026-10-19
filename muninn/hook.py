@@ -11,20 +11,20 @@ transcript belongs to a subagent or reviewer thread.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import sqlite3
+import time
 from collections.abc import Callable, Mapping
 from functools import partial
 from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 
-from muninn import classify, knowledge, scope, store
+from muninn import classify, knowledge_push, knowledge_read, scope, store
+from muninn.cli_learn import installed_policy
 from muninn.hook_context import as_payload, env_for_provider, project_cwd
 from muninn.hook_frame import (
     BLOCK_LIMIT,
     RECALL_LIMIT,
-    BlockEntry,
     escape_delimiter,
     frame,
     render_block,
@@ -38,6 +38,7 @@ from muninn.hook_recall import (
     recall_block,
 )
 from muninn.platform_io import open_regular
+from muninn.query.answers import knowledge_scopes
 
 __all__ = [
     "BLOCK_LIMIT",
@@ -58,7 +59,6 @@ CODEX_BLOCK_LIMIT = 2800
 CODEX_RECALL_LIMIT = 900
 MAX_INPUT = 64 * 1024  # bytes of hook payload read
 FIRST_LINE = 1024 * 1024  # bytes of a transcript's first line read
-SHOWN = 8  # knowledge entries a SessionStart block may push, newest first
 RECALL_OFF = "recall.off"  # in the data dir: UserPromptSubmit prints {}
 
 
@@ -76,27 +76,8 @@ class _Classifier(Protocol):
         ...
 
 
-class _Knowledge(Protocol):
-    """The ``muninn.knowledge`` call the hook makes, with typed results."""
-
-    def block_entries(
-        self, conn: sqlite3.Connection, scope_ids: list[int], limit: int
-    ) -> list[BlockEntry]:
-        """Current user-cited entries of the scopes, newest first."""
-        ...
-
-    def withheld(
-        self, conn: sqlite3.Connection, scope_ids: list[int]
-    ) -> dict[str, int]:
-        """Counts of expired and restricted entries a push left out."""
-        ...
-
-
-# classify and knowledge annotate their dicts bare, which pyright strict
-# reads as partly unknown; viewing the modules through these protocols
-# types the calls here without touching modules this file does not own.
+# The classifier's legacy dictionaries are typed at this call boundary.
 _CLASSIFY = cast("_Classifier", classify)
-_KNOWLEDGE = cast("_Knowledge", knowledge)
 
 # Builds the block text from an open read-only connection.
 Builder = Callable[
@@ -326,9 +307,17 @@ def _status_line(
         return f"muninn: memory unavailable ({trace['error']})"
     if event != "SessionStart":
         return ""
+    omitted = bool(trace.get("knowledge_omitted"))
     if not shown:
-        return "muninn: memory loaded (no knowledge entries yet)"
+        status = (
+            "knowledge omitted by byte limit"
+            if omitted
+            else "no eligible knowledge displayed"
+        )
+        return f"muninn: memory loaded ({status})"
     head = f"muninn: memory loaded ({len(shown)} knowledge entries)"
+    if omitted:
+        head += "; some knowledge omitted by byte limit"
     return "\n".join([head, *shown])
 
 
@@ -338,7 +327,7 @@ def _printable(text: str) -> str:
 
 
 def _limits(provider: str) -> tuple[int, int]:
-    """The (SessionStart, recall) character caps of a provider's blocks."""
+    """The (SessionStart, recall) UTF-8 byte caps for provider blocks."""
     if provider == "codex":
         return CODEX_BLOCK_LIMIT, CODEX_RECALL_LIMIT
     return BLOCK_LIMIT, RECALL_LIMIT
@@ -354,17 +343,29 @@ def _start_block(
 ) -> str:
     """Build the SessionStart block for the payload's repository."""
     cwd = project_cwd(payload, env)
-    ids = scope.scope_ids_for_read(conn, cwd)
-    entries = _KNOWLEDGE.block_entries(conn, ids, limit=SHOWN)
-    trace["knowledge_ids"] = [int(e["id"][1:]) for e in entries]
-    # The count is a diagnostic: a store fault must not cost the block, but
-    # anything else is a bug and reaches the outer handler.
-    with contextlib.suppress(store.StoreUnavailableError, sqlite3.Error):
-        trace["withheld"] = _KNOWLEDGE.withheld(conn, ids)
-    trace["shown"] = [f"- {e['id']}: {_printable(e['text'])}" for e in entries]
-    return render_block(
-        entries, _label(conn, ids, cwd), notes=index_notes(home), limit=limit
+    with knowledge_read.read_snapshot(conn):
+        ids = scope.scope_ids_for_read(conn, cwd)
+        label = _label(conn, ids, cwd)
+        policy = installed_policy(conn)
+        project = next(iter(knowledge_scopes(conn, ids, False)), None)
+        if project is None:
+            raise ValueError("scope_unavailable")
+        context = knowledge_push.knowledge_context(
+            conn, project, policy.context_bytes, time.time()
+        )
+    text = render_block(
+        context,
+        label,
+        notes=index_notes(home),
+        limit=min(limit, policy.context_bytes),
     )
+    shown = [line for line in text.splitlines() if line.startswith("- K_")]
+    trace["knowledge_ids"] = [line.split()[1] for line in shown]
+    trace["knowledge_omitted"] = context.truncated or len(shown) < (
+        len(context.notes) + len(context.guides)
+    )
+    trace["shown"] = [_printable(line) for line in shown]
+    return text
 
 
 def session_start(
@@ -374,11 +375,10 @@ def session_start(
     *,
     trace: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Handle SessionStart: push the repo's user-cited knowledge.
+    """Handle SessionStart: push the mapped project's eligible context.
 
-    The block holds this repo's and the global knowledge that carries a
-    user citation, plus the usage line. It is capped at ``BLOCK_LIMIT``, or
-    ``CODEX_BLOCK_LIMIT`` for Codex.
+    The installed immutable policy bounds complete notes and the compact
+    guide index. The provider cap further bounds the rendered UTF-8 bytes.
 
     Args:
         payload: The provider's hook payload; non-objects count as empty.
@@ -424,8 +424,7 @@ def prompt_submit(
 ) -> dict[str, object]:
     """Handle UserPromptSubmit: recall for the prompt, or ``{}``.
 
-    Matching knowledge comes first (user-cited entries only, as at
-    SessionStart: the others stay pull-only). Then come at most
+    Matching current eligible knowledge previews come first. Then come at most
     ``MAX_EVENTS`` prompt and reply events of this repo, never the caller's
     own session, each matching at least ``MIN_TERMS`` distinct query terms.
     Prompts with fewer terms, slash commands and subagent transcripts

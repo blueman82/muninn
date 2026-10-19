@@ -186,12 +186,9 @@ class SearchBytePagingTests(QueryCase):
         self.assertTrue(all("zebra" in hit["snippet"] for hit in hits))
 
     def test_knowledge_stays_on_first_page_without_skipping_hits(self) -> None:
-        for _ in range(3):
-            self.rw.execute(
-                "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-                " created_at) VALUES (?, 'decision', ?, 'current', 'user', 0)",
-                (self.repo, "zebra " + "雪" * 494),
-            )
+        ids = [
+            self.add_note(self.repo, "zebra " + "雪" * 494) for _ in range(3)
+        ]
         for i in range(12):
             self.add_event(
                 self.add_source(f"k{i:02d}"),
@@ -203,14 +200,13 @@ class SearchBytePagingTests(QueryCase):
         self.assertTrue(
             any(k.get("text_truncated") for k in pages[0]["knowledge"])
         )
-        self.assertEqual(
-            [k["id"] for k in pages[0]["knowledge"]], ["K1", "K2", "K3"]
-        )
+        self.assertEqual([k["id"] for k in pages[0]["knowledge"]], ids[::-1])
         self.assertEqual(
             [
                 r[0]
                 for r in self.rw.execute(
-                    "SELECT text FROM knowledge ORDER BY id"
+                    "SELECT json_extract(content_json,'$.content') "
+                    "FROM knowledge_version ORDER BY knowledge_id"
                 )
             ],
             ["zebra " + "雪" * 494] * 3,
@@ -235,17 +231,14 @@ class SearchBytePagingTests(QueryCase):
     def test_oversized_knowledge_is_explicit_and_later_hits_reachable(
         self,
     ) -> None:
-        self.rw.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at) VALUES (?, 'decision', 'zebra', 'current', ?, 0)",
-            (self.repo, "actor" * 2000),
-        )
+        huge = self.add_scope("scope" * 2000, cwd="/huge")
+        self.add_note(huge, "zebra")
         self.add_event(self.add_source("later"), self.repo, "zebra")
-        result = self.search("zebra")
+        result = self.search("zebra", all_projects=True)
         self.assertEqual(result.get("error"), "output_too_large")
         self.assertTrue(result.get("has_more"))
         self.assertLessEqual(len(json.dumps(result).encode()), 6144)
-        later = self.search("zebra", page=2)
+        later = self.search("zebra", page=2, all_projects=True)
         self.assertEqual(
             [h["ref"] for h in later["hits"]], ["codex:later:1.1"]
         )

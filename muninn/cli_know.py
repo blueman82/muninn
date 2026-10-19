@@ -1,167 +1,132 @@
-"""Command handlers for ``muninn know``, the cited knowledge ledger."""
+"""Present current knowledge and perform checked explicit local writes."""
 
 from __future__ import annotations
 
 import sqlite3
+import time
 from argparse import Namespace
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
-from muninn import cli_core, ingest, knowledge, obs
+from pydantic import ValidationError
+
+from muninn import knowledge_push, knowledge_read, knowledge_write, query
 from muninn.cli_core import (
     Env,
-    Handler,
     Out,
     Record,
     Result,
-    code_for,
-    counts,
     current_dir,
-    knowledge_id,
     read_store,
+    write_store,
 )
-
-__all__ = ["know"]
-
-
-def _citations(
-    cited: Sequence[tuple[str, str]] | None,
-) -> tuple[list[tuple[str, str]], str | None]:
-    """Pair up ``add``'s ordered ``--cite``/``--quote`` flags.
-
-    Args:
-        cited: ``("cite" | "quote", value)`` pairs in command-line order.
-
-    Returns:
-        The ``(ref, quote)`` pairs, and the one quote given without a cite.
-
-    Raises:
-        ValueError: If a cite lacks its quote, or two quotes stand alone.
-    """
-    pairs: list[tuple[str, str]] = []
-    pending: str | None = None
-    alone: list[str] = []
-    for what, value in cited or ():
-        if what == "cite":
-            if pending is not None:
-                raise ValueError("each --cite needs its --quote")
-            pending = value
-        elif pending is not None:
-            pairs.append((pending, value))
-            pending = None
-        else:
-            alone.append(value)
-    if pending is not None:
-        raise ValueError("each --cite needs its --quote")
-    if len(alone) > 1:
-        raise ValueError("only one --quote may stand without --cite")
-    return pairs, (alone[0] if alone else None)
+from muninn.cli_learn import installed_policy, propose
+from muninn.knowledge_models import KnowledgeView, Scope
+from muninn.query.answers import knowledge_scopes
+from muninn.review_models import ProposalInput
+from muninn.scope import scope_ids_for_read
 
 
-def _refused(refused: knowledge.RefusedError) -> Result:
-    """Turn a refused ledger write into exit 2 with its code."""
-    return 2, {"error": refused.code}
+def _scopes(conn: sqlite3.Connection, a: Namespace, env: Env) -> list[Scope]:
+    """Resolve permitted mapped project/task scopes without writing paths."""
+    ids = scope_ids_for_read(conn, current_dir(env))
+    return knowledge_scopes(
+        conn, ids, getattr(a, "all_projects", False), getattr(a, "task", None)
+    )
 
 
-def _add(a: Namespace, env: Env, home: Path, record: Record) -> Result:
-    """Record a new entry; every entry needs a verbatim quote."""
-    pairs, alone = _citations(a.cited)
+def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
+    """List or search only current applicable supported guidance."""
+    views: dict[str, KnowledgeView] = {}
+    with knowledge_read.read_snapshot(conn):
+        for scope in _scopes(conn, a, env):
+            found = (
+                knowledge_read.search_knowledge(conn, a.query, scope)
+                if a.know_cmd == "search"
+                else knowledge_read.current_knowledge(conn, scope, time.time())
+            )
+            views.update((view.id, view) for view in found)
+    return {
+        "knowledge": [
+            view.model_dump(mode="json")
+            for view in sorted(
+                views.values(),
+                key=lambda view: (view.created_at, view.id),
+                reverse=True,
+            )
+        ]
+    }
+
+
+# Translate within read_store so its one-time hot-journal healing can run.
+@query.guarded
+def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
+    """Return typed views or context bounded by the installed policy."""
+    if a.know_cmd in {"list", "search"}:
+        return _views(conn, a, env)
+    if a.know_cmd == "show":
+        return knowledge_read.show_knowledge(
+            conn, a.kid, a.revision
+        ).model_dump(mode="json")
+    policy = installed_policy(conn)
+    scopes = _scopes(conn, a, env)
+    project = next(
+        (scope for scope in scopes if scope.project_id is not None), None
+    )
+    if project is None:
+        raise ValueError("scope_unavailable")
+    return knowledge_push.knowledge_context(
+        conn, project, policy.context_bytes, time.time()
+    ).model_dump(mode="json")
+
+
+def _proposal(a: Namespace) -> ProposalInput:
+    """Validate the explicit content contract without allocating authority."""
     try:
-        out: Out = knowledge.run_add(
-            home,
-            # Looked up on cli_core at call time so tests can patch it.
-            wait_s=cli_core.WRITER_WAIT_S,
-            kind=a.kind,
-            text=a.text,
-            cites=pairs,
-            quote_only=alone,
-            supersedes=a.supersedes,
-            global_scope=a.is_global,
-            confidence=a.confidence,
-            valid_until=a.valid_until,
-            sensitivity=a.sensitivity,
-            contradicts=a.contradicts,
-            tags=a.tags,
-            loop=a.loop,
-            cwd=current_dir(env),
-            actor=obs.actor(env),
-            roots=ingest.default_roots(env),
-            env=env,
-        )
-    except knowledge.RefusedError as refused:
-        return _refused(refused)
-    record["knowledge_ids"] = [knowledge_id(out["entry"])]
-    return 0, out
+        return ProposalInput.model_validate_json(Path(a.input).read_bytes())
+    except ValidationError:
+        raise ValueError("rejected_validation") from None
 
 
-def _retract(a: Namespace, env: Env, home: Path, record: Record) -> Result:
-    """Retract a current entry."""
-    try:
-        out: Out = knowledge.run_retract(
-            home,
-            wait_s=cli_core.WRITER_WAIT_S,
-            kid=a.kid,
-            reason=a.reason,
-            actor=obs.actor(env),
-        )
-    except knowledge.RefusedError as refused:
-        return _refused(refused)
-    record["knowledge_ids"] = [knowledge_id(out["entry"])]
-    return 0, out
-
-
-def _list(a: Namespace, env: Env, home: Path, record: Record) -> Result:
-    """List entries of this repo and global, newest first."""
-    if a.loop is not None and a.all_projects:  # a loop is one scope
-        return 2, {"error": "loop_with_all_projects"}
-
-    def work(conn: sqlite3.Connection) -> Out:
-        return knowledge.list_entries(
-            conn,
-            cwd=current_dir(env),
-            status=a.status,
-            kind=a.kind,
-            all_projects=a.all_projects,
-            loop=a.loop,
-            tags=a.tags,
-        )
-
-    out = read_store(home, work)
-    entries: list[dict[str, Any]] = out.get("entries", [])
-    record["knowledge_ids"] = [knowledge_id(e) for e in entries]
-    return code_for(out), out
-
-
-def _show(a: Namespace, env: Env, home: Path, record: Record) -> Result:
-    """Show one entry with its chain and log."""
-
-    def work(conn: sqlite3.Connection) -> Out:
-        return knowledge.show(conn, a.kid)
-
-    out = read_store(home, work)
-    if "entry" in out:
-        record["knowledge_ids"] = [knowledge_id(out["entry"])]
-    return code_for(out), out
-
-
-def _check(a: Namespace, env: Env, home: Path, record: Record) -> Result:
-    """Re-verify every citation against its transcript."""
-    out: Out = read_store(home, knowledge.check)
-    record["counts"] = counts(out)
-    return 0, out
-
-
-_SUBCOMMANDS: dict[str, Handler] = {
-    "add": _add,
-    "retract": _retract,
-    "list": _list,
-    "show": _show,
-    "check": _check,
-}
-
-
+@query.guarded
 def know(a: Namespace, env: Env, home: Path, record: Record) -> Result:
-    """Dispatch ``muninn know SUBCOMMAND``; log it as ``know SUBCOMMAND``."""
+    """Dispatch current knowledge controls and emit safe refusal codes."""
     record["cmd"] = f"know {a.know_cmd}"
-    return _SUBCOMMANDS[a.know_cmd](a, env, home, record)
+    try:
+        if a.know_cmd == "propose":
+            proposal = _proposal(a)
+            out = propose(home, proposal).model_dump(mode="json")
+            record["knowledge_ids"] = [
+                item["knowledge_id"] for item in out["applied"]
+            ]
+        elif a.know_cmd == "retract":
+            out = write_store(
+                home,
+                lambda conn: knowledge_write.retract_knowledge(
+                    conn, a.kid, a.expected_revision, a.reason, time.time()
+                ).model_dump(mode="json"),
+            )
+            record["knowledge_ids"] = [out["id"]]
+        else:
+            out = read_store(home, lambda conn: _read(conn, a, env))
+            record["knowledge_ids"] = [
+                view["id"]
+                for view in out.get("knowledge", out.get("notes", []))
+            ]
+            if "id" in out:
+                record["knowledge_ids"] = [out["id"]]
+    except ValidationError:
+        return 2, {"error": "rejected_validation"}
+    except ValueError as exc:
+        code = (
+            "rejected_evidence"
+            if str(exc)
+            in {
+                "original_unavailable",
+                "evidence_changed",
+                "evidence_unavailable",
+                "evidence_limit",
+            }
+            else str(exc)
+        )
+        return 2, {"error": code}
+    return 0, out

@@ -1,0 +1,1755 @@
+{
+  "commit": "5c1a69b0edff81df80836d72a80971a91a8f9520",
+  "files": {
+    ".claude/settings.json": {
+      "mode": 436,
+      "sha256": "bd12cdfba0fdd397bee46a6a5132c644fed3ec4d456146599a80a95f3192ee53"
+    },
+    ".claude/skills/muninn-compact/SKILL.md": {
+      "mode": 436,
+      "sha256": "c1770d3feb69ccb848d7505b66bcf17db7bbb2afe00942b8d22cebb6c92796a8"
+    },
+    ".claude/skills/muninn-doctor/SKILL.md": {
+      "mode": 436,
+      "sha256": "d711b2f4ead2940d84f7da715f4d30df114b67e71430cc497402190d96967aee"
+    },
+    ".claude/skills/muninn-erase/SKILL.md": {
+      "mode": 436,
+      "sha256": "01337dd0e5ded32444c97d66bfb2bd05faef28e5b78662420a812a0de1287aec"
+    },
+    ".claude/skills/muninn-ingest/SKILL.md": {
+      "mode": 436,
+      "sha256": "25b22041f428c4d6335a967694e28a2b32aff1e1ede30ad8afe84707798b5af4"
+    },
+    ".claude/skills/muninn-know/SKILL.md": {
+      "mode": 436,
+      "sha256": "b0f60d8eb054175c02aa3219966f49f673b95b8354e8afe86a156aa9c3c4fa7b"
+    },
+    ".claude/skills/muninn-open/SKILL.md": {
+      "mode": 436,
+      "sha256": "bfa8ec5465d065864fbe832cbcef4d01985ab0e568c083a922cba43c1ab5afe0"
+    },
+    ".claude/skills/muninn-quote-check/SKILL.md": {
+      "mode": 436,
+      "sha256": "ef701bdd481c3126d91793abb3c2fa820e17088b351bc6666b74f88e92cacce3"
+    },
+    ".claude/skills/muninn-rebuild/SKILL.md": {
+      "mode": 436,
+      "sha256": "2b0615fda7ff99e026685df9724945eba8ddaa3957efbaa352db619657fda6b9"
+    },
+    ".claude/skills/muninn-search/SKILL.md": {
+      "mode": 436,
+      "sha256": "0bb496e1150ba3057899656afe618736621fe5cf3b498f92f3b19a1db638f22d"
+    },
+    ".claude/skills/muninn-sessions/SKILL.md": {
+      "mode": 436,
+      "sha256": "3cef98b831a4cc66fe4dda2fbf81f598b1f9fd6b36c7c7e2b919d77ce9ef0f67"
+    },
+    ".claude/skills/muninn-stats/SKILL.md": {
+      "mode": 436,
+      "sha256": "56f44fc21626c100ecdcc93a8212032e4c3f4a344418c2a0746a27279d611699"
+    },
+    ".codex/hooks.json": {
+      "mode": 436,
+      "sha256": "b57d95e9acf4c1d756f53258efc76ddd4618bfeb775f3f5fd185ed1f08bd77c8"
+    },
+    ".codex/skills/muninn-compact/SKILL.md": {
+      "mode": 436,
+      "sha256": "c1770d3feb69ccb848d7505b66bcf17db7bbb2afe00942b8d22cebb6c92796a8"
+    },
+    ".codex/skills/muninn-doctor/SKILL.md": {
+      "mode": 436,
+      "sha256": "d711b2f4ead2940d84f7da715f4d30df114b67e71430cc497402190d96967aee"
+    },
+    ".codex/skills/muninn-erase/SKILL.md": {
+      "mode": 436,
+      "sha256": "19fae20891f5971110b430ae0c7aa481239567ce3d3e60d65132684d5d6d7c59"
+    },
+    ".codex/skills/muninn-ingest/SKILL.md": {
+      "mode": 436,
+      "sha256": "25b22041f428c4d6335a967694e28a2b32aff1e1ede30ad8afe84707798b5af4"
+    },
+    ".codex/skills/muninn-know/SKILL.md": {
+      "mode": 436,
+      "sha256": "b0f60d8eb054175c02aa3219966f49f673b95b8354e8afe86a156aa9c3c4fa7b"
+    },
+    ".codex/skills/muninn-open/SKILL.md": {
+      "mode": 436,
+      "sha256": "bfa8ec5465d065864fbe832cbcef4d01985ab0e568c083a922cba43c1ab5afe0"
+    },
+    ".codex/skills/muninn-quote-check/SKILL.md": {
+      "mode": 436,
+      "sha256": "ef701bdd481c3126d91793abb3c2fa820e17088b351bc6666b74f88e92cacce3"
+    },
+    ".codex/skills/muninn-rebuild/SKILL.md": {
+      "mode": 436,
+      "sha256": "3e82a09f268c2066421ba314fb10504d36f1f39d18d096e740f4f0c582c45f9a"
+    },
+    ".codex/skills/muninn-search/SKILL.md": {
+      "mode": 436,
+      "sha256": "0bb496e1150ba3057899656afe618736621fe5cf3b498f92f3b19a1db638f22d"
+    },
+    ".codex/skills/muninn-sessions/SKILL.md": {
+      "mode": 436,
+      "sha256": "3cef98b831a4cc66fe4dda2fbf81f598b1f9fd6b36c7c7e2b919d77ce9ef0f67"
+    },
+    ".codex/skills/muninn-stats/SKILL.md": {
+      "mode": 436,
+      "sha256": "56f44fc21626c100ecdcc93a8212032e4c3f4a344418c2a0746a27279d611699"
+    },
+    ".gitattributes": {
+      "mode": 436,
+      "sha256": "d2c7f33082c0d3ac9baaed389f132df15abe0ee6e54d7b640cb6f0a0eeda2557"
+    },
+    ".githooks/pre-commit": {
+      "mode": 509,
+      "sha256": "c314f69259c5d8dc1082f1b1a90fbc4c6794d6e7dfd184d7366494de00065bb2"
+    },
+    ".githooks/pre-merge-commit": {
+      "mode": 509,
+      "sha256": "9324803d7196597af690ba4d53af915b39979e0d553301ce2afb0ca777dd705b"
+    },
+    ".github/workflows/platforms.yml": {
+      "mode": 436,
+      "sha256": "b1e67a9e65bc54a70ddb9c8e27efc5a0ed0c3b4ffbfd67e49c52a913150989fa"
+    },
+    ".gitignore": {
+      "mode": 436,
+      "sha256": "9eb38280b60874fdc2aa95b1c123a6ce773fd6843628eb0010c4d6d53bf5e766"
+    },
+    "AGENTS.md": {
+      "mode": 436,
+      "sha256": "7275973d6f2b1973cf209dc25487e851d5b18324e316dc92d7ae45dec1086b21"
+    },
+    "CLAUDE.md": {
+      "mode": 436,
+      "sha256": "9fd5ba88e3929c07e347fce58196b00c2260d20e93f9a3753de811613b0e297d"
+    },
+    "LICENSE": {
+      "mode": 436,
+      "sha256": "ed89d423adbbb4bcedc3141d59cc036861a47a2690312a352f62d5a58252ab0d"
+    },
+    "README.md": {
+      "mode": 436,
+      "sha256": "dddceaae2c3fba6ce9da6e2e1d71f340d698dbc9d11a2bb919c700d95b4cfc4b"
+    },
+    "assets/muninn-avatar.png": {
+      "mode": 436,
+      "sha256": "96db2ca2b30d05e416fe6b764e56fed7570db80d05f375139109c8ca5a101534"
+    },
+    "assets/muninn-banner-wide.png": {
+      "mode": 436,
+      "sha256": "60b58807b62b3875f61a231feaa4d5b0c7770ad0f775314010702472fa682e3f"
+    },
+    "assets/muninn-mythic-woodcut.png": {
+      "mode": 436,
+      "sha256": "6cf7512e54f0c8abb54e70685812cae375d49e70615cddb4fca5eb4f1151aac4"
+    },
+    "assets/muninn-social-preview.png": {
+      "mode": 436,
+      "sha256": "562782145107cb4759168d65286eb9a2493c80e77811f33377d9edb2ca26ad17"
+    },
+    "assets/muninn-square.png": {
+      "mode": 436,
+      "sha256": "65e9eb5fe5a1bab336947e6a93c01a5a2955333a8f23cc32e87d816f291bcb5b"
+    },
+    "bin/muninn": {
+      "mode": 509,
+      "sha256": "ce276a76440baafeb2e47a595db222a8f99a041819b5a09ddb68c01269ca450a"
+    },
+    "bin/muninn-install": {
+      "mode": 509,
+      "sha256": "44fb5308355c50acce1a41aa9162a8474d878a756c5b7c64ca376e39e03e3c52"
+    },
+    "bin/muninn-install.cmd": {
+      "mode": 436,
+      "sha256": "0d8331508fa7909d076017cb8cb18851cfe0daa14b55b294b770c0a375195336"
+    },
+    "bin/muninn-install.ps1": {
+      "mode": 436,
+      "sha256": "3a269358af8c34eaa23249eba6f778a4db7254cc35b49ee4a35ca8882975016d"
+    },
+    "bin/muninn-uninstall": {
+      "mode": 509,
+      "sha256": "1330ce68d7a025000381b2cb5c211d342f7cc144d186584e162bd5c22ff34954"
+    },
+    "bin/muninn-uninstall.cmd": {
+      "mode": 436,
+      "sha256": "887fb1cd81be81fa789cb46e27d4136783bf6970be452864df67a6757bf477a9"
+    },
+    "bin/muninn-uninstall.ps1": {
+      "mode": 436,
+      "sha256": "5df196410bafd387b3824ca0f9ddc33e53f7eaf0254ec1b6bf0c31478b5deae5"
+    },
+    "bin/muninn.cmd": {
+      "mode": 436,
+      "sha256": "d392b3b25aec892415916195e2024ef1dd7c8ce70df30df93131e1cf9001b83f"
+    },
+    "bin/muninn.ps1": {
+      "mode": 436,
+      "sha256": "259501dc29b4eb50cfed771f5ccbfad843a1a086587964080a54c41a328ccb6b"
+    },
+    "docs/ARCHITECTURE.md": {
+      "mode": 436,
+      "sha256": "59d7d7d1d0a0496c536645970aa003b24107849364bc27fbb16e7b0f42e9bf18"
+    },
+    "docs/CURSOR-PRECOMPACT-BENCHMARK.md": {
+      "mode": 436,
+      "sha256": "9c585672455d03b343b9664a61089240a996e75b4504b8ca0d7b22eb4ea48293"
+    },
+    "docs/QUICKSTART.md": {
+      "mode": 436,
+      "sha256": "f67c58486c80b4802addce1741f3a9a711df6e6de5a27d30d9736527094ef9f5"
+    },
+    "docs/REFERENCE.md": {
+      "mode": 436,
+      "sha256": "9fa79a8032ed498ca0c325c0f0e0522c6272ec8a2413d171d30fa4f3f939e183"
+    },
+    "docs/SKILLS.md": {
+      "mode": 436,
+      "sha256": "3922c4bbc41a43a5aa784f9451bb280102bcf6586b5eea1730cd1964b0de171b"
+    },
+    "docs/STANDARDS.md": {
+      "mode": 436,
+      "sha256": "a5788009c035d0a6b9526ae1ea5bf2dc6df49d65cd668e279ab7fda465b79251"
+    },
+    "docs/TROUBLESHOOTING.md": {
+      "mode": 436,
+      "sha256": "733eabffb188b30107487f64c5ca7b9a48dd46c5de53df765c3fa274381ae8d8"
+    },
+    "docs/adr/0001-one-pinned-release.md": {
+      "mode": 436,
+      "sha256": "72b06bc6d97d3ce5462a401280e46855d8d55d6d2088982336dd0805f8617918"
+    },
+    "docs/adr/0002-installer-modes.md": {
+      "mode": 436,
+      "sha256": "4aed394a6cadf794299a047d50a47c79016a81fd0448c46fe34402c7f5d81cfa"
+    },
+    "docs/adr/0003-interpreter-resolution.md": {
+      "mode": 436,
+      "sha256": "3d81294cdc50986076b4b1258651cc6079d3c3c5a24cf565ab716730b4a2f970"
+    },
+    "docs/adr/0004-content-free-logs.md": {
+      "mode": 436,
+      "sha256": "964dc6f93b6392a39f495034d8a55c0584a1bf993a9eefab307f6dfe0e6ac8ad"
+    },
+    "docs/adr/0005-no-hash-chained-call-log.md": {
+      "mode": 436,
+      "sha256": "15ec9931bd1685a2f79969c5336a094d3fcd4580d01c8276641e8c45fa438715"
+    },
+    "docs/adr/0006-mechanical-standards.md": {
+      "mode": 436,
+      "sha256": "4e81e4bfdb5980f0dfafa39d972c6accd4ad1079805998dbe749f4bdb947d1e4"
+    },
+    "docs/adr/0007-recall-off-by-default.md": {
+      "mode": 436,
+      "sha256": "1bd456ad3d20729172963ec0523522803b1edba1ef2a6e852a8bda87d8a720c9"
+    },
+    "docs/adr/0008-install-wrapper.md": {
+      "mode": 436,
+      "sha256": "509a23601408511b438f8693f0edf4dc93f8cd24fd516f0e168d5528d150a49d"
+    },
+    "docs/adr/0009-uninstall.md": {
+      "mode": 436,
+      "sha256": "4d679adb4a4a38928537884553d1ec785afe98423a33abd3759f395665878d62"
+    },
+    "docs/adr/0010-chatgpt-handoff-sessions.md": {
+      "mode": 436,
+      "sha256": "ca0f6e1b329f441b0e271cde6a4b2c557f2fee3ac12f91d2daaa415c282983bc"
+    },
+    "docs/adr/0011-one-way-schema-migration-with-snapshot.md": {
+      "mode": 436,
+      "sha256": "86692294cc37ec80dbd1da20c036505f654cc242679023992dc286cf248574e4"
+    },
+    "docs/adr/0012-keyed-content-tombstones.md": {
+      "mode": 436,
+      "sha256": "aeee57e45749504c07f39ac6625d722937d984a6cd61cdf9459a650c1c6cf75f"
+    },
+    "docs/adr/0013-cursor-imports.md": {
+      "mode": 436,
+      "sha256": "8f29acd76c04c9c14341ed6fdc71ed3fbe2fd4be658f2cb1c5accaf1f041020c"
+    },
+    "docs/adr/README.md": {
+      "mode": 436,
+      "sha256": "14bfa6cb36829f4a086da7f6b70e2d04f3e694912b55785fae672f86b2012127"
+    },
+    "install/__init__.py": {
+      "mode": 436,
+      "sha256": "0f8263b46bd8425e393c6650c03a2d680fd71a6743862a8b70cda6b110683cbc"
+    },
+    "install/config_windows.py": {
+      "mode": 436,
+      "sha256": "76fca29f88e7489cc4286b8e693354e9ad3ed6115dbd856f60f4af482d8983cc"
+    },
+    "install/configedit.py": {
+      "mode": 436,
+      "sha256": "c08384e9905c102941442ba1c86b8f5e2c060df0000fd172612400cb3a28fe75"
+    },
+    "install/constants.py": {
+      "mode": 436,
+      "sha256": "32208635133ae69fc6fc7afe9db5f1cdd07faefd6ad188c729e187a0bb0cedd2"
+    },
+    "install/context.py": {
+      "mode": 436,
+      "sha256": "d8aa2a7506736c5a89cef72fd2e5906cdd380c10ad05cf66d013bd61e134afed"
+    },
+    "install/entry.py": {
+      "mode": 436,
+      "sha256": "7205cb93abe644b7b3bc2d47c24a077a9d83cbcac7f6c19c6da6016ee24086b5"
+    },
+    "install/errors.py": {
+      "mode": 436,
+      "sha256": "d8b3e725ae44b99626c085af035764cb24fe1b830c110b51c0b84422da26911b"
+    },
+    "install/installer.py": {
+      "mode": 436,
+      "sha256": "4fb1f4688324bb79e58741aebfd632920eaf99c6e8a2864696224fb7004cd95a"
+    },
+    "install/installer_log.py": {
+      "mode": 436,
+      "sha256": "0aef339edfcb3734a4081d3909ba81a9bd6b6bccfc8f76bb3446d07ca3c175a9"
+    },
+    "install/lifecycle.py": {
+      "mode": 436,
+      "sha256": "af2603bb992ccba2b37e2a5fbe1d38468d1635a5a0252d618d07e5182e3e7a3a"
+    },
+    "install/preflight.py": {
+      "mode": 436,
+      "sha256": "dd475abf44874b5cf094003dc67b625ff87fb4365398044c251a2cf9f7fc9c65"
+    },
+    "install/probe.py": {
+      "mode": 436,
+      "sha256": "d4fec1573aa45108b409be75a84727bb4a9fdd0c758b130bcc3b4662db428fc3"
+    },
+    "install/provider_apps.py": {
+      "mode": 436,
+      "sha256": "b345cca4095813d5e2b026be7838981d4383ef8aaab7cdeabf909e6d46c7d72b"
+    },
+    "install/provider_paths.py": {
+      "mode": 436,
+      "sha256": "1e37d1b61209424132a232824b68dfd944c5280fdc7d58280b70353a03035e00"
+    },
+    "install/record.py": {
+      "mode": 436,
+      "sha256": "29c6575511f03b74c9f14191c22fa879f5aa2cbff30a31603eeb1b0814785474"
+    },
+    "install/release_io.py": {
+      "mode": 436,
+      "sha256": "2d32435759a1e6c2eda0b34b719adb34a85f741bc90a36467b2a088505cda1f6"
+    },
+    "install/rollback.py": {
+      "mode": 436,
+      "sha256": "5740821236dc1cccc4ad533117f61da6e5053347af5a1497e221f1078be4c3a7"
+    },
+    "install/snapshot.py": {
+      "mode": 436,
+      "sha256": "f9f29a9a988b48dde23a6ae8cb174416993217f73d9bba4020a6e560d810582e"
+    },
+    "install/snapshot_io.py": {
+      "mode": 436,
+      "sha256": "f7267e3b7e8bfca84ab994ccd07ace39472b51f89f1a017a07f65bb7c2fe1ced"
+    },
+    "install/steps_config.py": {
+      "mode": 436,
+      "sha256": "aad33a677903a6eb7e36bdd8d23a5ccd1cc9461f8255c831e8839276af1df854"
+    },
+    "install/steps_release.py": {
+      "mode": 436,
+      "sha256": "8c455cf5712fb96fd295c27de7b9ed930da5b63b7cda5c0e2d4ebc680fbe3f91"
+    },
+    "install/tomledit.py": {
+      "mode": 436,
+      "sha256": "8b454ea744ba4c817025c266b9d06668555efdd01db80159181b496b77a94d29"
+    },
+    "install/transforms.py": {
+      "mode": 436,
+      "sha256": "b8b829d8c2a036b4e89dba31cd7f5f666af2d7b3d96d8950d5fbb50d8861244a"
+    },
+    "install/trust.py": {
+      "mode": 436,
+      "sha256": "9d48c80c8868a22f1452ca05c6dc517265687cf2e237f88604fccc414aadeb07"
+    },
+    "install/uninstall.py": {
+      "mode": 436,
+      "sha256": "af39ecf4c1450abb743ea8e6f94303485abbf804d62e3d8c59d9b6dde9fb18f9"
+    },
+    "install/verify.py": {
+      "mode": 436,
+      "sha256": "67e8d874ef992b6c1e0418a7e13dc9a5d314161d5bf683c607f0fc47e62e002b"
+    },
+    "install/writer_binding.py": {
+      "mode": 436,
+      "sha256": "698ca44d0ae867cd4dae523979b0abecd1d81127368f4217c16c6ee45b5c39f0"
+    },
+    "integrations/claude/settings-hooks.json": {
+      "mode": 436,
+      "sha256": "d0c95998d3d18709c9de02913a14ea01eac3d9e4afcd46eb2cb6d8390ad3d361",
+      "template": "{\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"matcher\": \"startup|resume|clear|compact\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"@HOME@/.local/bin/muninn hook session-start --provider claude\",\n            \"timeout\": 5\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"@HOME@/.local/bin/muninn hook prompt --provider claude\",\n            \"timeout\": 5\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+    },
+    "integrations/codex/.agents/plugins/marketplace.json": {
+      "mode": 436,
+      "sha256": "eb4addf7301fb5afd23d89da9aaca7d93a466dc3b6b4f6fd4e76112959139a27"
+    },
+    "integrations/codex/.codex-plugin/plugin.json": {
+      "mode": 436,
+      "sha256": "0edbc87f3e12d6791af4c8ad3503d41a66d165e5b5dcaae6c5b6ab7c292c4dfb"
+    },
+    "integrations/codex/hooks/hooks.json": {
+      "mode": 436,
+      "sha256": "509ad018d4626ca852f29cfbf3508f1939ace03596a6eca29079931e5676f54a",
+      "template": "{\n  \"description\": \"Inject bounded muninn memory blocks as untrusted data.\",\n  \"hooks\": {\n    \"SessionStart\": [\n      {\n        \"matcher\": \"startup|resume|clear|compact\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"@HOME@/.local/bin/muninn hook session-start --provider codex\",\n            \"timeout\": 5,\n            \"additionalContextLimit\": 1500\n          }\n        ]\n      }\n    ],\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"@HOME@/.local/bin/muninn hook prompt --provider codex\",\n            \"timeout\": 5,\n            \"additionalContextLimit\": 500\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+    },
+    "integrations/cursor/hooks.json": {
+      "mode": 436,
+      "sha256": "a5522ce1b19559c5fead08fb74b3a2b55e2e1a3c68fd88c2527ae788cb55f225",
+      "template": "{\n  \"version\": 1,\n  \"hooks\": {\n    \"preCompact\": [\n      {\n        \"command\": \"@HOME@/.local/bin/muninn hook pre-compact --provider cursor\",\n        \"timeout\": 90\n      }\n    ]\n  }\n}\n"
+    },
+    "launchd/com.muninn.plist": {
+      "mode": 436,
+      "sha256": "0d40b52445aa26a2c01036688e2a2af21830a69a2dd321c5a9a8605ec6a8ab7e",
+      "template": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\"\n  \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n  <key>Label</key>\n  <string>com.muninn</string>\n  <key>ProgramArguments</key>\n  <array>\n    <string>@HOME@/.local/lib/muninn/current/bin/muninn</string>\n    <string>serve</string>\n    <string>--interval</string>\n    <string>60</string>\n  </array>\n  <key>KeepAlive</key>\n  <true/>\n  <key>RunAtLoad</key>\n  <true/>\n  <key>ProcessType</key>\n  <string>Background</string>\n  <key>LowPriorityIO</key>\n  <true/>\n  <key>Umask</key>\n  <string>077</string>\n  <key>EnvironmentVariables</key>\n  <dict>\n    <key>PATH</key>\n    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>\n  </dict>\n  <key>StandardOutPath</key>\n  <string>/dev/null</string>\n  <key>StandardErrorPath</key>\n  <string>/dev/null</string>\n</dict>\n</plist>\n"
+    },
+    "muninn/__init__.py": {
+      "mode": 436,
+      "sha256": "9a5b02b0bbb387695c9ded8d5c9bf2ef403b1af9b26e2a101c2d876542309dd0"
+    },
+    "muninn/__main__.py": {
+      "mode": 436,
+      "sha256": "097e4c1166adaea086b64d981ab39c4863da73d43a1b1f133a07d135acc0f0c1"
+    },
+    "muninn/classify.py": {
+      "mode": 436,
+      "sha256": "850d064a22d7ab41c9d7a8d01b3e021723b49a4fdad0882dfb518cd71bee3e80"
+    },
+    "muninn/claude_events.py": {
+      "mode": 436,
+      "sha256": "4242194ffcae686e3dc3f7f9189880f255a0eac2543d9b9c4e17fdc2c2a4bcc8"
+    },
+    "muninn/cli.py": {
+      "mode": 436,
+      "sha256": "e49aafc5f21197503f7f38e6c2b6272143162ef0bf6766d25594ac236aa9063d"
+    },
+    "muninn/cli_core.py": {
+      "mode": 436,
+      "sha256": "346509186bd443e8ac9eed5dac38b6aaada079647c1ae6133ea17e607b257e3b"
+    },
+    "muninn/cli_hook.py": {
+      "mode": 436,
+      "sha256": "300f20052fac52d623aa9b6e2e2d49609ebb685040e880ceb5141585331ecf71"
+    },
+    "muninn/cli_know.py": {
+      "mode": 436,
+      "sha256": "d82bfd537f532b9ea7fc5697e45ebc46e3ce16aa6a58976d0fc8a8a66bd5d7ac"
+    },
+    "muninn/cli_maint.py": {
+      "mode": 436,
+      "sha256": "01d9c05460042e436cb3797e045c07ef41b0e1a84dbe46618554c79ab29b998a"
+    },
+    "muninn/cli_output.py": {
+      "mode": 436,
+      "sha256": "e89231253e2e48a960f6713c5a9cfe7035c888bd8e91926e37c4661132c38dbf"
+    },
+    "muninn/cli_parser.py": {
+      "mode": 436,
+      "sha256": "953a958d4b7679fef35d5afe7f09187ce06bf0dad16aa959c4217de485cd2da6"
+    },
+    "muninn/cli_read.py": {
+      "mode": 436,
+      "sha256": "d894f0121115c5e6a2adeabeebfa90333e1ae74b1677d3e23a84303ca6a63f81"
+    },
+    "muninn/cli_rebuild.py": {
+      "mode": 436,
+      "sha256": "0074b289a8a8eb2d3da5adebd6926bb9b36ef5d7bcb9cfd58447899323dc2cbb"
+    },
+    "muninn/cli_serve.py": {
+      "mode": 436,
+      "sha256": "f3c7a8b0fddd668b26ce00f948eac899c3db2b714342ed670135cc2c7910bb96"
+    },
+    "muninn/codex_events.py": {
+      "mode": 436,
+      "sha256": "744eb0a871b16717939206b9c76441e87499f32883681ef15514a8742a5530bd"
+    },
+    "muninn/cursor_import.py": {
+      "mode": 436,
+      "sha256": "ec87e1321f48280926b56fa6b89ab15db738765cece7ff384c3d88c3e8927599"
+    },
+    "muninn/cursor_import_read.py": {
+      "mode": 436,
+      "sha256": "d88abbd1c0484a8234b2ad010ca6e78857f25bcee2ba6cf8f2e88032aeb4dd28"
+    },
+    "muninn/erase.py": {
+      "mode": 436,
+      "sha256": "003ea3bae0966cabaaa694855351af4dc89b673c51aa5bed5153e5b67eeedc9d"
+    },
+    "muninn/erase_collect.py": {
+      "mode": 436,
+      "sha256": "f172539ed097911a693629dca66103c2fe239c8f94178f557eecd274988e031e"
+    },
+    "muninn/erase_family.py": {
+      "mode": 436,
+      "sha256": "794679f6e214b8464d582b4635c25932ae220ea35b1f0d3d110c4ddb921877a8"
+    },
+    "muninn/erase_residue.py": {
+      "mode": 436,
+      "sha256": "b65e1b4a891660a5a40743cb5cf58f88b5ad02ede6d01a63f505a68d389888ae"
+    },
+    "muninn/event_model.py": {
+      "mode": 436,
+      "sha256": "59cc8f3c9aa6e8a2f8765def812d88dc65c7ed64e37b30030f666c51b35a1534"
+    },
+    "muninn/file_sync.py": {
+      "mode": 436,
+      "sha256": "1c0bbac76af0a4ceac943fad4b9cecbb1d816dfa752ca21bab707e4b2db13f25"
+    },
+    "muninn/hook.py": {
+      "mode": 436,
+      "sha256": "f642639f6346fc453f6bdca4e22872e3d89cfff086bf2642eb3ee3afe0de0d92"
+    },
+    "muninn/hook_context.py": {
+      "mode": 436,
+      "sha256": "9d8ea6d16e46467606c11cfc2c0fbf7b7422a457935eea5fe20d3eacaa1eda5a"
+    },
+    "muninn/hook_cursor.py": {
+      "mode": 436,
+      "sha256": "68145302883cedb114311655f669750f7e36dd256730f56593c7122171b251aa"
+    },
+    "muninn/hook_frame.py": {
+      "mode": 436,
+      "sha256": "ae0a256013a1725536c647e375c159ce818f123797aa3a1716a636b7e55ac361"
+    },
+    "muninn/hook_notes.py": {
+      "mode": 436,
+      "sha256": "092e097a2c4e77ee25f880310bedbe8bc26e4d699ac6b285c8a0003a9fe70e6e"
+    },
+    "muninn/hook_recall.py": {
+      "mode": 436,
+      "sha256": "2495d6d0b5a75b4461fcf022ae856b31f0da01fc237d88588b45d4cc6418e15e"
+    },
+    "muninn/ingest.py": {
+      "mode": 436,
+      "sha256": "c2a4ea920cdea8d5d521cd8e370b55d93fc2164dc6f527501adeb7d067c24085"
+    },
+    "muninn/ingest_lines.py": {
+      "mode": 436,
+      "sha256": "bf44d69a6293dc0a966dc489949881900871735d3015f7487f38376a5d67e8f5"
+    },
+    "muninn/ingest_model.py": {
+      "mode": 436,
+      "sha256": "2dec46eda4875501bcb5bbcd5d49c77ea187550cce98b96ad9a67acacab7f754"
+    },
+    "muninn/ingest_parse.py": {
+      "mode": 436,
+      "sha256": "18def12706db728411e329fb980e5b6f59d53da4ce8776c5ff155e334e76f346"
+    },
+    "muninn/ingest_plan.py": {
+      "mode": 436,
+      "sha256": "0cdce118c8d6b212afece0cedac5387264d1959a0d27afbbd2d051f1e5ff503c"
+    },
+    "muninn/knowledge.py": {
+      "mode": 436,
+      "sha256": "141689f570b3993534a2970388e248138125bc07c44a38b40bff2794c9fcdeb4"
+    },
+    "muninn/knowledge_cite.py": {
+      "mode": 436,
+      "sha256": "b56278a2a50b740520e6b6f91df0f5b43fbcf99b7a1237487c2ab9824d60d4e6"
+    },
+    "muninn/knowledge_expiry.py": {
+      "mode": 436,
+      "sha256": "494ea3ef0c1fdace3c5c5832f8cc26ce89dcadf3fd2410df624ab66b0c5c7d37"
+    },
+    "muninn/knowledge_model.py": {
+      "mode": 436,
+      "sha256": "cac5132c73b73eb67b64758bdded8f4a4e599fe3ed090319805a550e2864f5cb"
+    },
+    "muninn/knowledge_push.py": {
+      "mode": 436,
+      "sha256": "88e72768c3427ab84cf39b77742d91e2cd67f326e58d3805fd0601ef26d08bac"
+    },
+    "muninn/knowledge_read.py": {
+      "mode": 436,
+      "sha256": "20824efd9758a0e97eb72f19934aecb9fc6e1494ee383f9e3b263b34f70618bf"
+    },
+    "muninn/knowledge_typed.py": {
+      "mode": 436,
+      "sha256": "ec8da5249bc4aba30a64438c83e17f3a670d288d6e733f708596622befec998e"
+    },
+    "muninn/obs.py": {
+      "mode": 436,
+      "sha256": "ddf02cb89e785fed1ecf87e8e3d5cd906e012c36c78db42a3d023e1adb3c7d07"
+    },
+    "muninn/obs_linux_service.py": {
+      "mode": 436,
+      "sha256": "3cd36dca3357282f14d6a431f01e2244597a329b33ae7d4ddb482f74fe68fd47"
+    },
+    "muninn/obs_log.py": {
+      "mode": 436,
+      "sha256": "03c7b47f93daac794c2fa61c3b884b83ba75ec1d137d4f7d0494003a9cb248d8"
+    },
+    "muninn/obs_service.py": {
+      "mode": 436,
+      "sha256": "1c149688474fa5b03a4133454542c2bcd1cb1bd20b00f32fa03fe97ac698efc1"
+    },
+    "muninn/obs_service_commands.py": {
+      "mode": 436,
+      "sha256": "3c1722cb40be1aae787b0d9302e24092fa69e73d51d55c6fc0bbe26d984471bb"
+    },
+    "muninn/obs_stats.py": {
+      "mode": 436,
+      "sha256": "67be76ac1c5a451c4f0454c3b751b337088616a912e1a189578643185693fd1a"
+    },
+    "muninn/obs_status.py": {
+      "mode": 436,
+      "sha256": "6f82460373df92066d7e3d53eef383dcab22e789e081e5f282f47c0409873c99"
+    },
+    "muninn/platform_io.py": {
+      "mode": 436,
+      "sha256": "8569dc984145721ba4accffc4ee89717ca6a4a78028570a3cfc769391fea5361"
+    },
+    "muninn/platform_lock.py": {
+      "mode": 436,
+      "sha256": "01bc2abed501ec4d7e04655a965d9155315528336dec6cba18c58a044cc09672"
+    },
+    "muninn/platform_paths.py": {
+      "mode": 436,
+      "sha256": "2f8f3868e72347e62f4a6565a9ee67144b9cf43bbb14929af101b654ba8a8a39"
+    },
+    "muninn/platform_rebuild.py": {
+      "mode": 436,
+      "sha256": "9f4832517c8fcc2fc9764c71914e30f7298daa841ff77dcc95786c3a09e3bb5a"
+    },
+    "muninn/platform_windows.py": {
+      "mode": 436,
+      "sha256": "e6184a6b1be3079a7dcbff2f1c51d2c5a71283be1f1e4520ad793f3632c9d32d"
+    },
+    "muninn/platform_windows_security.py": {
+      "mode": 436,
+      "sha256": "bea4dfd2e84b3f433c9be9fa66ca5527be14faa4642dde902f83472624f2d6c7"
+    },
+    "muninn/poller_stop.py": {
+      "mode": 436,
+      "sha256": "5c3bcf829d94cdd5cf2d76229e1299f3e2ad21262e75644a8a4b9ab6bd1c9e95"
+    },
+    "muninn/query/__init__.py": {
+      "mode": 436,
+      "sha256": "2f8938915ade3d9af48dedd86a83567f4a23d880ed9b77d65640afebd25119d6"
+    },
+    "muninn/query/answers.py": {
+      "mode": 436,
+      "sha256": "8418681f3d196d92252ece1be213994f9b932ff5ffa89d286d07d87687a0dc30"
+    },
+    "muninn/query/constants.py": {
+      "mode": 436,
+      "sha256": "6ec1af0e05ef907168b6f72305ab166b3f7e862200fdbbbf9748c13c5078d35b"
+    },
+    "muninn/query/filters.py": {
+      "mode": 436,
+      "sha256": "febcf83e2b9392b034fd78239bb471fde57dd55be2b9786278d8d641ad3ccf05"
+    },
+    "muninn/query/guard.py": {
+      "mode": 436,
+      "sha256": "5c6486f75d22eaee8b67a529a5901e88781551b25681477239cb0a7af71fddf9"
+    },
+    "muninn/query/hits.py": {
+      "mode": 436,
+      "sha256": "f29c96333db52fec731f1a6f504b2cfa059bc9b22f878e952fd2fb3281fbf49c"
+    },
+    "muninn/query/index_age.py": {
+      "mode": 436,
+      "sha256": "e8431adf9dfd37041068415c5c09e838ba70602814bf352f95cef382e2db9db0"
+    },
+    "muninn/query/listing.py": {
+      "mode": 436,
+      "sha256": "dde908ad4f419b1073986419daa682595815457a7149d86ade907c8557e3f35f"
+    },
+    "muninn/query/opening.py": {
+      "mode": 436,
+      "sha256": "739ff8a15fe8a6e9a9ce17724c4241e5dd8c3683a4bf0f531882021ad501181b"
+    },
+    "muninn/query/paging.py": {
+      "mode": 436,
+      "sha256": "d158d44a9598b5a50379592fe42ae9f5377d7e24c864e16545471a079a9407f7"
+    },
+    "muninn/query/quotes.py": {
+      "mode": 436,
+      "sha256": "7039b1ee7ba6b75424722f2b51eef2bf937f60d00a030a5e461ec0122df03614"
+    },
+    "muninn/query/ranked.py": {
+      "mode": 436,
+      "sha256": "69aff381ec533dd536ecfbd89fa066b408e58df0f315c3f9d70fc876e0c031f4"
+    },
+    "muninn/query/terms.py": {
+      "mode": 436,
+      "sha256": "68682d5337d3fa22759e389979887a429a50a839e72fd2900b5d0ee91dc8b111"
+    },
+    "muninn/redaction.py": {
+      "mode": 436,
+      "sha256": "b465d2137e4e40fc1c7058f6d6540912e5bf0b164c99c6f14058448b668c71b2"
+    },
+    "muninn/scope.py": {
+      "mode": 436,
+      "sha256": "62f7ff563320f7b35d439b53e5bd36829b20b04426c618c01eafd7f0dbac4960"
+    },
+    "muninn/store.py": {
+      "mode": 436,
+      "sha256": "6f01d4e525ecfc05fdbb884ab78c7cc193d37576e8729ccc567c8d1a189b1c8b"
+    },
+    "muninn/store_migrate.py": {
+      "mode": 436,
+      "sha256": "1abc8521c8149988e1386deea8d3649e1a7726d625f4aba774398d1dd20ead58"
+    },
+    "muninn/store_schema.py": {
+      "mode": 436,
+      "sha256": "99e0c81ee240acb84df9b88282acb29b18d75d0289c0e3291865e49af306e6ec"
+    },
+    "muninn/tombstone_key.py": {
+      "mode": 436,
+      "sha256": "678d37c931c59fe41759e6d7224b68f0ebda0606cabc84bb3b30a97846e62e8b"
+    },
+    "muninn/tombstones.py": {
+      "mode": 436,
+      "sha256": "5e755b37901a139df879710398e8cb69de9243c0f530607ba71ee7215380751b"
+    },
+    "muninn/tool_errors.py": {
+      "mode": 436,
+      "sha256": "c9c17d243e78978358206c8960d0e0ed557c0e5d10ec1117d28dc4c1d4f23888"
+    },
+    "pyproject.toml": {
+      "mode": 436,
+      "sha256": "1ef1cfd53dada2a3b846088e1af383657e7ac99fa92f778d0a29dda5dbf2b7d7"
+    },
+    "pyrightconfig.json": {
+      "mode": 436,
+      "sha256": "ad715aadc86d6ada911e36d2fed82490f8f9906149ee4edfd09784a3f901c18d"
+    },
+    "requirements-dev.txt": {
+      "mode": 436,
+      "sha256": "577945c9c6e3f44e310edcb2b8910cd1e68f6d5a7ff550047fd1d0d1640cb4f9"
+    },
+    "tests/__init__.py": {
+      "mode": 436,
+      "sha256": "56d9c01e4ad5b066c9c91c26836e2064ea365a6547d20678ed28f79ef428fd6f"
+    },
+    "tests/classify_claude_support.py": {
+      "mode": 436,
+      "sha256": "9463bda847aa08892690b05f3cb21b15235d43e1bdcaf622bdee9fe461689bca"
+    },
+    "tests/classify_support.py": {
+      "mode": 436,
+      "sha256": "e483c400e5e016a9f17e1cab9eac47debaccd8010219a969b30dad2a45219485"
+    },
+    "tests/cli_support.py": {
+      "mode": 436,
+      "sha256": "655ec4a1132c7b35f28dc8eeaddf9b654dd489c38da6f997042e946dc55429bd"
+    },
+    "tests/erase_support.py": {
+      "mode": 436,
+      "sha256": "5a20271cd926c230daf788fe83eaf6a694aa9ed45f9d7a9e40ee73859a43cfe8"
+    },
+    "tests/fixtures/classify/claude-main.jsonl": {
+      "mode": 436,
+      "sha256": "69bb0c69da06d9449928e3d4d27f6616f73e8452935b34564fcdfb23b812ff63"
+    },
+    "tests/fixtures/classify/codex-fork.jsonl": {
+      "mode": 436,
+      "sha256": "6ed60762acd299f0c5713f7734b0e7b97e1c401e7393fcd2c423e62369cc3e82"
+    },
+    "tests/fixtures/classify/codex-guardian.jsonl": {
+      "mode": 436,
+      "sha256": "42b274caf37b7f27126f7738f676e551d0b6a9e15c58009322621abb196103c1"
+    },
+    "tests/fixtures/classify/codex-parent.jsonl": {
+      "mode": 436,
+      "sha256": "17d2f329f34c0cb2c883f63b443c042678e6d39419e886263fef6e801f7cbff1"
+    },
+    "tests/hook_nonregular.py": {
+      "mode": 436,
+      "sha256": "d00ae80029f0c5bd248eea4472f786df44afe99d712dcfafa003a69aa161e7d0"
+    },
+    "tests/hook_support.py": {
+      "mode": 436,
+      "sha256": "a8c093ab1ffd87f896637dfa3d32d1f666d3beb716bd6e37d9b499e37a6e1781"
+    },
+    "tests/ingest_support.py": {
+      "mode": 436,
+      "sha256": "49698ea0b92d6efee505eb67524491862e6cff4b391060dd9e34ca5441f44d3f"
+    },
+    "tests/installer_fakes.py": {
+      "mode": 436,
+      "sha256": "e33b766bbdffbd6a5852ae40bc69bc4f4f10a9c8ec16571661e71ff85fdff89e"
+    },
+    "tests/installer_support.py": {
+      "mode": 436,
+      "sha256": "2ca243278958386aabda1be8f60ad7da248ceb196911a6b0ae9dfd5297108213"
+    },
+    "tests/knowledge_support.py": {
+      "mode": 436,
+      "sha256": "18741bcd0a964eda9b1caee3bf8d5528c34eddffbee84282e007ea3cf58cd590"
+    },
+    "tests/lifecycle_account_child.py": {
+      "mode": 436,
+      "sha256": "6947126f95e92475f401c4eb34d7478de3247f0238d935e98414a0b1266d8500"
+    },
+    "tests/lifecycle_account_desktop.py": {
+      "mode": 436,
+      "sha256": "a1f2546353e070093fb2338ce39bd4140f29e24ee341879cdd631280ec4671fd"
+    },
+    "tests/lifecycle_account_errors.py": {
+      "mode": 436,
+      "sha256": "2df4943df9a581a1e052007ae146706b3a0d778dd86f027693565c7abeb54283"
+    },
+    "tests/lifecycle_account_native.py": {
+      "mode": 436,
+      "sha256": "55e9799f5a62a1053d943fd1ba09a44ee997f6a5f66245633344b85b5fc72ab7"
+    },
+    "tests/lifecycle_account_privileges.py": {
+      "mode": 436,
+      "sha256": "a5ed91ba8152e03f9b0bb834a55055e9cf8819d9d786201b51d15cbbc451a7cc"
+    },
+    "tests/lifecycle_account_scripts.py": {
+      "mode": 436,
+      "sha256": "5eb7c09c40f2cd0ef553b9a16f9eb2cb50b7ea7a0b90389cff76809cb7bd2cb7"
+    },
+    "tests/lifecycle_native.py": {
+      "mode": 436,
+      "sha256": "927927d40dbf68117c05d52762ac80cff268ef051a71c36d71dac8359ec974d2"
+    },
+    "tests/lifecycle_native_doctor.py": {
+      "mode": 436,
+      "sha256": "65a4190746252830266819512317c3fee3697d15b5816b4b8e625ea013fc8c8f"
+    },
+    "tests/lifecycle_native_entry.py": {
+      "mode": 436,
+      "sha256": "bf86dab72f2f549e9d5b65e89984c1b8ec0cf79c4b307bdb696a7badea2f16a4"
+    },
+    "tests/lifecycle_native_linux.py": {
+      "mode": 436,
+      "sha256": "8667da1a66c2cf664a7459520b04f76c2994cacf1e88add3d56a1e3d5bb02e77"
+    },
+    "tests/lifecycle_native_python.py": {
+      "mode": 436,
+      "sha256": "bc4176679beaabfac580f8e9703a629709f78fc82c0d7fda6ab69cd1bcb6d088"
+    },
+    "tests/lifecycle_native_records.py": {
+      "mode": 436,
+      "sha256": "2cb721929c9a79cd859b35ed6a4748b3b9bb2f5edc11de25a53fd13ae22a7c54"
+    },
+    "tests/lifecycle_native_rollback.py": {
+      "mode": 436,
+      "sha256": "485d190f815891f58619946cf38564e13a640b2e657c1e701d3abe9db0aa4d35"
+    },
+    "tests/lifecycle_native_windows.py": {
+      "mode": 436,
+      "sha256": "3ed220343dd56fe0dee0a8d0a4d69badeea2052f436bd7aa7ae211a3480382b0"
+    },
+    "tests/lifecycle_native_writer.py": {
+      "mode": 436,
+      "sha256": "77427c1d86983fefc613aebcc30623cbf0c5748b55e5cc0ddee9ea308742ee6d"
+    },
+    "tests/native_diagnostic_metrics.py": {
+      "mode": 436,
+      "sha256": "20887b741159c62b8f455fa034f507ffd831e9ed8f211e3b9860d73f0dfa7625"
+    },
+    "tests/native_diagnostics.py": {
+      "mode": 436,
+      "sha256": "03156d9642e39c87aeb4d358fcc9242d55ff3d0776011d2999128d48ef28032b"
+    },
+    "tests/provider_native.py": {
+      "mode": 436,
+      "sha256": "aba726485f999f0a828a0b8ed1f5bd0a86eb01407ecac519f9a1534f0bd7a593"
+    },
+    "tests/provider_native_codex.py": {
+      "mode": 436,
+      "sha256": "5b8ed07473181646a78c40e73f1a27c924aa7569c827bc53731e4fa934a91759"
+    },
+    "tests/provider_native_security.py": {
+      "mode": 436,
+      "sha256": "680abae5f38cc460523abb85008016adb4c596cfd6259f4f220c2cb5ece5ee56"
+    },
+    "tests/provider_native_setup.py": {
+      "mode": 436,
+      "sha256": "9f7a7df691e83da1d017b2f7eb9bbeb875e5f862fe12144913d993dcade7bc4d"
+    },
+    "tests/provider_native_stages.py": {
+      "mode": 436,
+      "sha256": "a123b0579a65b2b4e9c1948fb1d24b7119cdd5436b4819c2fa281186eb63192a"
+    },
+    "tests/provider_native_stderr.py": {
+      "mode": 436,
+      "sha256": "cdc25d33643644778f638c628e1d93ee769cbcd97f2cda3b47cdfd28fd911d33"
+    },
+    "tests/query_support.py": {
+      "mode": 436,
+      "sha256": "44bdda690d85dcffe923e98336dada12e3bef34b84badbe4883c2cf47a6b7b2a"
+    },
+    "tests/scope_support.py": {
+      "mode": 436,
+      "sha256": "4d100e9e355c9acf558f040b9c5319704ab0b08ebf7b907ca10a5143c668c05b"
+    },
+    "tests/store_support.py": {
+      "mode": 436,
+      "sha256": "f6b197c1efe82fdbc723f09503e0e0dac636b57c1b8354b169c7416f3d5c1da7"
+    },
+    "tests/store_v1_schema.py": {
+      "mode": 436,
+      "sha256": "e825b3e5769f794f3065ea2a2e3795b1c4c36443a6b6024c55fdc0409f970a15"
+    },
+    "tests/test_atomic_state.py": {
+      "mode": 436,
+      "sha256": "e4917f43b7d217e9fe09ba5565548426fbf89b97763355e99b4827e6e3b6a0bc"
+    },
+    "tests/test_benchmark_cursor_precompact.py": {
+      "mode": 436,
+      "sha256": "2a0f19e2acbd16b296ba52d7f7eb8eaa9429dd1183a10b680d5b16054d9a8199"
+    },
+    "tests/test_bootstrap_guards.py": {
+      "mode": 436,
+      "sha256": "da8666968adde0f53af4abc8bd64c539aa9547ef67ad6d7e2f00e218bae42d29"
+    },
+    "tests/test_classify.py": {
+      "mode": 436,
+      "sha256": "dfb6364d9d530c9c4f478ecbd109b1396bd540a8efa1988ad146153aacd9354f"
+    },
+    "tests/test_classify_canary.py": {
+      "mode": 436,
+      "sha256": "e0a2b3cbe97d5a9ed1dbe2206e6c9c626006f025c9cc50685b1c69e148f211cc"
+    },
+    "tests/test_classify_claude.py": {
+      "mode": 436,
+      "sha256": "fa81db659f18de83a13129cb9c04cdfda65d55f32d404408d9218416013965a7"
+    },
+    "tests/test_classify_claude_queued.py": {
+      "mode": 436,
+      "sha256": "af3413df8b98114ce177978495322101973e78be8410b6a465e041e5fe7ad3b3"
+    },
+    "tests/test_classify_codex.py": {
+      "mode": 436,
+      "sha256": "6ec5ee01fdd64a6207e2479b1b8cf5f4a819827c4c09f6f9f0f6871f3583cb3e"
+    },
+    "tests/test_classify_codex_handoff.py": {
+      "mode": 436,
+      "sha256": "b371b838d54788e8bab9ae8590537f72eb5eac1adbda16432612fb566952160e"
+    },
+    "tests/test_classify_tool_errors.py": {
+      "mode": 436,
+      "sha256": "255e0e3006db2882f21535d0a1cf3e582b871f54dc6df5d9b24907d33763a480"
+    },
+    "tests/test_cli.py": {
+      "mode": 436,
+      "sha256": "52071961b42ac22ced8da0e29ea49422ed248f6255b3f8e28768508ef5ab5d83"
+    },
+    "tests/test_cli_doctor.py": {
+      "mode": 436,
+      "sha256": "c09f2f66b8886f6c79efc2db837aa7804f038e88a07607952e66bd22c00a95e2"
+    },
+    "tests/test_cli_know.py": {
+      "mode": 436,
+      "sha256": "92c74b4c273618fddafddd762b9d8a9634e419c3819eeea632ebb285779734fc"
+    },
+    "tests/test_cli_know_tag_filter.py": {
+      "mode": 436,
+      "sha256": "34e61141acad4b5ef205d0883a6fa1e44ded1af494dbce27de1c84cc857cebc4"
+    },
+    "tests/test_cli_know_typed.py": {
+      "mode": 436,
+      "sha256": "3b3c0c260d750b6d4681fec1d3d0f67109e2dd59e514a7d6cbb8d7c31445db83"
+    },
+    "tests/test_cli_reader.py": {
+      "mode": 436,
+      "sha256": "b56126ecd73c9c4ae1a4dcf019dc0b9d87e4172f0b68a1afddc7f7181548acda"
+    },
+    "tests/test_cli_rebuild.py": {
+      "mode": 436,
+      "sha256": "81059ca201d7319659cc4e5d3d56cecfd955890993c4243b2a7cde6b4b4125fa"
+    },
+    "tests/test_cli_writer.py": {
+      "mode": 436,
+      "sha256": "ad3f48070702c7ef1b20d89f562e204327c69485fb8a3f875c9b4e89c3e2baa1"
+    },
+    "tests/test_codex_stop_gate.py": {
+      "mode": 436,
+      "sha256": "8a07e4d7ae7faaf1ca1c057957da2f8c56cb4a7949467e60128ed1150f311d63"
+    },
+    "tests/test_config_windows_metadata.py": {
+      "mode": 436,
+      "sha256": "8b7dfd9f8b4cd0518bf3d77b295da58cc48f531deb3411112aca9e965ae4e1e0"
+    },
+    "tests/test_configedit.py": {
+      "mode": 436,
+      "sha256": "1060702b57c6a60f865677f7504b0e03fcc79871d015e0bf1f4aa4260d6a01a4"
+    },
+    "tests/test_configedit_security.py": {
+      "mode": 436,
+      "sha256": "b6a95fe65b8e1550c35fdecaa9b382da894c7d8afc22e538b0ac5f97839b3af8"
+    },
+    "tests/test_configedit_windows.py": {
+      "mode": 436,
+      "sha256": "7852bab61d0c1345b2673c2876a5fbac7cb5175881dc84299e7784475add5753"
+    },
+    "tests/test_cursor_import.py": {
+      "mode": 436,
+      "sha256": "624e9ccc017d26ba2e3539485c127520f58e9a12bf824367139df510affd55b3"
+    },
+    "tests/test_cursor_precompact.py": {
+      "mode": 436,
+      "sha256": "66de045a300eec37c62d0d3ae9b776112e88495ef380837f619f67cf1780fc67"
+    },
+    "tests/test_cursor_rollback.py": {
+      "mode": 436,
+      "sha256": "fd87d1e0b2915b430da8fc1a1cf6590016299c70f46a7c1e93a60567d520e7ef"
+    },
+    "tests/test_directory_publication.py": {
+      "mode": 436,
+      "sha256": "43827246211c40850cd2490963367508c76a227dc92f0c3fa029d501c076ae19"
+    },
+    "tests/test_erase.py": {
+      "mode": 436,
+      "sha256": "38066310890f3b03ad8d20cd1f50b04a3a5cb4661118e72f31ecc836809f8852"
+    },
+    "tests/test_erase_family.py": {
+      "mode": 436,
+      "sha256": "3a7036addcc3e1fd628320f5245eaa6ba56c90fe56e67f56bd657b50796558df"
+    },
+    "tests/test_erase_files.py": {
+      "mode": 436,
+      "sha256": "9068bf44e68b81ed5f4f44b4e2d56ccb14c1484b914830ef443396f30e511e52"
+    },
+    "tests/test_erase_forks.py": {
+      "mode": 436,
+      "sha256": "e16ecb59c759fa8e4c1a2d055d0877e45aa4974f537ca13703a8998fb77cef63"
+    },
+    "tests/test_erase_hardening.py": {
+      "mode": 436,
+      "sha256": "9dd6003f77f84e7baa9a033e71377c93ea2e4855ce8d82614a91eeb69dfa915e"
+    },
+    "tests/test_erase_typed.py": {
+      "mode": 436,
+      "sha256": "d0befff16722e53056d9cacfed13bc9e274ae5afb43cb056890e7db6f99d004a"
+    },
+    "tests/test_file_sync.py": {
+      "mode": 436,
+      "sha256": "7008e4c8d7ce1677baf70d256668d366b6e81defa8337224f95ee39c892ae871"
+    },
+    "tests/test_guidance.py": {
+      "mode": 436,
+      "sha256": "71d28eead1a1f6113f2aa354ddbf3d5a57c5cbbecdffa77a0efc2713d97beef4"
+    },
+    "tests/test_hook.py": {
+      "mode": 436,
+      "sha256": "0238f8a8e9593fb30ed0bf1b331f0b7149c44d6e618cdf9a5bec95c80c1eae96"
+    },
+    "tests/test_hook_cli.py": {
+      "mode": 436,
+      "sha256": "727c0ad305233da87da00e342b4e65e6c6668a6102a895d9fbd10a6dcbb20e20"
+    },
+    "tests/test_hook_e2e.py": {
+      "mode": 436,
+      "sha256": "d138a067b08982ca44c7ffc8bfe1d97d6c25241aa7ba7ac01932ac8632054a71"
+    },
+    "tests/test_hook_failed_sources.py": {
+      "mode": 436,
+      "sha256": "2342c6a8955dd06862ed9db40376c0b3ebc72379d2b6b4ef4281ff73963b19e1"
+    },
+    "tests/test_hook_paging.py": {
+      "mode": 436,
+      "sha256": "312a10369b987c7ef2e4098cb12447be9f10df7fed09fe2448de208e5b4ba5d6"
+    },
+    "tests/test_hook_recall.py": {
+      "mode": 436,
+      "sha256": "f7deeb13dde732193890be64a028a9a3e2af34ee7723303eef64f9734e5de813"
+    },
+    "tests/test_hook_render.py": {
+      "mode": 436,
+      "sha256": "68b2ca311524c5af51f43c7620b722609b0d641372845c75daee0f85693b01c0"
+    },
+    "tests/test_ingest.py": {
+      "mode": 436,
+      "sha256": "a91aeaceade79d066d7144f9d1fa4c05eb1fc52d20143794cbd3126f1c4c0527"
+    },
+    "tests/test_ingest_amend.py": {
+      "mode": 436,
+      "sha256": "fb83b19102834afe59af10c53aaa3644fa69e273d08a67d1e9652580826f8507"
+    },
+    "tests/test_ingest_handoff.py": {
+      "mode": 436,
+      "sha256": "94ea4d98646e9c6dee9da6f4c704971bc60f1f73077d62951b7aae672c8a0d3c"
+    },
+    "tests/test_ingest_replay.py": {
+      "mode": 436,
+      "sha256": "dafe8dd3d362ba90eded1fc74a1bc491ff2bbf50266656f1fdba5c630f1b1ad4"
+    },
+    "tests/test_install_contracts.py": {
+      "mode": 436,
+      "sha256": "0121fe671ae094a793c5f66384a075dad4891475c978ecb20ffa5913ce34a597"
+    },
+    "tests/test_install_cursor.py": {
+      "mode": 436,
+      "sha256": "c24d0a6c075211aff90f14f914e0336c40acca7fa18fcf070990ecbe6c4d12cf"
+    },
+    "tests/test_install_detection.py": {
+      "mode": 436,
+      "sha256": "0b95bed541e06e947b193fc296c2fb498cd8cb341900cd988ea6dc6f39dd0fb3"
+    },
+    "tests/test_install_dry_run.py": {
+      "mode": 436,
+      "sha256": "1875b88b0ed727c451438a0f6ec1de51504e258556544e30ff6a8dabe55fd492"
+    },
+    "tests/test_install_interpreter.py": {
+      "mode": 436,
+      "sha256": "0aab77b50b03a728109e3ee5f551200ddcb3af46182c633d1cb3c4bd4ded1bb0"
+    },
+    "tests/test_install_lifecycle.py": {
+      "mode": 436,
+      "sha256": "a00f26d815a53bf7e3b5667e76e1a16d7530fc73ab19dceb0b7c969c25b70d4b"
+    },
+    "tests/test_install_platform_context.py": {
+      "mode": 436,
+      "sha256": "7100d0b173bb86cba5238f79453d22dca8892963f71a10c70bab29909ea74294"
+    },
+    "tests/test_install_preflight_logging.py": {
+      "mode": 436,
+      "sha256": "fa38ae4e26c55cba719eaf5bb1ee18bb3a4a512ba6c20c2d9844ec37e1c5ed02"
+    },
+    "tests/test_install_prune.py": {
+      "mode": 436,
+      "sha256": "d622315201a39f5fa4babafa7c317ccdabe2772aad7a4522fbc6bdf13dd628c7"
+    },
+    "tests/test_install_snapshot.py": {
+      "mode": 436,
+      "sha256": "a64caedf8cea0be67424f0e0f31b8ae63a808cb0ec76fe4f1bf56172e8d9dd76"
+    },
+    "tests/test_install_wrapper.py": {
+      "mode": 436,
+      "sha256": "6ef40c1cbbde654e399b2abc482b60fb5ecded4e41f170c3f9c615103904adb2"
+    },
+    "tests/test_installer.py": {
+      "mode": 436,
+      "sha256": "7d66dbdaa03101e15d273bb8508b6eb707d3f05bd603485f6ba29a0a74c7ce6d"
+    },
+    "tests/test_installer_fixture_boundary.py": {
+      "mode": 436,
+      "sha256": "0ec6299f5b54bcec83ebcae955d24124759bd8e3204bf0e18520bacab71dabb8"
+    },
+    "tests/test_integrations.py": {
+      "mode": 436,
+      "sha256": "9300e0cacef4594faff1739f9d84f1d29bba9267051a58dfd5efd4bb47bdde9f"
+    },
+    "tests/test_interpreter_guard.py": {
+      "mode": 436,
+      "sha256": "133404b5b7801727da01537fd0dc854c52390f30e8251450a25a42e8ca95c0d3"
+    },
+    "tests/test_key_history.py": {
+      "mode": 436,
+      "sha256": "6a8c49a1469f348d9cbce5758ba7333b40d84cf774f39f2795efb7efcbf45374"
+    },
+    "tests/test_knowledge.py": {
+      "mode": 436,
+      "sha256": "c3f1139e4b875f39aabbd4acef6da40a4e776a2218e6cf542533e8bbd159f536"
+    },
+    "tests/test_knowledge_approval.py": {
+      "mode": 436,
+      "sha256": "e48cc000e1d25a4e4dfa62c83d66b75664796d77725d15195b101f90a2ddae45"
+    },
+    "tests/test_knowledge_backing.py": {
+      "mode": 436,
+      "sha256": "188c7e931311d83f5cb07b77127f9adf1e41fbcbfab4905edff0e0fcc87995e7"
+    },
+    "tests/test_knowledge_block.py": {
+      "mode": 436,
+      "sha256": "a74bf657a8eefa57763c58fe419203810a973ad545d65dbc2aa043fa9001341a"
+    },
+    "tests/test_knowledge_ledger.py": {
+      "mode": 436,
+      "sha256": "52ed5d6a0061f3b160c57a0e8fb636b314f43407bc3cd889d41c34dd083e9ad0"
+    },
+    "tests/test_knowledge_pull.py": {
+      "mode": 436,
+      "sha256": "5a30452e20f8eda85bbf5df986e85270bc53768ea6fc119d72a9b9911f0740de"
+    },
+    "tests/test_knowledge_quote_only.py": {
+      "mode": 436,
+      "sha256": "ec8dfa496cd12b9e4fd19a3db099f91c58e8bfb3aeecb948f53d586ac256d7ac"
+    },
+    "tests/test_knowledge_typed_read.py": {
+      "mode": 436,
+      "sha256": "fab66039732cea2bdac838d69f657fb2bcabc61c344162932b68bc83fb94f09c"
+    },
+    "tests/test_knowledge_typed_validate.py": {
+      "mode": 436,
+      "sha256": "7a47259f09ff684243debdbeb51ed511c41ca73e02a37febcb986df66c10dc67"
+    },
+    "tests/test_knowledge_verify.py": {
+      "mode": 436,
+      "sha256": "0a71e416966b37d9dba426e27e335a7aaa1db1ff1fdc2b110626d3eb192d2ffb"
+    },
+    "tests/test_lifecycle_account_desktop.py": {
+      "mode": 436,
+      "sha256": "8895ddf3a94b8e9722be3d74714fb037293960afe35aac55721f4fc3bd19df7f"
+    },
+    "tests/test_lifecycle_account_diagnostics.py": {
+      "mode": 436,
+      "sha256": "c1f436d57ab0af187ded7d9f57f4b8cde2c02d64eddda83d5573df944a5bc5ca"
+    },
+    "tests/test_lifecycle_account_errors.py": {
+      "mode": 436,
+      "sha256": "64150a815f5d3bb74ea0cbb233cb5b598bc5586a0d30f4dd8093357d94808b8d"
+    },
+    "tests/test_lifecycle_account_native.py": {
+      "mode": 436,
+      "sha256": "34ed186404e62456874fa0f807aef504195407441794b9ee66304b247193e2a0"
+    },
+    "tests/test_lifecycle_account_privileges.py": {
+      "mode": 436,
+      "sha256": "779f8a765c850df89afdbbc4ad4aafb579fe3e5ee5e674702025764256af6e60"
+    },
+    "tests/test_lifecycle_diagnostics.py": {
+      "mode": 436,
+      "sha256": "a1a9c5c61e68280533e8fc4e712202efdd8eb282476babfd528c27f4046aaebc"
+    },
+    "tests/test_lifecycle_native_doctor.py": {
+      "mode": 436,
+      "sha256": "59161b1887a89f048e9bf1d7483ed46ab9fab74a0d7c6d5e5803e28143260abe"
+    },
+    "tests/test_lifecycle_native_entry.py": {
+      "mode": 436,
+      "sha256": "3efcb0fb58494e053396f6d9c319cb0b6830249f4a5ca76b41f6760f7fbeb2a1"
+    },
+    "tests/test_lifecycle_native_python.py": {
+      "mode": 436,
+      "sha256": "4824bab8f0bbb6e576bf3cc0510e3e6105f61a7e809e3b3d5d4dcd1679e5e47b"
+    },
+    "tests/test_lifecycle_native_rollback.py": {
+      "mode": 436,
+      "sha256": "5f58ad21c282274773b1f1b98ab50f16959f8ac3ac100796be3e03ccc424cf46"
+    },
+    "tests/test_lifecycle_native_writer.py": {
+      "mode": 436,
+      "sha256": "3458d882c0ddb4ddd44630f81f8fc5dee0f5a577643b5a5ccb42b5d5bb7f8731"
+    },
+    "tests/test_lifecycle_timing.py": {
+      "mode": 436,
+      "sha256": "46ae5335d28860afb4298ce5a66e5fcdd4f7b7faacb8caa65d2b63a0c0015d62"
+    },
+    "tests/test_native_diagnostic_codes.py": {
+      "mode": 436,
+      "sha256": "4a3328c86a89ab5fd5ead451f495959052b034113853c561be4510e512897bd1"
+    },
+    "tests/test_native_diagnostics.py": {
+      "mode": 436,
+      "sha256": "8fa72b88dd2dac12124f01f8291353bb4214edaee52cb3d468725e2a353348a4"
+    },
+    "tests/test_native_install_entry.py": {
+      "mode": 436,
+      "sha256": "3ca38f28247b5974232caf797992b27fe46e682b064f03db7966b29a6f0c383c"
+    },
+    "tests/test_native_launcher.py": {
+      "mode": 436,
+      "sha256": "997040f16efa7fd7a5879b55e24d8ff37a93d4d247c9c26b11b6708cbe558e0b"
+    },
+    "tests/test_native_tools.py": {
+      "mode": 436,
+      "sha256": "d8998001e69187abcce55ab0b7386e3ee295b3e4099e4ce5df5218b0e439639a"
+    },
+    "tests/test_obs.py": {
+      "mode": 436,
+      "sha256": "44fbd6633a77ebf1b2ccc2dcfd54d3fe2984945231ccf6c89ac0b16c20c9c3a7"
+    },
+    "tests/test_obs_linux_service.py": {
+      "mode": 436,
+      "sha256": "88fd3750170cc8c07fdeb226c6c89b90b15f936dc8f08c9bc34e363883bb287f"
+    },
+    "tests/test_platform_children.py": {
+      "mode": 436,
+      "sha256": "3e5b813f3e3a8108d8f4cf2b293d680b07073507898c98e9f31da8d7deaf1652"
+    },
+    "tests/test_platform_io.py": {
+      "mode": 436,
+      "sha256": "0abc947b7ef263bd92030f92cca3b0e596320b9e6675d57cb535e73e1721adcb"
+    },
+    "tests/test_platform_lock.py": {
+      "mode": 436,
+      "sha256": "ba79261cb73999bb188ecc33336983f4315d8e5fcbd72780b8c45f6c4aeccd7a"
+    },
+    "tests/test_platform_paths.py": {
+      "mode": 436,
+      "sha256": "2018a04ca593413e4156a87b19d50f0b613c36577086cabac9962d94b60ef94d"
+    },
+    "tests/test_platform_windows.py": {
+      "mode": 436,
+      "sha256": "9c96f5da5c8b93fddb4ec7accb31a7f92544b163b7a2f2f5bc09d58a7572c0dd"
+    },
+    "tests/test_platform_workflow.py": {
+      "mode": 436,
+      "sha256": "99c51c837bb3fe8ab2591966cd2a55842c94accc4a46218931d90cf2d6d6ffa9"
+    },
+    "tests/test_poller_error.py": {
+      "mode": 436,
+      "sha256": "d45f85a7cfb495dd235d1201ca861c1511ef6662541b15709747c83ed7438f6c"
+    },
+    "tests/test_poller_stop.py": {
+      "mode": 436,
+      "sha256": "a96452693fbf68ce188e6780fffe84970e444b2acdd7ec70984f01bedc2fc2a3"
+    },
+    "tests/test_provider_codex_command.py": {
+      "mode": 436,
+      "sha256": "c2bb854e68f2fece9972ac1c2da6cfe606cd8dadbf13c5f8d2cfc9c7607fdbac"
+    },
+    "tests/test_provider_native_security.py": {
+      "mode": 436,
+      "sha256": "f64596bd5262a20847d03713e3fb75437835dea0292af65f3b2103f161b3a319"
+    },
+    "tests/test_provider_native_setup.py": {
+      "mode": 436,
+      "sha256": "c8a48f499b0e46aa7a7a9e33dd84d73ab86663c1ae6b9d667ce307ee3a60c6f1"
+    },
+    "tests/test_provider_native_stages.py": {
+      "mode": 436,
+      "sha256": "ef1b1d57ea0b6c58a068895515c0cb3cb94a8813c65c1fdfdce8a3fcb651ce00"
+    },
+    "tests/test_provider_native_stderr.py": {
+      "mode": 436,
+      "sha256": "c8559da2a29e92e1f620f128746797d50797edc6c8165607d17731c6f6f002c5"
+    },
+    "tests/test_provider_native_timing.py": {
+      "mode": 436,
+      "sha256": "681665f3830f876861758438243779c114ba6ef931205911901c00e03baceaa1"
+    },
+    "tests/test_provider_paths.py": {
+      "mode": 436,
+      "sha256": "985eca7d0ba6f3fe400ab12b84b8bcc815fed39b0b1d1317b2a455c2af17b9a9"
+    },
+    "tests/test_provider_render.py": {
+      "mode": 436,
+      "sha256": "13f50436260cb289a9f7e811ae1e214da4be00d72645b9f566d94ea332c330c5"
+    },
+    "tests/test_provider_trust_version.py": {
+      "mode": 436,
+      "sha256": "0734199806943aecbc0e9d1a3058ff3e711a1827d5702612a29d33f34ba4ee77"
+    },
+    "tests/test_query.py": {
+      "mode": 436,
+      "sha256": "5b4d9b2abc625323371ed247088ce6d2e92544a86d8f651e7abc03c5cd9247c4"
+    },
+    "tests/test_query_compose.py": {
+      "mode": 436,
+      "sha256": "978b56c60e709723dd4a79d3f5b259e41e267599ed0e14ac8cc4c9235424c413"
+    },
+    "tests/test_query_ingested.py": {
+      "mode": 436,
+      "sha256": "53c496b84c23a1db5a4c01fbab1f11bcdb15511782061076bec0807b40585339"
+    },
+    "tests/test_query_open.py": {
+      "mode": 436,
+      "sha256": "176d4c40727ea76dfba8610a382a001052533b23094597124fd3566da12ad35e"
+    },
+    "tests/test_query_paging.py": {
+      "mode": 436,
+      "sha256": "3c5e12e0c17166bc1da3b1cff5726be51fe6247c0edd54c2baf1bda6f8b937c3"
+    },
+    "tests/test_query_search.py": {
+      "mode": 436,
+      "sha256": "daa0d55a3374bf97206832105a543ffb4d3aad02933b5c1b4964b0c2d9455be3"
+    },
+    "tests/test_query_sessions.py": {
+      "mode": 436,
+      "sha256": "703b71dd8d5b9db42d339de7dc60df4cd498721d49494a9c07743e3ae0c660d5"
+    },
+    "tests/test_query_store.py": {
+      "mode": 436,
+      "sha256": "8fff2409d4f937e1454408f9509e18267c20cf88477d7d0cd228e4f8a21fc15b"
+    },
+    "tests/test_rebuild_failures.py": {
+      "mode": 436,
+      "sha256": "f8c3cd65e7be5d4b8d19533485f51a61106e757ae63990287ce56aeab6516eab"
+    },
+    "tests/test_redaction.py": {
+      "mode": 436,
+      "sha256": "4e02031934f66af74b58456a126c824ef2ede7da9064922362a3db9816040710"
+    },
+    "tests/test_reread_progress.py": {
+      "mode": 436,
+      "sha256": "d69aefefdefd0b2bea0e81131b93461563287d4db1767178b875ce9aeea4225d"
+    },
+    "tests/test_residue_portability.py": {
+      "mode": 436,
+      "sha256": "ed3590ad7f8ffb07f7c3d657bd5387a449624775e56bc29de3a1e27018c08215"
+    },
+    "tests/test_run_tests.py": {
+      "mode": 436,
+      "sha256": "83ef7825b08227cf1320523aa16af3967de677e81d18170807a6a27b61cd8555"
+    },
+    "tests/test_scope.py": {
+      "mode": 436,
+      "sha256": "e011eabadaf8e8d05b6138011f7f9838b0f2e655b27e53fee4788edd499382a0"
+    },
+    "tests/test_scope_missing.py": {
+      "mode": 436,
+      "sha256": "80122165296de8480c5afb5e94a860d6be5d42d0f96270aa5c7a5b3020d40d9b"
+    },
+    "tests/test_serve_alive.py": {
+      "mode": 436,
+      "sha256": "1198a11a11c69378b41d0ddc8bf395c67d1a7d6d235df6fbbf315e5593b86496"
+    },
+    "tests/test_serve_identity.py": {
+      "mode": 436,
+      "sha256": "9f9e92e37e347f937f8d1573d32b095c6d1af79956a12c6918a6b7a4e588ac3f"
+    },
+    "tests/test_serve_streams.py": {
+      "mode": 436,
+      "sha256": "0ce459b24bed95b1406a2a7074d502681e4d7d6e52ee08bd14a815147c5cc710"
+    },
+    "tests/test_skeleton.py": {
+      "mode": 436,
+      "sha256": "85c6f16e3c2a4ad0af4f2004997c17a63a80ff0b40e0959536732d4bd2893acd"
+    },
+    "tests/test_snapshot_safety.py": {
+      "mode": 436,
+      "sha256": "4e203e4956f8ef22ebd0ba0736c9d09d54bb9dfff29e7aec05e8132932c4d992"
+    },
+    "tests/test_sqlite_privacy.py": {
+      "mode": 436,
+      "sha256": "d1e904844743996c62965bc7f932cb9b41917964139e49a8540e25dab8f45ae7"
+    },
+    "tests/test_sqlite_version.py": {
+      "mode": 436,
+      "sha256": "63402b0d14366e6139a4499aaad6aae233a8414c39fef5951f81b3757c47d439"
+    },
+    "tests/test_standards.py": {
+      "mode": 436,
+      "sha256": "6d1c897c2c2956c410adc5768b5e13e64d4917126fe580e7f09d594d749fc216"
+    },
+    "tests/test_standards_rules.py": {
+      "mode": 436,
+      "sha256": "df65dc5bc7d21c205d24f9cdcc52223ba844465798f70222870b78c2de5cea6b"
+    },
+    "tests/test_store.py": {
+      "mode": 436,
+      "sha256": "ac90598383b8c2612daa8da9d864b8eae2c76f7d814cb12bcd449d67f509cf94"
+    },
+    "tests/test_store_erasure.py": {
+      "mode": 436,
+      "sha256": "c1ad6b393da9e7693257a2eff276323cbcd8b43767c7a2ef54ebb9cf300308ec"
+    },
+    "tests/test_store_migrate.py": {
+      "mode": 436,
+      "sha256": "27d9711d7cc807ff9650158d03c024cb4a2dfa32756c3732d91a8ad0893b2c6a"
+    },
+    "tests/test_store_migrate_race.py": {
+      "mode": 436,
+      "sha256": "e9bcf21facccb464f782deb173af4437fcc92151f38d3caaa983c5649b4253cd"
+    },
+    "tests/test_store_schema.py": {
+      "mode": 436,
+      "sha256": "5159a0be17ebfaa71f314bf3b71bf27993a48d182fb372a9471332bd84eec838"
+    },
+    "tests/test_task_query.py": {
+      "mode": 436,
+      "sha256": "c65a9a42da3ea57a9a13a205726e6eeb95caa57b1d27e90d5e1e795c8cb2c20d"
+    },
+    "tests/test_tombstone_key.py": {
+      "mode": 436,
+      "sha256": "806024029c5332714dfa9718b4af9438af6824b575f6756a2c0ecec98e8100aa"
+    },
+    "tests/test_uninstall.py": {
+      "mode": 436,
+      "sha256": "0073544cbf0706250af6c6cc2cc3191a97f447db74a35906772417255b75b1e4"
+    },
+    "tests/test_visible_faults.py": {
+      "mode": 436,
+      "sha256": "d9fe9984cb5b047882cc62ad90488a88c505de991a994b98da2075230504ebb1"
+    },
+    "tests/test_windows_metadata.py": {
+      "mode": 436,
+      "sha256": "64e2ea78b15110a1af2a88f393db0b5cb73e2bd78b084cd38ddac1340d0d0240"
+    },
+    "tests/test_windows_runtime.py": {
+      "mode": 436,
+      "sha256": "df346e0b7abe3b828a8f568168cd68e8e67a807dfada5a678be96bc761912f01"
+    },
+    "tests/test_writer_binding.py": {
+      "mode": 436,
+      "sha256": "a465416a56e22a9bab38b82b078f1526ac226ae9529e59cf0797619e4d01e764"
+    },
+    "tools/__init__.py": {
+      "mode": 436,
+      "sha256": "de17a8012087c9c2bab75dc82a2d2dbb1a6a5c0e350d5cc4a06b1b056265be4d"
+    },
+    "tools/benchmark_cursor_precompact.py": {
+      "mode": 436,
+      "sha256": "bae2abd13857fb4a378d70670e00f78b6c8103b26f4989842d59d9baf2ab8636"
+    },
+    "tools/check.py": {
+      "mode": 436,
+      "sha256": "54c2b7348434a7cc4e5bb7df0b2c004b8be7bf423263583aa76b26a62cd619e5"
+    },
+    "tools/claude-settings.json": {
+      "mode": 436,
+      "sha256": "bd12cdfba0fdd397bee46a6a5132c644fed3ec4d456146599a80a95f3192ee53"
+    },
+    "tools/codex_stop_gate.py": {
+      "mode": 436,
+      "sha256": "9aa0098f490e81d212374a06006f2b360d2cd9846172d0eb6665eaff0c5983c6"
+    },
+    "tools/doc_rules.py": {
+      "mode": 436,
+      "sha256": "d1525cce8ecb3be38c0336dd5bd13e973be66f49c3892f7233315917e46f5e05"
+    },
+    "tools/model.py": {
+      "mode": 436,
+      "sha256": "df70f596bf384c82145cb9813361cbc83a4634259e64331cb219bc9f671c265b"
+    },
+    "tools/run_tests.py": {
+      "mode": 436,
+      "sha256": "a58b0a1b9228d7633deec667471b016a3d217767ca12ec1ae057f3639413c74f"
+    },
+    "tools/shape_rules.py": {
+      "mode": 436,
+      "sha256": "309d2ae31319ee70ddd46f95372d2c1c0a2f3c3a8dbcd8c2cc0094f47618d7e1"
+    },
+    "tools/standards.py": {
+      "mode": 436,
+      "sha256": "fd28299944aad2fca522afd2f244bbb1607bcc5b3b67060402cb65fbe0037cbb"
+    }
+  },
+  "sqlite_master": [
+    [
+      "index",
+      "citation_target",
+      "citation",
+      "CREATE INDEX citation_target ON citation(provider, thread_id, line, part)"
+    ],
+    [
+      "index",
+      "event_cwd",
+      "event",
+      "CREATE INDEX event_cwd ON event(cwd)"
+    ],
+    [
+      "index",
+      "event_scope_ts",
+      "event",
+      "CREATE INDEX event_scope_ts ON event(scope_id, ts)"
+    ],
+    [
+      "index",
+      "source_session",
+      "source",
+      "CREATE INDEX source_session ON source(provider, session_root)"
+    ],
+    [
+      "index",
+      "sqlite_autoindex_event_1",
+      "event",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_scope_1",
+      "scope",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_scope_path_1",
+      "scope_path",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_source_1",
+      "source",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_source_2",
+      "source",
+      null
+    ],
+    [
+      "index",
+      "sqlite_autoindex_source_issue_1",
+      "source_issue",
+      null
+    ],
+    [
+      "index",
+      "tombstone_session",
+      "tombstone",
+      "CREATE INDEX tombstone_session ON tombstone(provider, session_root)"
+    ],
+    [
+      "index",
+      "tombstone_thread",
+      "tombstone",
+      "CREATE INDEX tombstone_thread ON tombstone(provider, thread_id)"
+    ],
+    [
+      "table",
+      "citation",
+      "citation",
+      "CREATE TABLE citation (id INTEGER PRIMARY KEY,\n  knowledge_id INTEGER NOT NULL REFERENCES knowledge(id),\n  provider TEXT NOT NULL, thread_id TEXT NOT NULL,\n  line INTEGER NOT NULL, part INTEGER NOT NULL,\n  line_sha256 TEXT NOT NULL,  -- identity copied at write time: survives\n                              -- re-parse (event ids do not)\n  role TEXT NOT NULL, kind TEXT NOT NULL, ts TEXT,\n  quote TEXT, span_start INTEGER, span_end INTEGER,  -- verbatim 12..300-char\n                                                     -- span; NULL when erased\n  state TEXT NOT NULL DEFAULT 'live' CHECK (state IN ('live','erased')))"
+    ],
+    [
+      "table",
+      "event",
+      "event",
+      "CREATE TABLE event (id INTEGER PRIMARY KEY,\n  source_id INTEGER NOT NULL REFERENCES source(id),\n  line INTEGER NOT NULL, part INTEGER NOT NULL,  -- 1-based JSONL line; 1-based\n                                                 -- event index within the line\n  byte_offset INTEGER NOT NULL,      -- start of the line in the file\n  line_sha256 TEXT NOT NULL,         -- sha256(line w/o \\r\\n): record_hash\n  seq INTEGER NOT NULL,              -- codex record 'ordinal' (else line)\n  ts TEXT,                           -- provider UTC timestamp\n  role TEXT NOT NULL CHECK (role IN ('user','assistant')),\n  kind TEXT NOT NULL CHECK (kind IN\n    ('prompt','reply','tool_call','harness','delegation','tool_error')),\n  tag TEXT,                          -- harness tag or tool name\n  scope_id INTEGER NOT NULL REFERENCES scope(id),\n  cwd TEXT,                          -- exact cwd string in effect\n  parent_event_id INTEGER,           -- tool_error -> its tool_call; no FK\n  flags INTEGER NOT NULL DEFAULT 0,  -- 1 injected-block marker, 2 redacted,\n                                     -- 4 truncated (>64 KiB)\n  text TEXT NOT NULL, UNIQUE (source_id, line, part))"
+    ],
+    [
+      "table",
+      "event_fts",
+      "event_fts",
+      "CREATE VIRTUAL TABLE event_fts USING fts5(text,\n  content='event', content_rowid='id',\n  tokenize='unicode61 remove_diacritics 2')"
+    ],
+    [
+      "table",
+      "event_fts_config",
+      "event_fts_config",
+      "CREATE TABLE 'event_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+    ],
+    [
+      "table",
+      "event_fts_data",
+      "event_fts_data",
+      "CREATE TABLE 'event_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+    ],
+    [
+      "table",
+      "event_fts_docsize",
+      "event_fts_docsize",
+      "CREATE TABLE 'event_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+    ],
+    [
+      "table",
+      "event_fts_idx",
+      "event_fts_idx",
+      "CREATE TABLE 'event_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+    ],
+    [
+      "table",
+      "knowledge",
+      "knowledge",
+      "CREATE TABLE knowledge (\n  id INTEGER PRIMARY KEY,    -- shown as K<id>\n  scope_id INTEGER NOT NULL REFERENCES scope(id),  -- repo, loop or 'global'\n  kind TEXT NOT NULL CHECK (kind IN\n    ('decision','fact','preference','procedure','lesson','constraint')),\n  text TEXT,                 -- 1..500 chars, redacted; NULL only when erased\n  status TEXT NOT NULL\n    CHECK (status IN ('current','superseded','retracted','erased')),\n  supersedes INTEGER REFERENCES knowledge(id),\n  superseded_by INTEGER REFERENCES knowledge(id),\n  retract_reason TEXT,       -- <=200 chars; NULL when erased\n  actor TEXT NOT NULL,       -- 'user' | 'claude:<root12>' | 'codex:<root12>'\n  created_at REAL NOT NULL,\n  confidence TEXT            -- NULL: not stated\n    CHECK (confidence IS NULL OR confidence IN\n      ('observed','reported','inferred')),\n  valid_until REAL,          -- epoch seconds; NULL never expires\n  sensitivity TEXT NOT NULL DEFAULT 'normal'\n    CHECK (sensitivity IN ('normal','restricted')),\n  contradicts INTEGER REFERENCES knowledge(id),  -- informational only\n  tags TEXT,                 -- comma-joined [a-z0-9_-]; data, not in FTS\n  CHECK (status = 'erased' OR text IS NOT NULL))"
+    ],
+    [
+      "table",
+      "knowledge_fts",
+      "knowledge_fts",
+      "CREATE VIRTUAL TABLE knowledge_fts USING fts5(text,\n  content='knowledge', content_rowid='id')"
+    ],
+    [
+      "table",
+      "knowledge_fts_config",
+      "knowledge_fts_config",
+      "CREATE TABLE 'knowledge_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+    ],
+    [
+      "table",
+      "knowledge_fts_data",
+      "knowledge_fts_data",
+      "CREATE TABLE 'knowledge_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+    ],
+    [
+      "table",
+      "knowledge_fts_docsize",
+      "knowledge_fts_docsize",
+      "CREATE TABLE 'knowledge_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+    ],
+    [
+      "table",
+      "knowledge_fts_idx",
+      "knowledge_fts_idx",
+      "CREATE TABLE 'knowledge_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+    ],
+    [
+      "table",
+      "knowledge_log",
+      "knowledge_log",
+      "CREATE TABLE knowledge_log (id INTEGER PRIMARY KEY,\n  knowledge_id INTEGER NOT NULL,  -- append-only, no free text\n  action TEXT NOT NULL CHECK (action IN\n    ('add','supersede','superseded','retract','erase')),\n  actor TEXT NOT NULL, at REAL NOT NULL)"
+    ],
+    [
+      "table",
+      "scope",
+      "scope",
+      "CREATE TABLE scope (id INTEGER PRIMARY KEY,\n  key TEXT NOT NULL UNIQUE,  -- main-worktree realpath | bare cwd | 'global'\n                             -- | 'loop:<id>' (kind 'dir')\n  label TEXT NOT NULL,\n  kind TEXT NOT NULL CHECK (kind IN ('git','dir','global')))"
+    ],
+    [
+      "table",
+      "scope_path",
+      "scope_path",
+      "CREATE TABLE scope_path (cwd TEXT PRIMARY KEY,\n  scope_id INTEGER NOT NULL REFERENCES scope(id),\n  method TEXT NOT NULL\n    CHECK (method IN ('git','worktree','prefix','cwd','alias')))"
+    ],
+    [
+      "table",
+      "source",
+      "source",
+      "CREATE TABLE source (id INTEGER PRIMARY KEY,\n  provider TEXT NOT NULL CHECK (provider IN ('codex','claude','cursor')),\n  thread_id TEXT NOT NULL,     -- codex line-1 payload.id | claude sessionId\n  session_root TEXT NOT NULL,  -- codex payload.session_id | claude sessionId\n  parent_thread_id TEXT, forked_from_id TEXT,\n  thread_class TEXT NOT NULL\n    CHECK (thread_class IN ('primary','subagent','reviewer','other')),\n  class_reason TEXT NOT NULL,  -- 'thread_source=user' | 'path:subagents' | ...\n  replay_mode TEXT NOT NULL CHECK (replay_mode IN\n    ('none','ordinal','history_base','content_prefix','unverified')),\n  replay_before INTEGER,       -- codex subagent_history_start_ordinal\n  root TEXT NOT NULL\n    CHECK (root IN ('codex-sessions','codex-archived','claude-projects',\n                    'cursor-imports')),\n  path TEXT NOT NULL,          -- relative to root; mutable (archive moves)\n  first_line_sha256 TEXT NOT NULL, ino INTEGER NOT NULL,\n  size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,\n  cursor_bytes INTEGER NOT NULL DEFAULT 0,\n  cursor_line INTEGER NOT NULL DEFAULT 0,  -- after last \\n-terminated line\n  anchor_offset INTEGER, anchor_sha256 TEXT,  -- last committed line\n  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','missing')),\n  skipped_lines INTEGER NOT NULL DEFAULT 0,\n  classifier_version INTEGER NOT NULL,\n  first_seen REAL NOT NULL, last_seen REAL NOT NULL,\n  parse_state TEXT,  -- ingest resume state (JSON ids and paths, no text)\n  UNIQUE (provider, thread_id), UNIQUE (root, path))"
+    ],
+    [
+      "table",
+      "source_issue",
+      "source_issue",
+      "CREATE TABLE source_issue (\n  source_id INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,\n  line INTEGER NOT NULL, at REAL NOT NULL,  -- codes only, never text\n  code TEXT NOT NULL\n    CHECK (code IN ('line_too_large','invalid_json','too_deep','not_object')),\n  PRIMARY KEY (source_id, line))"
+    ],
+    [
+      "table",
+      "tombstone",
+      "tombstone",
+      "CREATE TABLE tombstone (id INTEGER PRIMARY KEY,\n  created_at REAL NOT NULL, provider TEXT NOT NULL,\n  level TEXT NOT NULL CHECK (level IN ('session','thread','line')),\n  session_root TEXT, thread_id TEXT, line INTEGER, line_sha256 TEXT,\n  CHECK ((level = 'session' AND session_root IS NOT NULL)\n      OR (level = 'thread' AND thread_id IS NOT NULL)\n      OR (level = 'line' AND thread_id IS NOT NULL AND line IS NOT NULL\n          AND line_sha256 IS NOT NULL)))"
+    ],
+    [
+      "table",
+      "usage",
+      "usage",
+      "CREATE TABLE usage (  -- muninn invocations seen at ingest; counts only\n  source_id INTEGER PRIMARY KEY REFERENCES source(id) ON DELETE CASCADE,\n  provider TEXT NOT NULL CHECK (provider IN ('codex','claude','cursor')),\n  session_root TEXT NOT NULL,\n  calls INTEGER NOT NULL DEFAULT 0,\n  errors INTEGER NOT NULL DEFAULT 0,  -- codex outputs with a failed exit\n  last_ts TEXT)"
+    ],
+    [
+      "trigger",
+      "event_ad",
+      "event",
+      "CREATE TRIGGER event_ad AFTER DELETE ON event BEGIN\n  INSERT INTO event_fts(event_fts, rowid, text)\n    VALUES ('delete', old.id, old.text); END"
+    ],
+    [
+      "trigger",
+      "event_ai",
+      "event",
+      "CREATE TRIGGER event_ai AFTER INSERT ON event BEGIN\n  INSERT INTO event_fts(rowid, text) VALUES (new.id, new.text); END"
+    ],
+    [
+      "trigger",
+      "event_immutable",
+      "event",
+      "CREATE TRIGGER event_immutable BEFORE UPDATE ON event BEGIN\n  SELECT RAISE(ABORT, 'event is immutable'); END"
+    ],
+    [
+      "trigger",
+      "knowledge_ad",
+      "knowledge",
+      "CREATE TRIGGER knowledge_ad AFTER DELETE ON knowledge BEGIN\n  INSERT INTO knowledge_fts(knowledge_fts, rowid, text)\n    SELECT 'delete', old.id, old.text WHERE old.text IS NOT NULL; END"
+    ],
+    [
+      "trigger",
+      "knowledge_ai",
+      "knowledge",
+      "CREATE TRIGGER knowledge_ai AFTER INSERT ON knowledge BEGIN\n  INSERT INTO knowledge_fts(rowid, text)\n    SELECT new.id, new.text WHERE new.text IS NOT NULL; END"
+    ],
+    [
+      "trigger",
+      "knowledge_au",
+      "knowledge",
+      "CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge BEGIN\n  INSERT INTO knowledge_fts(knowledge_fts, rowid, text)\n    SELECT 'delete', old.id, old.text WHERE old.text IS NOT NULL;\n  INSERT INTO knowledge_fts(rowid, text)\n    SELECT new.id, new.text WHERE new.text IS NOT NULL; END"
+    ],
+    [
+      "trigger",
+      "knowledge_log_no_delete",
+      "knowledge_log",
+      "CREATE TRIGGER knowledge_log_no_delete BEFORE DELETE ON knowledge_log BEGIN\n  SELECT RAISE(ABORT, 'append-only'); END"
+    ],
+    [
+      "trigger",
+      "knowledge_log_no_update",
+      "knowledge_log",
+      "CREATE TRIGGER knowledge_log_no_update BEFORE UPDATE ON knowledge_log BEGIN\n  SELECT RAISE(ABORT, 'append-only'); END"
+    ]
+  ]
+}

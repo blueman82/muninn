@@ -7,13 +7,21 @@ import sqlite3
 from pathlib import Path
 from unittest import mock
 
-from muninn import cursor_import_read
+from muninn import cursor_import_read, store
 from muninn.cursor_import import default_database
 from tests.cli_support import CliCase
+from tests.review_quiescence_support import initialize
 
 
 class CursorImportTests(CliCase):
     """Exercise Cursor discovery and import without installing Cursor."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.conn.close()
+        initialize(self.home)
+        self.conn = store.connect_rw(store.db_path(self.home))
+        self.addCleanup(self.conn.close)
 
     def database_path(self) -> Path:
         """Return Cursor's standard database path under the test HOME."""

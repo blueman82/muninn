@@ -7,21 +7,27 @@ so the report is safe to paste into a bug report.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Mapping
+from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
-from muninn import classify, store
-from muninn.knowledge_expiry import LIVE_SQL
+from muninn import classify, platform_io, store
+from muninn.knowledge_read import read_snapshot
 from muninn.obs_status import (
+    ELIGIBLE,
+    RECEIPTED,
+    REVIEW_RECORDS,
+    alive_age,
     freshness,
     install_sha,
     poller_error,
     read_status,
 )
-from muninn.query.index_age import ALIVE_AT, seconds_since
+from muninn.review_models import ReviewStats, Usage
 
 _LAST_PASS_FIELDS = (
     "last_pass_at",
@@ -184,23 +190,11 @@ def _table_counts(conn: sqlite3.Connection) -> dict[str, object]:
             "SELECT class_reason, count(*) FROM source"
             " WHERE thread_class = 'other' GROUP BY 1",
         ),
-        # An expired entry is counted apart from current: expiry is derived.
         "knowledge": _pairs(
-            conn,
-            "SELECT CASE WHEN status = 'current' AND valid_until <= ?"
-            " THEN 'expired' ELSE status END, count(*)"
-            " FROM knowledge GROUP BY 1",
-            (time.time(),),
+            conn, "SELECT state, count(*) FROM knowledge GROUP BY 1"
         ),
-        # Current in the same sense as ``knowledge.current`` above: an
-        # expired restricted entry is counted as expired, not here.
-        "knowledge_restricted": conn.execute(
-            "SELECT count(*) FROM knowledge k WHERE k.status = 'current'"
-            f" AND {LIVE_SQL} AND k.sensitivity = 'restricted'",
-            (time.time(),),
-        ).fetchone()[0],
-        "citations": _pairs(
-            conn, "SELECT state, count(*) FROM citation GROUP BY 1"
+        "evidence": _pairs(
+            conn, "SELECT state, count(*) FROM review_evidence GROUP BY 1"
         ),
         "tombstones": _pairs(
             conn, "SELECT level, count(*) FROM tombstone GROUP BY 1"
@@ -230,26 +224,6 @@ def reread(conn: sqlite3.Connection) -> dict[str, int]:
         (classify.CLASSIFIER_VERSION,),
     ).fetchone()
     return {"pending": int(pending), "of": int(total)}
-
-
-def _alive_age(status: Mapping[str, object]) -> int | None:
-    """Return the age of the alive stamp of a pass that is still running.
-
-    Args:
-        status: Parsed status.json.
-
-    Returns:
-        Seconds since a running pass last stamped alive, or None between
-        passes and when no usable stamp exists (not written yet, failed to
-        write, or from the future).
-    """
-    alive = seconds_since(status.get(ALIVE_AT), future_ok=False)
-    last = seconds_since(status.get("last_pass_at"))
-    # A stamp older than the last finished pass was left by a poller that
-    # died mid-pass, not by a pass that is running now.
-    if alive is None or (last is not None and alive >= last):
-        return None
-    return alive
 
 
 def _usage(conn: sqlite3.Connection) -> dict[str, object]:
@@ -294,13 +268,15 @@ def stats(
     """
     status = read_status(home)
     db = store.db_path(home)
-    out = _table_counts(conn)
+    with read_snapshot(conn):
+        out = _table_counts(conn)
+        out["review"] = review_stats(conn, time.time()).model_dump(mode="json")
     out["db_bytes"] = db.stat().st_size if db.exists() else 0
     out["db_space"] = db_space(conn)
     out["last_pass"] = (
         {k: status.get(k) for k in _LAST_PASS_FIELDS}
         | freshness(status)
-        | {"alive_age_s": _alive_age(status)}
+        | {"alive_age_s": alive_age(status)}
         | {"last_error": poller_error(status)}
     )
     out["reread"] = reread(conn)
@@ -310,3 +286,158 @@ def stats(
     if usage:
         out |= _usage(conn)
     return out
+
+
+def review_records(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Count indexed logical records outside the activation archive.
+
+    Args:
+        conn: Read connection in the caller's coherent snapshot.
+
+    Returns:
+        Eligible and receipted record counts, including explicit replay.
+    """
+    return tuple(
+        conn.execute(
+            "SELECT count(*)" + REVIEW_RECORDS + "WHERE " + condition
+        ).fetchone()[0]
+        for condition in (ELIGIBLE, RECEIPTED)
+    )
+
+
+def _review_usage(conn: sqlite3.Connection) -> Usage:
+    """Sum reported calls once, retaining unknown components and currency.
+
+    Args:
+        conn: Read connection in the caller's coherent snapshot.
+
+    Returns:
+        Nullable aggregate usage; reservations are never actual charges.
+    """
+    rows = [
+        _usage_value(row[1]) if row[0] == "completed" else None
+        for row in conn.execute("SELECT state,usage_json FROM review_call")
+    ]
+    tokens: dict[str, int | None] = {}
+    for name in ("input_tokens", "output_tokens", "cached_tokens"):
+        values = [
+            getattr(row, name) if row is not None else None for row in rows
+        ]
+        tokens[name] = (
+            sum(value for value in values if value is not None)
+            if values and all(value is not None for value in values)
+            else None
+        )
+    currencies = {row.currency if row is not None else None for row in rows}
+    known = bool(rows) and None not in currencies and len(currencies) == 1
+    costs = [row.cost_decimal if row is not None else None for row in rows]
+    cost = (
+        str(
+            sum(
+                (Decimal(value) for value in costs if value is not None),
+                Decimal(0),
+            )
+        )
+        if known and all(value is not None for value in costs)
+        else None
+    )
+    return Usage.model_validate(
+        {
+            **tokens,
+            "cost_decimal": cost,
+            "currency": next(iter(currencies)) if known else None,
+        }
+    )
+
+
+def _observed_busy(conn: sqlite3.Connection) -> int | None:
+    """Count retained busy acknowledgments with incomplete coverage."""
+    filename = conn.execute("PRAGMA database_list").fetchone()[2]
+    if not filename:
+        return None
+    count, observed = 0, False
+    for name in ("calls.jsonl.1", "calls.jsonl"):
+        try:
+            with platform_io.open_regular(
+                Path(filename).parent / name, root=Path(filename).parent
+            ) as handle:
+                platform_io.assert_private_fd(handle.fileno())
+                for line in handle:
+                    try:
+                        row: object = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict):
+                        observed = True
+                        count += (
+                            cast("dict[str, object]", row).get("event")
+                            == "review_enqueue_busy"
+                        )
+        except (OSError, ValueError):
+            continue
+    return count if observed else None
+
+
+def review_stats(conn: sqlite3.Connection, now: float) -> ReviewStats:
+    """Read durable review counts and explicitly incomplete busy observations.
+
+    Args:
+        conn: Current normalized store connection; no writer is acquired.
+        now: Observation time in UTC seconds.
+
+    Returns:
+        Content-free counts, nonnegative ages and nullable actual usage.
+    """
+    with read_snapshot(conn):
+        pending = conn.execute(
+            "SELECT min(created_at) FROM review_request "
+            "WHERE state IN ('pending','waiting')"
+        ).fetchone()[0]
+        progress = conn.execute(
+            "SELECT max(progress_at) FROM review_attempt"
+        ).fetchone()[0]
+        eligible, completed = review_records(conn)
+        return ReviewStats.model_validate(
+            {
+                "schema_version": 1,
+                "requests_by_state": _pairs(
+                    conn,
+                    "SELECT state,count(*) FROM review_request GROUP BY state",
+                ),
+                "calls_by_state": _pairs(
+                    conn,
+                    "SELECT state,count(*) FROM review_call GROUP BY state",
+                ),
+                "oldest_pending_age_seconds": (
+                    None if pending is None else max(0.0, now - pending)
+                ),
+                "last_progress_age_seconds": (
+                    None if progress is None else max(0.0, now - progress)
+                ),
+                "eligible_records": eligible,
+                "completed_records": completed,
+                "unresolved_items": conn.execute(
+                    "SELECT count(*) FROM unresolved WHERE state='open'"
+                ).fetchone()[0],
+                "usage": _review_usage(conn),
+                "observed_enqueue_busy": _observed_busy(conn),
+                "busy_count_complete": False,
+            }
+        )
+
+
+def _usage_value(raw: str | None) -> Usage | None:
+    """Treat unavailable or malformed usage as unknown, never as zero."""
+    try:
+        usage = None if raw is None else Usage.model_validate_json(raw)
+        if (
+            usage is not None
+            and usage.currency is not None
+            and not re.fullmatch(r"[A-Z]{3}", usage.currency)
+        ):
+            usage = usage.model_copy(
+                update={"currency": None, "cost_decimal": None}
+            )
+        return usage
+    except ValueError:
+        return None

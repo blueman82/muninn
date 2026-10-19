@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from muninn.knowledge_models import GuideBody, KnowledgeView, NoteBody, Scope
 from muninn.query.constants import NOTICE
 
 # Answers are plain JSON-serialisable dicts whose shape varies per query.
@@ -39,3 +40,51 @@ def answer_citable(row: sqlite3.Row) -> bool:
 def preview(text: str) -> str:
     """Collapse whitespace and cut the text to one preview line."""
     return " ".join(text.split())[:PREVIEW]
+
+
+def knowledge_scopes(
+    conn: sqlite3.Connection,
+    ids: list[int],
+    everywhere: bool,
+    task: str | None = None,
+) -> list[Scope]:
+    """Resolve mapped scopes for authoritative current knowledge readers."""
+    if not everywhere and not ids:
+        return []
+    predicate = (
+        ""
+        if everywhere
+        else "WHERE kind!='global' AND " f"id IN ({','.join('?' * len(ids))})"
+    )
+    rows = conn.execute(
+        f"SELECT key,kind FROM scope {predicate} ORDER BY id",
+        () if everywhere else ids,
+    )
+    return [
+        Scope(
+            project_id=None if row["kind"] == "global" else row["key"],
+            task=None if row["kind"] == "global" else task,
+        )
+        for row in rows
+    ]
+
+
+def knowledge_preview(view: KnowledgeView) -> Answer:
+    """Render a revision-aware preview with governed support identities."""
+    body = view.body
+    if isinstance(body, NoteBody):
+        text, refs = body.content, body.evidence_refs
+    elif isinstance(body, GuideBody):
+        text, refs = body.title, body.summary.evidence_refs
+    else:
+        raise ValueError("knowledge_ineligible")
+    return {
+        "id": view.id,
+        "revision": view.revision,
+        "state": view.state,
+        "form": body.form,
+        "kind": body.kind,
+        "text": text[:300],
+        "scope": body.scope.model_dump(mode="json"),
+        "evidence_refs": refs,
+    }

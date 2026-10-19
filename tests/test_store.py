@@ -5,11 +5,14 @@ Every test uses temp dirs only; nothing here touches a live data dir.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import sys
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NoReturn
 from unittest import mock
@@ -215,6 +218,62 @@ class PathTests(StoreCase):
         assert_private(self, target)
 
 
+class InitializationTests(StoreCase):
+    """Atomic and concurrent creation of an empty store."""
+
+    def test_initialization_failure_rolls_back_all_ddl(self) -> None:
+        with contextlib.closing(
+            sqlite3.connect(":memory:", isolation_level=None)
+        ) as conn:
+            with (
+                mock.patch.object(
+                    store,
+                    "SCHEMA_SQL",
+                    store.SCHEMA_SQL + "CREATE TABLE scope(x);\n",
+                ),
+                self.assertRaises(sqlite3.OperationalError),
+            ):
+                store.initialize_store(conn)
+            self.assertEqual(
+                conn.execute("PRAGMA user_version").fetchone()[0], 0
+            )
+            self.assertEqual(
+                conn.execute("SELECT count(*) FROM sqlite_schema").fetchone()[
+                    0
+                ],
+                0,
+            )
+            store.initialize_store(conn)
+            store.initialize_store(conn)
+            store.assert_store_format(conn)
+
+    def test_competing_initializers_create_one_marked_store(self) -> None:
+        store.ensure_private_dir(self.home)
+        barrier = threading.Barrier(2)
+
+        def initialize() -> tuple[object, ...]:
+            with contextlib.closing(
+                sqlite3.connect(self.db, isolation_level=None)
+            ) as conn:
+                conn.execute("PRAGMA busy_timeout=5000")
+                barrier.wait(timeout=5)
+                store.initialize_store(conn)
+                return tuple(
+                    conn.execute("SELECT * FROM store_meta").fetchone()
+                )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(initialize) for _ in range(2)]
+            self.assertEqual(
+                [f.result(timeout=10) for f in futures],
+                [(1, "muninn-knowledge", 1), (1, "muninn-knowledge", 1)],
+            )
+        with contextlib.closing(sqlite3.connect(self.db)) as conn:
+            self.assertEqual(
+                conn.execute("PRAGMA integrity_check").fetchone()[0], "ok"
+            )
+
+
 class ReaderTests(StoreCase):
     """Read-only connections and their failure modes."""
 
@@ -229,7 +288,9 @@ class ReaderTests(StoreCase):
         Raises:
             AssertionError: If the failure is a hot-journal error.
         """
-        with self.assertRaises(store.StoreUnavailableError) as caught:
+        with self.assertRaisesRegex(
+            store.StoreUnavailableError, "^cutover_required$"
+        ) as caught:
             store.connect_ro(self.db)
         self.assertNotIsInstance(caught.exception, store.HotJournalError)
 
@@ -249,6 +310,7 @@ class ReaderTests(StoreCase):
         self.assertEqual(
             conn.execute("PRAGMA busy_timeout").fetchone()[0], 5000
         )
+        self.assertEqual(conn.execute("PRAGMA foreign_keys").fetchone()[0], 1)
         with self.assertRaises(sqlite3.OperationalError):
             conn.execute(
                 "INSERT INTO scope(key, label, kind) VALUES ('a','a','dir')"

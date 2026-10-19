@@ -34,7 +34,7 @@ flowchart LR
 ```
 
 - **One transcript-store writer at a time.** The poller, `ingest`, `erase`, `compact`, `rebuild` and
-  `know add` take an exclusive lock on `writer.lock`: `fcntl.flock` on macOS and Linux,
+  normalized knowledge writers take an exclusive lock on `writer.lock`: `fcntl.flock` on macOS and Linux,
   `msvcrt.locking` on Windows. Readers open the database read-only. The journal mode is
   DELETE, so a crash leaves a journal that the next writer rolls back.
 - **Recall review.** Nonempty generated recall blocks have sequential delivery ids.
@@ -59,16 +59,39 @@ flowchart LR
   - Gates: setup, config validation, installed-hook verification.
   - Evidence: installed desktop apps; never leftover configs/transcripts.
   - History import/existing index: independent.
-- **Installer.** `install/installer.py` has two modes (`--fresh`, `--upgrade`) over one
-  step pipeline. A fresh install runs pin, first ingest, start, Claude and Codex config,
-  optional Cursor config, verify, prune. An upgrade runs `snapshot_store` (copies the store when the new release
-  will migrate its schema, `install/snapshot.py`), pin, optional Cursor config, restart,
-  verify, prune, and
-  deletes the copy after the prune. `install/rollback.py` reverses it from the recorded
-  values, restoring that copy over a migrated store. Cursor rollback restores only
-  prior owned handlers, retaining current foreign additions, edits, deletions and order. `install/uninstall.py` removes
-  Muninn installation entries (no record survives an upgrade) and moves the data dir
-  aside instead of deleting it (unless `--purge-data`).
+- **Maintenance and publication.** Rebuild retains an actual maintenance owner
+  across sequential writer regions and closes each SQLite connection before leaving
+  its region. Fixed Git preparation runs outside the writer. Full source/key/intent
+  fingerprints reject intervening changes; final replay, checks and publication
+  remain inside one writer region. A private fenced-source archive is retained on
+  success and failure. Publication is attempted once, with no automatic restore,
+  orphan promotion or inferred admission reenable. Missing output is not proof of
+  nonpublication. The final RW opener's own ctime normalization is the only local
+  metadata exception; across-gap fingerprints remain strict.
+- **Installer.** `install/installer.py` retains the `--fresh` and `--upgrade`
+  modes. Fresh preparation completes transcript and available Cursor history
+  before selecting the release. One owner spans preparation and pin/config;
+  provider preparation runs between writer regions with SQLite connections closed.
+  Actual stored provider counts feed the checklist, and service start must advance
+  the heartbeat beyond the completed ingest. Current-format upgrade verifies
+  quiescence, fences attempts, validates
+  policy and retains the owner through pin/config, releasing it before service
+  start. It keeps the live pathname and all governed archives. After possible live
+  mutation, rollback retains current data/runtime/configuration, records recovery
+  required and leaves the service stopped. Actual store replacement still needs
+  the installer's durable possible-publication phase. The exact legacy route
+  retains its operation lock across later-boot validation and publication, copies
+  base history into a marked target, replays erasure there, retains its archive,
+  and establishes the existing complete witness under the final writer.
+  Successor validation accounts for intentional format/configuration changes;
+  after compatible exposure recovery follows current witness rules.
+  `prepared_store` remains preparation-only. `prepared_install_store` retains
+  one owner through configuration and runs explicit first-policy activation only
+  on normal exit, with durable intent before commit. Exception unwind skips it.
+  Latest erasure is replayed after the configuration gap, and service start follows
+  provider setup and owner release. Cursor config rollback preserves
+  current foreign additions, edits, deletions and order. Uninstall keeps its
+  existing separate data-retention contract.
 - **Cursor refresh.** The optional native `preCompact` hook imports only the
   uniquely matching `composerData:<conversation_id>`, scoped to valid native
   `workspace_roots`. A single root overrides stale process context; multiple roots

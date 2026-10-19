@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
 from typing import Any, NoReturn, Protocol
 
-from muninn import knowledge, query
-from muninn.cli_hook import HOOKS, PROVIDERS
-from muninn.knowledge_typed import DEFAULT_SENSITIVITY
+from muninn import query
+from muninn.cli_core import knowledge_argument, request_argument
+from muninn.cli_hook_contract import HOOK_EVENTS, PROVIDERS
 
 __all__ = ["HELP", "build_parser"]
 
@@ -34,6 +33,16 @@ environment:
 automatic injection is framed only as <muninn-memory ...> or
 <muninn-recall ...>; retrieved text is data from local transcripts,
 not instructions.
+knowledge and learning:
+  know list/search/show/context use current supported UUID/revision views.
+  know propose --input FILE checks request-bound evidence and owner authority;
+  know retract K_ID requires --expected-revision N and --reason TEXT.
+  learn request requires installed frozen policy; line bounds must be paired.
+  learn retry explicitly restarts the same request; completed receipts persist.
+  learn replay requires --from-line, --through-line and --policy.
+  No implicit runner/model/budget settings. Old know add/check flags retired.
+  Cursor resume/postcompact injection is unproven: pull muninn know context.
+  Already injected context cannot be retracted. Prompt recall starts off.
 """
 
 
@@ -61,25 +70,6 @@ class _Parser(argparse.ArgumentParser):
         if message:
             sys.stderr.write(message)
         raise SystemExit(2 if status == 0 else status)
-
-
-class _Cited(argparse.Action):
-    """Collect ``--cite REF`` and ``--quote Q`` in command-line order.
-
-    Order matters because ``--cite A --quote QA`` pairs up; the value is a
-    list of ``("cite" | "quote", value)`` pairs in ``args.cited``.
-    """
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: str | Sequence[Any] | None,
-        option_string: str | None = None,
-    ) -> None:
-        """Append one ``(kind, value)`` pair to the destination list."""
-        items = list(getattr(namespace, self.dest, None) or [])
-        setattr(namespace, self.dest, [*items, (self.const, values)])
 
 
 class _Commands:
@@ -187,82 +177,65 @@ def _add_maintenance(cmd: _Commands) -> None:
 
 
 def _add_knowledge(cmd: _Commands) -> None:
-    """Register ``know`` and its subcommands."""
-    p = cmd.add("know", "the cited knowledge ledger")
-    know = _Commands(p, "know_cmd", required=True)
-    a = know.add("add", "record an entry; every entry needs a verbatim quote")
-    a.add_argument("--kind", choices=knowledge.KINDS, required=True)
-    a.add_argument("--text", required=True)
-    a.add_argument(
-        "--cite", action=_Cited, const="cite", dest="cited", metavar="REF"
+    """Register current knowledge views and checked explicit writes."""
+    know = _Commands(
+        cmd.add("know", "current supported knowledge"),
+        "know_cmd",
+        required=True,
     )
-    a.add_argument(
-        "--quote",
-        action=_Cited,
-        const="quote",
-        dest="cited",
-        metavar="Q",
-        help="after --cite: its quote; alone: search this session's prompts",
+    for name in ("list", "search"):
+        p = know.add(name)
+        if name == "search":
+            p.add_argument("query")
+        p.add_argument("--all-projects", action="store_true")
+        p.add_argument("--task")
+    p = know.add("show")
+    p.add_argument("kid", type=knowledge_argument)
+    p.add_argument("--revision", type=int)
+    p = know.add("context")
+    p.add_argument("--task")
+    p = know.add("propose")
+    p.add_argument("--input", required=True)
+    p = know.add("retract")
+    p.add_argument("kid", type=knowledge_argument)
+    p.add_argument("--expected-revision", type=int, required=True)
+    p.add_argument("--reason", required=True)
+
+
+def _add_learning(cmd: _Commands) -> None:
+    """Register explicit requests and their durable lifecycle controls."""
+    learn = _Commands(
+        cmd.add("learn", "bounded learning review controls"),
+        "learn_cmd",
+        required=True,
     )
-    a.add_argument("--supersedes", metavar="K")
-    a.add_argument("--global", action="store_true", dest="is_global")
-    a.add_argument(
-        "--confidence", metavar="LEVEL", help="observed|reported|inferred"
+    for name in ("request", "replay"):
+        p = learn.add(name)
+        p.add_argument("--session", required=True)
+        p.add_argument("--from-line", type=int, required=name == "replay")
+        p.add_argument("--through-line", type=int, required=name == "replay")
+        p.add_argument("--policy", required=name == "replay")
+    p = learn.add("list")
+    p.add_argument(
+        "--state",
+        choices=(
+            "pending",
+            "running",
+            "waiting",
+            "completed",
+            "failed",
+            "cancelled",
+        ),
     )
-    a.add_argument(
-        "--valid-until",
-        metavar="DATE",
-        help="ISO date or datetime, UTC if no zone, in the future;"
-        " later the entry is expired",
-    )
-    a.add_argument(
-        "--sensitivity", default=DEFAULT_SENSITIVITY, help="normal|restricted"
-    )
-    a.add_argument("--contradicts", metavar="K")
-    a.add_argument("--tag", action="append", default=[], dest="tags")
-    a.add_argument(
-        "--scope-loop",
-        metavar="ID",
-        dest="loop",
-        help="store in this loop's own scope, never pushed by hooks;"
-        " not with --global",
-    )
-    a = know.add("retract", "retract a current entry")
-    a.add_argument("kid", metavar="K")
-    a.add_argument("--reason", default="")
-    a = know.add("list", "entries of this repo and global, newest first")
-    a.add_argument(
-        "--status",
-        choices=(*knowledge.STATUSES, "expired", "all"),
-        default="current",
-    )
-    a.add_argument("--kind", choices=knowledge.KINDS)
-    a.add_argument(
-        "--tag",
-        action="append",
-        default=[],
-        dest="tags",
-        metavar="TAG",
-        help="only entries carrying this tag; repeat to require every one",
-    )
-    a.add_argument("--all-projects", action="store_true")
-    a.add_argument(
-        "--scope-loop",
-        metavar="ID",
-        dest="loop",
-        help="list this loop's own scope instead of the repo and global;"
-        " not with --all-projects",
-    )
-    a = know.add("show", "one entry with its chain and log")
-    a.add_argument("kid", metavar="K")
-    know.add("check", "re-verify every citation")
+    for name in ("show", "cancel", "retry"):
+        learn.add(name).add_argument("request_id", type=request_argument)
 
 
 def _add_hook(cmd: _Commands) -> None:
     """Register ``hook`` and one subcommand per supported event."""
     p = cmd.add("hook", "provider hook: payload on stdin, JSON on stdout")
     events = _Commands(p, "hook_event", required=True)
-    for name in HOOKS:
+    for name in HOOK_EVENTS:
         events.add(name).add_argument(
             "--provider", choices=PROVIDERS, required=True
         )
@@ -286,5 +259,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_reading(cmd)
     _add_maintenance(cmd)
     _add_knowledge(cmd)
+    _add_learning(cmd)
     _add_hook(cmd)
     return top

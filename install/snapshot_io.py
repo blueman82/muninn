@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import sys
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -36,14 +36,14 @@ def _private(
 
 
 @contextmanager
-def validated(path: Path) -> Generator[None]:
+def validated(path: Path) -> Generator[Callable[[], None]]:
     """Keep the source and every existing sidecar private and identity-bound.
 
     Args:
         path: SQLite file in its private data directory.
 
     Yields:
-        Control while all validation descriptors remain open.
+        A pathname identity recheck while validation descriptors remain open.
 
     Raises:
         OSError: If privacy, ordinary type or pathname identity changes.
@@ -69,11 +69,17 @@ def validated(path: Path) -> Generator[None]:
             metadata = os.fstat(handle.fileno())
             _private(candidate, metadata)
             identities.append((candidate, metadata))
-        _unchanged(identities)
-        try:
-            yield
-        finally:
+
+        def revalidate() -> None:
             _unchanged(identities)
+
+        revalidate()
+        try:
+            yield revalidate
+        finally:
+            # Identity refusal must not hide the caller's original failure.
+            if sys.exception() is None:
+                revalidate()
 
 
 def _unchanged(identities: list[tuple[Path, os.stat_result]]) -> None:

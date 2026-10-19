@@ -7,42 +7,46 @@ write-ahead ``tombstones.jsonl`` next to the database.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import os
 import sqlite3
 import time
-from collections.abc import Iterator, Mapping
+from contextlib import suppress
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal
 
 from muninn import platform_io
 from muninn.file_sync import sync_fd
-from muninn.tombstone_key import KEYED_PREFIX, TOMBSTONE_FILE
-
-_PROVIDERS = ("codex", "claude", "cursor")
-# Columns that identify a tombstone; their order is the INSERT column order.
-_KEY = (
-    "provider",
-    "level",
-    "session_root",
-    "thread_id",
-    "line",
-    "line_sha256",
+from muninn.knowledge_erase import (
+    erase_attempt_material,
+    erase_support_closure,
+    plan_replay_support,
+    replay_support,
 )
+from muninn.tombstone_intent import (
+    KEY_FIELDS,
+    TombstoneRow,
+    event_tag,
+    read_intent,
+    role_digest,
+)
+from muninn.tombstone_key import KEYED_PREFIX, TOMBSTONE_FILE
+from muninn.tombstone_replay import plan_transcripts
 
-
-class TombstoneRow(TypedDict):
-    """One tombstone as stored in the table and in the JSON-lines log."""
-
-    provider: str
-    level: Literal["session", "thread", "line"]
-    session_root: str | None
-    thread_id: str | None
-    line: int | None
-    line_sha256: str | None
-    created_at: float
+__all__ = [
+    "TombstoneRow",
+    "append_tombstones",
+    "erase_attempt_material",
+    "erased_ancestor_lines",
+    "erased_events",
+    "event_digests",
+    "event_tag",
+    "reapply_tombstones",
+    "replay_support",
+    "require_current_tombstones",
+    "role_digest",
+    "tombstone_row",
+]
 
 
 def tombstone_row(
@@ -80,25 +84,6 @@ def tombstone_row(
     )
 
 
-def role_digest(role: str, text: str) -> bytes:
-    """Return sha256(role, text), the identity of one event's content.
-
-    A fork's early events are compared with its parent's by this hash in
-    memory only; it is never stored (see ``event_tag`` for what is).
-    ``surrogatepass`` keeps lone surrogates from a lossy transcript
-    hashable instead of raising.
-
-    Args:
-        role: Event role.
-        text: Event text.
-
-    Returns:
-        The 32-byte digest.
-    """
-    data = f"{role}\n{text}".encode("utf-8", "surrogatepass")
-    return hashlib.sha256(data).digest()
-
-
 def event_digests(
     conn: sqlite3.Connection, source_id: int | None
 ) -> set[bytes]:
@@ -109,12 +94,6 @@ def event_digests(
         "SELECT role, text FROM event WHERE source_id = ?", (source_id,)
     )
     return {role_digest(role, text) for role, text in rows}
-
-
-def event_tag(key: bytes, role: str, text: str) -> str:
-    """Return the ``line_sha256`` value of a content tombstone."""
-    data = f"{role}\n{text}".encode("utf-8", "surrogatepass")
-    return KEYED_PREFIX + hmac.new(key, data, hashlib.sha256).hexdigest()
 
 
 def _family(
@@ -237,84 +216,78 @@ def append_tombstones(home: Path, tombstones: list[TombstoneRow]) -> None:
         os.close(fd)
 
 
-def _valid(row: Mapping[str, object]) -> bool:
-    """Whether a logged row carries the ids its level needs."""
-    level = row.get("level")
-    return (
-        row.get("provider") in _PROVIDERS
-        and (
-            (level == "session" and bool(row.get("session_root")))
-            or (level == "thread" and bool(row.get("thread_id")))
-            or (
-                level == "line"
-                and bool(row.get("thread_id"))
-                and _is_int(row.get("line"))
-                and bool(row.get("line_sha256"))
-            )
-        )
-        and _is_number(row.get("created_at"))
-    )
+def require_current_tombstones(conn: sqlite3.Connection, home: Path) -> None:
+    """Refuse incomplete erasure using only the caller's read snapshot.
 
+    No transaction, key creation, connection, writer or cleanup is owned here.
+    Strict intent and remaining transcript targets are checked; successful
+    logical completion does not independently certify external file cleanup.
 
-def _is_int(value: object) -> bool:
-    """Whether a value is an int; ``bool`` is a subclass but not a line."""
-    return isinstance(value, int) and not isinstance(value, bool)
+    Args:
+        conn: Caller-owned connection with its current transaction view.
+        home: Directory containing durable erasure intent.
 
-
-def _is_number(value: object) -> bool:
-    """Whether a log field is absent or a real timestamp."""
-    return value is None or (
-        isinstance(value, (int, float)) and not isinstance(value, bool)
-    )
-
-
-def _logged_rows(path: Path) -> Iterator[dict[str, object]]:
-    """Yield the valid rows of the log, skipping damaged lines."""
-    # errors="replace": one corrupt byte must not hide every other row.
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            row = json.loads(raw)
-        except ValueError:
-            continue
-        if isinstance(row, dict):
-            # json.loads gives Any; JSON object keys are always strings.
-            typed = cast("dict[str, object]", row)
-            if _valid(typed):
-                yield typed
+    Raises:
+        ValueError: If intent is malformed, unverified or still pending.
+    """
+    intent = read_intent(conn, home)
+    plan = plan_transcripts(conn, intent)
+    if intent.missing or plan.sources or plan.events:
+        raise ValueError("erasure_pending")
 
 
 def reapply_tombstones(conn: sqlite3.Connection, home: Path) -> int:
-    """Insert the logged tombstones that the table lacks.
+    """Complete recorded erasure in one transaction, then clean working data.
 
-    This is how erasures survive a rebuilt database. Invalid lines are
-    skipped. The caller holds the writer lock.
+    The caller holds the physical writer and supplies an autocommit connection.
+    Replay never opens or closes that connection or acquires another writer.
+    Existing working-file cleanup may authenticate through its bounded
+    same-home read-only connection. A postcommit failure propagates and is
+    retried even when no keys are missing. Provider originals and retained
+    archives remain.
 
     Args:
-        conn: Read-write connection.
-        home: Data directory.
+        conn: Caller-owned autocommit connection.
+        home: Directory containing durable intent and governed working files.
 
     Returns:
-        How many rows were inserted.
+        Number of newly inserted six-field keys after successful cleanup.
+
+    Raises:
+        ValueError: If the caller has a transaction or intent cannot be proved.
+        OSError: If cleanup fails or a reader prevents WAL truncation.
     """
-    path = home / TOMBSTONE_FILE
-    if not path.is_file():
-        return 0
-    have: set[tuple[object, ...]] = {
-        tuple(r)
-        for r in conn.execute(f"SELECT {', '.join(_KEY)} FROM tombstone")
-    }
-    missing: list[tuple[object, ...]] = []
-    for row in _logged_rows(path):
-        key = tuple(row.get(k) for k in _KEY)
-        if key not in have:
-            have.add(key)  # the log may repeat a row
-            missing.append((row.get("created_at") or time.time(), *key))
-    if missing:
-        conn.execute("BEGIN IMMEDIATE")
+    if conn.in_transaction:
+        raise ValueError("replay_autocommit_required")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        intent = read_intent(conn, home)
+        target = plan_transcripts(conn, intent)
+        support = plan_replay_support(conn, intent.rows)
         conn.executemany(
-            f"INSERT INTO tombstone(created_at, {', '.join(_KEY)})"
+            f"INSERT INTO tombstone({', '.join(KEY_FIELDS)}, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            missing,
+            intent.missing,
+        )
+        conn.executemany(
+            "DELETE FROM event WHERE id=?", [(i,) for i in target.events]
+        )
+        erase_support_closure(conn, support, time.time())
+        conn.executemany(
+            "DELETE FROM source WHERE id=?", [(i,) for i in target.sources]
         )
         conn.execute("COMMIT")
-    return len(missing)
+    except BaseException:
+        with suppress(BaseException):
+            conn.execute("ROLLBACK")
+        raise
+    for ident in support.requests:
+        for row in conn.execute(
+            "SELECT id FROM review_attempt WHERE request_id=?", (ident,)
+        ):
+            erase_attempt_material(home, row[0])
+    status = conn.execute("PRAGMA main.wal_checkpoint(TRUNCATE)").fetchone()
+    if status[0]:
+        raise OSError("erasure_checkpoint_busy")
+    require_current_tombstones(conn, home)
+    return len(intent.missing)

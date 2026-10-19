@@ -1,9 +1,10 @@
 """muninn erase: remove sessions, event lines or matching text for good.
 
-``erase`` needs the caller to hold ``store.writer_lock``; ``run_erase``
-takes it. Targets are collected first. One transaction then inserts the
+``erase`` needs caller-held writer ownership and established producer
+quiescence for real erasure; ``run_erase`` establishes both. Targets are
+collected first. One transaction then inserts the
 tombstones, deletes the events (their FTS rows go under secure-delete),
-scrubs knowledge text and citation quotes, and deletes the source rows of
+scrubs revisioned knowledge and review content, and deletes source rows of
 erased sessions. Tombstones and logs hold ids and hashes only; residue
 needles and rare terms stay in memory. Provider transcripts are never
 touched, only listed.
@@ -16,9 +17,11 @@ import shlex
 import sqlite3
 import time
 from collections.abc import Mapping
+from contextlib import ExitStack, suppress
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from muninn import ingest, store
+from muninn import ingest, query, store
 from muninn.erase_collect import (
     Target,
     collect_event,
@@ -35,6 +38,12 @@ from muninn.erase_residue import (
     still_stored,
     vocab_left,
 )
+from muninn.knowledge_erase import (
+    ErasureSummary,
+    erase_attempt_material,
+    erase_support_closure,
+)
+from muninn.review_quiescence import EraseStatus, erase_connection
 from muninn.tombstone_key import TOMBSTONE_FILE
 from muninn.tombstones import append_tombstones, reapply_tombstones
 
@@ -42,10 +51,12 @@ __all__ = [
     "MIN_MATCH",
     "NOT_COVERED",
     "TOMBSTONE_FILE",
+    "EraseRequest",
     "erase",
     "reapply_tombstones",
     "residue_scan",
     "run_erase",
+    "run_erase_request",
 ]
 
 MIN_MATCH = 4  # a 1-3 character match would erase nearly everything
@@ -59,6 +70,16 @@ _DERIVED = (
     ".codex/plugins/cache/muninn-local",
     ".codex/memories",
 )
+
+
+@dataclass(frozen=True)
+class EraseRequest:
+    """Group one selection and its dry-run intent without validating early."""
+
+    session: str | None = None
+    event_ref: str | None = None
+    match: str | None = None
+    dry_run: bool = False
 
 
 def _pick_mode(
@@ -124,7 +145,7 @@ def _aside_report(home: Path) -> dict[str, object]:
     return {"aside_files": aside, "aside_remove": _aside_remove(aside)}
 
 
-def _apply(conn: sqlite3.Connection, target: Target) -> None:
+def _apply(conn: sqlite3.Connection, target: Target) -> ErasureSummary:
     """Write the plan; the caller wraps this in one transaction."""
     conn.executemany(
         "INSERT INTO tombstone(created_at, provider, level, session_root,"
@@ -135,44 +156,27 @@ def _apply(conn: sqlite3.Connection, target: Target) -> None:
     conn.executemany(  # the event_ad trigger removes the FTS rows
         "DELETE FROM event WHERE id = ?", [(i,) for i in target.events]
     )
-    conn.executemany(
-        "UPDATE citation SET quote = NULL, span_start = NULL,"
-        " span_end = NULL, state = 'erased' WHERE id = ?",
-        [(i,) for i in sorted(target.citations)],
-    )
-    now = time.time()
-    # Every value field of an erased entry is cleared (tags are free text the
-    # person chose); only structural ids stay: scope, supersede links and any
-    # other entry's contradicts pointer to it, none of which carry content.
-    for kid in sorted(target.knowledge):
-        conn.execute(
-            "UPDATE knowledge SET text = NULL, retract_reason = NULL,"
-            " tags = NULL, confidence = NULL, valid_until = NULL,"
-            " contradicts = NULL, sensitivity = 'normal',"
-            " status = 'erased' WHERE id = ?",
-            (kid,),
-        )
-        conn.execute(
-            "INSERT INTO knowledge_log(knowledge_id, action, actor, at)"
-            " VALUES (?, 'erase', 'user', ?)",
-            (kid, now),
-        )
+    summary = erase_support_closure(conn, target.review, time.time())
     conn.executemany(  # source_issue and usage rows cascade
         "DELETE FROM source WHERE id = ?", [(i,) for i in target.sources]
     )
 
+    return summary
 
-def _commit(conn: sqlite3.Connection, target: Target) -> None:
+
+def _commit(conn: sqlite3.Connection, target: Target) -> ErasureSummary:
     """Apply the plan atomically, or leave the database untouched."""
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _apply(conn, target)
+        summary = _apply(conn, target)
         conn.execute("COMMIT")
+        return summary
     except BaseException:
         # BaseException: an interrupt mid-transaction must not leave the
-        # connection holding the write lock.
+        # connection holding the write lock or lose the original failure.
         if conn.in_transaction:
-            conn.execute("ROLLBACK")
+            with suppress(BaseException):
+                conn.execute("ROLLBACK")
         raise
 
 
@@ -181,25 +185,57 @@ def _erase_and_verify(
     home: Path,
     target: Target,
     match: str | None,
+    status: EraseStatus,
 ) -> dict[str, object]:
     """Commit the plan, then measure what survived."""
     needles = [match.encode()] if match else pick_needles(conn, target)
     # Both must be computed before the delete: afterwards the texts and the
     # vocabulary evidence are gone.
-    rare = rare_terms(conn, target.events, sorted(target.knowledge))
+    fts_ids = [
+        r[0]
+        for ident, revision in target.review.versions
+        for r in conn.execute(
+            "SELECT rowid FROM knowledge_fts WHERE knowledge_id=? AND "
+            "revision=?",
+            (ident, revision),
+        )
+    ]
+    rare = rare_terms(conn, target.events, fts_ids)
     # Write-ahead: the tombstones reach disk before the commit, so a crash
     # in between cannot lose an erasure.
     # The key is made here, after planning, so a dry run never creates it.
     target.tombstones += content_tombstones(conn, target)
+    status.erasure_phase = "intent_may_be_durable"
     append_tombstones(home, target.tombstones)
-    _commit(conn, target)
+    status.erasure_phase = "intent_durable"
+    summary = _commit(conn, target)
+    status.erasure_phase = "committed"
+    working_files = sum(
+        erase_attempt_material(home, row[0])
+        for ident in target.review.requests
+        for row in conn.execute(
+            "SELECT id FROM review_attempt WHERE request_id=?", (ident,)
+        )
+    )
+    summary = replace(
+        summary,
+        working_files=working_files,
+        retained_archives=len(aside_files(home)),
+    )
+    # A held reader can prevent truncation; the residue scan then reports WAL.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     if not match:  # a needle still in a surviving row is not residue
         needles = [n for n in needles if not still_stored(conn, n)]
+    vocab = vocab_left(conn, rare)
+    residue = residue_scan(home, needles)
+    if not vocab and not residue and not summary.retained_archives:
+        status.erasure_phase = "verified"
     return {
-        "vocab": vocab_left(conn, rare),
+        "review": asdict(summary),
+        "vocab": vocab,
         "needles": len(needles),
         # The list of leftover files, or 0 when the scan is clean.
-        "residue": residue_scan(home, needles) or 0,
+        "residue": residue or 0,
     }
 
 
@@ -216,7 +252,9 @@ def erase(
     """Erase one session (with its forks), one event line or matching text.
 
     Exactly one of ``session``, ``event_ref`` and ``match`` is given. The
-    caller holds ``store.writer_lock``. A ``ValueError`` propagates when
+    caller holds ``store.writer_lock`` and, for real erasure, has established
+    producer quiescence through ``erase_connection``. This low-level function
+    never acquires those barriers. A ``ValueError`` propagates when
     not exactly one selector is given, ``match`` is shorter than
     ``MIN_MATCH`` characters or ``event_ref`` is malformed; a
     ``LookupError`` when ``event_ref`` matches no thread, several threads
@@ -235,6 +273,29 @@ def erase(
     Returns:
         Counts and paths only; never erased text or the match string.
     """
+    return _erase(
+        conn,
+        home,
+        EraseRequest(session, event_ref, match, dry_run),
+        env,
+        EraseStatus(),
+    )
+
+
+def _erase(
+    conn: sqlite3.Connection,
+    home: Path,
+    request: EraseRequest,
+    env: Mapping[str, str],
+    status: EraseStatus,
+) -> dict[str, object]:
+    """Collect and erase once under the caller's established barriers."""
+    session, event_ref, match = (
+        request.session,
+        request.event_ref,
+        request.match,
+    )
+    dry_run = request.dry_run
     mode = _pick_mode(session, event_ref, match)
     target = Target()
     if session is not None:
@@ -251,7 +312,7 @@ def erase(
         "sources": len(target.sources),
         "lines": len(target.lines),
         "events": len(target.events),
-        "citations": len(target.citations),
+        "evidence": len(target.review.evidence),
         "knowledge": len(target.knowledge),
         "tombstones": len(target.tombstones) + len(target.content),
         "provider_files": _provider_files(target, ingest.default_roots(env)),
@@ -260,7 +321,7 @@ def erase(
     } | _aside_report(home)
     if dry_run:
         return out
-    return out | _erase_and_verify(conn, home, target, match)
+    return out | _erase_and_verify(conn, home, target, match, status)
 
 
 def run_erase(
@@ -273,36 +334,56 @@ def run_erase(
     dry_run: bool = False,
     env: Mapping[str, str] = os.environ,
 ) -> dict[str, object]:
-    """Take the writer lock, open the store with full fsync, and erase.
+    """Erase through one coordinated root, preserving the selector API."""
+    return run_erase_request(
+        home,
+        EraseRequest(session, event_ref, match, dry_run),
+        wait_s=wait_s,
+        env=env,
+    )
 
-    ``store.BusyError`` propagates if the writer lock is still held after
-    ``wait_s``; ``erase`` raises ``ValueError`` and ``LookupError`` as
-    documented there. Callee exceptions are described here, not in a
-    Raises section.
+
+def run_erase_request(
+    home: Path,
+    request: EraseRequest,
+    *,
+    wait_s: float = 15.0,
+    env: Mapping[str, str] = os.environ,
+    status: EraseStatus | None = None,
+) -> dict[str, object]:
+    """Establish producer quiescence and writer ownership, then erase.
+
+    Real erasure refuses an absent store; dry runs keep their writer-only
+    path and may initialize an empty store. Neither creates containment
+    evidence. Original callee exceptions propagate with the caller's status.
 
     Args:
         home: Data directory.
-        wait_s: Seconds to wait for the writer lock.
-        session: Session root id to erase.
-        event_ref: ``provider:thread:line.part`` of one event.
-        match: Literal text; every text containing it is erased.
-        dry_run: Report the counts without changing anything.
+        request: Selector and dry-run intent.
+        wait_s: Coordination-acquisition budget, not a whole-command deadline.
         env: Environment, for provider roots and ``HOME``.
+        status: Optional caller-owned milestones retained through failures.
 
     Returns:
-        The result of ``erase``.
+        Counts and paths only; never erased text or the match string.
     """
-    with store.writer_lock(home, wait_s=wait_s):
-        conn = store.connect_rw(store.db_path(home))
+    _pick_mode(request.session, request.event_ref, request.match)
+    if request.event_ref is not None:
+        query.parse_ref(request.event_ref)
+    status = status if status is not None else EraseStatus()
+    with ExitStack() as resources:
         try:
-            return erase(
-                conn,
-                home=home,
-                session=session,
-                event_ref=event_ref,
-                match=match,
-                dry_run=dry_run,
-                env=env,
-            )
-        finally:
-            conn.close()
+            if request.dry_run:
+                resources.enter_context(store.writer_lock(home, wait_s=wait_s))
+                conn = store.connect_rw(store.db_path(home))
+                resources.callback(conn.close)
+            else:
+                conn = resources.enter_context(
+                    erase_connection(home, wait_s=wait_s, status=status)
+                )
+            return _erase(conn, home, request, env, status)
+        except BaseException:
+            # Secondary cleanup must not hide the original body failure.
+            with suppress(BaseException):
+                resources.close()
+            raise

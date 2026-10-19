@@ -9,7 +9,13 @@ MKT_NAME = "muninn-local"
 PLUGIN_ID = f"muninn@{MKT_NAME}"
 MARKETPLACE = f"[marketplaces.{MKT_NAME}]"
 PLUGIN = f'[plugins."{PLUGIN_ID}"]'
-EVENTS = ("pre_tool_use", "session_start", "user_prompt_submit")
+EVENTS = (
+    "pre_tool_use",
+    "session_start",
+    "session_end",
+    "pre_compact",
+    "user_prompt_submit",
+)
 # Codex keys a hook's trust record by plugin, file, event and position; we
 # only ever manage the first group and handler (``:0:0``) of each event.
 TRUST = {
@@ -23,7 +29,13 @@ CODEX_KEYS = {
 }
 # Substrings that mark a line as ours; none may appear outside our sections.
 MARKERS = (MKT_NAME, "muninn@")
-CLAUDE_EVENTS = ("SessionStart", "UserPromptSubmit")
+CLAUDE_EVENTS = (
+    "SessionStart",
+    "SessionEnd",
+    "PreCompact",
+    "UserPromptSubmit",
+)
+CURSOR_EVENTS = ("sessionStart", "sessionEnd", "preCompact")
 CURSOR_DOC_URL = (
     "https://github.com/blueman82/muninn/blob/main/docs/QUICKSTART.md"
     "#cursor-history"
@@ -61,10 +73,12 @@ PINNED = (
     "integrations/codex/hooks/hooks.json",
     "integrations/cursor/hooks.json",
     "launchd/com.muninn.plist",
+    "requirements-runtime.lock",
 )
 OWNER_STEP = (
-    "OWNER STEP: start a new Codex session, run /hooks and trust the two "
-    "muninn hooks (session_start, user_prompt_submit)."
+    "OWNER STEP: start a new Codex session, run /hooks and trust all "
+    "muninn hooks (session_start, session_end, pre_compact, "
+    "user_prompt_submit)."
 )
 # The per-prompt recall switch muninn checks for in its data dir
 # (muninn/hook.py).

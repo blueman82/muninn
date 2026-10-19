@@ -12,6 +12,7 @@ from unittest import mock
 
 from muninn import cli_serve
 from tests.cli_support import CliCase
+from tests.review_quiescence_support import initialize
 
 ROOT = Path(__file__).resolve().parent.parent
 CHILD = (
@@ -61,6 +62,10 @@ class QuietStreamsTests(CliCase):
 
 class CrashTests(CliCase):
     """An exception outside a pass is logged as a class name only."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        initialize(self.home)
 
     def test_a_crash_logs_the_class_and_exits_nonzero(self) -> None:
         with mock.patch.object(

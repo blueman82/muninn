@@ -35,8 +35,8 @@ copy:
   turns query results into the bounded SessionStart / UserPromptSubmit blocks;
   `scope.py` maps a cwd to a repository scope (worktrees fold into the main repo).
 - **Single writer:** poller (`serve`), `ingest`, `erase`, `compact`, `rebuild`
-  (`cli_rebuild.py` takes `writer_lock`), `know add` all take the exclusive
-  `writer.lock` (`fcntl.flock` on macOS/Linux, `msvcrt.locking` on Windows); readers
+  (`cli_rebuild.py` takes `writer_lock`), `learn request`, `know propose` and
+  `know retract` all take the exclusive `writer.lock` (`fcntl.flock` on macOS/Linux, `msvcrt.locking` on Windows); readers
   open read-only. Journal mode is DELETE. Exit code 3 means busy; 4 means store
   unavailable, a hot journal, or a missing or damaged `tombstone.key`
   (`tombstone_key.py`); 1 means `doctor` found an error-level problem.

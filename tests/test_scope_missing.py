@@ -5,11 +5,21 @@ Temp repos and temp dirs only; HOME is patched to a temp dir.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sqlite3
 from unittest import mock
 
-from muninn import scope
+from muninn import (
+    ingest,
+    review_quiescence,
+    review_quiescence_state,
+    scope,
+    store,
+)
+from tests.ingest_support import line
 from tests.scope_support import NO_HASH, ScopeCase
+from tests.test_classify import codex_meta, reply, user_msg
 
 
 class MissingCwdTests(ScopeCase):
@@ -158,3 +168,155 @@ class MissingCwdTests(ScopeCase):
         cwd = self.tmp / "away" / "gone"
         got = scope.scope_id(conn, str(cwd), commit_hint=hash_one)
         self.assertEqual(got, id_clone)
+
+    def test_unprepared_older_clone_precedes_prepared_later_match(
+        self,
+    ) -> None:
+        conn = self.rw()
+        old, new = self.tmp / "old", self.tmp / "new"
+        hint = self.make_repo(old)
+        self.git("clone", "-q", str(old), str(new), cwd=self.tmp)
+        oldest = scope.scope_id(conn, str(old))
+        scope.scope_id(conn, str(new))
+        facts = {scope.CommitLookup(str(new), hint): True}
+        with self.assertRaises(scope.ScopePreparationRequiredError) as raised:
+            scope.scope_id(
+                conn, str(self.tmp / "gone"), hint, commit_facts=facts
+            )
+        self.assertEqual(raised.exception.lookup, (str(old), hint))
+        scope.prepare_commit(raised.exception.lookup, facts)
+        self.assertEqual(
+            scope.scope_id(
+                conn, str(self.tmp / "gone"), hint, commit_facts=facts
+            ),
+            oldest,
+        )
+
+    def test_connection_owned_retry_retains_owner_and_reopens_under_writer(
+        self,
+    ) -> None:
+        self.home.chmod(0o700)
+        repo = self.tmp / "repo"
+        hint = self.make_repo(repo)
+        gone = self.tmp / "gone"
+        roots = {"codex-sessions": self.tmp / "sources"}
+        roots["codex-sessions"].mkdir()
+        records = [
+            codex_meta(
+                "user", "one", cwd=str(repo), git={"commit_hash": hint}
+            ),
+            user_msg(1, "first"),
+            {"type": "turn_context", "payload": {"cwd": str(gone)}},
+            reply(2, "second"),
+        ]
+        (roots["codex-sessions"] / "rollout-one.jsonl").write_bytes(
+            b"".join(map(line, records))
+        )
+        facts: scope.CommitFacts = {}
+        total = ingest.PassStats()
+        with review_quiescence.maintenance_owner(
+            self.home, wait_s=0, status=review_quiescence.EraseStatus()
+        ) as owner:
+            deadline = owner.deadline
+            self.assertFalse(os.get_inheritable(owner.fd))
+            with review_quiescence.maintenance_writer(owner):
+                conn = store.connect_rw(
+                    store.db_path(self.home), fullfsync=False
+                )
+                with contextlib.closing(conn):
+                    review_quiescence_state.seed_new(self.home, owner.fd)
+                    with self.assertRaises(
+                        ingest.IngestPreparationRequiredError
+                    ) as raised:
+                        ingest.ingest(conn, roots, commit_facts=facts)
+                    pending = raised.exception
+                    total.accumulate(pending.stats)
+                    self.assertFalse(conn.in_transaction)
+                    for table in ("source", "event", "scope", "scope_path"):
+                        self.assertEqual(
+                            conn.execute(
+                                f"SELECT count(*) FROM {table}"
+                            ).fetchone()[0],
+                            0,
+                        )
+                    self.assertEqual(
+                        (
+                            pending.stats.failed,
+                            pending.stats.errors,
+                            pending.stats.missing,
+                        ),
+                        (0, {}, 0),
+                    )
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    conn.execute("SELECT 1")
+            with self.assertRaises(BlockingIOError):
+                review_quiescence_state.acquire(self.home)
+            with store.writer_lock(self.home, wait_s=0):
+                pass
+            scope.prepare_commit(pending.lookup, facts)
+            self.assertEqual(owner.deadline, deadline)
+            with (
+                review_quiescence.maintenance_writer(owner),
+                contextlib.closing(
+                    store.connect_rw(store.db_path(self.home), fullfsync=False)
+                ) as reopened,
+            ):
+                review_quiescence.verify_current(owner, reopened)
+                stats = ingest.ingest(reopened, roots, commit_facts=facts)
+                total.accumulate(stats)
+                self.assertEqual(
+                    reopened.execute("SELECT count(*) FROM event").fetchone()[
+                        0
+                    ],
+                    2,
+                )
+            self.assertEqual(
+                (
+                    total.files_seen,
+                    total.files_changed,
+                    total.events_added,
+                    total.failed,
+                ),
+                (2, 1, 2, 0),
+            )
+
+    def test_retry_rechecks_new_cached_cwd_before_prepared_membership(
+        self,
+    ) -> None:
+        conn = self.rw()
+        one, two = self.tmp / "one", self.tmp / "two"
+        hint = self.make_repo(one)
+        self.make_repo(two, "two")
+        scope.scope_id(conn, str(one))
+        second = scope.scope_id(conn, str(two))
+        gone = self.tmp / "gone"
+        root = self.tmp / "sources"
+        root.mkdir()
+        records = [
+            codex_meta(
+                "user", "one", cwd=str(gone), git={"commit_hash": hint}
+            ),
+            user_msg(1, "question"),
+        ]
+        (root / "rollout-one.jsonl").write_bytes(b"".join(map(line, records)))
+        probe = scope._has_commit
+
+        def remap(repo: str, commit: str) -> bool:
+            answer = probe(repo, commit)
+            with store.writer_lock(self.db.parent, wait_s=0):
+                conn.execute(
+                    "INSERT INTO scope_path(cwd,scope_id,method)"
+                    " VALUES(?,?,'git')",
+                    (str(gone), second),
+                )
+            return answer
+
+        with mock.patch.object(scope, "_has_commit", remap):
+            stats = ingest.run_pass(
+                self.db.parent, {"codex-sessions": root}, fullfsync=False
+            )
+        self.assertEqual(self.row(conn, gone)[0], str(two))
+        self.assertEqual(
+            conn.execute("SELECT scope_id FROM event").fetchone()[0], second
+        )
+        self.assertEqual((stats.files_seen, stats.files_changed), (2, 1))

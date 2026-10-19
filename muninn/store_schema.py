@@ -1,19 +1,10 @@
-"""Store schema v3: the DDL a fresh store gets, in reusable pieces.
-
-Schema v2 adds typed ledger fields to the knowledge table.  Its kind CHECK
-cannot be altered in place, so ``store_migrate`` rebuilds the table from the
-same ``KNOWLEDGE_TABLE`` template used here (``{name}`` is the table name);
-one definition serves both paths.  The DDL is line-wrapped to 79 columns.
-source_issue lists `code` before its table-level PRIMARY KEY because SQLite
-rejects a column definition that follows a table constraint.  The
-knowledge_ai/ad/au triggers are spelled out with NULL-text guards: an erased
-entry (text NULL) is not in knowledge_fts, and an FTS5 'delete' for a row
-that is not indexed corrupts the index.
-"""
+"""Compose preserved transcript DDL and the marked knowledge schema."""
 
 from __future__ import annotations
 
-SCHEMA_VERSION = 3
+from muninn.store_knowledge_schema import KNOWLEDGE_SQL
+
+SCHEMA_VERSION = 1
 
 SCOPE_SQL = r"""
 CREATE TABLE scope (id INTEGER PRIMARY KEY,
@@ -187,15 +178,4 @@ CREATE TRIGGER knowledge_log_no_delete BEFORE DELETE ON knowledge_log BEGIN
   SELECT RAISE(ABORT, 'append-only'); END;
 """
 
-SCHEMA_SQL = (
-    SCOPE_SQL
-    + _SOURCES_SQL
-    + KNOWLEDGE_TABLE.format(name="knowledge")
-    + ";\n"
-    + _FTS_SQL
-    + ";\n".join(KNOWLEDGE_TRIGGERS)
-    + ";\n"
-    + _CITATION_SQL
-    + _LOG_SQL
-    + _TOMBSTONE_SQL
-)
+SCHEMA_SQL = SCOPE_SQL + _SOURCES_SQL + _TOMBSTONE_SQL + KNOWLEDGE_SQL
