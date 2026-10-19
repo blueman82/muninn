@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
-from muninn import cli_serve, platform_lock, store
+from muninn import cli_serve, platform_lock, review_spawn, store
 from muninn import review_process as process
 from muninn import review_supervisor as supervision
 from muninn.review_models import ReviewContext
@@ -191,7 +191,7 @@ class ReviewSupervisorTests(SupervisorCase):
             return cast(subprocess.Popen[bytes], real(*args, **kwargs))
 
         with mock.patch.object(
-            supervision.subprocess, "Popen", side_effect=spawn
+            review_spawn.subprocess, "Popen", side_effect=spawn
         ):
             self.finish()
         self.assertEqual(

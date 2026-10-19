@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from muninn.knowledge_models import StrictModel, Text, UtcSeconds
+from muninn.knowledge_models import StrictModel, UtcSeconds
 from muninn.review_json import finite_float, reject_constant, unique_object
 from muninn.review_models import ProcessIdentity
 
@@ -18,7 +18,7 @@ CONTROL_HEADER_MAX = 1024 * 1024
 class Control(StrictModel):
     """Accept only fixed parent-selected command data without prompt text."""
 
-    argv: tuple[Text, ...]
+    argv: tuple[str, ...]
     cwd: Path
     env: dict[str, str]
 

@@ -24,6 +24,7 @@ from tools.learning_eval.models import (
     Trial,
     validate_metric_name,
 )
+from tools.learning_eval.report import matched_conditions, summarize
 
 BLOCKERS = frozenset(
     {
@@ -231,10 +232,19 @@ def comparable_pair(left: Trial, right: Trial) -> bool:
     """Refuse memory attribution when reported configuration is unmatched."""
     configs = (left.requested, left.observed, right.requested, right.observed)
     judgments = (left.judgment, right.judgment)
-    return all(
-        c == configs[0] and all(c.model_dump().values()) for c in configs
-    ) and all(
-        j is not None and j.later_task_passed is not None for j in judgments
+    return (
+        (
+            matched_conditions(left)
+            and matched_conditions(right)
+            and left.expected_conditions == right.expected_conditions
+        )
+        and all(
+            c == configs[0] and all(c.model_dump().values()) for c in configs
+        )
+        and all(
+            j is not None and j.later_task_passed is not None
+            for j in judgments
+        )
     )
 
 
@@ -272,7 +282,7 @@ def score_metric(
     selected = tuple(t for t in trials if t.comparator == comparator)
     scheduled = assessment.sample_size * assessment.repetitions
     complete = len(selected) == scheduled and all(
-        t.requested == t.observed for t in selected
+        t.requested == t.observed and matched_conditions(t) for t in selected
     )
     numerator: int | None = None
     denominator: int | None = None
@@ -364,29 +374,9 @@ def score_trials(
         or comparator != "new_withheld"
     )
     blockers = tuple(sorted({trial.outcome for trial in trials} & BLOCKERS))
-    limitations = ["offline_scoring_does_not_establish_live_acceptance"]
-    if any(t.requested != t.observed for t in trials):
-        limitations.append(
-            "unmatched_configuration_not_attributable_to_memory"
-        )
-    if any(t.judgment is None for t in trials):
-        limitations.append("missing_independent_judgment")
-    if len(cases) != assessment.sample_size:
-        limitations.append("incomplete_case_population")
-    statuses = {metric.status for metric in metrics} | {
-        host.status for host in hosts
-    }
-    status: AssessmentStatus = "inconclusive"
-    if blockers or "revise" in statuses:
-        status = "revise"
-    elif "unverified" in statuses:
-        status = "unverified"
-    elif (
-        metrics
-        and statuses == {"accept"}
-        and len(cases) == assessment.sample_size
-    ):
-        status = "accept"
+    limitations, status = summarize(
+        trials, metrics, hosts, blockers, len(cases) == assessment.sample_size
+    )
     return EvaluationReport(
         schema_version=1,
         assessment_id=assessment.id,

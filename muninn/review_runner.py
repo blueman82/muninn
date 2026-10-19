@@ -7,9 +7,7 @@ import json
 import os
 import re
 import stat
-import sys
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -22,6 +20,8 @@ from muninn.review_json import (
     result_schema,
     unique_object,
 )
+from muninn.review_launch_spec import LaunchSpec as LaunchSpec
+from muninn.review_launch_spec import cli_argv, launch_spec
 from muninn.review_models import (
     ReviewContext,
     RunnerConfig,
@@ -49,20 +49,6 @@ class RunnerCapability(StrictModel):
     schema_digest: Digest
     config_digest: Digest
     proof_path: Path
-
-
-@dataclass(frozen=True)
-class LaunchSpec:
-    """Carry fixed launch data without authorizing spending or activation."""
-
-    wrapper_argv: tuple[str, ...]
-    wrapper_cwd: Path
-    wrapper_env: dict[str, str]
-    cli_argv: tuple[str, ...]
-    cli_cwd: Path
-    cli_env: dict[str, str]
-    prompt: bytes
-    deadline: float
 
 
 class HostProof(StrictModel):
@@ -169,7 +155,7 @@ def read_private_file(path: Path, limit: int) -> bytes:
     return raw
 
 
-def _file_digest(path: Path, limit: int) -> tuple[str, int]:
+def file_digest(path: Path, limit: int) -> tuple[str, int]:
     """Stream a bounded file and refuse observable concurrent changes."""
     _canonical(path)
     with os.fdopen(
@@ -224,7 +210,7 @@ def config_fingerprint(
             entries.append((str(path), "absent", ""))
             continue
         if stat.S_ISREG(info.st_mode):
-            hashed, size = _file_digest(path, min(_MIB, remaining))
+            hashed, size = file_digest(path, min(_MIB, remaining))
             remaining -= size
             entries.append((str(path), "file", hashed))
         elif stat.S_ISDIR(info.st_mode):
@@ -246,30 +232,6 @@ def config_fingerprint(
                 "environment": dict(environment),
             }
         ).encode()
-    )
-
-
-def _argv(requested: RunnerConfig) -> tuple[str, ...]:
-    """Fix every CLI option independently of model-controlled data."""
-    return (
-        requested.executable,
-        "-p",
-        "--json-schema",
-        _json(round_schema()),
-        "--output-format",
-        "json",
-        "--tools",
-        "",
-        "--strict-mcp-config",
-        "--mcp-config",
-        '{"mcpServers":{}}',
-        "--no-session-persistence",
-        "--safe-mode",
-        "--disable-slash-commands",
-        "--model",
-        requested.model,
-        "--effort",
-        requested.reasoning,
     )
 
 
@@ -316,7 +278,7 @@ def _configuration(
     if (
         proof.requested != requested
         or proof.output_contract_digest != output_contract_digest()
-        or proof.cli_argv != _argv(requested)
+        or proof.cli_argv != cli_argv(requested)
         or proof.schema_digest != capability.schema_digest
         or proof.config_digest != capability.config_digest
         or set(proof.coverage) != _COVERAGE
@@ -340,7 +302,7 @@ def _configuration(
             raise ValueError("capability_changed")
         environment[key] = value
     executable = Path(requested.executable)
-    hashed, _ = _file_digest(executable, 256 * _MIB)
+    hashed, _ = file_digest(executable, 256 * _MIB)
     if hashed != proof.executable_sha256 or not os.access(executable, os.X_OK):
         raise ValueError("capability_changed")
     if (
@@ -387,28 +349,7 @@ def prepare_launch(
         proof = _proof(capability)
         environment = _configuration(proof, capability, requested)
         check_round(context)
-        return LaunchSpec(
-            (
-                sys.executable,
-                "-E",
-                "-s",
-                "-m",
-                "muninn.review_worker",
-                "--deadline",
-                repr(context.deadline),
-                "--max-input-bytes",
-                str(context.policy.max_input_bytes),
-                "--max-output-bytes",
-                str(context.policy.max_output_bytes),
-            ),
-            Path(__file__).resolve().parent.parent,
-            {},
-            _argv(requested),
-            proof.cli_cwd,
-            environment,
-            prompt,
-            context.deadline,
-        )
+        return launch_spec(context, proof.cli_cwd, environment, prompt)
     except (ValidationError, json.JSONDecodeError):
         raise ValueError("capability_invalid") from None
     except (OSError, UnicodeError):

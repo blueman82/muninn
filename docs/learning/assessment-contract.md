@@ -1,9 +1,10 @@
 # Offline knowledge-learning assessment
 
-This tool defines strict C6 records and scores synthetic, independently attributed
-labels. It does not launch a reviewer, install a comparator, acquire native proof,
-read a heldout provider transcript, or authorize paid work. A passing structural
-check establishes no measured learning performance. The frozen comparator revisions
+The offline CLI defines strict C6 records and scores synthetic, independently
+attributed labels. A separate callable Python harness exercises isolated candidate
+launches with disposable test children. Neither path grants paid-work authority or
+produces native proof. Passing synthetic tests establishes no measured learning
+performance. The frozen comparator revisions
 for later work are current Muninn `5c1a69b0edff81df80836d72a80971a91a8f9520`
 and Hermes `f925b01791fe052e7d55dc975750c0bd985aff91`; neither runs here.
 
@@ -13,7 +14,7 @@ and Hermes `f925b01791fe052e7d55dc975750c0bd985aff91`; neither runs here.
 working directory. Use `.artifacts/knowledge-learning/` for private inputs/output;
 that directory is ignored. Missing budget/approval fields, heldout freeze metadata,
 duplicate JSON keys, unknown fields, nonfinite values and digest mismatches refuse
-before output. All execution paths make zero runner calls. Approval strings in a
+before output. The offline CLI always reports `runner_calls: 0`. Approval strings in a
 synthetic fixture are examples, never actual owner authorization.
 
 The existing Task 2 `Scope`, `Digest`, `UtcSeconds`, `Provider`, `EvidenceRecord`,
@@ -44,7 +45,7 @@ configuration before evaluating outcomes. Hashing uses the canonical JSON descri
 below. Observed settings remain separate: a mismatch is retained/disclosed, with
 inconclusive attribution to the frozen treatment; it is never a parity claim.
 
-The four public interfaces are `load_cases(Path) -> tuple[Case, ...]`,
+The offline scoring interfaces are `load_cases(Path) -> tuple[Case, ...]`,
 `validate_partition(tuple[Case, ...]) -> None`,
 `score_trials(cases, trials, assessment, *, host_results=()) -> EvaluationReport`
 and `write_report(report, Path) -> None`. The approved keyword-only host argument
@@ -140,11 +141,84 @@ frozen named summaries, not a substitute for these distributions. Config mismatc
 are disclosed separately and cannot establish an effect of memory. Synthetic CLI
 reports cannot claim acceptance; hard blockers still produce `revise`.
 
-Live capability launch, durable shared-account reservations across comparator
-restarts, exact runtime isolation, owner-approved production tolerances and real
-native host trials belong to later authorized work. No placeholder capability
-function claims to implement those boundaries here. Budget exhaustion or insufficient
-sample evidence must remain inconclusive in that later assessment.
+## Synthetic callable harness
+
+`tools.learning_eval.run.prepare_capability_trial(context, capability, prompt,
+authorization) -> LaunchSpec` accepts only the concrete Claude POSIX candidate
+recipe. Preparation grants no reservation or activation permit. `proof_path` names
+an explicit private `Candidate` artifact (`kind: synthetic_candidate`), whose exact
+bytes must match `TrialAuthorization.candidate_digest`. Requested settings,
+executable bytes, generated round schema, output decoder, explicit configuration
+roots, selected environment hashes and disposable cwd are freshly checked. The
+selected `HOME` must equal the private disposable home; cwd and roots stay inside
+that home. Only explicitly selected environment values reach the child. Candidate
+artifacts contain no native coverage claims and cannot satisfy production
+`prepare_launch`, which continues to require verified native proof.
+
+`Account(path, assessment, initialize=True)` explicitly initializes a private
+SQLite account in an existing private directory outside disposable homes. Reopening
+requires the same explicit path and immutable assessment/account/approval/budget
+identity; absent or corrupt stores refuse. New authorized policy/configuration
+snapshots append without replacing historical limits. All four comparator labels,
+rounds, retries and fault calls share that ledger. First reservation permanently
+anchors elapsed wall time. A separate durable clock high-water mark records every
+budget observation, including refusals, before the admission decision. Reopening
+preserves that mark, and reversed time refuses further admission. Original and
+historical account limits remain active; the stronger original/current conservative
+call charge is retained. Unknown usage stays null. Refused schedules are retained
+without fabricating a model call.
+
+The account context holds the existing non-reentrant OS controller lock through
+scheduling, execution and cleanup. Each SQLite transaction closes before wrapper
+creation. `claim` atomically records a one-use launch claim; replay returns the
+same row without another permit, and altered bindings refuse. An interrupted claim
+never becomes reusable. Reopening preserves unresolved calls as unknown and invokes
+the existing recovery primitive only with recorded native identities. Missing,
+unsupported or conflicting identities block further execution; there is no PID-only
+cleanup, stale-age takeover, refund or automatic account reset. A missing-identity
+crash can require separate explicit reconciliation. Cross-machine account sharing
+is unsupported.
+
+`tools.learning_eval.execution.execute_trial(account, context, capability, prompt,
+authorization, schedule)` runs one model call under that lock. It rechecks candidate
+inputs after the durable claim and again after persisting positively checked worker
+readiness, before spending activation once. The shared fixed wrapper creator and
+`ProcessMonitor` own identity, bounded activation framing, deadlines, output limits
+and cleanup. The deadline is capped by the policy and remaining original/historical
+account wall allowance. Each round has a separate call ID while the supplied review
+attempt remains unchanged. Registration or persistence faults retain conservative charges and
+owned-child containment. The wire format preserves empty and whitespace arguments,
+including the distinct empty argument after `--tools`, while retaining strict
+executable/path, NUL, environment and frame validation. Missing or unreadable
+preparation inputs retain a content-free `configuration_refused` scheduled row
+without consuming a model-call charge; reopening and reporting preserve it.
+
+Only `new_present` and `new_withheld` have this callable candidate execution path.
+Hermes and current-Muninn execution refuse and remain scheduled/unmeasured until
+separately reviewed adapters mediate every model call. Reserving once around a
+multi-call comparator process is not supported. The CLI has no launch switch.
+
+`report.with_account(report, account)` retains scheduled trial IDs and discloses
+budget refusal, unknown spending and unsupported comparators. Its synthetic results
+remain unverified; reliability hard blockers retain `revise` precedence. Explicit
+`Trial.expected_conditions` and `observed_conditions` bind evidence availability
+and selection digests, native state, cache state and approval mode. Historical
+absence is unknown. Unknown or unequal conditions are visibly unmatched and cannot
+support causal attribution to memory, including paired later-task comparisons.
+
+Heldout validation requires a separately supplied immutable `frozen_assessment`
+argument to `validate_manifest`, equal to the strict manifest assessment. Approval
+shape, phase, criteria, policies and configuration digest are checked before reading
+case material; exact cases, labels and family digests are checked afterward. The
+CLI cannot supply that external binding, so heldout CLI requests refuse. Tests use
+fabricated temporary heldout cases; this does not freeze or access a real heldout set.
+
+Offline case loading/scoring and callable execution remain separate interfaces.
+There is no automatic case-to-prompt, schedule or pilot controller. Actual provider
+calls, native isolation trials, owner-approved numerical tolerances, reserved
+heldout material, measured pilot/freeze artifacts and real comparator adapters
+remain separate authorized work. No synthetic test emits a measured pilot summary,
+production policy, native capability proof or activation record.
 
 ## Conditional runner capability fields
 

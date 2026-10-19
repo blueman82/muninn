@@ -146,6 +146,16 @@ class IndependentJudgment(StrictModel):
         return self
 
 
+class Conditions(StrictModel):
+    """Keep unreported experimental conditions explicitly unknown."""
+
+    evidence_available_digest: Digest | None
+    evidence_selected_digest: Digest | None
+    native_state: Text | None
+    cache_state: Text | None
+    approval_mode: Text | None
+
+
 class Trial(StrictModel):
     """Retain every scheduled outcome and explicitly unreported usage."""
 
@@ -154,6 +164,8 @@ class Trial(StrictModel):
     comparator: Comparator
     policy_digest: Digest
     budget_account_id: Text
+    expected_conditions: Conditions | None = None
+    observed_conditions: Conditions | None = None
     requested: ObservedConfig
     observed: ObservedConfig
     outcome: Text

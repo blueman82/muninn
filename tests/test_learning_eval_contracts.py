@@ -17,6 +17,7 @@ from tools.learning_eval.cases import (
 )
 from tools.learning_eval.models import (
     Assessment,
+    Conditions,
     HostResult,
     IndependentJudgment,
     Trial,
@@ -130,7 +131,16 @@ def trial(case_id: str, **changes: Any) -> Trial:
     config = ObservedConfig(
         runner=None, version=None, model=None, reasoning=None
     )
+    conditions = Conditions(
+        evidence_available_digest=DIGEST,
+        evidence_selected_digest=DIGEST,
+        native_state="synthetic-none",
+        cache_state="cold",
+        approval_mode="synthetic",
+    )
     data = {
+        "expected_conditions": conditions,
+        "observed_conditions": conditions,
         "id": "attempt-1",
         "case_id": case_id,
         "comparator": "new_present",

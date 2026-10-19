@@ -339,3 +339,67 @@ class ReviewWorkerTests(unittest.TestCase):
         ):
             process.adopt_after_registration_error(self.monitor, other)
         self.assertIs(self.monitor.slots[ATTEMPT, 1].handle, running)
+
+    def test_empty_arguments_reach_real_child(self) -> None:
+        self.worker()
+        self.assertEqual([e.kind for e in self.events("ready")], ["ready"])
+        script = (
+            "import sys; sys.stdin.buffer.read(); "
+            "assert sys.argv[1:] == ['--tools', '']; "
+            f"print({SUCCESS!r})"
+        )
+        self.monitor.activate(
+            ATTEMPT,
+            1,
+            protocol.activation(
+                (sys.executable, "-c", script, "--tools", ""),
+                self.home,
+                {},
+                b"synthetic",
+                8192,
+            ),
+        )
+        events = self.events("outcome")
+        self.assertEqual(
+            [event.kind for event in events], ["launched", "outcome"]
+        )
+        self.assertIsNone(cast(process.ProcessOutcome, events[-1]).error_code)
+
+    def test_argument_values_and_prompt_round_trip_unchanged(self) -> None:
+        argv = (sys.executable, "--tools", "", " ", "", "\t")
+        prompt = b"synthetic\x00\xff"
+        raw = protocol.activation(argv, self.home, {}, prompt, 8192)
+        try:
+            decoded = protocol.decode_activation(raw, 8192)
+        except ValueError as exc:
+            self.fail(f"valid argument transport refused: {exc}")
+        self.assertEqual(decoded, (argv, self.home, {}, prompt))
+
+    def test_strict_transport_rejections_survive_empty_arguments(self) -> None:
+        for argv, cwd, env in (
+            ((), self.home, {}),
+            (("",), self.home, {}),
+            (("relative",), self.home, {}),
+            ((sys.executable, "bad\x00"), self.home, {}),
+            ((sys.executable,), Path("relative"), {}),
+            ((sys.executable,), self.home, {"bad=key": "value"}),
+        ):
+            with (
+                self.subTest(argv=argv, cwd=cwd, env=env),
+                self.assertRaises(ValueError),
+            ):
+                protocol.decode_activation(
+                    protocol.activation(argv, cwd, env, b"synthetic", 8192),
+                    8192,
+                )
+        for argv in (
+            [sys.executable, 0],
+            [sys.executable, False],
+            [sys.executable, None],
+        ):
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                protocol.Control.model_validate_json(
+                    json.dumps(
+                        {"argv": argv, "cwd": str(self.home), "env": {}}
+                    )
+                )

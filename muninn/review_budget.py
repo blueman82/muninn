@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from decimal import Decimal, DecimalException, Inexact, localcontext
 
+from muninn.review_charge import Charge, aggregate, limits
 from muninn.review_json import canonical_json
 from muninn.review_models import (
     CallView,
-    PilotBudget,
     ReviewContext,
     ReviewPolicy,
     Usage,
@@ -84,57 +83,6 @@ def _policies(
     return tuple(ReviewPolicy.model_validate_json(row[0]) for row in rows)
 
 
-def _limits(
-    calls: list[CallView],
-    budget: PilotBudget,
-    charge: str | None,
-    now: float,
-) -> None:
-    """Check call counts and elapsed time from the first reservation."""
-    if len(calls) >= budget.max_model_calls:
-        raise ValueError("budget_call_limit")
-    if (
-        calls
-        and now - min(call.reserved_at for call in calls)
-        >= budget.max_wall_seconds
-    ):
-        raise ValueError("budget_wall_limit")
-    if calls and now < max(call.reserved_at for call in calls):
-        raise ValueError("budget_clock_reversed")
-    if budget.max_cost_decimal is not None:
-        if charge is None:
-            raise ValueError("budget_charge_unavailable")
-        charges = [_retained_charge(call, budget.currency) for call in calls]
-        if Decimal(_sum_decimal([*charges, charge])) > Decimal(
-            budget.max_cost_decimal
-        ):
-            raise ValueError("budget_cost_limit")
-
-
-def _retained_charge(call: CallView, currency: str | None) -> str:
-    """Retain uncertain charge bounds; use actual completed costs if known."""
-    if call.currency != currency:
-        raise ValueError("budget_currency_mismatch")
-    usage = call.usage
-    reported = usage.cost_decimal if usage is not None else None
-    if (
-        usage is not None
-        and reported is not None
-        and usage.currency != currency
-    ):
-        raise ValueError("budget_currency_mismatch")
-    if call.state == "completed" and reported is not None:
-        return reported
-    reserved = call.cost_reservation_decimal
-    if reserved is None:
-        raise ValueError("budget_charge_unavailable")
-    return (
-        str(max(Decimal(reserved), Decimal(reported)))
-        if reported is not None
-        else reserved
-    )
-
-
 def reserve_call(
     conn: sqlite3.Connection,
     context: ReviewContext,
@@ -165,9 +113,9 @@ def reserve_call(
         *_policies(conn, context.policy.budget.account_id),
         context.policy,
     ):
-        _limits(calls, policy.budget, charge, now)
-    _limits(
-        [c for c in calls if c.policy_digest == policy_digest],
+        limits([_charge(c) for c in calls], policy.budget, charge, now)
+    limits(
+        [_charge(c) for c in calls if c.policy_digest == policy_digest],
         context.policy.budget,
         charge,
         now,
@@ -210,20 +158,6 @@ def reserve_call(
     return call
 
 
-def _sum_decimal(values: list[str]) -> str:
-    """Add reported decimal charges without binary floating point rounding."""
-    amounts = [Decimal(value) for value in values]
-    with localcontext() as context:
-        context.prec = (
-            max((len(a.as_tuple().digits) for a in amounts), default=1) + 32
-        )
-        context.traps[Inexact] = True
-        try:
-            return str(sum(amounts, Decimal(0)))
-        except DecimalException as exc:
-            raise ValueError("budget_charge_unavailable") from exc
-
-
 def aggregate_usage(
     conn: sqlite3.Connection,
     account_id: str,
@@ -236,41 +170,15 @@ def aggregate_usage(
         (account_id, policy_digest, policy_digest),
     ).fetchall()
     calls = [call_view(row) for row in rows]
-    usages = [call.usage for call in calls if call.state == "completed"]
-    data: dict[str, int | str | None] = {}
-    for field in ("input_tokens", "output_tokens", "cached_tokens"):
-        values = [
-            getattr(usage, field) if usage is not None else None
-            for usage in usages
-        ]
-        data[field] = (
-            sum(value for value in values if value is not None)
-            if len(values) == len(calls) and None not in values
-            else None
-        )
-    costs = [
-        usage.cost_decimal if usage is not None else None for usage in usages
-    ]
-    currencies = {
-        usage.currency if usage is not None else None for usage in usages
-    }
-    known = (
-        bool(calls)
-        and len(usages) == len(calls)
-        and None not in costs
-        and len(currencies) == 1
-        and None not in currencies
+    return aggregate([_charge(c) for c in calls])
+
+
+def _charge(call: CallView) -> Charge:
+    """Remove admission-only fields before shared conservative arithmetic."""
+    return Charge(
+        call.state,
+        call.reserved_at,
+        call.usage,
+        call.cost_reservation_decimal,
+        call.currency,
     )
-    data["cost_decimal"] = (
-        _sum_decimal([value for value in costs if value is not None])
-        if known
-        else None
-    )
-    data["currency"] = (
-        next(iter(currencies))
-        if len(usages) == len(calls)
-        and len(currencies) == 1
-        and None not in currencies
-        else None
-    )
-    return Usage.model_validate(data)

@@ -251,6 +251,9 @@ class LearningEvalTests(unittest.TestCase):
             )
             self.assertTrue((root / "out/trials.json").exists())
         from_data["labels_digest"] = "b" * 64
+        from_data["config_digest"] = config_digest(
+            Assessment.model_validate_json(json.dumps(from_data))
+        )
         with self.assertRaisesRegex(ValueError, "input_digest_mismatch"):
             validate_manifest(json.dumps(raw).encode(), "pilot")
 

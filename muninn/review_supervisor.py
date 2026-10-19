@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import subprocess
+import subprocess as subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -28,10 +28,9 @@ from muninn.review_process import (
     RunningProcess,
     WorkerLaunched,
     WorkerReady,
-    adopt_after_registration_error,
     cancel_registered,
 )
-from muninn.review_process_identity import identify, recover_group
+from muninn.review_process_identity import recover_group
 from muninn.review_process_protocol import activation
 from muninn.review_progress import checked_policy, digest
 from muninn.review_request_views import request_view
@@ -42,6 +41,7 @@ from muninn.review_requests import (
 )
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
 from muninn.review_runner import LaunchSpec, RunnerCapability, prepare_launch
+from muninn.review_spawn import create_wrapper
 from muninn.review_supervisor_store import (
     database,
     is_contention,
@@ -222,39 +222,14 @@ class Supervisor:
         _main()
         spec = pending.launch
         assert spec is not None
-        proc = subprocess.Popen(
-            spec.wrapper_argv,
-            cwd=spec.wrapper_cwd,
-            env=spec.wrapper_env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-            start_new_session=os.name != "nt",
-        )
-        pending.spawned = True
-        try:
-            identity = identify(proc.pid)
-        except OSError:
-            identity = ProcessIdentity(
-                pid=proc.pid,
-                created="unverified-owned-child",
-                pgid=proc.pid if os.name != "nt" else None,
-                job_marker=None,
-            )
-        handle = RunningProcess(
+        pending.handle = create_wrapper(
+            spec,
+            self.monitor,
             pending.context.attempt_id,
             pending.context.round_index,
-            proc,
-            identity,
-            spec.deadline,
             self.policy.max_output_bytes,
         )
-        pending.handle = handle
-        try:
-            self.monitor.register(handle)
-        except Exception:
-            adopt_after_registration_error(self.monitor, handle)
+        pending.spawned = True
 
     def _event(self, event: ProcessEvent, now: float) -> None:
         """Retain the permit and event through durable reconciliation."""
