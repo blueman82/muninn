@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import sys
 import tempfile
 import time
 import unittest
@@ -54,6 +55,9 @@ def account_assessment(**budget: Any) -> Assessment:
     return result.model_copy(update={"config_digest": config_digest(result)})
 
 
+@unittest.skipIf(
+    sys.platform == "win32", "requires POSIX evaluation account storage"
+)
 class LearningAccountTests(unittest.TestCase):
     """Keep calls across retries, variants and disposable-home replacement."""
 

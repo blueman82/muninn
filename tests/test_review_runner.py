@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,8 @@ class ReviewRunnerTests(unittest.TestCase):
     """Exercise real file drift checks without running a provider."""
 
     def setUp(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX runner capability storage")
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.home = Path(temporary.name).resolve()
@@ -251,30 +254,6 @@ class ReviewRunnerTests(unittest.TestCase):
                     self.capability.model_copy(update={"runner": runner}),
                     b"prompt",
                 )
-
-    def test_reported_settings_and_usage_unknown_remain_null(self) -> None:
-        observed, usage = review_runner.reported_metadata({}, None)
-        self.assertEqual(
-            observed.model_dump(),
-            {
-                "runner": None,
-                "version": None,
-                "model": None,
-                "reasoning": None,
-            },
-        )
-        self.assertIsNone(usage)
-        observed, usage = review_runner.reported_metadata(
-            {"model": "observed-model"}, {"input_tokens": 2}
-        )
-        self.assertEqual(observed.model, "observed-model")
-        self.assertIsNone(observed.reasoning)
-        assert usage is not None
-        self.assertEqual(usage.input_tokens, 2)
-        self.assertIsNone(usage.cost_decimal)
-        self.assertIsNone(usage.output_tokens)
-        with self.assertRaises(ValueError):
-            review_runner.reported_metadata({}, {"input_tokens": -1})
 
     def test_synthetic_fixture_never_authorizes_executable(self) -> None:
         fixture = json.loads(

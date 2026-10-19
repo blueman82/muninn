@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import time
+import unittest
 from collections.abc import Callable
 from unittest import mock
 
@@ -49,6 +51,7 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
         )
         return previous
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_repeated_start_refusal_preserves_cleanup_eligibility(
         self,
     ) -> None:
@@ -102,33 +105,36 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
             ),
         ):
             other.start(15.0)
-        self.assertIsNone(
-            self.conn.execute(
-                "SELECT ended_at FROM review_attempt"
-            ).fetchone()[0]
-        )
+        cursor = self.conn.execute("SELECT ended_at FROM review_attempt")
+        self.assertIsNone(cursor.fetchone()[0])
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_startup_rechecks_admission_outside_writer_actions(self) -> None:
         self.assert_startup_drift("UPDATE review_control SET admission=0")
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_startup_rechecks_generation_drift(self) -> None:
         self.assert_startup_drift(
             "UPDATE review_control SET generation=generation+1"
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_startup_rechecks_policy_drift(self) -> None:
         self.assert_startup_drift(
             "UPDATE review_control SET policy_digest='changed'"
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_startup_rechecks_call_state_drift(self) -> None:
         self.assert_startup_drift("UPDATE review_call SET state='launched'")
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_startup_rechecks_persisted_identity_drift(self) -> None:
         self.assert_startup_drift(
             "UPDATE review_call SET process_identity_json=NULL"
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_recovery_keeps_completed_call_and_recovers_unfinished_attempt(
         self,
     ) -> None:
@@ -149,6 +155,7 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
             "waiting",
         )
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_successful_signal_does_not_claim_descendant_exit(self) -> None:
         previous = self.abandoned("launched")
         other = supervision.Supervisor(self.home, self.policy)
@@ -217,6 +224,7 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
         self.assertIsNotNone(row["process_identity_json"])
         self.assertIsNone(row["launched_at"])
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_missing_creation_identity_refuses_without_signal(self) -> None:
         self.abandoned()
         other = supervision.Supervisor(self.home, self.policy)
@@ -260,9 +268,12 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
         assert poller.supervisor is not None
         self.assertEqual(poller.supervisor.policy, self.policy)
 
+    @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_ready_and_terminal_resume_retains_outcome_through_busy(
         self,
     ) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         self.supervisor.tick(13.0)
         monitor = self.supervisor.monitor
         key = next(iter(self.supervisor._rounds))

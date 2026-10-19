@@ -107,6 +107,26 @@ class ActivationLifetimeTests(unittest.TestCase):
         order = [step.__name__ for step in installer.FRESH_STEPS]
         self.assertLess(order.index("cursor"), order.index("start_new"))
 
+    def test_windows_operation_uses_descriptor_sync_without_directory_sync(
+        self,
+    ) -> None:
+        self.ctx.lib.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with (
+            mock.patch.object(legacy_state.os, "name", "nt"),
+            mock.patch.object(
+                legacy_state.platform_io, "is_private", return_value=True
+            ),
+            mock.patch.object(legacy_state.file_sync, "sync_fd") as sync,
+            mock.patch.object(
+                legacy_state.file_sync,
+                "sync_path",
+                side_effect=OSError("unsupported directory sync"),
+            ),
+            legacy_state.operation(self.ctx) as check,
+        ):
+            self.assertEqual(len(check()), 2)
+            sync.assert_called_once()
+
     def test_fresh_installer_retains_operation_lock_through_activation(
         self,
     ) -> None:

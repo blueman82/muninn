@@ -197,6 +197,8 @@ class LegacyRecoveryTests(LegacyCase):
     def test_real_process_crash_leaves_pending_partial_stage_unarmed(
         self,
     ) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         child = os.fork()
         if child == 0:
 

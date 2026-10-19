@@ -34,6 +34,8 @@ class MacProviderProbeTests(unittest.TestCase):
                 probe.codex_probe(ctx, timeout=2)
 
     def test_app_server_bounds_stderr_and_silent_timeout(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         for mode, error in (
             ("stderr", "output_limit"),
             ("silent", "process_timeout"),
@@ -54,6 +56,8 @@ class MacProviderProbeTests(unittest.TestCase):
                     os.waitpid(pid, os.WNOHANG)
 
     def test_app_server_kills_and_reaps_term_resistant_server(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         with tempfile.TemporaryDirectory() as tmp:
             ctx, env = self.fake_server(Path(tmp), "resistant")
             failure: Exception | None = None
@@ -79,8 +83,22 @@ class MacProviderProbeTests(unittest.TestCase):
             with self.assertRaises(ChildProcessError):
                 os.waitpid(pid, os.WNOHANG)
 
+    def prepare(self, ctx: Ctx) -> tuple[dict[str, str], bytes]:
+        """Keep the Linux test interpreter's provisioned SQLite available."""
+        if sys.platform == "win32":
+            self.skipTest("requires the POSIX provider launcher")
+        env = models.environment(ctx, Path(sys.executable))
+        if sys.platform == "linux" and (
+            library := os.environ.get("LD_LIBRARY_PATH")
+        ):
+            env["LD_LIBRARY_PATH"] = library
+        with mock.patch.object(probe, "environment", return_value=env):
+            return probe.prepare(ctx, ROOT, Path(sys.executable))
+
     def fake_server(self, root: Path, mode: str) -> tuple[Ctx, dict[str, str]]:
         """Create a synthetic local protocol server without provider access."""
+        if sys.platform == "win32":
+            self.skipTest("requires a POSIX executable script")
         ctx = Ctx(root.resolve(), run_real, "test", platform="darwin")
         fake = ctx.home / "provider-bin/codex"
         fake.parent.mkdir(mode=0o700)
@@ -257,7 +275,7 @@ while True: time.sleep(1)
                 Path(tmp) / "private", run_real, "test", platform="darwin"
             )
             ctx.home.mkdir(mode=0o700)
-            env, rendered = probe.prepare(ctx, ROOT, Path(sys.executable))
+            env, rendered = self.prepare(ctx)
             results = probe.direct_hooks(ctx, env, rendered)
             self.assertEqual(len(results), 10)
             self.assertTrue(all(row["returncode"] == 0 for row in results))
@@ -278,7 +296,7 @@ while True: time.sleep(1)
                 Path(tmp) / "private", run_real, "test", platform="darwin"
             )
             ctx.home.mkdir(mode=0o700)
-            env, rendered = probe.prepare(ctx, ROOT, Path(sys.executable))
+            env, rendered = self.prepare(ctx)
             with mock.patch.object(
                 probe, "command", wraps=probe.command
             ) as run:

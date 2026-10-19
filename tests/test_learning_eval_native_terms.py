@@ -6,6 +6,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime
@@ -78,6 +79,9 @@ def terms_data(root: Path, assessment: Any, started: float) -> dict[str, Any]:
     }
 
 
+@unittest.skipIf(
+    sys.platform == "win32", "requires POSIX evaluation account storage"
+)
 class NativeTermsTests(unittest.TestCase):
     """Exercise carry-in via public Account operations, never seeded rows."""
 

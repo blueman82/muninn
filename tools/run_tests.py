@@ -121,6 +121,8 @@ def run_module(module: str, root: Path = ROOT) -> ModuleResult:
         check=False,
     )
     output = done.stdout + done.stderr
+    if done.returncode not in (0, NO_TESTS_EXIT):
+        print(f"tests: failed {module}", flush=True)
     return ModuleResult(
         module,
         done.returncode,

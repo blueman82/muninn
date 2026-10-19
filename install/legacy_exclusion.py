@@ -32,7 +32,7 @@ def retained(ctx: Ctx) -> Path:
 def selection(ctx: Ctx) -> dict[str, object]:
     """Read the stable launcher link without resolving the maintenance stub."""
     info = ctx.muninn.lstat()
-    if not ctx.muninn.is_symlink() or info.st_uid != os.getuid():
+    if not ctx.muninn.is_symlink() or info.st_uid != baseline.owner_uid():
         raise StepFailedError("legacy_launcher_changed")
     return {
         "text": link_text(ctx.muninn),

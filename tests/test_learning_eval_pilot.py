@@ -52,6 +52,8 @@ class PilotFixture(unittest.TestCase):
     """Build private synthetic originals and fake executables."""
 
     def setUp(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires a POSIX executable fixture")
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()

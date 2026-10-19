@@ -130,8 +130,10 @@ def command(
         Captured output, exit code and elapsed milliseconds.
 
     Raises:
-        ValueError: If input, output or time exceeds its bound.
+        ValueError: If the platform is unsupported or a bound is exceeded.
     """
+    if os.name == "nt":
+        raise ValueError("unsupported_platform")
     if len(payload) > 4096:
         raise ValueError("input_limit")
     started = time.monotonic()

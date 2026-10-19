@@ -136,30 +136,15 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
             "session_id": "different-session",
             "prompt": _WORDS,
             "hook_event_name": "SessionStart",
+            "transcript_path": None,
+            "source": "startup",
+            "model": "synthetic",
+            "permission_mode": "default",
         }
     ).encode()
-    calls: list[str | list[str]] = []
-    calls.extend(hook_invocations(ctx)[:2])
-    for hooks_path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
-        for hook in codex_hooks(
-            hooks_path.read_bytes(), platform=ctx.platform
-        ):
-            if sys.platform == "win32":
-                comspec = env.get("COMSPEC", "cmd.exe")
-                platform_windows.assert_executable(Path(comspec))
-                calls.append(
-                    subprocess.list2cmdline([comspec])
-                    + ' /C "'
-                    + hook["command"]
-                    + '"'
-                )
-            else:
-                calls.append(
-                    [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
-                )
     argv: str | list[str] = []
     try:
-        for index, argv in enumerate(calls):
+        for index, argv in enumerate(_context_calls(ctx, env)):
             write(
                 "provider",
                 "routes",
@@ -202,6 +187,39 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
             )
         raise
     return results
+
+
+def _context_calls(ctx: Ctx, env: dict[str, str]) -> list[str | list[str]]:
+    """Select only startup and prompt routes that return cited context."""
+    calls: list[str | list[str]] = [
+        call
+        for call in hook_invocations(ctx)
+        if "claude" in call
+        and any(verb in call for verb in ("session-start", "prompt"))
+    ]
+    for hooks_path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
+        for hook in codex_hooks(
+            hooks_path.read_bytes(), platform=ctx.platform
+        ):
+            if hook["suffix"].split(":")[0] not in {
+                "session_start",
+                "user_prompt_submit",
+            }:
+                continue
+            if sys.platform == "win32":
+                comspec = env.get("COMSPEC", "cmd.exe")
+                platform_windows.assert_executable(Path(comspec))
+                calls.append(
+                    subprocess.list2cmdline([comspec])
+                    + ' /C "'
+                    + hook["command"]
+                    + '"'
+                )
+            else:
+                calls.append(
+                    [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
+                )
+    return calls
 
 
 def _hook_result(

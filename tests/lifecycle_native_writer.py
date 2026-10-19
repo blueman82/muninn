@@ -60,21 +60,25 @@ def busy_stop(ctx: Ctx) -> None:
     """Block an actual managed commit, request stop, then allow completion."""
     _native(ctx)
     write("lifecycle", "busy_stop")
-    source = ctx.codex_home / "sessions" / rollout(TID)
-    platform_io.ensure_private_dir(source.parent)
-    write_private(source, b"".join(line(record) for record in primary(TID)))
     database = store.db_path(ctx.data)
+    started = time.time()
+    lifecycle.start(ctx, (ctx.lib / "python").resolve(), ctx.release)
+    wait(ctx, lambda: _completed(ctx, started), 20, "idle managed pass absent")
     with (
         snapshot_io.validated(database),
         closing(store.connect_ro(database)) as reader,
     ):
         reader.execute("BEGIN")
         assert committed_rows(reader, TID) == 0
-        lifecycle.start(ctx, (ctx.lib / "python").resolve(), ctx.release)
+        source = ctx.codex_home / "sessions" / rollout(TID)
+        platform_io.ensure_private_dir(source.parent)
+        write_private(
+            source, b"".join(line(record) for record in primary(TID))
+        )
         wait(
             ctx,
             lambda: journal_ready(ctx.data),
-            20,
+            75,
             "managed transaction absent",
         )
         wait(

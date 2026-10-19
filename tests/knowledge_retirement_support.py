@@ -97,6 +97,7 @@ def window_note(
             projection_version="permitted-fields-v2",
             max_input_bytes=max_bytes,
             max_output_bytes=max_bytes,
+            context_bytes=max_bytes,
             allow_global=allow_global or evidence.scope.project_id is None,
             policy_id="fixture-" + uuid4().hex,
         )

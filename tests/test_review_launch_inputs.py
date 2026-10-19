@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import sys
 import unittest
 from pathlib import Path
 from typing import Any
@@ -167,6 +168,8 @@ class ReviewLaunchInputTests(unittest.TestCase):
             review_launch_inputs.load_capability(self.home, self.policy)
 
     def test_platform_ownership_and_path_replacement_refuse(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("requires POSIX ownership or process APIs")
         self.prompt()
         path = self.prompts / (self.policy.prompt_digest + ".json")
         with mock.patch("os.name", "nt"), self.assertRaises(ValueError):
