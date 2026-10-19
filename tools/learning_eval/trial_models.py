@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import math
+import sqlite3
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+
+from pydantic import model_validator
 
 from muninn.knowledge_models import (
     AttemptId,
@@ -36,6 +39,9 @@ from tools.learning_eval.models import (
 class Candidate(StrictModel):
     """Bind static inputs without asserting observed native coverage."""
 
+    protocol: Literal["muninn-review-round-v1", "muninn-task-answer-v1"] = (
+        "muninn-review-round-v1"
+    )
     schema_version: SchemaVersion
     kind: Literal["synthetic_candidate"]
     recipe: Literal["claude-static-posix-v1"]
@@ -54,6 +60,11 @@ class Candidate(StrictModel):
 class ScheduledCall(StrictModel):
     """Bind one model call to a scheduled comparator, retry and round."""
 
+    purpose: Literal["learning", "task"] = "learning"
+    protocol: Literal["muninn-review-round-v1", "muninn-task-answer-v1"] = (
+        "muninn-review-round-v1"
+    )
+    schema_digest: Digest | None = None
     id: AttemptId
     assessment_id: Text
     comparator: Comparator
@@ -64,10 +75,38 @@ class ScheduledCall(StrictModel):
     config_digest: Digest
     authorization_digest: Digest
 
+    @model_validator(mode="after")
+    def purpose_protocol(self) -> Self:
+        """Keep the two predeclared stages from exchanging protocols."""
+        if (self.purpose == "learning") != (
+            self.protocol == "muninn-review-round-v1"
+        ):
+            raise ValueError("protocol_mismatch")
+        if self.purpose == "task" and self.schema_digest is None:
+            raise ValueError("protocol_schema_required")
+        return self
+
+    def slot(self) -> str:
+        """Retain the historical learning identity while separating tasks."""
+        value = self.model_dump(
+            mode="json",
+            include={
+                "assessment_id",
+                "comparator",
+                "trial_id",
+                "retry_index",
+                "round_index",
+            },
+        )
+        if self.purpose == "task":
+            value["purpose"] = self.purpose
+        return digest(value)
+
 
 class AccountCall(StrictModel):
     """Retain one spent claim and nullable usage without transcript data."""
 
+    evidence_digest: Digest | None = None
     schedule: ScheduledCall
     state: CallState
     reserved_at: UtcSeconds
@@ -168,3 +207,35 @@ def validate_schedule(
         or schedule.retry_index > policy.max_attempts
     ):
         raise ValueError("schedule_policy_mismatch")
+
+
+def result_digest(
+    conn: sqlite3.Connection, trial: str, hashed: str | None
+) -> str | None:
+    """Persist or read a trial digest inside the account-owned transaction."""
+    row = conn.execute(
+        "SELECT digest FROM results WHERE trial=?", (trial,)
+    ).fetchone()
+    if hashed is not None:
+        if row is not None and row[0] != hashed:
+            raise ValueError("pilot_result_binding")
+        conn.execute(
+            "INSERT OR IGNORE INTO results VALUES(?,?)", (trial, hashed)
+        )
+        return hashed
+    return row[0] if row is not None else None
+
+
+def bound_call(call: AccountCall | None, hashed: str) -> AccountCall:
+    """Require contained work and an immutable content-free output digest."""
+    if (
+        call is None
+        or not call.cleaned
+        or (
+            call.evidence_digest is not None and call.evidence_digest != hashed
+        )
+    ):
+        raise ValueError("artifact_binding")
+    return AccountCall.model_validate_json(
+        canonical_json(call.model_copy(update={"evidence_digest": hashed}))
+    )

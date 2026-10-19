@@ -25,14 +25,16 @@ class LaunchSpec:
     deadline: float
 
 
-def cli_argv(requested: RunnerConfig) -> tuple[str, ...]:
+def cli_argv(
+    requested: RunnerConfig, schema: dict[str, object] | None = None
+) -> tuple[str, ...]:
     """Fix every CLI option independently of model-controlled data."""
     return (
         requested.executable,
         "-p",
         "--json-schema",
         json.dumps(
-            round_schema(),
+            round_schema() if schema is None else schema,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -60,6 +62,7 @@ def launch_spec(
     cwd: Path,
     environment: dict[str, str],
     prompt: bytes,
+    schema: dict[str, object] | None = None,
 ) -> LaunchSpec:
     """Build the fixed idle wrapper and explicit isolated CLI environment."""
     return LaunchSpec(
@@ -78,7 +81,7 @@ def launch_spec(
         ),
         Path(__file__).resolve().parent.parent,
         {},
-        cli_argv(context.policy.runner),
+        cli_argv(context.policy.runner, schema),
         cwd,
         environment,
         prompt,

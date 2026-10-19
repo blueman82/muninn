@@ -159,6 +159,8 @@ class Conditions(StrictModel):
 class Trial(StrictModel):
     """Retain every scheduled outcome and explicitly unreported usage."""
 
+    pair_id: Digest | None = None
+    learned_state_digest: Digest | None = None
     id: Text
     case_id: Text
     comparator: Comparator

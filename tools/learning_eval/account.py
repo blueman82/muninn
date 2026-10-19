@@ -21,9 +21,11 @@ from tools.learning_eval.models import Assessment, TrialAuthorization
 from tools.learning_eval.trial_models import (
     AccountCall,
     ScheduledCall,
+    bound_call,
     check_time,
     checked_assessment,
     reserved_charge,
+    result_digest,
     validate_schedule,
 )
 
@@ -127,6 +129,10 @@ class Account:
                     "CREATE TABLE calls(id TEXT PRIMARY KEY, slot TEXT UNIQUE "
                     "NOT NULL, record TEXT NOT NULL)"
                 )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS results(trial TEXT PRIMARY KEY, "
+                "digest TEXT NOT NULL)"
+            )
             rows = conn.execute("SELECT identity FROM metadata").fetchall()
             if rows != [(identity,)]:
                 raise ValueError("account_binding_mismatch")
@@ -189,6 +195,11 @@ class Account:
     ) -> tuple[AccountCall, bool]:
         """Atomically spend a durable one-use launch claim before Popen."""
         self.validate(schedule, authorization)
+        declared = [old for old, _ in self.scheduled()]
+        if schedule.purpose == "task" and schedule not in declared:
+            if any(old.slot() == schedule.slot() for old in declared):
+                raise ValueError("call_binding_mismatch")
+            raise ValueError("schedule_not_declared")
         self._schedule(schedule)
         try:
             self._observe_time(now)
@@ -205,6 +216,13 @@ class Account:
                     )
             raise
 
+    def plan(
+        self, schedule: ScheduledCall, authorization: TrialAuthorization
+    ) -> None:
+        """Persist an immutable potential call without claiming spending."""
+        self.validate(schedule, authorization)
+        self._schedule(schedule)
+
     def _schedule(self, schedule: ScheduledCall) -> None:
         """Retain scheduled rows even when a cap prevents reservation."""
         with self._transaction() as conn:
@@ -212,7 +230,10 @@ class Account:
                 "SELECT record FROM scheduled WHERE id=?", (schedule.id,)
             ).fetchone()
             raw = canonical_json(schedule)
-            if row is not None and row[0] != raw:
+            if (
+                row is not None
+                and ScheduledCall.model_validate_json(row[0]) != schedule
+            ):
                 raise ValueError("call_binding_mismatch")
             conn.execute(
                 "INSERT OR IGNORE INTO scheduled VALUES(?,?,?)",
@@ -236,18 +257,7 @@ class Account:
         now: float,
     ) -> tuple[AccountCall, bool]:
         """Commit the one-use claim separately from scheduling metadata."""
-        slot = digest(
-            schedule.model_dump(
-                mode="json",
-                include={
-                    "assessment_id",
-                    "comparator",
-                    "trial_id",
-                    "retry_index",
-                    "round_index",
-                },
-            )
-        )
+        slot = schedule.slot()
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT record FROM calls WHERE id=? OR slot=?",
@@ -373,6 +383,20 @@ class Account:
                 }
             )
         )
+
+    def result_binding(
+        self, trial: str, hashed: str | None = None
+    ) -> str | None:
+        """Bind or read an immutable result digest without changing charges."""
+        with self._transaction() as conn:
+            return result_digest(conn, trial, hashed)
+
+    def bind_evidence(self, identity: str, hashed: str) -> None:
+        """Bind private output to a completed charge."""
+        call = next(
+            (c for c in self.calls() if c.schedule.id == identity), None
+        )
+        self._save(bound_call(call, hashed))
 
     def usage(self) -> Usage:
         """Aggregate nullable reports with shared production arithmetic."""

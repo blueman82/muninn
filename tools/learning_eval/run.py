@@ -20,6 +20,7 @@ from tools.learning_eval.cases import (
     validate_trial_bindings,
 )
 from tools.learning_eval.models import Assessment, Case, OfflineManifest
+from tools.learning_eval.pilot import run_pilot as run_pilot
 from tools.learning_eval.report import write_report
 from tools.learning_eval.score import score_trials
 

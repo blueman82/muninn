@@ -7,6 +7,7 @@ import random
 from collections import Counter
 from statistics import mean
 
+from tools.learning_eval import report as reporting
 from tools.learning_eval.cases import (
     validate_partition,
     validate_trial_bindings,
@@ -24,7 +25,6 @@ from tools.learning_eval.models import (
     Trial,
     validate_metric_name,
 )
-from tools.learning_eval.report import matched_conditions, summarize
 
 BLOCKERS = frozenset(
     {
@@ -205,27 +205,34 @@ def paired_values(
         for case in cases
         if case.expected.later_task_success_rule is not None
     }
-    pairs: dict[str, dict[str, list[Trial]]] = {}
+    pairs: dict[tuple[str, str], dict[str, list[Trial]]] = {}
+    complete = True
     for trial in trials:
         if trial.comparator in {comparator, "new_withheld"}:
-            pairs.setdefault(trial.case_id, {}).setdefault(
+            if trial.pair_id is None:
+                complete = False
+                continue
+            pairs.setdefault((trial.case_id, trial.pair_id), {}).setdefault(
                 trial.comparator, []
             ).append(trial)
     values: dict[str, list[float]] = {}
-    complete = True
-    for case_id, comparisons in pairs.items():
+    covered: set[str] = set()
+    for (case_id, _), comparisons in sorted(pairs.items()):
         present = comparisons.get(comparator, [])
         withheld = comparisons.get("new_withheld", [])
-        complete = complete and len(present) == len(withheld)
-        for left, right in zip(present, withheld, strict=False):
-            if not comparable_pair(left, right) or case_id not in families:
-                complete = False
-            elif left.judgment is not None and right.judgment is not None:
-                difference = float(
-                    bool(left.judgment.later_task_passed)
-                ) - float(bool(right.judgment.later_task_passed))
-                values.setdefault(families[case_id], []).append(difference)
-    return values, complete
+        if len(present) != 1 or len(withheld) != 1:
+            complete = False
+            continue
+        left, right = present[0], withheld[0]
+        if not comparable_pair(left, right) or case_id not in families:
+            complete = False
+        elif left.judgment is not None and right.judgment is not None:
+            difference = float(bool(left.judgment.later_task_passed)) - float(
+                bool(right.judgment.later_task_passed)
+            )
+            values.setdefault(families[case_id], []).append(difference)
+            covered.add(case_id)
+    return values, complete and covered == set(families)
 
 
 def comparable_pair(left: Trial, right: Trial) -> bool:
@@ -233,9 +240,14 @@ def comparable_pair(left: Trial, right: Trial) -> bool:
     configs = (left.requested, left.observed, right.requested, right.observed)
     judgments = (left.judgment, right.judgment)
     return (
-        (
-            matched_conditions(left)
-            and matched_conditions(right)
+        left.case_id == right.case_id
+        and left.pair_id is not None
+        and left.pair_id == right.pair_id
+        and left.learned_state_digest is not None
+        and left.learned_state_digest == right.learned_state_digest
+        and (
+            reporting.matched_conditions(left)
+            and reporting.matched_conditions(right)
             and left.expected_conditions == right.expected_conditions
         )
         and all(
@@ -282,7 +294,8 @@ def score_metric(
     selected = tuple(t for t in trials if t.comparator == comparator)
     scheduled = assessment.sample_size * assessment.repetitions
     complete = len(selected) == scheduled and all(
-        t.requested == t.observed and matched_conditions(t) for t in selected
+        t.requested == t.observed and reporting.matched_conditions(t)
+        for t in selected
     )
     numerator: int | None = None
     denominator: int | None = None
@@ -374,7 +387,7 @@ def score_trials(
         or comparator != "new_withheld"
     )
     blockers = tuple(sorted({trial.outcome for trial in trials} & BLOCKERS))
-    limitations, status = summarize(
+    limitations, status = reporting.summarize(
         trials, metrics, hosts, blockers, len(cases) == assessment.sample_size
     )
     return EvaluationReport(

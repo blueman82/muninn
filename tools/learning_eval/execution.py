@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
+from muninn import review_prompt
 from muninn.review_models import ReviewContext
 from muninn.review_process import (
     ProcessMonitor,
@@ -19,7 +22,22 @@ from tools.learning_eval.account import Account
 from tools.learning_eval.capability import prepare_capability_trial
 from tools.learning_eval.cases import digest
 from tools.learning_eval.models import TrialAuthorization
+from tools.learning_eval.pilot_bridge import LearnerBridge
+from tools.learning_eval.pilot_evidence import (
+    ExecutionResult,
+    restore_output,
+    saved_output,
+)
+from tools.learning_eval.task_protocol import protocol_schema
 from tools.learning_eval.trial_models import AccountCall, ScheduledCall
+
+
+@dataclass(frozen=True)
+class ExecutionEvidence:
+    """Select private output storage and an optional real learner mapping."""
+
+    root: Path
+    learner: LearnerBridge | None = None
 
 
 def validate_execution(
@@ -36,7 +54,12 @@ def validate_execution(
         mode="json", exclude={"executable"}
     )
     if (
-        context.round_index != schedule.round_index
+        (
+            schedule.schema_digest is not None
+            and schedule.schema_digest
+            != digest(protocol_schema(schedule.protocol))
+        )
+        or context.round_index != schedule.round_index
         or digest(context.policy.model_dump(mode="json"))
         != schedule.policy_digest
         or account.assessment.comparator_config_digests[schedule.comparator]
@@ -45,18 +68,24 @@ def validate_execution(
         raise ValueError("call_binding_mismatch")
 
 
-def execute_trial(
+def execute_result(
     account: Account,
     context: ReviewContext,
     capability: RunnerCapability,
     prompt: bytes,
     authorization: TrialAuthorization,
     schedule: ScheduledCall,
-) -> AccountCall:
+    *,
+    evidence: ExecutionEvidence | None = None,
+) -> ExecutionResult:
     """Spend one durable claim before creating the shared idle wrapper."""
+    artifacts = evidence.root if evidence is not None else None
+    learner = evidence.learner if evidence is not None else None
     try:
         validate_execution(account, context, authorization, schedule)
-        prepare_capability_trial(context, capability, prompt, authorization)
+        prepare_capability_trial(
+            context, capability, prompt, authorization, schedule.protocol
+        )
     except (ValueError, OSError) as exc:
         code = (
             "comparator_unsupported"
@@ -66,8 +95,18 @@ def execute_trial(
         account.refuse(schedule, authorization, code)
         raise
     call, permit = account.claim(schedule, authorization, time.time())
+    mapping = learner.mapping_digest() if learner is not None else None
+    limit = context.policy.max_output_bytes * 8 + 65536
     if not permit:
-        return call
+        return (
+            restore_output(artifacts, call, prompt, mapping, limit)
+            if artifacts is not None
+            else ExecutionResult(call, None, None)
+        )
+    if learner is not None:
+        if learner.schedule != schedule or learner.context != context:
+            raise ValueError("call_binding_mismatch")
+        learner.reserve()
     remaining = min(
         account.remaining_wall(time.time()), context.policy.deadline_seconds
     )
@@ -79,7 +118,7 @@ def execute_trial(
     monitor = ProcessMonitor(context.policy)
     try:
         fresh = prepare_capability_trial(
-            context, capability, prompt, authorization
+            context, capability, prompt, authorization, schedule.protocol
         )
         create_wrapper(
             fresh,
@@ -95,13 +134,18 @@ def execute_trial(
             capability,
             prompt,
             authorization,
-            schedule,
+            (schedule, learner),
         )
     finally:
         # The independent monitor retains owned children if persistence fails.
         monitor.stop_all()
     account.finish(schedule.id, outcome.usage, outcome.error_code, time.time())
-    return next(c for c in account.calls() if c.schedule.id == schedule.id)
+    call = next(c for c in account.calls() if c.schedule.id == schedule.id)
+    if artifacts is not None:
+        return saved_output(
+            artifacts, account, call, prompt, outcome, mapping, limit
+        )
+    return ExecutionResult(call, outcome, None)
 
 
 def _wait(
@@ -111,9 +155,10 @@ def _wait(
     capability: RunnerCapability,
     prompt: bytes,
     authorization: TrialAuthorization,
-    schedule: ScheduledCall,
+    binding: tuple[ScheduledCall, LearnerBridge | None],
 ) -> ProcessOutcome:
     """Persist readiness, freshly revalidate, then spend activation once."""
+    schedule, learner = binding
     while True:
         for event in monitor.drain():
             if (event.attempt_id, event.round_index) != (
@@ -124,18 +169,15 @@ def _wait(
             if isinstance(event, WorkerReady):
                 try:
                     account.ready(schedule.id, event.identity, time.time())
-                    validate_execution(
-                        account, context, authorization, schedule
-                    )
-                    fresh = prepare_capability_trial(
-                        context, capability, prompt, authorization
-                    )
-                    frame = activation(
-                        fresh.cli_argv,
-                        fresh.cli_cwd,
-                        fresh.cli_env,
-                        fresh.prompt,
-                        context.policy.max_input_bytes,
+                    if learner is not None:
+                        learner.persist(event)
+                    frame = _activation_frame(
+                        account,
+                        context,
+                        capability,
+                        prompt,
+                        authorization,
+                        binding,
                     )
                     account.activate(schedule.id, time.time())
                     monitor.activate(schedule.id, schedule.round_index, frame)
@@ -147,7 +189,51 @@ def _wait(
                         "activation_refused",
                     )
             elif isinstance(event, WorkerLaunched):
+                if learner is not None:
+                    learner.persist(event)
                 account.launched(schedule.id, time.time())
             else:
+                if learner is not None:
+                    learner.persist(event)
                 return event
         time.sleep(0.01)
+
+
+def _activation_frame(
+    account: Account,
+    context: ReviewContext,
+    capability: RunnerCapability,
+    prompt: bytes,
+    authorization: TrialAuthorization,
+    binding: tuple[ScheduledCall, LearnerBridge | None],
+) -> bytes:
+    """Recheck configuration and attempt immediately before activation."""
+    schedule, learner = binding
+    validate_execution(account, context, authorization, schedule)
+    fresh = prepare_capability_trial(
+        context, capability, prompt, authorization, schedule.protocol
+    )
+    frame = activation(
+        fresh.cli_argv,
+        fresh.cli_cwd,
+        fresh.cli_env,
+        fresh.prompt,
+        context.policy.max_input_bytes,
+    )
+    if learner is not None:
+        review_prompt.refresh(learner.home, learner.context)
+    return frame
+
+
+def execute_trial(
+    account: Account,
+    context: ReviewContext,
+    capability: RunnerCapability,
+    prompt: bytes,
+    authorization: TrialAuthorization,
+    schedule: ScheduledCall,
+) -> AccountCall:
+    """Preserve the original API over the sole launch implementation."""
+    return execute_result(
+        account, context, capability, prompt, authorization, schedule
+    ).call

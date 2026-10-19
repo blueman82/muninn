@@ -142,6 +142,8 @@ def trial(case_id: str, **changes: Any) -> Trial:
         "expected_conditions": conditions,
         "observed_conditions": conditions,
         "id": "attempt-1",
+        "pair_id": digest([case_id, 1]),
+        "learned_state_digest": DIGEST,
         "case_id": case_id,
         "comparator": "new_present",
         "policy_digest": digest(

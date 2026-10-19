@@ -355,3 +355,75 @@ this implementation performs no native trial or publication. Wrapper framing,
 aggregate stdout-plus-stderr limits, final prompt assembly, durable launch
 identity and activation belong to the consumer implementation. Prompt fragments
 fitting individually do not establish that the assembled prompt fits.
+
+## Synthetic pilot controller
+
+`tools.learning_eval.run.run_pilot(PilotManifest, *, initialize=False)` is a
+callable synthetic controller. The offline CLI remains zero-call. The controller
+uses explicit private candidate, prompt, pilot-material, account and artifact
+paths; it does not discover installed model programs or read reserved heldout
+material. `initialize=True` creates the persistent account exclusively. Subsequent
+runs verify its existing bindings and never reset spent calls.
+
+`PilotManifest` binds the complete Assessment, pilot source/label/family hashes,
+reserved heldout digest metadata, learner and task candidates per comparator,
+trusted instructions and one exposure recipe per case. `PilotMaterial` contains
+only pilot cases and declared synthetic Codex JSONL originals. Cases run in their
+family chronology, in one disposable store per family/comparator/repetition.
+Mixed partitions, changed inputs and candidate/schema/configuration mismatches
+refuse. This controller currently supports synthetic Codex originals and the
+fixed Claude-style fake-child recipe; it supplies no qualified native adapter.
+
+The private `schedule.json` freezes case/comparator/repetition identities and the
+bounded learning retry/round envelope plus the separate task stage before any
+call. Current-Muninn and Hermes rows remain `comparator_unsupported`. Potential
+rounds do not consume budget. Refusals, unfinished stages and unnecessary later
+rounds remain distinguishable; only durable Account claims consume the global
+allowance. Every actual learner call also has a production reservation and an
+immutable mapping to its real request/attempt/round. That production ledger is
+lifecycle evidence, not an additional expenditure total.
+
+Fresh disposable stores use the public bootstrap and fresh witness contracts.
+`Supervisor.start` and `Supervisor.stop` supply only exclusive ownership and
+current generation. The controller never invokes Supervisor scheduling or result
+internals. All fake-child calls use the same Account executor; learner operations
+use capture, ordinary claim, initialize/refresh/assemble, controlled read, and
+checked atomic commit. Writer transactions close before root-owning reads and
+process creation. Unreconciled harness work retains its owner and refuses later
+activation rather than publishing completed-owner evidence.
+
+`ScheduledCall.purpose` separates learning and task slots. Historical records
+without purpose/protocol remain learning records and keep their original slot
+and charges. Task slots require prior declaration and an explicit task schema.
+The program-owned task protocol accepts exactly `{"answer": "..."}` after native
+output decoding and containment; it grants no source-read, request or commit
+authority. Production reviewer launch still defaults to the reviewer schema and
+retains the verified-proof gate.
+
+Decoded output, input digest, actual observed configuration, nullable usage,
+elapsed time and call mapping are stored in bounded immutable private artifacts.
+Account rows hold content-free output and trial-result digests. Missing output
+never grants another launch. Corrupt or conflicting checkpoints cannot replace a
+saved answer. A failed later task retains the successful learning receipt and
+its supported revisions. Observed settings and usage are never filled from the
+requested configuration.
+
+Exposure evidence separately records pushed full notes, exposed guide labels,
+actual scoped FTS hits, explicitly admitted guide bodies, omissions, and the exact
+context supplied to the task. Guide opens use only surfaced identities/revisions
+and recheck scope, support, expiry, tombstones and physical originals. The
+withheld arm receives an empty knowledge context without mutating its learned
+store. Search uses the actual task query and no expected claim keys or labels.
+These are controlled retrieval experiments, not autonomous model selection or
+native-hook delivery. The procedural fixture demonstrates a literal lexical hit,
+a differently worded miss with independent note/guide delivery, bounded omission,
+and wrong-scope exclusion; it establishes no production retrieval performance.
+
+Explicit pair IDs and learned-state digests are required for paired attribution;
+row order and historical records without pair identity cannot create pairs.
+Independently attributed human judgments may be supplied separately with an exact
+saved-result digest. This callable does not execute grading rules or accept
+post-hoc frozen-rule judgments. Missing judgments remain unknown. Reports retain
+all scheduled rows and are synthetic/unverified unless a reliability blocker
+requires `revise`. No pilot summary, production assessment freeze, native proof,
+policy approval or activation record is issued by this controller.
