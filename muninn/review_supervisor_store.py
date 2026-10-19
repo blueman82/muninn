@@ -70,9 +70,26 @@ def startup_snapshot(
     return control["generation"], identities
 
 
+def halt_interrupted(conn: sqlite3.Connection, policy: ReviewPolicy) -> None:
+    """Keep uncertain ongoing calls stopped across shutdown and restart."""
+    if (
+        policy.experimental_codex is not None
+        and conn.execute(
+            "SELECT 1 FROM review_attempt WHERE ended_at IS NULL UNION ALL "
+            "SELECT 1 FROM review_call WHERE state IN "
+            "('reserved','launched','unknown') LIMIT 1"
+        ).fetchone()
+    ):
+        conn.execute("UPDATE review_control SET admission=0")
+
+
 def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
     """Persist lifecycle data without granting stale attempt authority."""
     with database(home) as conn:
+        policy_row = conn.execute(
+            "SELECT policy_json FROM review_control"
+        ).fetchone()
+        policy = ReviewPolicy.model_validate_json(policy_row[0])
         if isinstance(event, WorkerReady):
             conn.execute(
                 "UPDATE review_call SET process_identity_json=? "
@@ -106,3 +123,10 @@ def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
                     event.round_index,
                 ),
             )
+        if policy.experimental_codex is not None:
+            failed = (
+                not isinstance(event, (WorkerReady, WorkerLaunched))
+                and event.error_code is not None
+            )
+            if failed:
+                conn.execute("UPDATE review_control SET admission=0")

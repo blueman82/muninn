@@ -16,11 +16,11 @@ from unittest import mock
 from muninn import review_runner
 from muninn.review_models import ProcessIdentity, ReviewContext
 from tests import test_review_runner as runner_tests
+from tests.learning_eval_capability_support import authorization
 from tests.test_learning_eval_account import account_assessment
 from tools.learning_eval import execution, report, run
 from tools.learning_eval.account import Account
 from tools.learning_eval.cases import config_digest, digest
-from tools.learning_eval.models import TrialAuthorization
 from tools.learning_eval.score import score_trials
 from tools.learning_eval.trial_models import AccountCall, ScheduledCall
 
@@ -66,14 +66,8 @@ class LearningCapabilityTests(unittest.TestCase):
                 "proof_path": self.path,
             }
         )
-        self.auth = TrialAuthorization(
-            assessment_id="synthetic",
-            candidate_digest=hashlib.sha256(raw).hexdigest(),
-            config_digest=self.capability.config_digest,
-            budget=self.context.policy.budget,
-            disposable_home=self.fixture.home,
-            approved_by="synthetic-owner",
-            approved_at=1.0,
+        self.auth = authorization(
+            self.context, self.capability, raw, self.fixture.home
         )
 
     def prepare(self) -> review_runner.LaunchSpec:

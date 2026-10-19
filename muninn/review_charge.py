@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException, Inexact, localcontext
 
-from muninn.review_models import CallState, PilotBudget, Usage
+from muninn.review_models import CallState, OngoingBudget, PilotBudget, Usage
 
 
 @dataclass(frozen=True)
@@ -21,11 +21,15 @@ class Charge:
 
 def limits(
     calls: list[Charge],
-    budget: PilotBudget,
+    budget: PilotBudget | OngoingBudget,
     charge: str | None,
     now: float,
 ) -> None:
     """Check call counts and elapsed time from the first reservation."""
+    if calls and now < max(call.reserved_at for call in calls):
+        raise ValueError("budget_clock_reversed")
+    if isinstance(budget, OngoingBudget):
+        return
     if len(calls) >= budget.max_model_calls:
         raise ValueError("budget_call_limit")
     if (
@@ -34,8 +38,6 @@ def limits(
         >= budget.max_wall_seconds
     ):
         raise ValueError("budget_wall_limit")
-    if calls and now < max(call.reserved_at for call in calls):
-        raise ValueError("budget_clock_reversed")
     if budget.max_cost_decimal is not None:
         if charge is None:
             raise ValueError("budget_charge_unavailable")

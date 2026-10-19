@@ -11,7 +11,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from muninn import review_prompt, review_quiescence_state, store
+from muninn import (
+    review_prompt,
+    review_quiescence_state,
+    store,
+)
 from muninn.review_budget import reserve_call
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_launch_inputs import load_capability, load_prompt
@@ -44,6 +48,7 @@ from muninn.review_runner import LaunchSpec, RunnerCapability, prepare_launch
 from muninn.review_spawn import create_wrapper
 from muninn.review_supervisor_store import (
     database,
+    halt_interrupted,
     is_contention,
     persist_event,
     startup_snapshot,
@@ -111,12 +116,15 @@ class Supervisor:
                 if startup_snapshot(conn, self.policy) != snapshot:
                     raise ValueError("startup_state_changed")
                 self.generation = snapshot[0] + 1
+                halt_interrupted(conn, self.policy)
                 conn.execute(
                     "UPDATE review_control SET generation=?",
                     (self.generation,),
                 )
                 recover_attempts(conn, self.generation, now)
-            self.monitor = ProcessMonitor(self.policy)
+            self.monitor = ProcessMonitor(
+                self.policy, runner=self.policy.runner.runner
+            )
         except BaseException:
             os.close(self._owner)
             self._owner = None
@@ -329,6 +337,8 @@ class Supervisor:
             except ValueError as exc:
                 if str(exc) != "rejected_fenced":
                     raise
+            if self.policy.experimental_codex is not None:
+                conn.execute("UPDATE review_control SET admission=0")
 
     def stop(self, now: float) -> None:
         """Stop admission, contain children, and fence this generation."""
@@ -337,6 +347,7 @@ class Supervisor:
             return
         self.monitor.stop_all()
         with database(self.home) as conn:
+            halt_interrupted(conn, self.policy)
             conn.execute(
                 "UPDATE review_control SET generation=generation+1 "
                 "WHERE generation=?",

@@ -434,7 +434,10 @@ policy approval or activation record is issued by this controller.
 
 A `PilotManifest` with `origin="native_codex_trial"` may select the fixed
 `codex-exec-macos-trial-v1` candidate. Source material remains explicitly synthetic.
-Production `prepare_launch` rejects Codex, including a forged `verified` label.
+Default production `prepare_launch` rejects Codex, including a forged `verified` label.
+The separately recorded [ongoing production policy](ongoing-codex-production.md)
+can select an explicit `unverified` capability without aggregate trial limits. It is not qualification
+of this harness or full C6; the default verified-only path still rejects Codex.
 This recipe is restricted to the bound Darwin arm64 host and Codex 0.163.0 with
 executable SHA256 `8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31`.
 Requested model and effort must be frozen explicitly; they are not observations.

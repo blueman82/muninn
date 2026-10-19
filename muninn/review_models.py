@@ -21,6 +21,7 @@ from muninn.knowledge_models import (
     UnresolvedId,
     UtcSeconds,
 )
+from muninn.review_codex_policy import CodexExperiment
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
@@ -100,6 +101,24 @@ class PilotBudget(StrictModel):
         return self
 
 
+class OngoingBudget(StrictModel):
+    """Record ongoing production authority without aggregate trial limits."""
+
+    kind: Literal["ongoing_production"]
+    account_id: Text
+    conservative_call_cost_decimal: None = None
+    currency: None = None
+    approved_by: Text
+    approved_at: UtcSeconds
+
+
+def require_pilot_budget(budget: PilotBudget | OngoingBudget) -> PilotBudget:
+    """Require finite authority for trial-only consumers."""
+    if not isinstance(budget, PilotBudget):
+        raise ValueError("finite_pilot_budget_required")
+    return budget
+
+
 class ReviewPolicy(StrictModel):
     """Require explicit model, boundary, retry and budget controls."""
 
@@ -119,14 +138,44 @@ class ReviewPolicy(StrictModel):
     concurrency: PositiveInt
     hook_wait_seconds: UtcSeconds
     allow_global: bool
-    budget: PilotBudget
+    budget: PilotBudget | OngoingBudget
+    experimental_codex: CodexExperiment | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def retry_schedule(self) -> Self:
         """Require one explicit backoff for each possible retry."""
         if len(self.retry_backoff_seconds) != self.max_attempts - 1:
             raise ValueError("invalid_backoff_count")
+        self.experimental_bounds()
         return self
+
+    def experimental_bounds(self) -> None:
+        """Refuse widened or incompletely recorded experimental bounds."""
+        if self.experimental_codex is None:
+            if isinstance(self.budget, OngoingBudget):
+                raise ValueError("ongoing_policy_required")
+            return
+        expected = {
+            "max_rounds": 2,
+            "max_input_bytes": 65536,
+            "max_output_bytes": 32768,
+            "context_bytes": 12000,
+            "deadline_seconds": 120.0,
+            "max_attempts": 1,
+            "concurrency": 1,
+            "hook_wait_seconds": 0.0,
+            "allow_global": False,
+        }
+        runner, budget = self.runner, self.budget
+        if (
+            any(getattr(self, key) != value for key, value in expected.items())
+            or (runner.runner, runner.version, runner.model, runner.reasoning)
+            != ("codex_cli", "0.163.0", "gpt-6.1-sol", "low")
+            or not isinstance(budget, OngoingBudget)
+        ):
+            raise ValueError("codex_experimental_policy")
 
 
 class RequestView(StrictModel):

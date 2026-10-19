@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import ValidationError, field_validator
 
+from muninn import review_codex_launch
 from muninn.knowledge_models import Digest, SchemaVersion, StrictModel, Text
 from muninn.review_json import (
     finite_float,
@@ -330,6 +331,11 @@ def prepare_launch(
             or len(prompt) > context.policy.max_input_bytes
         ):
             raise ValueError("invalid_prompt_size")
+        if (
+            capability.runner == "codex_cli"
+            and context.policy.experimental_codex is not None
+        ):
+            return review_codex_launch.prepare(context, capability, prompt)
         if capability.runner != "claude_cli":
             raise ValueError("runner_unsupported")
         if capability.status != "verified":

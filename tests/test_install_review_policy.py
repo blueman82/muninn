@@ -13,8 +13,11 @@ from unittest import mock
 from install import installer
 from install.context import StepFailedError
 from muninn import store
+from muninn.review_json import canonical_json
+from muninn.review_models import ReviewPolicy
 from tests.installer_support import World
 from tests.test_review_shared_models import policy_data
+from tools.prepare_codex_policy import policy
 
 
 class InstallPolicyTests(unittest.TestCase):
@@ -68,6 +71,42 @@ class InstallPolicyTests(unittest.TestCase):
         with self.assertRaises(StepFailedError):
             module.frozen(self.ctx, rec, check_supplied=True)
         self.assertFalse(self.ctx.data.exists())
+
+    def test_generated_ongoing_policy_survives_intake_and_activation(
+        self,
+    ) -> None:
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+        ):
+            selected, _ = policy(
+                self.ctx.data,
+                self.world.home / "synthetic-codex",
+                "synthetic-fixture-owner",
+                1.0,
+            )
+            raw = canonical_json(selected)
+            self.path.write_text(raw)
+            self.ctx.review_policy = self.path
+            captured = self.intake()
+            self.assertEqual(captured["raw"], raw)
+            module = importlib.import_module("install.review_policy")
+            self.assertEqual(
+                module.frozen(
+                    self.ctx,
+                    {"sha": self.world.sha, "policy_input": captured},
+                    check_supplied=True,
+                ),
+                selected,
+            )
+            installer.install(self.ctx, self.world.repo, self.world.sha)
+        with closing(store.connect_ro(store.db_path(self.ctx.data))) as conn:
+            control = conn.execute("SELECT * FROM review_control").fetchone()
+            self.assertEqual(control["admission"], 1)
+            self.assertEqual(
+                ReviewPolicy.model_validate_json(control["policy_json"]),
+                selected,
+            )
 
     def test_invalid_duplicate_nonfinite_and_linked_input_refuse(self) -> None:
         self.assertIn("review_policy", self.ctx.__dataclass_fields__)

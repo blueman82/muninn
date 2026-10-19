@@ -11,9 +11,18 @@ from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
+from muninn import review_codex_launch
+from muninn.review_codex_launch import (
+    JSON_ONLY_INSTRUCTION as JSON_ONLY_INSTRUCTION,
+)
+from muninn.review_codex_launch import WIRE_INSTRUCTION as WIRE_INSTRUCTION
 from muninn.review_codex_output import output_contract_digest
+from muninn.review_codex_policy import (
+    PINNED_EXECUTABLE as PINNED_EXECUTABLE_SHA256,
+)
 from muninn.review_json import canonical_json
 from muninn.review_launch_spec import codex_cli_argv
+from muninn.review_models import require_pilot_budget
 from muninn.review_runner import (
     RunnerCapability,
     check_private_path,
@@ -36,15 +45,6 @@ from tools.learning_eval.pilot_models import RunnerBinding
 from tools.learning_eval.task_protocol import protocol_schema
 from tools.learning_eval.trial_models import Candidate
 
-PINNED_EXECUTABLE_SHA256 = (
-    "8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31"
-)
-
-JSON_ONLY_INSTRUCTION = (
-    "Return only the required JSON object. Do not invoke tools, commands, "
-    "MCP, web search, or file operations."
-)
-
 
 def require_json_instruction(instructions: str) -> None:
     """Require the fixed no-action instruction in both declared prompts."""
@@ -54,12 +54,9 @@ def require_json_instruction(instructions: str) -> None:
 
 def wire_schema() -> dict[str, object]:
     """Constrain provider output to one strict object for both protocols."""
-    return {
-        "type": "object",
-        "properties": {"payload_json": {"type": "string"}},
-        "required": ["payload_json"],
-        "additionalProperties": False,
-    }
+    return cast(
+        dict[str, object], json.loads(review_codex_launch.wire_schema())
+    )
 
 
 def native_prompt(prompt: bytes, protocol: str, limit: int) -> bytes:
@@ -81,13 +78,6 @@ def native_prompt(prompt: bytes, protocol: str, limit: int) -> bytes:
     if len(raw) > limit:
         raise ValueError("invalid_prompt_size")
     return raw
-
-
-WIRE_INSTRUCTION = (
-    "Serialize the JSON object matching payload_schema into the payload_json "
-    "string of the required outer object. "
-    "Do not return the inner object directly."
-)
 
 
 def validate_native_prompt(prompt: bytes, protocol: str) -> None:
@@ -296,7 +286,7 @@ def execution_terms(
     _, charged = account_totals(account, terms)
     budgets = [
         account.assessment.budget,
-        *(p.budget for p in account.assessment.policies),
+        *(require_pilot_budget(p.budget) for p in account.assessment.policies),
     ]
     additional = max(
         Decimal(b.conservative_call_cost_decimal or "5") for b in budgets
