@@ -130,7 +130,7 @@ class PlatformWorkflowTests(unittest.TestCase):
         self.assertNotIn("needs:", source)
         self.assertNotIn("continue-on-error:", source)
         self.assertIn("timeout-minutes: 75", source)
-        self.assertIn("fail-fast: true", source)
+        self.assertIn("fail-fast: false", source)
         self.assertIn("contents: read", source)
         self.assertIn("cancel-in-progress: true", source)
         self.assertIn("name: native-proof-codes-${{ matrix.runner }}", source)
@@ -233,6 +233,71 @@ class RuntimeWorkflowTests(unittest.TestCase):
         env = kwargs.get("env")
         assert isinstance(env, dict)
         self.assertEqual(env["PATH"].split(os.pathsep)[0], str(python.parent))
+
+    def test_windows_typing_uses_the_dependency_environment(self) -> None:
+        calls: list[list[str]] = []
+
+        def record(argv: list[str], **kwargs: object) -> None:
+            calls.append(argv)
+
+        with mock.patch.object(subprocess, "run", record):
+            exec(step_script("Check Windows native API typing"), {})
+        self.assertEqual(len(calls), 1)
+        command = calls[0]
+        self.assertIn("--pythonpath", command)
+        self.assertEqual(
+            command[command.index("--pythonpath") + 1], command[0]
+        )
+
+    def test_windows_copy_installs_hashed_runtime_before_readiness(
+        self,
+    ) -> None:
+        calls: list[list[str]] = []
+
+        def record(argv: list[str], **kwargs: object) -> None:
+            calls.append(argv)
+
+        script = step_script("Provision trusted native interpreter tree")
+        script = "copied = " + script.split("copied = ", 1)[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "GITHUB_PATH": str(root / "path"),
+                        "GITHUB_ENV": str(root / "env"),
+                    },
+                ),
+                mock.patch.object(subprocess, "run", record),
+            ):
+                exec(
+                    script,
+                    {
+                        "destination": root,
+                        "original": Path(sys.executable),
+                        "Path": Path,
+                        "subprocess": subprocess,
+                        "os": os,
+                    },
+                )
+            copied = str(root / Path(sys.executable).name)
+            self.assertEqual(
+                calls[0],
+                [
+                    copied,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "-r",
+                    "requirements-runtime.lock",
+                ],
+            )
+            self.assertEqual(
+                calls[1][:6], [copied, "-I", "-B", "-X", "utf8", "-c"]
+            )
+            self.assertEqual((root / "path").read_text().strip(), str(root))
 
 
 if sys.platform != "win32":

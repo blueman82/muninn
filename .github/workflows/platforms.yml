@@ -19,7 +19,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - runner: macos-15
@@ -247,11 +247,14 @@ jobs:
           shutil.copytree(original.parent, destination, dirs_exist_ok=True)
           platform_io.ensure_private_dir(destination)
           copied = destination / original.name
+          subprocess.run([str(copied), '-m', 'pip', 'install', '--require-hashes',
+                          '-r', 'requirements-runtime.lock'], check=True)
           verification = (
-              'import encodings,json,sqlite3,sys; from pathlib import Path; '
+              'import encodings,json,pydantic,sqlite3,sys; from pathlib import Path; '
               'base=Path(sys.argv[1]).resolve(); '
               'assert Path(sys.prefix).resolve()==base; '
               'assert Path(encodings.__file__).resolve().is_relative_to(base); '
+              'assert Path(pydantic.__file__).resolve().is_relative_to(base); '
               'assert sqlite3.sqlite_version_info>=(3,46,1); '
               'print(json.dumps({"python":sys.version.split()[0],'
               '"sqlite":sqlite3.sqlite_version,"private_copy":True}))'
@@ -305,8 +308,9 @@ jobs:
         run: |
           import subprocess
           from pathlib import Path
-          subprocess.run([str(Path('.venv/Scripts/python.exe')), '-m', 'pyright', '--pythonplatform',
-                          'Windows', 'muninn'], check=True)
+          python = str(Path('.venv/Scripts/python.exe').resolve())
+          subprocess.run([python, '-m', 'pyright', '--pythonplatform',
+                          'Windows', 'muninn', '--pythonpath', python], check=True)
       - name: Run mandatory full gate
         if: runner.os != 'Windows' && !cancelled()
         shell: bash
