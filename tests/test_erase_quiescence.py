@@ -11,7 +11,14 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import erase, poller_stop, review_commit, review_requests, store
+from muninn import (
+    erase,
+    platform_windows,
+    poller_stop,
+    review_commit,
+    review_requests,
+    store,
+)
 from muninn import review_quiescence_state as state
 from muninn.review_quiescence import EraseStatus
 from tests.ingest_support import TID, IngestCase
@@ -35,7 +42,18 @@ def owner_fixture(control: Path, replacement: bool) -> None:
     """Run the real owner and monitor around a local Python wrapper fixture."""
     fixture = SupervisorCase()
     try:
-        fixture.setUp()
+        try:
+            fixture.setUp()
+        except PermissionError as error:
+            if sys.platform == "win32" and hasattr(fixture, "tmp"):
+                for ancestor in reversed((fixture.tmp, *fixture.tmp.parents)):
+                    try:
+                        platform_windows.assert_ancestry(ancestor)
+                    except PermissionError:
+                        raise PermissionError(
+                            f"{error}; rejected ancestor: {ancestor}"
+                        ) from error
+            raise
         fixture.script = (
             "import os,time; from pathlib import Path; "
             f"Path({str(control / 'cli-started')!r})"

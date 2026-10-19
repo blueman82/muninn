@@ -83,7 +83,11 @@ class TaskOnlyTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
         self.pilot = self.fixture.successor()
         self.result = run_pilot(self.pilot, initialize=True)
-        self.assertEqual(self.result.cli_launches, 14)
+        if self.result.cli_launches != 14:
+            self.fail(
+                f"{self.result.cli_launches} != 14: "
+                f"{self.fixture.launch_diagnostic(self.result)}"
+            )
         self.assertEqual(len(self.result.trials), 6)
         self.root = self.fixture.directory
         self.manifest_path = self.root / "completed-manifest.json"
@@ -96,11 +100,20 @@ class TaskOnlyTests(unittest.TestCase):
             path.chmod(0o600)
         self.output = self.root / "task-only"
         self.output.mkdir(mode=0o700)
-        self.manifest = self.module.prepare_task_only(
-            self.ref(self.manifest_path),
-            self.ref(self.result_path),
-            self.output,
-        )
+        try:
+            self.manifest = self.module.prepare_task_only(
+                self.ref(self.manifest_path),
+                self.ref(self.result_path),
+                self.output,
+            )
+        except ValueError as exc:
+            if str(exc) != "task_only_pilot_binding":
+                raise
+            self.fail(
+                "task_only_pilot_binding: "
+                f"{self.result.reserved_cost_decimal}: "
+                f"{self.fixture.launch_diagnostic(self.result)}"
+            )
         self.original = {self.result_path: self.result_path.read_bytes()}
         self.original.update(
             {p: p.read_bytes() for p in self.fixture.original_bytes}

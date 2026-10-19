@@ -195,7 +195,7 @@ class LifecycleTimingTests(unittest.TestCase):
                 (lifecycle_native, "cleanup_backend"),
                 (lifecycle_native, "assert_service"),
                 (lifecycle_native.lifecycle_native_writer, "busy_stop"),
-                (lifecycle_native.lifecycle_native_writer, "crash_restart"),
+                (lifecycle_native.lifecycle_native_writer, "crash_refusal"),
                 (lifecycle_native.lifecycle_native_rollback, "rollback"),
                 (
                     lifecycle_native.lifecycle_native_entry,

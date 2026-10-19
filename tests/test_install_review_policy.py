@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import importlib
 import importlib.util
 import json
+import os
 import unittest
 from contextlib import closing
+from types import SimpleNamespace
 from unittest import mock
 
-from install import installer
+from install import installer, legacy_baseline
 from install.context import StepFailedError
 from muninn import store
 from muninn.review_json import canonical_json
@@ -37,6 +40,65 @@ class InstallPolicyTests(unittest.TestCase):
         self.assertIsNotNone(importlib.util.find_spec("install.review_policy"))
         module = importlib.import_module("install.review_policy")
         return module.capture(self.ctx, self.world.sha)
+
+    def test_shared_file_snapshot_accepts_windows_descriptor_metadata(
+        self,
+    ) -> None:
+        """Windows path and descriptor views differ in mode and ctime."""
+        original_fstat = os.fstat
+
+        def descriptor_state(fd: int) -> SimpleNamespace:
+            found = original_fstat(fd)
+            fields = (
+                "st_dev",
+                "st_ino",
+                "st_mode",
+                "st_size",
+                "st_mtime_ns",
+                "st_ctime_ns",
+            )
+            values = {name: getattr(found, name) for name in fields}
+            values["st_mode"] = self.path.lstat().st_mode ^ 0o111
+            values["st_ctime_ns"] += 1
+            return SimpleNamespace(**values)
+
+        with (
+            mock.patch.object(
+                legacy_baseline, "sys", SimpleNamespace(platform="win32")
+            ),
+            mock.patch.object(legacy_baseline.os, "fstat", descriptor_state),
+            mock.patch.object(
+                legacy_baseline.platform_io, "is_private", return_value=True
+            ),
+        ):
+            before = legacy_baseline.file_state(self.path, private=True)
+        self.assertEqual(
+            before["sha256"], hashlib.sha256(self.raw).hexdigest()
+        )
+
+        reads = 0
+
+        def changing_descriptor(fd: int) -> SimpleNamespace:
+            nonlocal reads
+            reads += 1
+            found = descriptor_state(fd)
+            if reads == 3:
+                found.st_mode ^= 0o111
+            return found
+
+        with (
+            mock.patch.object(
+                legacy_baseline, "sys", SimpleNamespace(platform="win32")
+            ),
+            mock.patch.object(
+                legacy_baseline.os, "fstat", changing_descriptor
+            ),
+            mock.patch.object(
+                legacy_baseline.platform_io, "is_private", return_value=True
+            ),
+            self.assertRaisesRegex(StepFailedError, "legacy_file_changed"),
+        ):
+            legacy_baseline.file_state(self.path, private=True)
 
     def test_parser_carries_explicit_path_without_automatic_discovery(
         self,

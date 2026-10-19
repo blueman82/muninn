@@ -58,7 +58,7 @@ _PHASES = frozenset(
         "upgrade_stop",
         "refused_cli",
         "busy_stop",
-        "crash_restart",
+        "crash_refusal",
         "rollback_upgrade",
         "outer_task_create",
         "outer_task_run",

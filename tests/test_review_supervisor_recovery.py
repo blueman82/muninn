@@ -323,11 +323,11 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
         self.assertEqual(rows[0]["state"], "unknown")
         self.assertIsNone(rows[0]["launched_at"])
 
-    def test_refusal_yields_to_ingest_then_healthy_work_after_restart(
-        self,
-    ) -> None:
+    def test_refusal_then_ingest_and_healthy_work_after_restart(self) -> None:
         tid = "0199aaaa-bbbb-4ccc-8ddd-ffffffffffff"
-        healthy_path = self.write(rollout(tid), primary(tid))
+        healthy_path = self.write(
+            rollout(tid), primary(tid, cwd=self.scope.project_id)
+        )
         self.run_ingest()
         window = self.window().model_copy(
             update={"source": SourceRef(provider="codex", thread_id=tid)}

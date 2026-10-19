@@ -17,6 +17,7 @@ from unittest import mock
 from muninn import store
 from muninn.review_process import WorkerReady
 from muninn.review_supervisor import Supervisor
+from tests.learning_eval_diagnostics import launch_diagnostic
 from tests.test_learning_eval_pilot import PilotFixture
 from tools.learning_eval import execution, pilot_bridge, pilot_sources
 from tools.learning_eval.account import Account
@@ -267,10 +268,11 @@ class NewMuninnPilotTests(PilotFixture):
         with mock.patch.object(Account, "ready", new=change):
             result = module.run_pilot(manifest, initialize=True)
         self.assertEqual(len(changed), 1)
-        self.assertTrue(
-            result.trials[2].receipts,
-            "committed learning disappeared when task failed",
-        )
+        if not result.trials[2].receipts:
+            self.fail(
+                "committed learning disappeared when task failed: "
+                f"{launch_diagnostic(self.root, result)}"
+            )
         self.assertTrue(all(t.answer is None for t in result.trials))
         with Account(self.account, self.config) as account:
             call = next(

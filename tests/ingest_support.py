@@ -63,16 +63,22 @@ def line(record: Record) -> bytes:
     return json.dumps(record, separators=(",", ":")).encode() + b"\n"
 
 
-def primary(tid: str = TID) -> list[Record]:
+def primary(tid: str = TID, *, cwd: str | None = None) -> list[Record]:
     """Return a minimal primary thread: metadata, one prompt, one reply.
 
     Args:
         tid: Thread id of the session metadata.
+        cwd: Optional native working directory for the session metadata.
 
     Returns:
         The three records.
     """
-    return [codex_meta("user", tid), user_msg(1, "q one"), reply(2, "a one")]
+    metadata = (
+        codex_meta("user", tid, cwd=cwd)
+        if cwd is not None
+        else codex_meta("user", tid)
+    )
+    return [metadata, user_msg(1, "q one"), reply(2, "a one")]
 
 
 def fc_output(ordinal: int, call_id: str, text: str) -> Record:
