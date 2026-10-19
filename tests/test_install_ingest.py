@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 import unittest
 from collections.abc import Generator
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -213,6 +215,10 @@ class FreshIngestTests(unittest.TestCase):
         self,
     ) -> None:
         prepare = scope.prepare_commit
+        sleep = mock.Mock()
+        clock = SimpleNamespace(
+            monotonic=time.monotonic, sleep=sleep, time=time.time
+        )
         with (
             ExitStack() as resources,
             q.maintenance_owner(
@@ -229,7 +235,7 @@ class FreshIngestTests(unittest.TestCase):
                 )
                 resources.enter_context(
                     mock.patch.object(
-                        q.time, "monotonic", return_value=owner.deadline + 1
+                        clock, "monotonic", return_value=owner.deadline + 1
                     )
                 )
 
@@ -237,7 +243,7 @@ class FreshIngestTests(unittest.TestCase):
                 mock.patch.object(
                     scope, "prepare_commit", side_effect=contend
                 ),
-                mock.patch.object(q.time, "sleep") as sleep,
+                mock.patch.object(q, "time", clock),
                 self.assertRaises(store.BusyError),
             ):
                 cutover.ingest_transcripts(self.ctx, owner)

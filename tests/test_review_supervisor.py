@@ -203,25 +203,30 @@ class ReviewSupervisorTests(SupervisorCase):
 
     def test_queue_saturation_cannot_drop_terminal_outcome(self) -> None:
         self.supervisor.tick(13.0)
+        persist = self.supervisor._persist
+
+        def block_outcome(event: process.ProcessEvent, now: float) -> None:
+            if isinstance(event, process.ProcessOutcome):
+                raise store.BusyError("busy")
+            persist(event, now)
+
         until = time.monotonic() + 5
-        while time.monotonic() < until:
-            self.supervisor.tick(13.0)
-            if (
-                self.conn.execute(
-                    "SELECT launched_at FROM review_call"
-                ).fetchone()[0]
-                is not None
-            ):
-                break
-            time.sleep(0.01)
-        time.sleep(0.2)
         with mock.patch.object(
-            self.supervisor, "_persist", side_effect=store.BusyError("busy")
+            self.supervisor, "_persist", side_effect=block_outcome
         ):
-            for _ in range(3):
+            while time.monotonic() < until and not any(
+                isinstance(event, process.ProcessOutcome)
+                for event in self.supervisor._pending
+            ):
                 self.supervisor.tick(13.0)
+                time.sleep(0.01)
             self.assertEqual(len(self.supervisor._rounds), 1)
-            self.assertTrue(self.supervisor._pending)
+            self.assertTrue(
+                any(
+                    isinstance(event, process.ProcessOutcome)
+                    for event in self.supervisor._pending
+                )
+            )
         self.finish()
         self.assertEqual(
             self.conn.execute("SELECT count(*) FROM review_call").fetchone()[

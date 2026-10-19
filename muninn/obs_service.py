@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-from muninn import obs_linux_service, platform_io
+from muninn import obs_linux_service, platform_io, platform_windows
 from muninn.obs_status import read_status
 from muninn.platform_paths import read_selection, windows_base
 
@@ -204,8 +204,9 @@ def _windows_status(
         or not isinstance(command, str)
     ):
         return None, "writer_release_unknown"
-    if not same_path(executable, selected[1]) or not command_names_path(
-        command, selected[0]
+    if not (
+        writer_image_matches(selected, executable)
+        and writer_command_matches(selected, command)
     ):
         return False, "writer_release_mismatch"
     return True, pid
@@ -258,6 +259,47 @@ def same_path(first: object, second: object) -> bool:
         return _resolved(first) == _resolved(second)
     except (OSError, ValueError):
         return False
+
+
+def writer_image_matches(selected: tuple[Path, Path], executable: str) -> bool:
+    """Accept the selected redirector or its private venv base image."""
+    release, launcher = selected
+    if not same_path(launcher, release / ".venv/Scripts/python.exe"):
+        return False
+    if same_path(executable, launcher):
+        return True
+    try:
+        cfg = release / ".venv/pyvenv.cfg"
+        with platform_io.open_regular(cfg, root=release) as handle:
+            platform_io.assert_private_fd(handle.fileno())
+            raw = handle.read(4097)
+        if len(raw) > 4096:
+            raise ValueError("venv configuration too large")
+        fields: dict[str, str] = {}
+        for line in raw.decode("utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            key = key.strip()
+            if not separator or key in fields:
+                raise ValueError("invalid venv configuration")
+            fields[key] = value.strip()
+        home = Path(fields["home"])
+        base = home / "python.exe"
+        if not home.is_absolute() or not same_path(executable, base):
+            raise ValueError("venv base image differs")
+        if sys.platform == "win32":
+            platform_windows.assert_executable(base)
+        return True
+    except (OSError, ValueError, KeyError, UnicodeError, RecursionError):
+        return False
+
+
+def writer_command_matches(selected: tuple[Path, Path], command: str) -> bool:
+    """Require the command's first token to be the selected venv launcher."""
+    release, launcher = selected
+    if not same_path(launcher, release / ".venv/Scripts/python.exe"):
+        return False
+    match = re.match(r'^\s*(?:"([^"]+)"|(\S+))(?=\s|$)', command)
+    return bool(match and same_path(match[1] or match[2], launcher))
 
 
 def command_names_path(command: str, path: object) -> bool:

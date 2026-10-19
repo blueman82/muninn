@@ -42,9 +42,9 @@ def record_writer_mismatch() -> list[int]:
     seen: list[int] = []
     real = lifecycle.writer_mismatch
 
-    def recording(*args: Any) -> int | None:
+    def recording(*args: Any, **kwargs: Any) -> int | None:
         """Pass the product verdict through while keeping the check number."""
-        index = real(*args)
+        index = real(*args, **kwargs)
         if index is not None:
             seen.append(index)
         return index
