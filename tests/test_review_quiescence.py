@@ -173,6 +173,26 @@ class QuiescenceTests(QuiescenceCase):
         self.assertEqual((self.home / state.WITNESS).read_bytes(), original)
         self.assertEqual((self.home / state.BASELINE).read_bytes(), baseline)
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
+        if os.name == "nt":
+            with (
+                mock.patch.object(
+                    quiescence.review_boot_identity,
+                    "observe",
+                    return_value=BOOT_B,
+                ),
+                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+                quiescence.erase_connection(
+                    self.home, wait_s=1, status=self.status
+                ),
+            ):
+                self.fail("Windows retired a baseline without durable proof")
+            self.assertEqual(
+                (self.home / state.WITNESS).read_bytes(), original
+            )
+            self.assertEqual(
+                (self.home / state.BASELINE).read_bytes(), baseline
+            )
+            return
         with (
             mock.patch.object(
                 quiescence.review_boot_identity, "observe", return_value=BOOT_B

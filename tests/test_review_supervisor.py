@@ -16,6 +16,7 @@ from unittest import mock
 from muninn import cli_serve, platform_lock, review_spawn, store
 from muninn import review_process as process
 from muninn import review_supervisor as supervision
+from muninn.review_launch_spec import worker_launch
 from muninn.review_models import ReviewContext
 from muninn.review_process_identity import identify
 from muninn.review_runner import LaunchSpec, RunnerCapability
@@ -100,22 +101,15 @@ class SupervisorCase(RequestCase):
         prompt: bytes,
     ) -> LaunchSpec:
         """Select a disposable fake executable without provider authority."""
+        command, environment = worker_launch(
+            context.deadline,
+            self.policy.max_input_bytes,
+            self.policy.max_output_bytes,
+        )
         return LaunchSpec(
-            (
-                sys.executable,
-                "-E",
-                "-s",
-                "-m",
-                "muninn.review_worker",
-                "--deadline",
-                str(context.deadline),
-                "--max-input-bytes",
-                str(self.policy.max_input_bytes),
-                "--max-output-bytes",
-                str(self.policy.max_output_bytes),
-            ),
+            command,
             ROOT,
-            {},
+            environment,
             (sys.executable, "-c", self.script),
             self.home,
             {},

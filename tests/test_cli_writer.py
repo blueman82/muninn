@@ -22,6 +22,7 @@ from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CANARY, CliCase
 from tests.hook_support import launcher_args
 from tests.review_quiescence_support import initialize
+from tests.store_support import direct_python
 from tests.test_ingest import TID
 
 
@@ -173,9 +174,11 @@ class ServeTests(CliCase):
         log_path = self.home / "poller.log"
         log = self.enterContext(log_path.open("ab"))
         log_path.chmod(0o644)  # as launchd creates it
+        executable, environment = direct_python()
         proc = subprocess.Popen(
             launcher_args("serve", "--interval", interval),
-            env=self.env,
+            executable=executable if sys.platform == "win32" else None,
+            env=self.env | environment,
             stdout=log,
             stderr=log,
             cwd=self.repo,
@@ -213,6 +216,24 @@ class ServeTests(CliCase):
             self.start_serve(interval="17")
         arguments.assert_called_once_with("serve", "--interval", "17")
         self.assertEqual(start.call_args.args[0], command)
+
+    def test_windows_serve_owns_direct_python_with_venv_packages(self) -> None:
+        environment = {"__PYVENV_LAUNCHER__": "synthetic-venv-python"}
+        with (
+            mock.patch(
+                "tests.test_cli_writer.sys", SimpleNamespace(platform="win32")
+            ),
+            mock.patch(
+                "tests.test_cli_writer.direct_python",
+                return_value=("synthetic-base-python", environment),
+            ),
+            mock.patch("tests.test_cli_writer.subprocess.Popen") as start,
+        ):
+            self.start_serve()
+        self.assertEqual(
+            start.call_args.kwargs["executable"], "synthetic-base-python"
+        )
+        self.assertEqual(start.call_args.kwargs["env"], self.env | environment)
 
     def test_native_stop_targets_the_published_generation(self) -> None:
         self.proc = mock.Mock(pid=4242)

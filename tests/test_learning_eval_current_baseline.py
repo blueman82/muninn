@@ -296,6 +296,9 @@ def native_fixture(
     }
 
 
+@unittest.skipIf(
+    sys.platform == "win32", "requires the POSIX baseline adapter"
+)
 class BaselineFlowTests(unittest.TestCase):
     """Check orchestration and replay using only harmless generated input."""
 

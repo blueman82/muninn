@@ -87,6 +87,38 @@ def codex_cli_argv(
     )
 
 
+def worker_launch(
+    deadline: float, input_limit: int, output_limit: int
+) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Bind the owned PID to Python while retaining Windows venv packages."""
+    executable = sys.executable
+    environment: dict[str, str] = {}
+    if sys.platform == "win32":
+        base: object = getattr(sys, "_base_executable", None)
+        if not isinstance(base, str) or not base:
+            raise OSError("wrapper_interpreter_unavailable")
+        if sys.executable != base:
+            # The venv redirector creates a different PID from its worker.
+            executable = base
+            environment = {"__PYVENV_LAUNCHER__": sys.executable}
+    return (
+        (
+            executable,
+            "-E",
+            "-s",
+            "-m",
+            "muninn.review_worker",
+            "--deadline",
+            repr(deadline),
+            "--max-input-bytes",
+            str(input_limit),
+            "--max-output-bytes",
+            str(output_limit),
+        ),
+        environment,
+    )
+
+
 def launch_spec(
     context: ReviewContext,
     cwd: Path,
@@ -105,22 +137,15 @@ def launch_spec(
         and schema_path is not None
         else cli_argv(context.policy.runner, schema)
     )
+    wrapper, wrapper_env = worker_launch(
+        context.deadline,
+        context.policy.max_input_bytes,
+        context.policy.max_output_bytes,
+    )
     return LaunchSpec(
-        (
-            sys.executable,
-            "-E",
-            "-s",
-            "-m",
-            "muninn.review_worker",
-            "--deadline",
-            repr(context.deadline),
-            "--max-input-bytes",
-            str(context.policy.max_input_bytes),
-            "--max-output-bytes",
-            str(context.policy.max_output_bytes),
-        ),
+        wrapper,
         Path(__file__).resolve().parent.parent,
-        {},
+        wrapper_env,
         argv,
         cwd,
         environment,

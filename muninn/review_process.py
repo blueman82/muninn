@@ -367,7 +367,8 @@ class ProcessMonitor:
             return
         except OSError:
             with self.lock:
-                slot.error = error or "process_cleanup_failed"
+                if error is not None:
+                    slot.error = error
             return
         stdout = b""
         observed = ObservedConfig(

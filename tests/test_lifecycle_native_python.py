@@ -85,12 +85,13 @@ class PrivatePythonTests(unittest.TestCase):
     def test_safe_host_is_copied_before_dependency_provisioning(self) -> None:
         self.exe.chmod(0o755)
         self.exe.parent.chmod(0o755)
+        before = self.exe.stat().st_mode
         copied = lifecycle_native_python.prepare(
             self.prefix, self.exe, self.target, self.exe.stat().st_uid
         )
         self.assertEqual(copied, self.target / "bin/python3.13")
         self.assertEqual(copied.read_bytes(), b"synthetic executable")
-        self.assertEqual(self.exe.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.exe.stat().st_mode, before)
 
     def test_private_runtime_is_installed_before_isolated_readiness(
         self,

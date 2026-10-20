@@ -275,6 +275,8 @@ class RebuildFailureTests(CliCase):
                             "INSERT INTO scope VALUES(99,'new','new','dir')"
                         )
                     elif kind == "identity":
+                        # Inject after SQLite releases its Windows delete lock.
+                        conn.close()
                         raw = path.read_bytes()
                         path.rename(home / "prior.sqlite")
                         path.write_bytes(raw)

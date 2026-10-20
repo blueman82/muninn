@@ -51,9 +51,8 @@ class FreshInstallTest(unittest.TestCase):
         before = snapshot(h)
         rec = self.install()
         self.assertEqual(w.fake.loaded, "new")
-        python = (self.lib / "python").readlink()
         selected = self.lib / w.sha / ".venv/bin/python3"
-        self.assertEqual(python, selected)
+        self.assertTrue((self.lib / "python").samefile(selected))
         out = json.loads((self.lib / co.INSTALL_RECORD).read_text())
         self.assertEqual(
             (out["outcome"], out["fresh"], out["sha"], out["python"]["path"]),

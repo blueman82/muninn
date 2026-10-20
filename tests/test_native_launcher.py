@@ -303,7 +303,35 @@ if sys.platform == "win32":
                         if status.get("passes", 0):
                             break
                         if process.poll() is not None:
-                            self.fail(str(process.communicate(timeout=2)))
+                            process.communicate(timeout=2)
+                            events: list[dict[str, object]] = []
+                            log = home / "poller.log"
+                            if log.exists():
+                                for raw in log.read_bytes().splitlines()[-8:]:
+                                    with contextlib.suppress(ValueError):
+                                        entry = json.loads(raw)
+                                        if isinstance(entry, dict):
+                                            events.append(
+                                                {
+                                                    key: entry[key]
+                                                    for key in (
+                                                        "event",
+                                                        "error",
+                                                        "exc",
+                                                        "passes",
+                                                    )
+                                                    if key in entry
+                                                }
+                                            )
+                            codes = {
+                                key: status[key]
+                                for key in ("passes", "error", "poller")
+                                if key in status
+                            }
+                            self.fail(
+                                f"exit={process.returncode}, status={codes},"
+                                f" events={events}"
+                            )
                         time.sleep(0.05)
                     self.assertEqual(status.get("pid"), process.pid)
                     generation = str(status["stop_generation"])

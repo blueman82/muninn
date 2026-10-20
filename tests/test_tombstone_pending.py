@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -293,6 +294,37 @@ class PendingTombstoneTests(unittest.TestCase):
         parent.write_bytes(b"synthetic")
         with self.assertRaises(NotADirectoryError):
             tombstones.require_current_tombstones(self.conn, parent)
+
+    def test_windows_missing_child_under_file_never_means_absent(self) -> None:
+        parent = self.home / "invalid-parent"
+        parent.write_bytes(b"synthetic")
+        journal = parent / TOMBSTONE_FILE
+        original = Path.lstat
+        before = self.conn.total_changes
+
+        def missing(path: Path) -> os.stat_result:
+            if path == journal:
+                raise FileNotFoundError("Windows invalid-parent result")
+            return original(path)
+
+        for operation in (
+            tombstones.require_current_tombstones,
+            tombstones.reapply_tombstones,
+        ):
+            with (
+                self.subTest(operation=operation.__name__),
+                mock.patch.object(Path, "lstat", missing),
+                self.assertRaises(NotADirectoryError),
+            ):
+                operation(self.conn, parent)
+        self.assertEqual(self.conn.total_changes, before)
+        self.assertEqual(parent.read_bytes(), b"synthetic")
+
+    def test_missing_home_cannot_certify_an_absent_journal(self) -> None:
+        missing = self.home / "missing-parent"
+        with self.assertRaises(FileNotFoundError):
+            tombstones.require_current_tombstones(self.conn, missing)
+        self.assertFalse(missing.exists())
 
     def test_actual_sql_failure_propagates(self) -> None:
         self.journal(self.row)

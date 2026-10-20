@@ -235,6 +235,10 @@ while True: time.sleep(1)
             )
 
     def test_candidate_mismatch_refuses_before_creating_root(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest(
+                "macOS absolute path validation requires POSIX paths"
+            )
         with tempfile.TemporaryDirectory() as tmp:
             private = Path(tmp).resolve() / "new"
             with (
@@ -247,6 +251,8 @@ while True: time.sleep(1)
             self.assertFalse(private.exists())
 
     def test_bounded_command_rejects_timeout_and_output_overflow(self) -> None:
+        if sys.platform == "win32":
+            self.skipTest("macOS process proof requires POSIX pipes")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for code, timeout in (

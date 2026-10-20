@@ -18,6 +18,7 @@ from muninn import cli_serve, poller_stop, review_supervisor, store
 from muninn import review_quiescence_state as state
 from tests.ingest_support import TID
 from tests.review_quiescence_support import initialize, interrupt_erasure
+from tests.store_support import public_read
 from tests.test_review_supervisor import SupervisorCase
 from tests.test_review_worker import policy
 
@@ -128,11 +129,11 @@ class QuiescenceStateTests(unittest.TestCase):
         initialize(self.home)
         for name in (state.WITNESS, state.LOCK):
             path = self.home / name
-            path.chmod(0o644)
-            with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+            with (
+                public_read(self, path),
+                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            ):
                 state.begin_owner(self.home)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
-            path.chmod(0o600)
         path = self.home / state.WITNESS
         target = self.home / "target"
         path.rename(target)
@@ -152,6 +153,7 @@ class QuiescenceStateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
             state.complete_owner(self.home, fd, token)
 
+    @unittest.skipIf(os.name == "nt", "Windows refuses baseline retirement")
     def test_baseline_is_synced_away_before_active_publication(self) -> None:
         initialize(self.home)
         path = self.home / state.BASELINE
@@ -169,6 +171,7 @@ class QuiescenceStateTests(unittest.TestCase):
         self.addCleanup(os.close, fd)
         state.complete_owner(self.home, fd, token)
 
+    @unittest.skipIf(os.name == "nt", "Windows refuses baseline retirement")
     def test_failed_retirement_sync_never_publishes_active(self) -> None:
         initialize(self.home)
         before = (self.home / state.WITNESS).read_bytes()
@@ -340,6 +343,12 @@ class OwnerCompletionTests(SupervisorCase):
             self.assertEqual((prompt.call_count, create.call_count), (0, 0))
             self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
             self.assertEqual(baseline.read_bytes(), retained)
+        if os.name == "nt":
+            with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+                other.start(15.0)
+            self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
+            self.assertEqual(baseline.read_bytes(), retained)
+            return
         other.start(15.0)
         self.assertFalse(baseline.exists())
         self.assertEqual(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shlex
 import unittest
 from pathlib import Path
 from typing import Any
@@ -64,7 +65,7 @@ class InstallLearningHookTests(unittest.TestCase):
     def assert_hooks(self) -> None:
         """Assert installed provider events and literal boundary commands."""
         ctx = self.w.ctx()
-        prefix = f"{ctx.muninn} hook "
+        prefix = f"{shlex.quote(ctx.muninn.as_posix())} hook "
         for provider, path in (
             ("claude", ctx.settings),
             ("codex", ctx.release / "integrations/codex/hooks/hooks.json"),
@@ -89,13 +90,15 @@ class InstallLearningHookTests(unittest.TestCase):
                             "startup|resume|clear|compact",
                         )
         hooks = json.loads(ctx.cursor_settings.read_bytes())["hooks"]
+        cursor_prefix = f"{shlex.quote(str(ctx.muninn))} hook "
         for event, verb in CURSOR_EVENTS.items():
             with self.subTest(provider="cursor", event=event):
                 self.assertIn(event, hooks)
                 matching = [
                     h
                     for h in hooks.get(event, [])
-                    if h.get("command") == prefix + verb + " --provider cursor"
+                    if h.get("command")
+                    == cursor_prefix + verb + " --provider cursor"
                 ]
                 self.assertEqual(len(matching), 1)
 
@@ -147,7 +150,10 @@ class InstallLearningHookTests(unittest.TestCase):
         foreign = {"type": "command", "command": "other-tool"}
         managed = {
             "type": "command",
-            "command": f"{ctx.muninn} hook session-start --provider claude",
+            "command": (
+                f"{shlex.quote(str(ctx.muninn))} hook session-start"
+                " --provider claude"
+            ),
         }
         doc = json.loads(ctx.settings.read_bytes())
         doc["hooks"] = {
@@ -189,6 +195,8 @@ class InstallLearningHookTests(unittest.TestCase):
     def test_failed_upgrade_retains_current_config_and_trust(self) -> None:
         self.install()
         ctx = self.w.ctx()
+        config = ctx.config.read_bytes().replace(b"\r\n", b"\n")
+        ctx.config.write_bytes(config.replace(b"\n", b"\r\n"))
         cursor = json.loads(ctx.cursor_settings.read_bytes())
         for event in CURSOR_EVENTS:
             cursor["hooks"].setdefault(event, []).insert(

@@ -109,6 +109,43 @@ class ReviewProcessCleanupTests(unittest.TestCase):
         assert slot.terminal is not None
         self.assertEqual(slot.terminal.error_code, "invalid_worker_protocol")
 
+    def test_transient_containment_error_keeps_success(self) -> None:
+        """Publish success only after a later owned-child cleanup succeeds."""
+        slot = process._Slot(self.handle)
+        slot.finished = True
+        slot.exit_code = 0
+        real_contain = process.contain
+        attempts = 0
+
+        def delayed_containment(handle: process.RunningProcess) -> int:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OSError("transient containment refusal")
+            return real_contain(handle)
+
+        observed = process.ObservedConfig(
+            runner=None, version=None, model=None, reasoning=None
+        )
+        with (
+            mock.patch.object(
+                process, "contain", side_effect=delayed_containment
+            ),
+            mock.patch.object(
+                self.monitor,
+                "_decode",
+                return_value=(b"success", observed, None),
+            ),
+        ):
+            self.monitor._finish(slot, None)
+            self.assertIsNone(slot.terminal)
+            self.assertIsNone(slot.error)
+            self.monitor._step(slot, False)
+        self.assertEqual(attempts, 2)
+        assert slot.terminal is not None
+        self.assertIsNone(slot.terminal.error_code)
+        self.assertEqual(slot.terminal.stdout, b"success")
+
     @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_transient_permission_error_preserves_deadline_after_reap(
         self,

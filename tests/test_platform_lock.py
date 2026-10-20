@@ -19,7 +19,9 @@ from pathlib import Path
 from muninn import platform_lock
 fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600)
 platform_lock.try_lock(fd)
-Path(sys.argv[2]).write_bytes(b'ready')
+marker = Path(sys.argv[2] + '.tmp')
+marker.write_text(str(os.getpid()))
+marker.replace(Path(sys.argv[2]))
 time.sleep(30)
 """
 
@@ -55,8 +57,14 @@ class NativeLockTests(unittest.TestCase):
     def test_killed_writer_releases_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path, ready = Path(temp) / "lock", Path(temp) / "ready"
+            # A Windows venv redirector has a different PID from its writer.
+            python = (
+                getattr(sys, "_base_executable", sys.executable)
+                if sys.platform == "win32"
+                else sys.executable
+            )
             with subprocess.Popen(
-                [sys.executable, "-c", CHILD, str(path), str(ready)], cwd=ROOT
+                [python, "-c", CHILD, str(path), str(ready)], cwd=ROOT
             ) as child:
                 try:
                     deadline = time.monotonic() + 10
@@ -64,6 +72,7 @@ class NativeLockTests(unittest.TestCase):
                         self.assertIsNone(child.poll())
                         time.sleep(0.02)
                     self.assertTrue(ready.exists(), "writer never acquired")
+                    self.assertEqual(int(ready.read_text()), child.pid)
                     fd = os.open(path, os.O_RDWR)
                     try:
                         with self.assertRaises(BlockingIOError):

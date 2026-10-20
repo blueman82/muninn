@@ -253,14 +253,14 @@ class RetainedPublicationTests(unittest.TestCase):
         self.assert_source()
         self.assertEqual(len(erase_residue.aside_files(self.home)), 1)
 
-    def test_changed_source_is_refused_before_archive_success(
-        self,
-    ) -> None:
+    def test_changed_source_refuses_archive_success(self) -> None:
         replacement = self.write("other", b"different content")
         real_copy = rebuild.shutil.copyfileobj
 
         def copy(source: BinaryIO, output: BinaryIO) -> None:
             real_copy(source, output)
+            # Windows replacement requires the completed reader to close.
+            source.close()
             replacement.replace(self.db)
 
         with (
