@@ -8,7 +8,14 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from install import installer, legacy_state, record, review_policy
+from install import (
+    finish,
+    installer,
+    legacy_state,
+    legacy_transition,
+    record,
+    review_policy,
+)
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import review_quiescence as q
@@ -20,6 +27,30 @@ from tests.test_review_shared_models import policy_data
 
 class PolicyRecoveryTests(ActivationLifetimeTests):
     """Exercise recovery using exact persisted activation records."""
+
+    def test_failed_verify_allows_a_new_candidate_after_activation(
+        self,
+    ) -> None:
+        with self.prepared():
+            pass
+        self.rec["failed"] = {"step": "verify", "error": "StepFailedError"}
+        self.rec["recovery_required"] = True
+        record.save(self.ctx, self.rec)
+        with (
+            mock.patch.object(review_policy, "verify_ready") as ready,
+            legacy_state.operation(self.ctx) as check,
+        ):
+            self.assertIsNone(
+                legacy_transition.resume_install(
+                    self.ctx, self.world.repo, "f" * 40, check
+                )
+            )
+        ready.assert_called_once_with(self.ctx, self.rec)
+        finish.supersede(self.ctx, "f" * 40)
+        saved = record.load_record(self.ctx.rdir / "rollback-record.json")
+        self.assertEqual(saved["superseded_by"], "f" * 40)
+        self.assertNotIn("recovery_required", saved)
+        self.assertIsNone(review_policy.pending(self.ctx))
 
     def test_commit_before_completion_save_is_recognized_without_reactivation(
         self,

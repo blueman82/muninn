@@ -212,6 +212,15 @@ def resume_install(
     if pending is None:
         return None
     active, rec = pending
+    if (
+        "legacy" not in rec
+        and rec["sha"] != sha
+        and rec.get("policy_status") == "active"
+        and rec.get("policy_activation", {}).get("phase") == "complete"
+        and rec.get("failed", {}).get("step") == "verify"
+    ):
+        review_policy.verify_ready(active, rec)
+        return None
     if rec["repo"] != str(repo) or rec["sha"] != sha:
         raise StepFailedError("legacy_candidate_changed")
     review_policy.frozen(active, rec, check_supplied=True)

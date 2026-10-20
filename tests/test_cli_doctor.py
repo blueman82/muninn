@@ -229,6 +229,15 @@ class StatsDoctorTests(CliCase):
         kept.unlink()
         (self.home / "recall.off").touch(0o600)  # the recall switch is known
         self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
+        for name in (
+            "review-capabilities",
+            "review-codex-schema.json",
+            "review-policy-codex-ongoing.json",
+            "review-prompts",
+            "review-runner-cwd",
+        ):
+            (self.home / name).touch(0o600)
+        self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
         status = self.home / "status.json"
         original = status.read_bytes()
         with public_read(self, status):

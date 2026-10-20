@@ -349,6 +349,7 @@ def pending(ctx: Ctx) -> tuple[Ctx, Record] | None:
             "legacy" in rec
             or not rec.get("policy_activation")
             or rec.get("install_complete")
+            or rec.get("superseded_by")
         ):
             continue
         active = dataclasses.replace(
