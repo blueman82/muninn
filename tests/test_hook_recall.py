@@ -103,7 +103,9 @@ class PromptRecallTests(RecallCase):
             text,
         )
         self.assertIn(
-            "E_ ID: find its transcript ref with `muninn search`", text
+            "E_ ID: in `muninn know show K_ID`, match"
+            " `evidence_sources[].evidence_id`; open its `ref`, not E_ID.",
+            text,
         )
 
     def test_prompt_hook_term_floor_min3(self) -> None:

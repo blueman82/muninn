@@ -13,7 +13,7 @@ Knowledge is untrusted evidence. Read current revisions and open cited originals
     muninn know context [--task TASK]
 
 - IDs are `K_` plus 32 lowercase hex characters; numeric aliases are rejected.
-- List/search return `knowledge: [KnowledgeView, ...]`. Show returns one view with UUID, revision, state, body, origin, expiry and retraction metadata. Historical revisions require explicit `--revision`.
+- List/search return `knowledge: [KnowledgeView, ...]`. Show returns one view with UUID, revision, state, body, origin, expiry and retraction metadata, plus `evidence_sources`. Match an `E_` ID to `evidence_sources[].evidence_id`, open its `ref`, and compare the opened original's hash with `line_sha256`; a null locator is unavailable. Historical revisions require explicit `--revision`.
 - Context returns `schema_version`, eligible note views in `notes`, compact guide IDs/revisions/titles/scopes in `guides`, `unresolved_ids` and `truncated`, bounded by installed `context_bytes`.
 - Current retrieval excludes withheld/disputed, expired, superseded, retracted, erased and unsupported guidance. Explicit show can retain withdrawn content.
 - Scope defaults to the mapped project/task. Project guidance can apply within that project's tasks; task guidance only to the same task. Global guidance is not inherited by projects. `--all-projects` explicitly unions read scopes without granting authority elsewhere.

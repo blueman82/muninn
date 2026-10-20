@@ -69,6 +69,29 @@ class CliLearningCase(CommitCase):
 class CliLearningTests(CliLearningCase):
     """Catch retired adapters, unsafe local writes and scoped retrieval."""
 
+    def test_show_maps_evidence_id_to_exact_openable_original(self) -> None:
+        """Expose the cited original rather than guessing from search text."""
+        code, receipt = self.propose()
+        self.assertEqual(code, 0)
+        ident = receipt["applied"][0]["knowledge_id"]
+        code, shown = self.call("know", "show", ident)
+        self.assertEqual(code, 0)
+        source = shown["evidence_sources"][0]
+        evidence = self.evidence[0]
+        self.assertEqual(source["evidence_id"], evidence.id)
+        self.assertEqual(
+            source["ref"],
+            f"{evidence.provider}:{evidence.thread_id}:"
+            f"{evidence.line}.{evidence.part}",
+        )
+        self.assertEqual(source["line_sha256"], evidence.line_sha256)
+        code, opened = self.call("open", source["ref"], "--context", "3")
+        self.assertEqual(code, 0)
+        self.assertTrue(opened["hash_ok"])
+        self.assertEqual(
+            opened["provenance"]["line_sha256"], source["line_sha256"]
+        )
+
     def test_all_command_shapes_and_json(self) -> None:
         code, out = self.call("learn", "list", "--state", "running")
         self.assertEqual(code, 0)

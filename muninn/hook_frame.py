@@ -46,8 +46,8 @@ RECALL_HINT = (
     "Open a hit with `muninn open <ref> --context 3`.\n"
     "K_ ID: read the full saved record with `muninn know show K_ID`;"
     " do not `muninn open K_ID`.\n"
-    "E_ ID: find its transcript ref with `muninn search`, then"
-    " `muninn open REF --context 3`; do not `muninn open E_ID`."
+    "E_ ID: in `muninn know show K_ID`, match"
+    " `evidence_sources[].evidence_id`; open its `ref`, not E_ID."
 )
 
 # The `<` of a frame delimiter, however spaced or cased. Only the `<` is

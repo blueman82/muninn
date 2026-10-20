@@ -21,7 +21,7 @@ from muninn.cli_core import (
 )
 from muninn.cli_learn import installed_policy, propose
 from muninn.knowledge_models import KnowledgeView, Scope
-from muninn.query.answers import knowledge_scopes
+from muninn.query.answers import event_ref, knowledge_scopes
 from muninn.review_models import ProposalInput
 from muninn.scope import scope_ids_for_read
 
@@ -57,6 +57,30 @@ def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     }
 
 
+def _evidence_sources(
+    conn: sqlite3.Connection, view: KnowledgeView
+) -> list[dict[str, str | None]]:
+    """Resolve retained support to exact original refs for this revision."""
+    if view.body is None:
+        return []
+    rows = conn.execute(
+        "SELECT DISTINCT s.evidence_id,e.provider,e.thread_id,e.line,"
+        "e.part,e.line_sha256 FROM knowledge_support s "
+        "LEFT JOIN review_evidence e ON e.id=s.evidence_id "
+        "AND e.state='live' WHERE s.knowledge_id=? AND s.revision=? "
+        "ORDER BY s.evidence_id",
+        (view.id, view.revision),
+    )
+    return [
+        {
+            "evidence_id": row["evidence_id"],
+            "ref": event_ref(row) if row["provider"] is not None else None,
+            "line_sha256": row["line_sha256"],
+        }
+        for row in rows
+    ]
+
+
 # Translate within read_store so its one-time hot-journal healing can run.
 @query.guarded
 def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
@@ -64,9 +88,10 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     if a.know_cmd in {"list", "search"}:
         return _views(conn, a, env)
     if a.know_cmd == "show":
-        return knowledge_read.show_knowledge(
-            conn, a.kid, a.revision
-        ).model_dump(mode="json")
+        view = knowledge_read.show_knowledge(conn, a.kid, a.revision)
+        return view.model_dump(mode="json") | {
+            "evidence_sources": _evidence_sources(conn, view)
+        }
     policy = installed_policy(conn)
     scopes = _scopes(conn, a, env)
     project = next(

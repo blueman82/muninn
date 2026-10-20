@@ -112,7 +112,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 |---|---|
 | `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first. |
 | `muninn know search QUERY [--all-projects] [--task TASK]` | SQLite FTS5 search of current permitted knowledge; no embeddings. |
-| `muninn know show K_ID [--revision N]` | `KnowledgeView` with UUID, revision, state, body, origin, expiry and retraction metadata; historical revisions require `--revision`. Explicit show may retain withdrawn content. |
+| `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources` mapping each `E_` ID to its exact transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions require `--revision`. Explicit show may retain withdrawn content. |
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local attempt and `Receipt`; no model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision; returns `KnowledgeView`. |
@@ -653,8 +653,9 @@ mapped project, excluding the caller's own session. It requires at least three
 distinct query terms and skips slash commands. UTF-8 caps are 1,500 bytes for Claude
 and 900 for Codex. With `recall.off` present it prints `{}` without opening the
 store. A nonempty recall block tells the agent to inspect `K_` records with
-`muninn know show`, and to search for a transcript ref before opening evidence
-shown as `E_`; the IDs themselves are not `muninn open` refs.
+`muninn know show`, match an `E_` ID in `evidence_sources`, and open its exact
+`ref`; the IDs themselves are not `muninn open` refs. Verify the opened
+original's hash against the source's `line_sha256`.
 `MUNINN_HOOK_DISABLE=1` silences all hooks.
 
 Verified SessionStart refreshes (`startup|resume|clear|compact` for Claude/Codex)
