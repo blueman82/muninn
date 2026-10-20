@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from muninn import query
 from muninn.erase_family import copies_of
+from muninn.knowledge_erase import SupportClosure, support_closure
 from muninn.tombstone_key import key_for
 from muninn.tombstones import TombstoneRow, event_tag, tombstone_row
 
@@ -42,8 +43,10 @@ class Target:
     content: list[tuple[str, str, str, str]] = field(
         default_factory=list[tuple[str, str, str, str]]
     )
-    citations: set[int] = field(default_factory=set[int])
-    knowledge: set[int] = field(default_factory=set[int])
+    knowledge: set[str] = field(default_factory=set[str])
+    review: SupportClosure = field(
+        default_factory=lambda: SupportClosure(set(), set(), set(), set())
+    )
 
 
 def _marks(count: int) -> str:
@@ -155,7 +158,7 @@ def collect_event(conn: sqlite3.Connection, target: Target, ref: str) -> None:
 def collect_match(
     conn: sqlite3.Connection, target: Target, match: str
 ) -> None:
-    """Collect every event line, knowledge text, reason, tag and quote.
+    """Collect literal matches across transcript and governed review content.
 
     Args:
         conn: Read connection.
@@ -171,24 +174,65 @@ def collect_match(
             "SELECT * FROM source WHERE id = ?", (source_id,)
         ).fetchone()
         _add_line(conn, target, source, line)
-    target.knowledge |= {
+    plan = target.review
+    plan.evidence.update(
         r[0]
         for r in conn.execute(
-            "SELECT id FROM knowledge WHERE (text IS NOT NULL"
-            " AND instr(text, ?) > 0) OR (retract_reason IS NOT NULL"
-            " AND instr(retract_reason, ?) > 0) OR (tags IS NOT NULL"
-            " AND instr(tags, ?) > 0)",
-            (match, match, match),
+            "SELECT id FROM review_evidence WHERE instr(excerpt,?)>0", (match,)
         )
-    }
-    target.citations |= {
+    )
+    plan.versions.update(
+        (r[0], r[1])
+        for r in conn.execute(
+            "SELECT v.knowledge_id,v.revision FROM knowledge_version v "
+            "JOIN knowledge k "
+            "ON k.id=v.knowledge_id WHERE EXISTS(SELECT 1 FROM "
+            "json_tree(v.content_json) j WHERE j.type='text' "
+            "AND instr(j.atom,?)>0) OR "
+            "instr(v.reason,?)>0 "
+            "OR instr(k.retracted_reason,?)>0 OR EXISTS(SELECT 1 FROM "
+            "json_tree(v.expiry_json) j WHERE j.type='text' "
+            "AND instr(j.atom,?)>0) "
+            "OR EXISTS (SELECT 1 FROM knowledge_claim c WHERE "
+            "c.knowledge_id=v.knowledge_id AND c.revision=v.revision "
+            "AND instr(c.text,?)>0)",
+            (match, match, match, match, match),
+        )
+    )
+    plan.requests.update(
         r[0]
         for r in conn.execute(
-            "SELECT id FROM citation WHERE quote IS NOT NULL"
-            " AND instr(quote, ?) > 0",
+            "SELECT request_id FROM review_receipt WHERE "
+            "instr(no_change_reason,?)>0",
             (match,),
         )
-    }
+    )
+    plan.unresolved.update(
+        r[0]
+        for r in conn.execute(
+            "SELECT id FROM unresolved u WHERE EXISTS(SELECT 1 FROM "
+            "json_tree(u.item_json) j WHERE j.type='text' "
+            "AND instr(j.atom,?)>0)",
+            (match,),
+        )
+    )
+    plan = support_closure(
+        conn,
+        tuple(plan.evidence),
+        request_ids=tuple(plan.requests),
+        versions=tuple(plan.versions),
+        unresolved_ids=tuple(plan.unresolved),
+    )
+    # Re-admitting the producing inputs must not regenerate matched output.
+    for ident in plan.requests:
+        plan.evidence.update(
+            r[0]
+            for r in conn.execute(
+                "SELECT evidence_id FROM review_input WHERE request_id=?",
+                (ident,),
+            )
+        )
+    target.review = plan
 
 
 def _add_line(
@@ -276,56 +320,97 @@ def content_tombstones(
     ]
 
 
-def _cites(
-    conn: sqlite3.Connection, where: str, args: tuple[object, ...]
-) -> set[int]:
-    """Ids of live citations matching a fixed (never user-built) clause."""
-    return {
-        r[0]
-        for r in conn.execute(
-            f"SELECT id FROM citation WHERE state = 'live' AND {where}", args
-        )
-    }
-
-
 def collect_knowledge(conn: sqlite3.Connection, target: Target) -> None:
-    """Extend the plan with citations and knowledge entries that follow.
+    """Extend transcript selection to every governed support association."""
+    plan = target.review
+    for provider, root in target.sessions:
+        plan.evidence.update(
+            r[0]
+            for r in conn.execute(
+                "SELECT id FROM review_evidence WHERE provider=? AND "
+                "session_root=?",
+                (provider, root),
+            )
+        )
+        plan.requests.update(
+            r[0]
+            for r in conn.execute(
+                "SELECT id FROM review_request WHERE provider=? AND "
+                "session_root=?",
+                (provider, root),
+            )
+        )
+    seen: set[str] = set()
+    while True:
+        before = (len(target.lines), len(plan.evidence))
+        for source_id, line in tuple(target.lines):
+            source = target.touched[source_id]
+            plan.evidence.update(
+                r[0]
+                for r in conn.execute(
+                    "SELECT id FROM review_evidence WHERE provider=? AND "
+                    "thread_id=? "
+                    "AND (line=? OR line_sha256 IN (SELECT line_sha256 FROM "
+                    "event WHERE source_id=? AND line=?))",
+                    (
+                        source["provider"],
+                        source["thread_id"],
+                        line,
+                        source_id,
+                        line,
+                    ),
+                )
+            )
+            plan.requests.update(
+                r[0]
+                for r in conn.execute(
+                    "SELECT id FROM review_request WHERE provider=? AND "
+                    "thread_id=? "
+                    "AND from_line<=? AND through_line>=?",
+                    (source["provider"], source["thread_id"], line, line),
+                )
+            )
+        _evidence_lines(conn, target, plan.evidence - seen)
+        seen.update(plan.evidence)
+        if before == (len(target.lines), len(plan.evidence)):
+            break
+    target.review = support_closure(
+        conn,
+        tuple(plan.evidence),
+        request_ids=tuple(plan.requests),
+        versions=tuple(plan.versions),
+        unresolved_ids=tuple(plan.unresolved),
+    )
+    target.knowledge = {ident for ident, _ in target.review.versions}
 
-    Citations of erased events are erased. An entry is erased when its text
-    matched or when every one of its live citations is erased, because an
-    entry nobody can verify any more is not worth keeping.
 
-    Args:
-        conn: Read connection.
-        target: Plan to extend.
-    """
-    for source in target.sources.values():
-        target.citations |= _cites(
-            conn,
-            "provider = ? AND thread_id = ?",
-            (source["provider"], source["thread_id"]),
+def _evidence_lines(
+    conn: sqlite3.Connection, target: Target, ids: set[str]
+) -> None:
+    """Tombstone physical evidence even when it has no indexed event."""
+    for ident in sorted(ids):
+        row = conn.execute(
+            "SELECT * FROM review_evidence WHERE id=?", (ident,)
+        ).fetchone()
+        target.tombstones.append(
+            tombstone_row(
+                row["provider"],
+                "line",
+                thread_id=row["thread_id"],
+                line=row["line"],
+                line_sha256=row["line_sha256"],
+            )
         )
-    for source_id, line in target.lines:
-        source = target.touched[source_id]
-        target.citations |= _cites(
-            conn,
-            "provider = ? AND thread_id = ? AND line = ?",
-            (source["provider"], source["thread_id"], line),
-        )
-    if not target.citations:
-        return
-    entries = conn.execute(
-        "SELECT knowledge_id, sum(id NOT IN"
-        f" ({_marks(len(target.citations))})) FROM citation"
-        " WHERE state = 'live' GROUP BY knowledge_id",
-        tuple(target.citations),
-    ).fetchall()
-    uncited = {kid for kid, live_left in entries if live_left == 0}
-    target.knowledge |= {
-        r[0]
-        for r in conn.execute(
-            "SELECT id FROM knowledge WHERE status != 'erased'"
-            f" AND id IN ({_marks(len(uncited)) or 'NULL'})",
-            tuple(uncited),
-        )
-    }
+        source = conn.execute(
+            "SELECT * FROM source WHERE provider=? AND thread_id=?",
+            (row["provider"], row["thread_id"]),
+        ).fetchone()
+        if source is None or source["id"] in target.sources:
+            continue
+        lines = conn.execute(
+            "SELECT DISTINCT line FROM event WHERE source_id=? AND "
+            "line_sha256=?",
+            (source["id"], row["line_sha256"]),
+        ).fetchall()
+        for line in lines:
+            _add_line(conn, target, source, line[0])

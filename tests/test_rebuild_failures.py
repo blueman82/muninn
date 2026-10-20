@@ -1,198 +1,336 @@
-"""``muninn rebuild`` when the old store cannot be read or replaced."""
+"""Conservative rebuild failure, publication and retained archive behavior."""
 
 from __future__ import annotations
 
 import contextlib
-import sys
-from collections.abc import Generator
+import dataclasses
+import os
+import sqlite3
+from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import BinaryIO
 from unittest import mock
 
-from muninn import cli_rebuild, platform_windows, store
+from muninn import cli_rebuild, erase_residue, platform_rebuild, store
+from muninn import review_quiescence as q
 from tests.cli_support import CliCase
+from tests.knowledge_retirement_support import native_note
+from tests.review_quiescence_support import initialize
 from tests.store_support import assert_private, public_read
 from tests.test_ingest import TID
 
-JUNK = b"not a database" * 100
-STAMP = "20260101T000000Z"
-
 
 class RebuildFailureTests(CliCase):
-    """An unreadable old store is kept, and kept safely."""
+    """Use a controlled current source and preserve every artifact."""
 
     def setUp(self) -> None:
         super().setUp()
-        self.session(TID, "keep this prompt", "kept")
         self.conn.close()
+        initialize(self.home)
+        self.session(TID, "Please retain this instruction.", "kept")
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        native_note(self.home, self.roots, "retained zebra")
         self.db = store.db_path(self.home)
-        self.db.write_bytes(JUNK)
+        self.unowned = self.home / "muninn.sqlite-unknown"
+        self.unowned.write_bytes(b"owner")
 
-    def names(self) -> list[str]:
-        """Return the file names in the data directory."""
-        return sorted(p.name for p in self.home.iterdir())
+    def asides(self) -> list[Path]:
+        """Enumerate recovery residue through the public scan."""
+        return [
+            Path(name)
+            for name in erase_residue.aside_files(self.home)
+            if Path(name).name.startswith(store.RECOVERY_PREFIX)
+        ]
 
-    def asides(self) -> list[str]:
-        """Return the set-aside store names."""
-        return [n for n in self.names() if store.UNREADABLE_PREFIX in n]
+    def admission(self, path: Path) -> int:
+        """Inspect a closed database without altering recovery state."""
+        with contextlib.closing(store.connect_ro(path)) as conn:
+            return conn.execute(
+                "SELECT admission FROM review_control"
+            ).fetchone()[0]
 
-    def test_a_second_set_aside_in_one_second_gets_a_suffix(self) -> None:
-        first = self.home / f"{store.UNREADABLE_PREFIX}{STAMP}"
-        first.write_bytes(b"earlier")
-        with mock.patch.object(
-            cli_rebuild.time, "strftime", return_value=STAMP
-        ):
-            name = cli_rebuild._set_aside(self.home, self.db)
-        self.assertEqual(name, f"{store.UNREADABLE_PREFIX}{STAMP}-2")
-        self.assertEqual(first.read_bytes(), b"earlier")
-        self.assertEqual((self.home / name).read_bytes(), JUNK)
+    def test_archive_collision_refuses_without_overwrite_or_retry(
+        self,
+    ) -> None:
+        archive = self.home / f"{store.RECOVERY_PREFIX}collision"
+        archive.write_bytes(b"earlier")
+        archive.chmod(0o600)
+        with mock.patch.object(platform_rebuild.uuid, "uuid4") as ident:
+            ident.return_value.hex = "collision"
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["error"]), (4, "store_unavailable"))
+        self.assertEqual(ident.call_count, 1)
+        self.assertEqual(archive.read_bytes(), b"earlier")
+        self.assertIsNone(out["old_kept_as"])
+        self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
+        self.assertEqual(self.admission(self.db), 0)
+        self.assertTrue(out["recovery_required"])
 
-    def test_a_loose_old_store_is_tightened_or_refused(self) -> None:
-        if sys.platform == "win32":
-            with store.writer_lock(self.home):
-                pass
-            self.muninn("stats")
-            self.assertEqual(self.db.read_bytes(), JUNK)
-            with public_read(self, self.db):
-                before = self.names()
-                code, out, _ = self.muninn("rebuild")
-                self.assertEqual(
-                    (code, out["error"]), (4, "store_unavailable")
-                )
-                self.assertEqual(self.db.read_bytes(), JUNK)
-                self.assertEqual(self.names(), before)
-        else:
-            self.db.chmod(0o644)
-            _, out, _ = self.muninn("rebuild")
-            assert_private(self, self.home / out["old_kept_as"])
-
-    @contextlib.contextmanager
-    def refuse_native_publication(self, *, restore: bool) -> Generator[None]:
-        """Refuse the new native move and optionally the restore move."""
-        calls: list[str] = []
-        if sys.platform == "win32":
-            real_publish = platform_windows.publish
-
-            def native(
-                source: Path,
-                target: Path,
-                *,
-                replace: bool,
-                retry_move: bool = False,
-                directory: bool = False,
-            ) -> None:
-                if target == self.db and replace:
-                    if source.name == cli_rebuild.REBUILD:
-                        calls.append("new")
-                        raise PermissionError("denied")
-                    if source.name.startswith(".restore-"):
-                        calls.append("restore")
-                        if restore:
-                            raise PermissionError("denied")
-                real_publish(
-                    source,
-                    target,
-                    replace=replace,
-                    retry_move=retry_move,
-                    directory=directory,
-                )
-
-            with mock.patch.object(platform_windows, "publish", native):
-                yield
-            self.assertEqual(calls, ["new", "restore"])
-        else:
-            raise AssertionError("native publication fixture requires Windows")
+    def test_public_source_is_refused_without_tightening(self) -> None:
+        before = self.db.read_bytes()
+        with public_read(self, self.db):
+            code, out, _ = self.muninn("rebuild")
+            self.assertEqual((code, out["reason"]), (2, "source_changed"))
+            self.assertEqual(self.db.read_bytes(), before)
+        self.assertEqual(self.asides(), [])
+        self.assertFalse(out["publication_possible"])
 
     @contextlib.contextmanager
-    def refuse_publication(self, *, restore: bool) -> Generator[None]:
-        """Interrupt the active publication backend at its actual move."""
-        if sys.platform == "win32":
-            with self.refuse_native_publication(restore=restore):
-                yield
-            return
-        calls: list[str] = []
-        real_replace, real_rename = Path.replace, Path.rename
+    def refuse_publication(self, *, after: bool) -> Generator[None]:
+        """Fail around a real publication with no automatic restore avenue."""
+        publish = platform_rebuild.publish_replacement
+        attempts: list[Path] = []
 
-        def no_replace(path: Path, target: str | Path) -> Path:
-            if path.name == cli_rebuild.REBUILD:
-                calls.append("new")
-                raise PermissionError("denied")
-            return real_replace(path, target)
+        def fail(home: Path, db: Path, new: Path) -> None:
+            attempts.append(new)
+            if after:
+                publish(home, db, new)
+            raise PermissionError("synthetic publication failure")
 
-        def no_return(path: Path, target: str | Path) -> Path:
-            if restore and path.name.startswith(store.UNREADABLE_PREFIX):
-                calls.append("restore")
-                raise PermissionError("denied")
-            return real_rename(path, target)
-
-        with (
-            mock.patch.object(Path, "replace", no_replace),
-            mock.patch.object(Path, "rename", no_return),
-        ):
+        with mock.patch.object(platform_rebuild, "publish_replacement", fail):
             yield
-        self.assertEqual(calls, ["new", "restore"] if restore else ["new"])
+        self.assertEqual(attempts, [self.home / cli_rebuild.REBUILD])
 
-    def assert_recovery_files(self, out: dict[str, object]) -> None:
-        """Check the retained original and absence of publication scratch."""
-        if sys.platform == "win32" or out["old_restored"] is True:
-            self.assertEqual(self.db.read_bytes(), JUNK)
-        else:
-            self.assertFalse(self.db.exists())
+    def assert_recovery(
+        self, out: dict[str, object], *, published: bool
+    ) -> None:
+        """Check actual retained content and uncertainty after failure."""
+        self.assertTrue(out["recovery_required"])
+        self.assertTrue(out["publication_possible"])
+        self.assertNotIn("old_restored", out)
+        self.assertEqual(self.unowned.read_bytes(), b"owner")
+        self.assertEqual(len(self.asides()), 1)
+        archive = self.asides()[0]
+        self.assertEqual(out["old_kept_as"], archive.name)
+        assert_private(self, archive)
+        self.assertEqual(self.admission(archive), 0)
+        self.assertEqual(self.admission(self.db), int(published))
         self.assertEqual(
-            (self.home / "muninn.sqlite-unknown").read_bytes(), b"owner"
+            (self.home / cli_rebuild.REBUILD).exists(), not published
         )
-        self.assertFalse(
-            any(
-                n.startswith((cli_rebuild.REBUILD, ".restore-", ".recovery-"))
-                for n in self.names()
+        if not published:
+            self.assertEqual(self.db.read_bytes(), archive.read_bytes())
+        with contextlib.closing(store.connect_ro(self.db)) as conn:
+            self.assertEqual(
+                conn.execute("PRAGMA quick_check").fetchone()[0], "ok"
             )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT count(*) FROM knowledge_fts "
+                    "WHERE knowledge_fts MATCH 'zebra'"
+                ).fetchone()[0],
+                1,
+            )
+
+    def test_failed_replace_preserves_old_and_complete_candidate(self) -> None:
+        with self.refuse_publication(after=False):
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["error"]), (4, "replace_failed"))
+        self.assert_recovery(out, published=False)
+        before = {
+            p: p.read_bytes()
+            for p in (*self.asides(), self.db, self.home / cli_rebuild.REBUILD)
+        }
+        code, again, _ = self.muninn("rebuild")
+        self.assertEqual(
+            (code, again["reason"]), (2, "rebuild_candidate_exists")
         )
-        if sys.platform == "win32" or out["old_restored"] is False:
-            kept = out["old_kept_as"]
-            self.assertIsInstance(kept, str)
-            assert isinstance(kept, str)
-            self.assertEqual(self.asides(), [kept])
-            self.assertEqual((self.home / kept).read_bytes(), JUNK)
-            assert_private(self, self.home / kept)
-        else:
-            self.assertEqual(self.asides(), [])
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
 
-    def test_the_answer_warns_that_the_ledger_was_not_copied(self) -> None:
-        code, out, _ = self.muninn("rebuild")
-        self.assertEqual(code, 0)
-        self.assertIn("not copied", out["warning"])
-        self.assertNotIn("keep this prompt", str(out))
-        _, again, _ = self.muninn("rebuild")  # now the old store is readable
-        self.assertIsNone(again["warning"])
-
-    def test_a_failed_replace_puts_the_old_store_back(self) -> None:
-        (self.home / "muninn.sqlite-unknown").write_bytes(b"owner")
-        with self.refuse_publication(restore=False):
+    def test_replace_then_raise_never_restores_or_reenables_live(self) -> None:
+        before = self.db.stat().st_ino
+        with self.refuse_publication(after=True):
             code, out, _ = self.muninn("rebuild")
         self.assertEqual((code, out["error"]), (4, "replace_failed"))
-        self.assertIs(out["old_restored"], True)
-        self.assert_recovery_files(out)
+        self.assertNotEqual(self.db.stat().st_ino, before)
+        self.assert_recovery(out, published=True)
+        archive = self.asides()[0]
+        raw = archive.read_bytes()
+        code, again, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, again)
+        self.assertEqual(archive.read_bytes(), raw)
+        self.assertEqual(len(self.asides()), 2)
 
-    def test_a_failed_put_back_is_reported_with_the_kept_name(self) -> None:
-        (self.home / "muninn.sqlite-unknown").write_bytes(b"owner")
-        with self.refuse_publication(restore=True):
-            code, out, _ = self.muninn("rebuild")
-        self.assertEqual((code, out["error"]), (4, "replace_failed"))
-        self.assertIs(out["old_restored"], False)
-        self.assert_recovery_files(out)
-
-    def test_a_failed_quick_check_sets_nothing_aside(self) -> None:
-        built = cli_rebuild._Built(False, {}, 0, mock.MagicMock(), "bad")
-        with mock.patch.object(cli_rebuild, "_build", return_value=built):
-            code, out, _ = self.muninn("rebuild")
-        self.assertEqual((code, out["error"]), (2, "quick_check_failed"))
-        self.assertEqual(self.asides(), [])
-        self.assertEqual(self.db.read_bytes(), JUNK)
-
-    def test_a_hot_journal_leaves_no_half_built_store(self) -> None:
-        (self.home / "muninn.sqlite-journal").write_bytes(b"\x00" * 512)
+    def test_answer_reports_retained_archive_without_content(self) -> None:
         code, out, _ = self.muninn("rebuild")
-        self.assertEqual((code, out["error"]), (4, "hot_journal"))
-        names = self.names()
-        self.assertNotIn(cli_rebuild.REBUILD, names)
-        self.assertNotIn(f"{cli_rebuild.REBUILD}-journal", names)
+        self.assertEqual(code, 0, out)
+        self.assertIn("archive", out["warning"])
+        self.assertNotIn("Please retain", str(out))
+        self.assertNotIn("retained zebra", str(out))
+        self.assertEqual(out["old_kept_as"], self.asides()[0].name)
+        self.assertEqual(self.admission(self.db), 1)
+
+    def test_failed_validation_retains_fenced_live_and_archive(self) -> None:
+        with mock.patch.object(
+            cli_rebuild,
+            "_validate",
+            side_effect=ValueError("quick_check_failed"),
+        ):
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["reason"]), (2, "quick_check_failed"))
+        self.assertFalse(out["publication_possible"])
+        self.assertTrue(out["recovery_required"])
+        self.assertEqual(self.admission(self.db), 0)
+        self.assertEqual(self.db.read_bytes(), self.asides()[0].read_bytes())
+        self.assertTrue((self.home / cli_rebuild.REBUILD).is_file())
+
+    def test_hot_journal_refuses_before_archive_or_candidate(self) -> None:
+        before = self.db.read_bytes()
+        journal = self.home / "muninn.sqlite-journal"
+        journal.write_bytes(b"\0" * 512)
+        code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["reason"]), (2, "source_changed"))
+        self.assertEqual(self.db.read_bytes(), before)
+        self.assertEqual(journal.read_bytes(), b"\0" * 512)
         self.assertEqual(self.asides(), [])
+        self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
+
+    def test_partial_archive_failure_preserves_enumerable_residue(
+        self,
+    ) -> None:
+        def partial(source: BinaryIO, target: BinaryIO) -> None:
+            target.write(b"partial")
+            target.flush()
+            raise OSError("synthetic copy interruption")
+
+        with mock.patch.object(
+            platform_rebuild.shutil, "copyfileobj", partial
+        ):
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["error"]), (4, "store_unavailable"))
+        self.assertIsNone(out["old_kept_as"])
+        self.assertTrue(out["recovery_required"])
+        self.assertEqual([p.read_bytes() for p in self.asides()], [b"partial"])
+        self.assertEqual(self.admission(self.db), 0)
+        self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
+
+    def test_own_open_ctime_drift_preserves_immutable_original(self) -> None:
+        verify = cli_rebuild._verify_after_own_open
+        originals: list[dict[str, object]] = []
+        drift: list[bool] = []
+
+        def observed(
+            home: Path, original: cli_rebuild.fingerprint.Fingerprint
+        ) -> None:
+            before = dataclasses.asdict(original)
+            current = cli_rebuild.fingerprint.capture(home)
+            with (
+                self.assertRaises(store.BusyError),
+                store.writer_lock(home, wait_s=0),
+            ):
+                self.fail("final comparison has no writer")
+            drift.append(
+                current.database.ctime_ns != original.database.ctime_ns
+            )
+            verify(home, original)
+            self.assertEqual(dataclasses.asdict(original), before)
+            originals.append(before)
+
+        with mock.patch.object(
+            cli_rebuild, "_verify_after_own_open", observed
+        ):
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(len(originals), 2)
+        self.assertTrue(all(item == originals[0] for item in originals))
+        if os.name != "nt":
+            self.assertEqual(drift, [True, True])
+
+    def test_own_replay_or_other_post_open_changes_never_publish(self) -> None:
+        for kind in (
+            "row",
+            "identity",
+            "size",
+            "mtime",
+            "key",
+            "intent",
+            "journal",
+            "wal",
+            "shm",
+        ):
+            with self.subTest(kind=kind):
+                home = self.tmp / ("final-" + kind)
+                with contextlib.closing(store.connect_rw(store.db_path(home))):
+                    pass
+                initialize(home)
+                verify, calls = q.verify_current, 0
+
+                def changed(
+                    owner: q.MaintenanceOwner,
+                    conn: sqlite3.Connection,
+                    kind: str = kind,
+                    home: Path = home,
+                    verify: Callable[
+                        [q.MaintenanceOwner, sqlite3.Connection], None
+                    ] = verify,
+                ) -> None:
+                    nonlocal calls
+                    verify(owner, conn)
+                    calls += 1
+                    if calls != 2:
+                        return
+                    path = store.db_path(home)
+                    if kind == "row":
+                        conn.execute(
+                            "INSERT INTO scope VALUES(99,'new','new','dir')"
+                        )
+                    elif kind == "identity":
+                        # Inject after SQLite releases its Windows delete lock.
+                        conn.close()
+                        raw = path.read_bytes()
+                        path.rename(home / "prior.sqlite")
+                        path.write_bytes(raw)
+                        path.chmod(0o600)
+                    elif kind == "size":
+                        with path.open("ab") as handle:
+                            handle.write(b"changed")
+                    elif kind == "mtime":
+                        info = path.stat()
+                        os.utime(
+                            path,
+                            ns=(info.st_atime_ns, info.st_mtime_ns + 1000000),
+                        )
+                    else:
+                        name = {
+                            "key": "tombstone.key",
+                            "intent": "tombstones.jsonl",
+                        }.get(kind, "muninn.sqlite-" + kind)
+                        (home / name).write_bytes(b"new private state")
+                        (home / name).chmod(0o600)
+
+                with (
+                    mock.patch.object(
+                        q, "verify_current", side_effect=changed
+                    ),
+                    mock.patch.object(
+                        platform_rebuild, "publish_replacement"
+                    ) as publish,
+                ):
+                    code, out, _ = self.muninn(
+                        "rebuild", env={"MUNINN_HOME": str(home)}
+                    )
+                self.assertEqual((code, out["reason"]), (2, "source_changed"))
+                self.assertTrue(out["recovery_required"])
+                self.assertFalse(out["publication_possible"])
+                self.assertEqual(calls, 2)
+                publish.assert_not_called()
+                self.assertEqual(
+                    len(list(home.glob(store.RECOVERY_PREFIX + "*"))), 1
+                )
+
+    def test_final_archive_identity_change_refuses_publication(self) -> None:
+        validate = cli_rebuild._validate
+
+        def replace(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
+            validate(conn, control)
+            archive = self.asides()[0]
+            raw = archive.read_bytes()
+            archive.rename(archive.with_name("held-archive.sqlite"))
+            archive.write_bytes(raw)
+            archive.chmod(0o600)
+
+        with mock.patch.object(cli_rebuild, "_validate", side_effect=replace):
+            code, out, _ = self.muninn("rebuild")
+        self.assertEqual((code, out["reason"]), (2, "source_changed"))
+        self.assertFalse(out["publication_possible"])
+        self.assertEqual(self.admission(self.db), 0)

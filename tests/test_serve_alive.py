@@ -18,6 +18,7 @@ from unittest import mock
 from muninn import cli_serve, ingest, obs, poller_stop, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CliCase
+from tests.review_quiescence_support import initialize
 
 LONG_AGO = 900  # seconds since the last finished pass: stale on its own
 # Taken before any patching, for the stand-ins that must still write.
@@ -29,6 +30,7 @@ class ServeAliveTests(CliCase):
 
     def setUp(self) -> None:
         super().setUp()
+        initialize(self.home)
         obs.write_status(
             self.home,
             {"last_pass_at": time.time() - LONG_AGO, "interval_s": 60},
@@ -347,12 +349,56 @@ class ServeAliveTests(CliCase):
         def fake(*_: Any, **__: Any) -> ingest.PassStats:
             raise AssertionError("must not run while the lock is busy")
 
-        with mock.patch.object(
-            store, "writer_lock", side_effect=store.BusyError("held")
+        poller = cli_serve._Poller(self.home, self.env, 60)
+        poller._start_review()
+        self.addCleanup(poller.close)
+        with (
+            store.writer_lock(self.home, wait_s=0),
+            mock.patch.object(cli_serve.ingest, "ingest", fake),
         ):
-            self.serve_one_pass(fake)
+            poller.step()
         self.assertEqual(self.alive_writes, [])
         self.assertEqual(obs.freshness(self.status())["poller"], "stale")
+
+    def test_stop_after_real_commit_keeps_work_without_heartbeat(self) -> None:
+        self.session("stop-commit", "question", "answer")
+        poller = cli_serve._Poller(self.home, self.env, 60)
+        before = self.status()["last_pass_at"]
+
+        def requested() -> bool:
+            return self.source("stop-commit") is not None
+
+        with (
+            mock.patch.object(poller, "_requested", requested),
+            self.assertRaises(cli_serve._ServeStopError),
+        ):
+            poller.step()
+        self.assertEqual(len(self.events("stop-commit")), 2)
+        self.assertIsNone(poller.conn)
+        self.assertEqual(poller.passes, 0)
+        self.assertEqual(self.status()["last_pass_at"], before)
+        self.assertFalse((self.home / "muninn.sqlite-journal").exists())
+
+    def test_stop_after_rollback_never_retries_or_publishes(self) -> None:
+        self.session("stop-rollback", "question", "answer")
+        poller = cli_serve._Poller(self.home, self.env, 60)
+        before = self.status()["last_pass_at"]
+
+        def fail(conn: Any, roots: object, **kwargs: Any) -> ingest.PassStats:
+            conn.execute("BEGIN IMMEDIATE")
+            poller.stop_requested = True
+            conn.execute("ROLLBACK")
+            self.fail("rollback failed to propagate stop")
+
+        with (
+            mock.patch.object(ingest, "ingest", fail),
+            self.assertRaises(cli_serve._ServeStopError),
+        ):
+            poller.step()
+        self.assertIsNone(self.source("stop-rollback"))
+        self.assertIsNone(poller.conn)
+        self.assertEqual(poller.passes, 0)
+        self.assertEqual(self.status()["last_pass_at"], before)
 
 
 if __name__ == "__main__":

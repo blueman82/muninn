@@ -19,30 +19,63 @@ MIN_NEEDLE_BYTES = 12
 # A term in more erased documents than this is ordinary vocabulary, not
 # something that identifies the erased text.
 RARE_MAX_DOCS = 3
-# SQLite's default bound-variable limit is 999 on older builds.
-CHUNK = 500
 
 
 def _texts(conn: sqlite3.Connection, target: Target) -> list[str]:
     """Return the texts about to be erased; they live in memory only."""
-    texts: list[str] = []
+    texts = [
+        r[0]
+        for ident in target.events
+        for r in conn.execute("SELECT text FROM event WHERE id=?", (ident,))
+    ]
     for table, column, ids in (
-        ("event", "text", target.events),
-        ("knowledge", "text", sorted(target.knowledge)),
-        ("knowledge", "retract_reason", sorted(target.knowledge)),
-        ("knowledge", "tags", sorted(target.knowledge)),
-        ("citation", "quote", sorted(target.citations)),
+        ("review_evidence", "excerpt", target.review.evidence),
+        ("knowledge", "retracted_reason", target.knowledge),
+        ("unresolved", "item_json", target.review.unresolved),
     ):
-        for start in range(0, len(ids), CHUNK):
-            chunk = ids[start : start + CHUNK]
-            texts += [
-                r[0]
-                for r in conn.execute(
-                    f"SELECT {column} FROM {table} WHERE id IN"
-                    f" ({','.join('?' * len(chunk))}) AND {column} NOT NULL",
-                    chunk,
-                )
-            ]
+        texts.extend(
+            r[0]
+            for ident in ids
+            for r in conn.execute(
+                f"SELECT {column} FROM {table} WHERE id=? AND {column} IS "
+                f"NOT NULL",
+                (ident,),
+            )
+        )
+    texts.extend(
+        r[0]
+        for ident in target.review.requests
+        for r in conn.execute(
+            "SELECT no_change_reason FROM review_receipt WHERE "
+            "request_id=? AND no_change_reason IS NOT NULL",
+            (ident,),
+        )
+    )
+    for ident, revision in target.review.versions:
+        texts.extend(
+            r[0]
+            for r in conn.execute(
+                "SELECT content_json FROM knowledge_version WHERE "
+                "knowledge_id=? AND revision=? "
+                "UNION ALL SELECT reason FROM knowledge_version WHERE "
+                "knowledge_id=? AND revision=? "
+                "UNION ALL SELECT expiry_json FROM knowledge_version "
+                "WHERE knowledge_id=? AND revision=? "
+                "UNION ALL SELECT text FROM knowledge_claim WHERE "
+                "knowledge_id=? AND revision=?",
+                (
+                    ident,
+                    revision,
+                    ident,
+                    revision,
+                    ident,
+                    revision,
+                    ident,
+                    revision,
+                ),
+            )
+            if r[0] is not None
+        )
     return texts
 
 
@@ -79,14 +112,18 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
         needle: Bytes to look for.
 
     Returns:
-        True if any event, knowledge text, reason or tags, or quote has it.
+        True if any surviving transcript or governed content has the bytes.
     """
     for table, column in (
         ("event", "text"),
-        ("knowledge", "text"),
-        ("knowledge", "retract_reason"),
-        ("knowledge", "tags"),
-        ("citation", "quote"),
+        ("knowledge", "retracted_reason"),
+        ("knowledge_version", "content_json"),
+        ("knowledge_version", "reason"),
+        ("knowledge_version", "expiry_json"),
+        ("knowledge_claim", "text"),
+        ("review_evidence", "excerpt"),
+        ("review_receipt", "no_change_reason"),
+        ("unresolved", "item_json"),
     ):
         # CAST to BLOB so instr compares bytes, matching the needle.
         if conn.execute(
@@ -172,7 +209,7 @@ def rare_terms(
         conn: Connection used before the erase runs. Main is only read;
             TEMP tables are created and filled.
         event_ids: Event rows about to be deleted.
-        knowledge_ids: Knowledge rows about to be scrubbed.
+        knowledge_ids: Knowledge FTS rowids about to be scrubbed.
 
     Returns:
         Per FTS table, the terms in at most three documents, all erased.

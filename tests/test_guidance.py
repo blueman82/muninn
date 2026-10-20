@@ -77,7 +77,7 @@ class HookGuidanceTests(RecallCase):
     ) -> None:
         self.talk("guidance", "alphaterm betaterm gammaterm deltaterm")
         for provider, cap in (("claude", 4000), ("codex", 2800)):
-            text = self.body(self.start(provider))
+            text = self.body(self.start_hook(provider))
             self.assertLessEqual(len(text), cap)
             for phrase in (
                 "navigation only",

@@ -1,11 +1,7 @@
 """Ingest provider transcripts into the store.
 
-Discover transcripts, identify threads from line 1, and commit complete lines
-as events. `ingest` needs the caller to hold `store.writer_lock`; `run_pass`
-takes it. Each source transaction commits events, cursor, anchor, parse state
-and usage counts together.
-
-Planning, parsing and shared types live in the corresponding ingest modules.
+`ingest` requires a caller-owned writer; `run_pass` acquires its own.
+Each source atomically commits events, cursor, anchor, parse state and usage.
 """
 
 from __future__ import annotations
@@ -16,44 +12,34 @@ import sqlite3
 import sys
 import time
 from collections.abc import Callable, Mapping
+from itertools import chain
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import cast
 
-from muninn import classify, store
+from muninn import classify, scope, store
 from muninn.ingest_model import (
     INDEXED,
     PROVIDER,
+    IngestPreparationRequiredError,
     PassStats,
     PlanOptions,
     Work,
+    Written,
 )
-from muninn.ingest_parse import (
-    ParseStart,
-    Progress,
-    Usage,
-    parse_source,
-)
-from muninn.ingest_plan import (
-    discover,
-    late_forks,
-    plan_source,
-    source_id_for,
-)
+from muninn.ingest_parse import ParseStart, Progress, Usage, parse_source
+from muninn.ingest_plan import discover, late_forks, plan_source, source_id_for
 from muninn.tombstone_key import TombstoneKeyError
 
-__all__ = ["PassStats", "default_roots", "ingest", "run_pass"]
+__all__ = [
+    "IngestPreparationRequiredError",
+    "PassStats",
+    "default_roots",
+    "ingest",
+    "run_pass",
+]
 
 # Progress of a source that is indexed as a row only (no events read).
 _NO_PROGRESS = Progress((0, 0), (None, None), None, 0)
-
-
-class _Written(NamedTuple):
-    """The counts one source's transaction produced."""
-
-    source_id: int
-    added: int
-    removed: int
-    skipped: int
 
 
 def provider_home(env: Mapping[str, str]) -> Path:
@@ -72,8 +58,7 @@ def provider_home(env: Mapping[str, str]) -> Path:
 def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
     """Return the provider roots, or those named by MUNINN_ROOTS.
 
-    MUNINN_ROOTS (a JSON object, root name to path) replaces the defaults,
-    e.g. for tests.
+    MUNINN_ROOTS is a JSON root-to-path map replacing the defaults.
 
     Args:
         env: Environment to read HOME and MUNINN_ROOTS from.
@@ -95,8 +80,7 @@ def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:
             "claude-projects": claude / "projects",
         }
     given = json.loads(raw)
-    # isinstance leaves the JSON object's types unknown; its keys are always
-    # strings and every value is passed through str() below.
+    # JSON object keys are strings; values are converted below.
     roots = cast(dict[str, object], given)
     if not isinstance(given, dict) or not set(roots) <= set(PROVIDER):
         raise ValueError(f"MUNINN_ROOTS must map {sorted(PROVIDER)} to paths")
@@ -119,29 +103,46 @@ def run_pass(
     fullfsync: bool = True,
     wait_s: float = 0.0,
 ) -> PassStats:
-    """Take the writer lock, open the store, run one ingest pass, close.
+    """Run fresh writer passes, preparing missing Git facts while unlocked.
 
-    store.BusyError propagates if the lock is still held after ``wait_s``,
-    and ValueError if a root name is not a known provider.
+    BusyError and invalid-root ValueError propagate.
 
     Args:
         home: Data home that holds the store and the lock.
         roots: Provider root name to directory.
         only_threads: Limit the pass to these thread or session ids.
-        full: Re-read every source from the start.
+        full: Re-read every source from the start on every pass.
         fullfsync: False only for a re-derivable pre-build.
-        wait_s: Seconds to wait for the lock; the poller passes 0 and skips
-            the pass when another writer is busy.
+        wait_s: Lock wait for each pass; retries may multiply total wait.
 
     Returns:
-        Counters for the pass.
+        Invocation work totals; moving inputs need not reach completion.
     """
-    with store.writer_lock(home, wait_s=wait_s):
-        conn = store.connect_rw(store.db_path(home), fullfsync=fullfsync)
+    started, total = time.monotonic(), PassStats()
+    facts: scope.CommitFacts = {}
+    while True:
         try:
-            return ingest(conn, roots, only_threads=only_threads, full=full)
-        finally:
-            conn.close()
+            with store.writer_lock(home, wait_s=wait_s):
+                conn = store.connect_rw(
+                    store.db_path(home), fullfsync=fullfsync
+                )
+                try:
+                    stats = ingest(
+                        conn,
+                        roots,
+                        only_threads=only_threads,
+                        full=full,
+                        commit_facts=facts,
+                    )
+                finally:
+                    conn.close()
+        except IngestPreparationRequiredError as pending:
+            total.accumulate(pending.stats)
+            scope.prepare_commit(pending.lookup, facts)
+        else:
+            total.accumulate(stats)
+            total.duration_s = time.monotonic() - started
+            return total
 
 
 def _no_beat() -> None:
@@ -155,12 +156,17 @@ def ingest(
     only_threads: set[str] | None = None,
     full: bool = False,
     on_source: Callable[[], None] = _no_beat,
+    on_committed: Callable[[int], None] | None = None,
+    commit_facts: scope.CommitFacts | None = None,
 ) -> PassStats:
     """Run one pass over the roots with a store.connect_rw connection.
 
     The caller must hold store.writer_lock for the whole call: writers are
     serialised by it, and the lock is not reentrant.  ValueError propagates
     if a root name is not a known provider.
+    IngestPreparationRequiredError rolls back the current source. Close the
+    connection and release the writer before preparing its lookup. Accumulate
+    its stats; replan on a new connection with the same fact dictionary.
 
     Args:
         conn: Read-write connection from store.connect_rw.
@@ -168,15 +174,17 @@ def ingest(
         only_threads: Limit the pass to these thread or session ids (a
             continuation file also matches its base thread id); this also
             skips missing-source marking, which needs a view of every root.
-        full: Re-read every source from the start.
-        on_source: Called after each source is planned or written, so a
-            caller can show that a long pass is still alive.
+        full: Re-read every source from the start on every pass.
+        on_source: Called after planning or writing each source.
+        on_committed: Receive a source id after its transaction commits.
+        commit_facts: Invocation-local facts; misses require preparation.
 
     Returns:
         Counters for the pass.
     """
     started = time.monotonic()
     opts = PlanOptions(roots, full, only_threads)
+    facts = {} if commit_facts is None else commit_facts
     stats, seen, work = PassStats(), set[int](), list[Work]()
     for name, path, st in discover(roots):
         stats.files_seen += 1
@@ -186,16 +194,12 @@ def ingest(
         elif item is not None:
             seen.add(item)  # an unchanged or skipped known source
         on_source()
-    # Parents before their old-format forks: the content-prefix rule reads
-    # the parent's events, so they must be written first.  Python's sort is
-    # stable, so every other order (path order) is kept.
+    # Fork prefix filtering needs parent events; the stable sort keeps
+    # discovery order among all other sources.
     work.sort(key=lambda w: w.info.replay_mode == "content_prefix")
     scopes: dict[str | None, int] = {}
-    for item in work:
-        _process(conn, item, stats, scopes, seen)
-        on_source()
-    for item in late_forks(conn, opts, stats):
-        _process(conn, item, stats, scopes, seen)
+    for item in chain(work, late_forks(conn, opts, stats)):
+        _process(conn, item, stats, scopes, seen, on_committed, facts)
         on_source()
     if only_threads is None:
         stats.missing = _mark_missing(conn, roots, seen)
@@ -235,6 +239,8 @@ def _process(
     stats: PassStats,
     scopes: dict[str | None, int],
     seen: set[int],
+    on_committed: Callable[[int], None] | None,
+    facts: scope.CommitFacts,
 ) -> None:
     """Write one source in one transaction; an error rolls back only it."""
     if w.row is not None:
@@ -243,20 +249,19 @@ def _process(
         stats.skipped_files += 1  # a copy that arrived earlier this pass
         return
     try:
-        # IMMEDIATE takes the write lock now rather than at the first write,
-        # so a source never fails half-way on a lock upgrade.
+        # Lock before writing so no source fails midway on a lock upgrade.
         conn.execute("BEGIN IMMEDIATE")
-        written = _write(conn, w, scopes)
+        written = _write(conn, w, scopes, facts)
         conn.execute("COMMIT")
     except Exception as exc:  # counted; the next pass redoes the source
         if conn.in_transaction:
             conn.execute("ROLLBACK")
-        # The cache may hold scope ids created inside the rolled-back
-        # transaction; reusing one would violate the scope foreign key.
+        # Rolled-back scope ids cannot be reused by a later source.
         scopes.clear()
+        if isinstance(exc, scope.ScopePreparationRequiredError):
+            raise IngestPreparationRequiredError(exc.lookup, stats) from None
         if isinstance(exc, TombstoneKeyError):
-            # Not a bad source: every fork would fail the same way, and
-            # only restoring the key helps, so stop the pass loudly.
+            # A missing key fails every fork; stop rather than retry sources.
             raise
         stats.failed += 1
         kind = type(exc).__name__
@@ -267,6 +272,8 @@ def _process(
     stats.events_added += written.added
     stats.events_removed += written.removed
     stats.skipped_lines += written.skipped
+    if on_committed is not None:
+        on_committed(written.source_id)
 
 
 def _replay(
@@ -323,8 +330,7 @@ def _upsert_source(
         " (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,0,?,?)",
         (*ident, PROVIDER[w.name], info.thread_id, now, now),
     ).lastrowid
-    # An INSERT that did not raise always sets lastrowid; typeshed types it
-    # as Optional because it is None after other statement kinds.
+    # Successful INSERT sets lastrowid; other statement kinds may not.
     return cast(int, new_id)
 
 
@@ -339,12 +345,14 @@ def _clear_source(conn: sqlite3.Connection, source_id: int) -> int:
 
 
 def _write(
-    conn: sqlite3.Connection, w: Work, scopes: dict[str | None, int]
-) -> _Written:
+    conn: sqlite3.Connection,
+    w: Work,
+    scopes: dict[str | None, int],
+    facts: scope.CommitFacts,
+) -> Written:
     """Write one source inside the caller's transaction.
 
-    The source row, the events, the cursor and the usage counts are all
-    written here so that the caller's COMMIT makes them visible together.
+    Source metadata, events, cursor and usage become visible together.
 
     Returns:
         The source id and the counts the transaction produced.
@@ -359,28 +367,16 @@ def _write(
         removed = _clear_source(conn, source_id)
     if info.thread_class not in INDEXED:  # a row with stat fields only
         _commit_source(conn, source_id, w.st, now, _NO_PROGRESS, reset=True)
-        return _Written(source_id, 0, removed, 0)
-    start = _start_of(row if resume else None, parent_id)
-    result = parse_source(conn, w, source_id, start, scopes)
+        return Written(source_id, 0, removed, 0)
+    start = ParseStart.from_source(row if resume else None, parent_id)
+    result = parse_source(conn, w, source_id, start, scopes, facts)
     _commit_source(
         conn, source_id, w.st, now, result.progress, reset=not resume
     )
     _add_usage(
         conn, source_id, PROVIDER[w.name], info.session_root, result.usage
     )
-    return _Written(source_id, result.added, removed, result.progress.skipped)
-
-
-def _start_of(prior: sqlite3.Row | None, parent_id: int | None) -> ParseStart:
-    """Return where to begin parsing: the row's cursor, or the file start."""
-    if prior is None:
-        return ParseStart((0, 0), (None, None), None, parent_id)
-    return ParseStart(
-        (prior["cursor_bytes"], prior["cursor_line"]),
-        (prior["anchor_offset"], prior["anchor_sha256"]),
-        prior["parse_state"],
-        parent_id,
-    )
+    return Written(source_id, result.added, removed, result.progress.skipped)
 
 
 def _add_usage(

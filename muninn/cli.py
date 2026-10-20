@@ -14,18 +14,22 @@ launcher and the launchd job call ``main``.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
 import time
 from argparse import Namespace
 from collections.abc import Sequence
+from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from muninn import (
     __version__,
     classify,
     cli_know,
+    cli_learn,
     cli_maint,
     cli_read,
     cli_rebuild,
@@ -36,9 +40,10 @@ from muninn import (
     tombstone_key,
 )
 from muninn.cli_core import Env, Handler, Out, Record, Result
-from muninn.cli_hook import HOOKS, PROVIDERS, hook_main
+from muninn.cli_hook_contract import PROVIDERS
 from muninn.cli_output import redacted
 from muninn.cli_parser import build_parser
+from muninn.review_quiescence import EraseStatus
 
 __all__ = [
     "HOOKS",
@@ -47,6 +52,7 @@ __all__ = [
     "main",
 ]
 
+HOOKS: dict[str, Any]
 NOTICE = classify.NOTICE
 
 
@@ -65,13 +71,27 @@ _HANDLERS: dict[str, Handler] = {
     "rebuild": cli_rebuild.rebuild,
     "know": cli_know.know,
     "recall-review": cli_recall_review.recall_review,
+    "learn": cli_learn.learn,
 }
 
 
-def _dispatch(args: Namespace, env: Env, home: Path, record: Record) -> Result:
+def _dispatch(
+    args: Namespace,
+    env: Env,
+    home: Path,
+    record: Record,
+    *,
+    status: EraseStatus | None = None,
+) -> Result:
     """Run the handler and map store failures to their exit codes."""
     try:
-        return _HANDLERS[args.cmd](args, env, home, record)
+        if args.cmd == "erase":
+            result = cli_maint.erase_command(
+                args, env, home, record, status=status
+            )
+        else:
+            result = _HANDLERS[args.cmd](args, env, home, record)
+        return result
     except store.BusyError:
         return 3, {"error": "busy"}
     except store.HotJournalError:
@@ -132,9 +152,17 @@ def _run(args: Namespace, env: Env) -> int:
         "cmd": args.cmd,
         "actor": obs.actor(env),
     }
-    code, out = _dispatch(args, env, home, record)
+    status = EraseStatus() if args.cmd == "erase" else None
+    code, out = _dispatch(args, env, home, record, status=status)
     if out is None:  # serve prints nothing
         return code
+    if status is not None:
+        out["erasure_status"] = asdict(status)
+        if status.stop_may_have_been_published:
+            out["erasure_status"] |= {
+                "restart": "not_attempted",
+                "next_action": "check_and_restart_if_needed",
+            }
     return _answer(args, env, home, (code, out), record, started)
 
 
@@ -151,7 +179,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if given[:1] == ["hook"] and not {"-h", "--help"} & set(given):
         # Handled before argparse: a usage error here would exit 2, and exit
         # 2 from a hook can block the user's prompt.
-        return hook_main(given[1:], os.environ)
+        runtime = importlib.import_module("muninn.cli_hook")
+        return runtime.hook_main(given[1:], os.environ)
     pretty = "--pretty" in given  # anywhere on the line; hooks never use it
     given = [a for a in given if a != "--pretty"]
     parser = build_parser()
@@ -170,3 +199,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     args.pretty = pretty
     return _run(args, os.environ)
+
+
+def __getattr__(name: str) -> Any:
+    """Expose the one actual hook registry only when explicitly requested."""
+    if name == "HOOKS":
+        return importlib.import_module("muninn.cli_hook").HOOKS
+    raise AttributeError(name)

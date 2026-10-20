@@ -5,12 +5,12 @@ Instructions for coding agents working in this repository. Any parent-directory
 
 ## Layout
 
-- `muninn/`: runtime package (Python 3.13 standard library only), one responsibility per
+- `muninn/`: runtime package (Python 3.13+ with the pinned validation closure), one responsibility per
   module; related modules share a prefix: `cli*` (parser, handlers, output, poller,
-  `cli_rebuild`), `store*` (`store_schema`, `store_migrate`), `ingest*` (plan, parse,
+  `cli_rebuild`), `store*` (`store_schema`, `store_copy`, `store_fingerprint`), `ingest*` (plan, parse,
   lines, model), `classify` with `claude_events`, `codex_events`, `event_model`,
-  `tool_errors`, `redaction`; `query/` (package), `knowledge*` (with `knowledge_typed`,
-  `knowledge_expiry`), `erase*` (`erase_collect`, `erase_family`, `erase_residue`),
+  `tool_errors`, `redaction`; `query/` (package), `knowledge*` (`knowledge_models`,
+  `knowledge_read`, `knowledge_write`, `knowledge_push`, `knowledge_erase`), `erase*` (`erase_collect`, `erase_family`, `erase_residue`),
   `tombstones`, `tombstone_key` (the HMAC key for content tombstones), `hook*`
   (`hook_frame`, `hook_notes`, `hook_recall`), `obs*` (`obs_log`, `obs_stats`,
   `obs_status`; `obs` holds doctor), `scope`.
@@ -35,7 +35,9 @@ Instructions for coding agents working in this repository. Any parent-directory
 
 ## Rules
 
-- No third-party imports in `muninn/` or `install/`.
+- Third-party imports in `muninn/` and `install/` are restricted to `pydantic`,
+  `pydantic_core`, `annotated_types`, `typing_extensions` and `typing_inspection`,
+  pinned with verified wheel hashes in `requirements-runtime.lock` (ADR 0014).
 - Logs and `doctor`/`stats` output hold counts, codes and ids, never transcript text.
   New log fields go through the allowlist in `muninn/obs_log.py`.
 - Output is JSON on stdout; `--pretty` only changes indentation. muninn provider hooks
@@ -68,9 +70,22 @@ Instructions for coding agents working in this repository. Any parent-directory
     python3.13 -m tools.run_tests          # the suite alone, in parallel (roughly 9 s)
     python3.13 -m unittest discover -s tests -t .   # the suite, serial (roughly 42 s)
 
-Set up once: `python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`
-and `git config core.hooksPath .githooks`. If Codex cannot write Git metadata, the owner
-or Claude session configures the Git hooks. The pre-commit and pre-merge-commit hooks
+Set up once, installing the hashed runtime separately from developer tools:
+
+```sh
+python3.13 -m venv .venv
+.venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
+.venv/bin/python3.13 -m pip install -r requirements-dev.txt
+source .venv/bin/activate
+```
+
+On Windows create the same venv with the selected Python 3.13 interpreter and
+use `.\.venv\Scripts\python.exe` in both pip commands and every later test/gate
+command. Explicit interpreter paths require no shell activation.
+
+The owner configures `git config core.hooksPath .githooks`. If Codex cannot write
+Git metadata, the owner or Claude session configures the Git hooks. The pre-commit
+and pre-merge-commit hooks
 run the whole gate; `tests/test_standards.py` runs the stdlib rules and checks
 enforcement configuration; the installer runs only the standards rules (S1 to S8), not
 ruff, pyright or the tests; Claude Code's Stop hook (`.claude/settings.json`) blocks
@@ -92,7 +107,8 @@ enforced by a gate (0006); per-prompt recall starts off on a fresh install (0007
 ChatGPT-handoff sessions are primary (0010); the schema migration is one-way and an
 upgrade snapshots the store first (0011); content tombstones are keyed HMAC tags and
 `tombstone.key` is a durable secret (0012); Cursor import is read-only during full
-ingest, without polling (0013).
+ingest, without polling (0013); pinned Pydantic validation and the distinct new
+knowledge format (0014).
 
 ## Definition of done (Codex Stop hook plus manual fallback)
 

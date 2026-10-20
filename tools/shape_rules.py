@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 
 from tools.model import MAX_FILE_LINES, MAX_FUNCTION_LINES, Violation
 
@@ -103,6 +104,7 @@ def check_imports(rel: str, tree: ast.Module) -> list[Violation]:
                 msg = f"import inside {fn.name}; move it to the top"
                 out.append(Violation(rel, node.lineno, "S6", msg))
     for node in ast.walk(tree):
+        out += _dependency_imports(rel, node)
         if isinstance(node, ast.ImportFrom) and any(
             alias.name == "*" for alias in node.names
         ):
@@ -142,3 +144,31 @@ def _has_future(tree: ast.Module) -> bool:
         and any(a.name == "annotations" for a in n.names)
         for n in tree.body
     )
+
+
+def _dependency_imports(rel: str, node: ast.AST) -> list[Violation]:
+    """Reject runtime third-party imports outside the approved closure."""
+    if not rel.startswith(("muninn/", "install/")):
+        return []
+    modules: list[str] = []
+    if isinstance(node, ast.Import):
+        modules = [alias.name for alias in node.names]
+    elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+        modules = [node.module]
+    if not isinstance(node, (ast.Import, ast.ImportFrom)):
+        return []
+    allowed = sys.stdlib_module_names | {
+        "muninn",
+        "install",
+        "tools",
+        "pydantic",
+        "pydantic_core",
+        "annotated_types",
+        "typing_extensions",
+        "typing_inspection",
+    }
+    return [
+        Violation(rel, node.lineno, "S6", f"unapproved dependency: {module}")
+        for module in modules
+        if module.split(".", 1)[0] not in allowed
+    ]

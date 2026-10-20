@@ -13,7 +13,7 @@ gate before an upgrade; the installer itself enforces only the stdlib rules S1 t
 | Stdlib rules S1 to S8 | `python3.13 -m tools.check` (also run by `tests/test_standards.py`) | size, docstrings, comments, imports, annotations |
 | Everything | `python3.13 -m tools.check --full` | the above plus ruff, black, pyright strict, shellcheck, the git-hook switch and the whole test suite (run in parallel) |
 | Tests, fast | `python3.13 -m tools.run_tests` (`-j N` for N processes) | the whole suite with each test module in its own process, about 5x faster than `unittest discover` (roughly 9 s against 42 s on 15 cores) |
-| Set up the tools | `python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt` | pinned versions in `requirements-dev.txt` |
+| Set up the tools | Separate hashed runtime and developer installs below | pins in `requirements-runtime.lock` and `requirements-dev.txt` |
 
 A missing tool, failing test or disabled Git-hook configuration fails the gate. No
 required check is skipped.
@@ -21,7 +21,18 @@ required check is skipped.
 One-time setup per clone (the first two are checked by the gate and the tests):
 
     git config core.hooksPath .githooks                  # pre-commit and pre-merge-commit run the gate
-    python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+
+```sh
+python3.13 -m venv .venv
+.venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
+.venv/bin/python3.13 -m pip install -r requirements-dev.txt
+source .venv/bin/activate
+```
+
+On Windows create the same venv with the selected Python 3.13 interpreter and
+use `.\.venv\Scripts\python.exe` in both pip commands and every later test/gate
+command. Explicit interpreter paths require no shell activation.
+
     cp tools/claude-settings.json .claude/settings.json  # Claude Code: gate after every edit, no stopping on a failure
 
 If Codex cannot write Git metadata, the owner or Claude session configures the Git
@@ -40,7 +51,8 @@ run ruff, pyright or the tests).
 
 ## Codex Stop contract
 
-The Stop command invokes `tools/codex_stop_gate.py` directly with Python 3.13. Codex
+The Stop command invokes `tools/codex_stop_gate.py` directly with Python 3.13 and
+`async: true`. Codex continues the turn while the hook runs in the background. Codex
 provides JSON on stdin, including `cwd`, `session_id`, `hook_event_name`, `turn_id`,
 `stop_hook_active` and `last_assistant_message`. The wrapper ignores that payload: it
 derives the worktree from its own file and always runs one
@@ -48,16 +60,16 @@ derives the worktree from its own file and always runs one
 receives closed stdin, so it cannot consume the hook payload.
 
 A passing gate returns compact `{}` on stdout and exit 0. A failed gate, launch error or
-timeout returns exit 2 with a blocking reason on stderr. The gate timeout is 540
-seconds, below the hook's 600-second timeout. No transcript payload is logged or echoed.
-These are Codex hook responses; muninn provider hooks retain their separate
+timeout returns exit 2 with the reason on stderr; Codex reports background-hook output
+at the next safe point, but the result does not block the current turn. The gate timeout
+is 540 seconds, below the hook's 600-second timeout. No transcript payload is logged or
+echoed. These are Codex hook responses; muninn provider hooks retain their separate
 compact-JSON, exit-0 contract.
 
-`stop_hook_active` means Codex already continued after a blocked Stop. It never permits
-completion without a passing gate. There are no recursive hook calls, internal retries
-or retry-count bypasses. A timeout bounds each invocation; it does not prevent repeated
-blocked turns. Fix a persistent failure or ask the owner for help before retrying
-unchanged work.
+The Stop hook does not inspect `stop_hook_active`, retry, or block completion. Git
+pre-commit and pre-merge hooks remain synchronous and block commits when the full gate
+fails. A timeout bounds each background invocation; repeated Stops can start repeated
+gate runs.
 
 If the host lacks hooks, or trust, approval or feature enablement is missing, run the
 full gate manually after the last edit and report its result verbatim. Another agent's
@@ -97,7 +109,14 @@ builtins over manual loops (`C4`, `SIM`, `PERF`, `PIE`, `RET`).
 - EAFP over look-before-you-leap; context managers for every resource; f-strings only;
   early returns over nesting.
 - Untrusted text is sanitised where it is inserted into output.
-- Standard library only in `muninn/` and `install/`.
+- Third-party imports in `muninn/` and `install/` may use only `pydantic`,
+  `pydantic_core`, `annotated_types`, `typing_extensions` and `typing_inspection`
+  (ADR 0014). S6 rejects every other third-party module root. Standard-library
+  and local `muninn`, `install` and `tools` imports remain allowed. Import-shape
+  rules, size limits, annotations and every other gate rule remain enforced.
+- The validation closure is pinned with verified PyPI wheel hashes. Runtime
+  installation uses `--require-hashes` and wheels only; no developer lock
+  inclusion or source-build fallback is permitted.
 
 ## Docstrings: Google style, everywhere
 

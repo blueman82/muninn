@@ -8,12 +8,15 @@ from __future__ import annotations
 import secrets
 import unittest
 
+from tests.erase_support import EraseCase
 from tests.store_support import (
     StoreCase,
     insert_event,
     insert_scope,
     insert_source,
 )
+from tests.test_classify import codex_meta, user_msg
+from tests.test_ingest import TID, rollout
 
 
 class ErasureTests(StoreCase):
@@ -55,33 +58,86 @@ class ErasureTests(StoreCase):
         conn.close()
         self.assertGreater(self.residue(needles), 0)  # the test can fail
 
+
+class KnowledgeErasureTests(EraseCase):
+    """Require physical erasure of normalized notes and selected originals."""
+
     def test_erased_knowledge_and_quote_leave_zero_bytes(self) -> None:
-        token, needles = self.canary()
-        conn = self.rw()
-        sid = insert_scope(conn)
-        kid = conn.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at) VALUES (?, 'fact', ?, 'current', 'u', 0)",
-            (sid, f"note {token}"),
-        ).lastrowid
-        conn.execute(
-            "INSERT INTO citation(knowledge_id, provider, thread_id, line,"
-            " part, line_sha256, role, kind, quote)"
-            " VALUES (?, 'codex', 't', 1, 1, 'h', 'user', 'prompt', ?)",
-            (kid, f"quote {token}"),
+        token = secrets.token_hex(16)
+        needles = [
+            value.encode() for value in (token, token[:12], token[-12:])
+        ]
+        original = self.write(
+            rollout(), [codex_meta("user", TID), user_msg(1, f"quote {token}")]
         )
-        self.assertGreater(self.residue(needles), 0)
-        conn.execute(
-            "UPDATE citation SET quote = NULL, span_start = NULL,"
-            " span_end = NULL, state = 'erased'"
+        original_bytes = original.read_bytes()
+        self.run_ingest()
+        kid = self.note(f"note {token}", TID)
+
+        def residue() -> int:
+            return sum(
+                path.read_bytes().count(needle)
+                for path in self.home.rglob("*")
+                if path.is_file()
+                for needle in needles
+            )
+
+        self.assertGreater(residue(), 0)
+        self.assertIn(
+            token,
+            self.conn.execute(
+                "SELECT content_json FROM knowledge_version "
+                "WHERE knowledge_id=?",
+                (kid,),
+            ).fetchone()[0],
         )
-        conn.execute(
-            "UPDATE knowledge SET text = NULL, status = 'erased'"
-            " WHERE id = ?",
-            (kid,),
+        self.assertIn(
+            token,
+            self.conn.execute(
+                "SELECT excerpt FROM review_evidence"
+            ).fetchone()[0],
         )
-        conn.close()
-        self.assertEqual(self.residue(needles), 0)
+        self.assertEqual(self.count("SELECT count(*) FROM knowledge_fts"), 1)
+        out = self.erase(event_ref=f"codex:{TID}:2.1")
+        self.assertEqual(out["residue"], 0)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT state FROM knowledge WHERE id=?", (kid,)
+            ).fetchone()[0],
+            "erased",
+        )
+        self.assertEqual(
+            tuple(
+                self.conn.execute(
+                    "SELECT content_json,reason,expiry_json "
+                    "FROM knowledge_version WHERE knowledge_id=?",
+                    (kid,),
+                ).fetchone()
+            ),
+            (None, None, None),
+        )
+        self.assertEqual(
+            tuple(
+                self.conn.execute(
+                    "SELECT text,state FROM knowledge_claim "
+                    "WHERE knowledge_id=?",
+                    (kid,),
+                ).fetchone()
+            ),
+            (None, "erased"),
+        )
+        self.assertEqual(
+            tuple(
+                self.conn.execute(
+                    "SELECT excerpt,state FROM review_evidence"
+                ).fetchone()
+            ),
+            (None, "erased"),
+        )
+        self.assertEqual(self.count("SELECT count(*) FROM knowledge_fts"), 0)
+        self.conn.close()
+        self.assertEqual(residue(), 0)
+        self.assertEqual(original.read_bytes(), original_bytes)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ Every test uses temp dirs only; nothing here touches a live data dir.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import sys
@@ -22,12 +23,12 @@ from tests.store_support import (
 
 
 class SchemaTests(StoreCase):
-    """Schema version 3 layout, pragmas, constraints and FTS triggers."""
+    """Marked schema 1 layout, pragmas, constraints and FTS triggers."""
 
-    def test_connect_rw_creates_schema_version_3(self) -> None:
+    def test_connect_rw_creates_marked_schema_1(self) -> None:
         conn = self.rw()
-        self.assertEqual(store.SCHEMA_VERSION, 3)
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 3)
+        self.assertEqual(store.SCHEMA_VERSION, 1)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
         found = {
             (r["type"], r["name"])
             for r in conn.execute(
@@ -44,15 +45,34 @@ class SchemaTests(StoreCase):
             "event_fts",
             "knowledge",
             "knowledge_fts",
-            "citation",
-            "knowledge_log",
+            "store_meta",
+            "review_control",
+            "review_source",
+            "review_request",
+            "review_attempt",
+            "review_call",
+            "review_evidence",
+            "review_input",
+            "knowledge_version",
+            "knowledge_claim",
+            "knowledge_support",
+            "unresolved",
+            "review_receipt",
             "tombstone",
         }
         indexes = {
             "source_session",
             "event_scope_ts",
             "event_cwd",
-            "citation_target",
+            "review_request_ready",
+            "review_request_source",
+            "review_attempt_request",
+            "review_call_budget",
+            "review_evidence_source",
+            "review_input_evidence",
+            "knowledge_version_request",
+            "knowledge_support_evidence",
+            "unresolved_request",
             "tombstone_session",
             "tombstone_thread",
         }
@@ -60,11 +80,7 @@ class SchemaTests(StoreCase):
             "event_ai",
             "event_ad",
             "event_immutable",
-            "knowledge_ai",
-            "knowledge_ad",
-            "knowledge_au",
-            "knowledge_log_no_update",
-            "knowledge_log_no_delete",
+            "review_request_policy_immutable",
         }
         self.assertLessEqual({("table", t) for t in tables}, found)
         self.assertEqual({n for t, n in found if t == "index"}, indexes)
@@ -75,17 +91,19 @@ class SchemaTests(StoreCase):
         insert_scope(first, "/keep")
         first.close()
         again = self.rw()
-        self.assertEqual(again.execute("PRAGMA user_version").fetchone()[0], 3)
+        self.assertEqual(again.execute("PRAGMA user_version").fetchone()[0], 1)
         keys = [r["key"] for r in again.execute("SELECT key FROM scope")]
         self.assertEqual(keys, ["/keep"])
 
-    def test_failed_schema_creation_rolls_back(self) -> None:
+    def test_nonempty_unmarked_store_is_refused(self) -> None:
         store.ensure_private_dir(self.home)
         raw = sqlite3.connect(self.db)
-        raw.execute("CREATE TABLE tombstone (x)")  # collides with the last
+        raw.execute("CREATE TABLE tombstone (x)")  # an existing unmarked store
         raw.commit()
         raw.close()
-        with self.assertRaises(sqlite3.OperationalError):
+        with self.assertRaisesRegex(
+            store.StoreUnavailableError, "^cutover_required$"
+        ):
             store.connect_rw(self.db)
         raw = sqlite3.connect(self.db)
         self.addCleanup(raw.close)
@@ -116,14 +134,29 @@ class SchemaTests(StoreCase):
         )  # no -wal, -shm or leftover -journal after a write
 
     def test_connect_rw_refuses_wal_mode(self) -> None:
-        store.ensure_private_dir(self.home)
+        self.rw().close()
         raw = sqlite3.connect(self.db)
         raw.execute("PRAGMA journal_mode=WAL")
         raw.execute("CREATE TABLE x (y)")
         raw.commit()
         raw.close()
-        with self.assertRaises(store.StoreUnavailableError):
+        with self.assertRaisesRegex(
+            store.StoreUnavailableError, "journal_mode"
+        ):
             store.connect_rw(self.db)
+
+    def test_old_wal_format_returns_cutover_required(self) -> None:
+        store.ensure_private_dir(self.home)
+        with contextlib.closing(sqlite3.connect(self.db)) as raw:
+            raw.execute("PRAGMA journal_mode=WAL")
+            raw.execute("CREATE TABLE retained(x)")
+            raw.execute("PRAGMA user_version=3")
+        original = self.db.read_bytes()
+        with self.assertRaisesRegex(
+            store.StoreUnavailableError, "^cutover_required$"
+        ):
+            store.connect_rw(self.db)
+        self.assertEqual(self.db.read_bytes(), original)
 
     def test_writer_pragmas(self) -> None:
         conn = self.rw()
@@ -259,9 +292,9 @@ class SchemaTests(StoreCase):
                 " line_sha256, seq, role, kind, scope_id, text) VALUES"
                 f" ({src}, 1, 1, 0, 'h', 1, 'developer', 'prompt', {sid}, 't')"
             ),
-            "knowledge text null unless erased": (
-                "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-                f" created_at) VALUES ({sid}, 'fact', NULL, 'current', 'u', 0)"
+            "knowledge invalid state": (
+                "INSERT INTO knowledge(id,current_revision,state)"
+                " VALUES ('K_test',1,'current')"
             ),
             "tombstone session without root": (
                 "INSERT INTO tombstone(created_at, provider, level)"
@@ -280,9 +313,8 @@ class SchemaTests(StoreCase):
             " VALUES (0, 'codex', 'session', 's')"
         )
         conn.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at) VALUES (?, 'fact', NULL, 'erased', 'u', 0)",
-            (sid,),
+            "INSERT INTO knowledge(id,current_revision,state)"
+            " VALUES ('K_test',1,'erased')",
         )
 
     def test_event_rows_are_immutable(self) -> None:
@@ -301,22 +333,6 @@ class SchemaTests(StoreCase):
                     (eid,),
                 )
         conn.execute("DELETE FROM event WHERE id = ?", (eid,))  # erase path
-
-    def test_knowledge_log_append_only(self) -> None:
-        conn = self.rw()
-        conn.execute(
-            "INSERT INTO knowledge_log(knowledge_id, action, actor, at)"
-            " VALUES (1, 'add', 'user', 0)"
-        )
-        for sql in (
-            "UPDATE knowledge_log SET actor = 'x'",
-            "DELETE FROM knowledge_log",
-        ):
-            with (
-                self.subTest(sql),
-                self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"),
-            ):
-                conn.execute(sql)
 
     def test_fts_secure_delete_enabled(self) -> None:
         conn = self.rw()
@@ -351,32 +367,6 @@ class SchemaTests(StoreCase):
         self.assertEqual(hits("event_fts", "alpha"), [])
         self.assertEqual(hits("event_fts", "gamma"), [e2])
         check("event_fts")
-
-        def update(sql: str, *args: int) -> None:
-            conn.execute(sql, args)
-
-        kid = conn.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at)"
-            " VALUES (?, 'fact', 'omega sigma', 'current', 'u', 0)",
-            (sid,),
-        ).lastrowid
-        assert kid is not None
-        self.assertEqual(hits("knowledge_fts", "omega"), [kid])
-        update("UPDATE knowledge SET status = 'superseded' WHERE id = ?", kid)
-        self.assertEqual(hits("knowledge_fts", "omega"), [kid])
-        update("UPDATE knowledge SET text = 'tau' WHERE id = ?", kid)
-        self.assertEqual(hits("knowledge_fts", "omega"), [])
-        self.assertEqual(hits("knowledge_fts", "tau"), [kid])
-        update(
-            "UPDATE knowledge SET text = NULL, status = 'erased' WHERE id = ?",
-            kid,
-        )
-        self.assertEqual(hits("knowledge_fts", "tau"), [])
-        # touching or deleting an already-erased row must not corrupt FTS
-        update("UPDATE knowledge SET retract_reason = NULL WHERE id = ?", kid)
-        update("DELETE FROM knowledge WHERE id = ?", kid)
-        check("knowledge_fts")
 
 
 class IngestSchemaTests(StoreCase):

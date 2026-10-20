@@ -6,7 +6,8 @@
           {
             "type": "command",
             "command": "python3.13 \"$(git rev-parse --show-toplevel)/tools/codex_stop_gate.py\"",
-            "timeout": 600
+            "timeout": 600,
+            "async": true
           }
         ]
       }

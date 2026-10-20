@@ -12,13 +12,15 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
 
 from muninn import ingest, obs_service, platform_io, store, tombstone_key
+from muninn.knowledge_read import read_snapshot
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
-from muninn.obs_stats import db_space, human_bytes, reread, stats
+from muninn.obs_stats import db_space, human_bytes, reread, review_stats, stats
 from muninn.obs_status import (
     DATA_FILES,
     count_field,
@@ -26,7 +28,10 @@ from muninn.obs_status import (
     install_sha,
     poller_error,
     read_status,
+    review_health,
+    review_protocol,
     write_status,
+    writer_secure_delete,
 )
 
 __all__ = [
@@ -44,6 +49,8 @@ __all__ = [
     "log_poller",
     "poller_error",
     "read_status",
+    "review_checks",
+    "review_stats",
     "run",
     "stats",
     "write_status",
@@ -151,25 +158,6 @@ def _job() -> JobInfo | None:
     }
 
 
-def _writer_secure_delete() -> bool:
-    """Whether writers turn ``secure_delete`` on.
-
-    It is a per-connection setting, not stored in the file, so the writer
-    pragmas are applied to an in-memory connection. Opening the real store
-    would roll back a hot journal that doctor is meant to report.
-
-    Returns:
-        True when ``secure_delete`` reads back as on.
-    """
-    conn = sqlite3.connect(":memory:")
-    try:
-        for pragma in store.WRITER_PRAGMAS:
-            conn.execute(pragma)
-        return conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
-    finally:
-        conn.close()
-
-
 def _data_dir_mode(home: Path) -> CheckResult:
     """Check private data-directory permissions or the native Windows ACL."""
     present = home.is_dir()
@@ -269,19 +257,6 @@ def _reread(conn: sqlite3.Connection) -> CheckResult:
     )
 
 
-def _citations_resolve(conn: sqlite3.Connection) -> CheckResult:
-    """Every live citation still points at an event with the same hash."""
-    broken = _count(
-        conn,
-        "SELECT count(*) FROM citation c WHERE c.state = 'live'"
-        " AND NOT EXISTS (SELECT 1 FROM event e JOIN source s"
-        " ON s.id = e.source_id WHERE s.provider = c.provider AND"
-        " s.thread_id = c.thread_id AND e.line = c.line AND"
-        " e.part = c.part AND e.line_sha256 = c.line_sha256)",
-    )
-    return _result("citations_resolve", not broken, broken, level="warn")
-
-
 def _db_size(conn: sqlite3.Connection) -> CheckResult:
     """The database is below the size warning threshold."""
     space = db_space(conn)
@@ -318,7 +293,6 @@ _STORE_CHECKS: tuple[Callable[[sqlite3.Connection], CheckResult], ...] = (
     _missing_sources,
     _other_threads,
     _reread,
-    _citations_resolve,
     _db_size,
     _db_free_space,
 )
@@ -335,6 +309,7 @@ def _store_checks(home: Path) -> list[CheckResult]:
         # extend() appends as the generator yields, so the checks that ran
         # before an SQLite error are kept.
         results.extend(check(conn) for check in _STORE_CHECKS)
+        results.extend(review_checks(conn, time.time()))
     except sqlite3.Error as exc:
         results.append(_result("store_readable", False, type(exc).__name__))
     finally:
@@ -344,7 +319,7 @@ def _store_checks(home: Path) -> list[CheckResult]:
 
 def _writer_pragmas() -> CheckResult:
     """Writers will delete securely."""
-    return _result("writer_secure_delete", _writer_secure_delete())
+    return _result("writer_secure_delete", writer_secure_delete())
 
 
 def _heartbeat(home: Path) -> CheckResult:
@@ -354,7 +329,7 @@ def _heartbeat(home: Path) -> CheckResult:
 
 
 def _failed_sources(home: Path) -> CheckResult:
-    """The last poller pass failed on no source."""
+    """Report ordinary failed read attempts, including later recoveries."""
     failed = read_status(home).get("failed") or 0
     return _result("failed_sources", not failed, failed, level="warn")
 
@@ -366,7 +341,7 @@ def _poller_error(home: Path) -> CheckResult:
 
 
 def _unreadable_files(home: Path) -> CheckResult:
-    """The last pass could open every transcript file it listed."""
+    """Report failed open attempts, including sources later recovered."""
     n = count_field(read_status(home), "unreadable_files")
     return _result("unreadable_files", not n, n, level="warn")
 
@@ -456,6 +431,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
     """
     checks = [check(home) for check in _DIRECTORY_CHECKS]
     checks += _store_checks(home)
+    checks += [_result(*value) for value in review_protocol(home)]
     checks += [
         _writer_pragmas(),
         _heartbeat(home),
@@ -478,3 +454,19 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
     ]
     ok = all(c["ok"] is not False for c in checks if c["level"] == "error")
     return {"ok": ok, "checks": checks}
+
+
+def review_checks(
+    conn: sqlite3.Connection, now: float
+) -> tuple[CheckResult, ...]:
+    """Report durable review health without process or repair side effects.
+
+    Args:
+        conn: Current normalized store connection.
+        now: Observation time in UTC seconds.
+
+    Returns:
+        Finite counts and codes using the existing doctor result contract.
+    """
+    with read_snapshot(conn):
+        return tuple(_result(*value) for value in review_health(conn, now))

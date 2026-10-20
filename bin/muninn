@@ -1,10 +1,10 @@
 #!/bin/sh
-# Interpreter (first that exists): $MUNINN_PYTHON, the link the installer wrote
-# at ~/.local/lib/muninn/python, then python3.13+ on PATH.
+# Discover an override, this release venv, the installed link, then PATH.
 set -eu
 self=$(realpath "$0")
 root=$(dirname "$(dirname "$self")")
 py=${MUNINN_PYTHON:-}
+[ -x "$py" ] || py=$root/.venv/bin/python3
 [ -x "$py" ] || py=${HOME:-/nonexistent}/.local/lib/muninn/python
 if [ ! -x "$py" ]; then
   py=

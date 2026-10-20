@@ -1,14 +1,18 @@
-"""Private generation-bound stop requests for a native Windows poller."""
+"""Private generation-bound stop requests for one native poller owner."""
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import cast
 
-from muninn import platform_io, store
+from muninn import file_sync, platform_io, platform_windows, store
+from muninn.review_quiescence_state import QuiescenceRefusedError
 
 FILE = "stop.json"
 _GENERATION = re.compile(r"[0-9a-f]{32}")
@@ -26,25 +30,48 @@ def _valid(pid: object, generation: object) -> bool:
     )
 
 
-def request(home: Path, pid: int, generation: str) -> None:
+def request(
+    home: Path, pid: int, generation: str, *, deadline: float | None = None
+) -> None:
     """Write an atomic private stop request for exactly one poller generation.
 
     Args:
         home: Existing private data directory.
         pid: Process id established by lifecycle verification.
         generation: Generation read from that process's heartbeat.
+        deadline: Optional monotonic deadline checked before one publication.
 
     Raises:
         ValueError: If the target fields are invalid.
         PermissionError: If the data directory is unsafe.
+        QuiescenceRefusedError: If staging exhausts the publication deadline.
     """
     if not _valid(pid, generation):
         raise ValueError("invalid stop target")
     if not platform_io.is_private(home, directory=True):
         raise PermissionError("stop directory is not private")
-    store.write_json_atomic(
-        home / FILE, {"pid": pid, "generation": generation}
-    )
+    value = {"pid": pid, "generation": generation}
+    if deadline is None:
+        store.write_json_atomic(home / FILE, value)
+        return
+    fd, temporary = tempfile.mkstemp(dir=home, prefix=".stop.json.")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            platform_io.assert_private_fd(handle.fileno())
+            handle.write(json.dumps(value).encode())
+            handle.flush()
+            file_sync.sync_fd(handle.fileno())
+        if time.monotonic() >= deadline:
+            raise QuiescenceRefusedError("coordination_timeout")
+        if os.name == "nt":
+            platform_windows.publish(
+                Path(temporary), home / FILE, replace=True, retry_move=False
+            )
+        else:
+            Path(temporary).replace(home / FILE)
+    finally:
+        with contextlib.suppress(OSError):
+            Path(temporary).unlink()
 
 
 def requested(home: Path, pid: int, generation: str) -> bool:

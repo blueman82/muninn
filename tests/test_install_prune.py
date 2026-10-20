@@ -4,17 +4,25 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
 import sys
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
 from install import steps_release as sr
-from muninn import obs
+from muninn import obs, store, tombstone_key
 from muninn.platform_paths import windows_base
 from tests.installer_support import World, git
+from tests.store_support import (
+    assert_private,
+    insert_event,
+    insert_scope,
+    insert_source,
+)
 
 TS = "20261002T000000Z"
 
@@ -31,6 +39,8 @@ class PruneTest(unittest.TestCase):
         self.sha2 = git(w.repo, "rev-parse", "HEAD").decode().strip()
         self.lib = w.home / ".local/lib/muninn"
         self.ctx = dataclasses.replace(w.ctx(upgrade=True), ts=TS)
+        # Legacy releases retain their reversible rename/undo contract.
+        shutil.rmtree(self.lib / self.first / ".venv")
         self.stale = [self.lib / ("0" * 40), self.lib / ("1" * 40)]
         for path in self.stale:
             path.mkdir()
@@ -147,6 +157,68 @@ class PruneTest(unittest.TestCase):
         self.assertEqual((self.lib / "current").readlink(), Path(self.first))
         self.assertTrue(all((p / "f").exists() for p in self.stale))
         self.assertEqual(self.pruning(), [])
+
+    def test_provisioned_release_stays_at_final_path_until_success(
+        self,
+    ) -> None:
+        venv = self.lib / self.first / ".venv"
+        venv.mkdir()
+        sr.prune(self.ctx, {"sha": self.sha2})
+        self.assertTrue(venv.is_dir())
+        self.assertFalse(any(self.first in name for name in self.pruning()))
+        co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertFalse((self.lib / self.first).exists())
+
+    def test_provisioned_release_survives_failed_verification(self) -> None:
+        venv = self.lib / self.first / ".venv"
+        venv.mkdir()
+        database = store.db_path(self.ctx.data)
+        identity = database.stat().st_dev, database.stat().st_ino
+        key = tombstone_key.load_key(self.ctx.data)
+        with closing(store.connect_rw(database)) as conn:
+            sid, source = insert_scope(conn), insert_source(conn)
+            event = insert_event(conn, source, sid, text="retained prune data")
+            before = tuple(
+                conn.execute("SELECT * FROM review_control").fetchone()
+            )
+        self.w.fake.doctor = 1
+        with self.assertRaises(co.StepFailedError):
+            co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertEqual((self.lib / "current").readlink(), Path(self.sha2))
+        self.assertTrue(venv.is_dir())
+        self.assertTrue((self.lib / self.sha2 / ".venv").is_dir())
+        self.assertTrue(all((path / "f").exists() for path in self.stale))
+        self.assertEqual(self.pruning(), [])
+        self.assertIsNone(self.w.fake.loaded)
+        record = json.loads((self.lib / co.INSTALL_RECORD).read_text())
+        self.assertEqual(
+            record["failed"], {"step": "verify", "error": "StepFailedError"}
+        )
+        self.assertEqual(record["store"]["phase"], "current_prepared")
+        self.assertEqual(record["outcome"], "recovery_required")
+        self.assertTrue(record["recovery_required"])
+        self.assertNotIn("prune", record["steps"])
+        self.assertIsNone(record["sweep_failed"])
+        self.assertEqual(
+            (database.stat().st_dev, database.stat().st_ino), identity
+        )
+        with closing(store.connect_ro(database)) as conn:
+            store.assert_store_format(conn)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT text FROM event WHERE id=?", (event,)
+                ).fetchone()[0],
+                "retained prune data",
+            )
+            self.assertEqual(
+                tuple(conn.execute("SELECT * FROM review_control").fetchone()),
+                (before[0], before[1] + 1, *before[2:]),
+            )
+        self.assertEqual(
+            tombstone_key.load_key(self.ctx.data, create=False), key
+        )
+        assert_private(self, database)
+        assert_private(self, self.ctx.data / tombstone_key.KEY_FILE)
 
 
 class DoctorLeftoverTests(unittest.TestCase):

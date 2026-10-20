@@ -1,4 +1,4 @@
-"""SQLite store: schema v3, connections, the writer lock, private files.
+"""SQLite store: marked schema 1, connections, the writer lock, private files.
 
 The store is one rollback-journal SQLite file under the data home.  Every
 writer takes the flock in `writer_lock` first, so there is exactly one
@@ -20,9 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from muninn import file_sync, platform_io, platform_paths, platform_windows
-from muninn.obs_log import log_poller
 from muninn.platform_lock import try_lock
-from muninn.store_migrate import migrate_v1_to_v2, migrate_v2_to_v3
 from muninn.store_schema import SCHEMA_SQL, SCHEMA_VERSION
 
 
@@ -137,69 +135,63 @@ def _ensure_dir(path: Path) -> None:
         ensure_private_dir(path)
 
 
-def _migrate_logged(conn: sqlite3.Connection, home: Path) -> None:
-    """Migrate an older store and leave one poller.log line about it.
-
-    The line says migrated, raced (another writer won) or failed, with the
-    row count and duration; logging is best effort and never fails an open.
-    """
-    started = time.monotonic()
-    from_version = 1
-    event, rows, exc = "migrated", None, None
-    try:
-        from_version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if from_version == 1:
-            rows = migrate_v1_to_v2(conn)
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
-        migrated = migrate_v2_to_v3(conn) if version == 2 else False
-        if rows is None and not migrated:
-            event = "migrate_raced"
-    except BaseException as err:
-        event, exc = "migrate_failed", type(err).__name__
-        raise
-    finally:
-        log_poller(
-            home,
-            {
-                "event": event,
-                "from_v": from_version,
-                "to_v": SCHEMA_VERSION,
-                "rows": rows,
-                "ms": round((time.monotonic() - started) * 1000, 1),
-                "exc": exc,
-            },
-        )
-
-
-def _init_schema(conn: sqlite3.Connection, home: Path) -> None:
-    """Create a new schema, or bring an older file to the current version.
-
-    Version 0 gets the full schema. Versions 1 and 2 are migrated in place;
-    a current file is left alone.
+def assert_store_format(conn: sqlite3.Connection) -> None:
+    """Require the distinct format marker and matching schema pragma.
 
     Args:
-        conn: Autocommit read-write connection.
-        home: Data directory, for the migration's poller.log line.
+        conn: Open connection checked before normal store access.
 
     Raises:
-        StoreUnavailableError: If the file holds any other schema version.
+        StoreUnavailableError: If an explicit cutover is required.
+        sqlite3.OperationalError: If SQLite cannot read the marker.
     """
-    version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version in (1, 2):
-        _migrate_logged(conn, home)
-        return
-    if version == SCHEMA_VERSION:
-        return
-    if version != 0:
-        raise StoreUnavailableError(
-            f"schema v{version}, need v{SCHEMA_VERSION}"
-        )
-    # All-or-nothing: DDL and user_version commit together. On failure the
-    # transaction stays open and connect_rw's close() rolls it back.
-    conn.executescript(
-        f"BEGIN IMMEDIATE;{SCHEMA_SQL}"
-        f"PRAGMA user_version={SCHEMA_VERSION};COMMIT;"
-    )
+    if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+        raise StoreUnavailableError("cutover_required")
+    try:
+        rows = conn.execute(
+            "SELECT singleton, format, version FROM store_meta"
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        if exc.sqlite_errorcode != sqlite3.SQLITE_ERROR:
+            raise
+        raise StoreUnavailableError("cutover_required") from exc
+    if [tuple(row) for row in rows] != [(1, "muninn-knowledge", 1)]:
+        raise StoreUnavailableError("cutover_required")
+
+
+def initialize_store(conn: sqlite3.Connection) -> None:
+    """Initialize only an empty database; refuse unmarked existing stores.
+
+    Args:
+        conn: Autocommit writer connection with its pragmas applied.
+
+    Raises:
+        StoreUnavailableError: If the existing store needs explicit cutover.
+    """
+    # Serialize the emptiness check with creation, including competing opens.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        empty = conn.execute("SELECT 1 FROM sqlite_schema LIMIT 1").fetchone()
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if empty is not None or version != 0:
+            assert_store_format(conn)
+            # Read-only validation need not exclude readers.
+            conn.execute("ROLLBACK")
+            return
+        # executescript commits a pending transaction. Put each complete SQL
+        # statement through execute so the check, DDL and marker stay atomic.
+        statement = ""
+        for line in SCHEMA_SQL.splitlines(keepends=True):
+            statement += line
+            if sqlite3.complete_statement(statement):
+                conn.execute(statement)
+                statement = ""
+        conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        assert_store_format(conn)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def assert_sqlite_private(path: Path) -> None:
@@ -229,7 +221,7 @@ def assert_sqlite_private(path: Path) -> None:
 
 
 def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
-    """Open the store for writing, creating and migrating it.
+    """Open the marked store for writing, initializing only an empty file.
 
     Autocommit connection (callers issue BEGIN IMMEDIATE); rows are
     sqlite3.Row.
@@ -268,10 +260,11 @@ def connect_rw(path: Path, fullfsync: bool = True) -> sqlite3.Connection:
         # switched to another mode behind our back.
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         if mode != "delete":
+            assert_store_format(conn)
             raise StoreUnavailableError(
                 f"journal_mode is {mode!r}, need 'delete'"
             )
-        _init_schema(conn, path.parent)
+        initialize_store(conn)
     except BaseException:
         conn.close()
         raise
@@ -355,7 +348,8 @@ def connect_ro(path: Path) -> sqlite3.Connection:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA query_only=ON")
-        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        conn.execute("PRAGMA foreign_keys=ON")
+        assert_store_format(conn)
     except sqlite3.Error as exc:
         if conn is not None:
             conn.close()
@@ -366,11 +360,10 @@ def connect_ro(path: Path) -> sqlite3.Connection:
             ) from exc
         name = getattr(exc, "sqlite_errorname", type(exc).__name__)
         raise StoreUnavailableError(f"cannot read the store ({name})") from exc
-    if version != SCHEMA_VERSION:
-        conn.close()
-        raise StoreUnavailableError(
-            f"schema v{version}, need v{SCHEMA_VERSION}"
-        )
+    except StoreUnavailableError:
+        if conn is not None:
+            conn.close()
+        raise
     return conn
 
 

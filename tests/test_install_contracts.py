@@ -94,7 +94,7 @@ class InstallLogTest(unittest.TestCase):
         )
         with (
             mock.patch.object(co, "save"),
-            mock.patch.object(co, "rollback", return_value=[]),
+            mock.patch.object(co, "rollback_owned", return_value=[]),
             mock.patch.object(co, "install_record"),
         ):
             co._roll_back(
@@ -134,12 +134,33 @@ class CliTest(unittest.TestCase):
 
 
 class CodexContractTest(unittest.TestCase):
-    """The shipped Codex files match what the real Codex computes."""
+    """Historical hook definitions retain their real Codex hash proof."""
 
     def test_hash_matches_real_codex_0_160_0(self) -> None:
         data = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
-        got = {h["suffix"]: h["hash"] for h in co.codex_hooks(data)}
+        doc = json.loads(data)
+        doc["hooks"] = {
+            event: groups
+            for event, groups in doc["hooks"].items()
+            if event in {"SessionStart", "UserPromptSubmit"}
+        }
+        got = {
+            h["suffix"]: h["hash"]
+            for h in co.codex_hooks(json.dumps(doc).encode())
+        }
         self.assertEqual(got, REAL_CODEX)
+
+    def test_session_end_matches_codex_three_second_timeout(self) -> None:
+        data = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
+        handler = json.loads(data)["hooks"]["SessionEnd"][0]["hooks"][0]
+        self.assertEqual(handler["timeout"], 3)
+        hooks = co.codex_hooks(data, platform="darwin")
+        end = next(hook for hook in hooks if hook["event"] == "session_end")
+        self.assertEqual(
+            end["hash"],
+            "sha256:"
+            "cadf850d333ac166436ed2dde9bc6144441dfc0012c3fdf379d8e7071be0a728",
+        )
 
     def test_marketplace_catalog_names_plugin_0_2_0(self) -> None:
         root = ROOT / "integrations/codex"

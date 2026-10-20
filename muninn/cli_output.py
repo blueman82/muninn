@@ -20,6 +20,16 @@ _TEXT_KEYS = frozenset(
         "retract_reason",
         "request_preview",
         "reason_preview",
+        "content",
+        "title",
+        "reason",
+        "conditions",
+        "question",
+        "excerpt",
+        "condition",
+        "claim",
+        "no_change_reason",
+        "retracted_reason",
     }
 )
 

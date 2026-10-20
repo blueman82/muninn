@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github/workflows/platforms.yml"
@@ -124,7 +130,7 @@ class PlatformWorkflowTests(unittest.TestCase):
         self.assertNotIn("needs:", source)
         self.assertNotIn("continue-on-error:", source)
         self.assertIn("timeout-minutes: 75", source)
-        self.assertIn("fail-fast: true", source)
+        self.assertIn("fail-fast: false", source)
         self.assertIn("contents: read", source)
         self.assertIn("cancel-in-progress: true", source)
         self.assertIn("name: native-proof-codes-${{ matrix.runner }}", source)
@@ -153,7 +159,7 @@ class PlatformWorkflowTests(unittest.TestCase):
             steps = selected_steps(source, row)
             self.assertIn("Run mandatory full gate", steps)
             self.assertIn(
-                "run: python3.13 -m tools.check --full",
+                ".venv/bin/python3.13 -m tools.check --full",
                 steps["Run mandatory full gate"],
             )
             self.assertNotIn("Run mandatory native full gate", steps)
@@ -165,3 +171,171 @@ class PlatformWorkflowTests(unittest.TestCase):
                 "Run actual Codex and rendered provider routes" in steps,
                 row["runner"].startswith("ubuntu"),
             )
+
+
+def step_script(name: str) -> str:
+    """Extract one executable workflow step without a YAML dependency."""
+    block = WORKFLOW.read_text().split(f"      - name: {name}\n", 1)[1]
+    block = block.split("      - name: ", 1)[0]
+    return textwrap.dedent(block.split("        run: |\n", 1)[1])
+
+
+class RuntimeWorkflowTests(unittest.TestCase):
+    """Exercise dependency ordering and selected-interpreter gate commands."""
+
+    def test_windows_installs_hashed_runtime_before_developer_tools(
+        self,
+    ) -> None:
+        calls: list[list[str]] = []
+
+        def record(argv: list[str], **kwargs: object) -> None:
+            calls.append(argv)
+
+        script = step_script("Install native gate tools").split("url = ", 1)[0]
+        with mock.patch.object(subprocess, "run", record):
+            exec(script, {})
+        self.assertEqual(calls[0], [sys.executable, "-m", "venv", ".venv"])
+        self.assertEqual(
+            [args[1:] for args in calls[1:]],
+            [
+                [
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "-r",
+                    "requirements-runtime.lock",
+                ],
+                ["-m", "pip", "install", "-r", "requirements-dev.txt"],
+            ],
+        )
+        self.assertTrue(
+            all(
+                Path(args[0]) == Path(".venv/Scripts/python.exe")
+                for args in calls[1:]
+            )
+        )
+
+    def test_windows_gate_selects_venv_for_itself_and_child_commands(
+        self,
+    ) -> None:
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def record(argv: list[str], **kwargs: object) -> None:
+            calls.append((argv, kwargs))
+
+        with mock.patch.object(subprocess, "run", record):
+            exec(step_script("Run mandatory native full gate"), {})
+        self.assertEqual(len(calls), 1)
+        argv, kwargs = calls[0]
+        python = Path(".venv/Scripts/python.exe").resolve()
+        self.assertEqual(argv, [str(python), "-m", "tools.check", "--full"])
+        env = kwargs.get("env")
+        assert isinstance(env, dict)
+        self.assertEqual(env["PATH"].split(os.pathsep)[0], str(python.parent))
+
+    def test_windows_typing_uses_the_dependency_environment(self) -> None:
+        calls: list[list[str]] = []
+
+        def record(argv: list[str], **kwargs: object) -> None:
+            calls.append(argv)
+
+        with mock.patch.object(subprocess, "run", record):
+            exec(step_script("Check Windows native API typing"), {})
+        self.assertEqual(len(calls), 1)
+        command = calls[0]
+        self.assertIn("--pythonpath", command)
+        self.assertEqual(
+            command[command.index("--pythonpath") + 1], command[0]
+        )
+
+    def test_windows_copy_installs_hashed_runtime_before_readiness(
+        self,
+    ) -> None:
+        calls: list[list[str]] = []
+
+        def record(argv: list[str], **kwargs: object) -> None:
+            calls.append(argv)
+
+        script = step_script("Provision trusted native interpreter tree")
+        script = "copied = " + script.split("copied = ", 1)[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "GITHUB_PATH": str(root / "path"),
+                        "GITHUB_ENV": str(root / "env"),
+                    },
+                ),
+                mock.patch.object(subprocess, "run", record),
+            ):
+                exec(
+                    script,
+                    {
+                        "destination": root,
+                        "original": Path(sys.executable),
+                        "Path": Path,
+                        "subprocess": subprocess,
+                        "os": os,
+                    },
+                )
+            copied = str(root / Path(sys.executable).name)
+            self.assertEqual(
+                calls[0],
+                [
+                    copied,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "-r",
+                    "requirements-runtime.lock",
+                ],
+            )
+            self.assertEqual(
+                calls[1][:6], [copied, "-I", "-B", "-X", "utf8", "-c"]
+            )
+            self.assertEqual((root / "path").read_text().strip(), str(root))
+
+
+if sys.platform != "win32":
+
+    class UnixRuntimeWorkflowTests(unittest.TestCase):
+        """Run the POSIX setup commands against an owned command fixture."""
+
+        def test_unix_installs_hashed_runtime_before_developer_tools(
+            self,
+        ) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                interpreter = root / "python3.13"
+                interpreter.write_text(
+                    '#!/bin/sh\nif [ "$2" = venv ]; then\n'
+                    "  mkdir -p .venv/bin\n"
+                    '  cp "$0" .venv/bin/python\n'
+                    '  cp "$0" .venv/bin/python3.13\nfi\n'
+                    'printf "%s\\n" "$*" >> calls\n'
+                )
+                interpreter.chmod(0o700)
+                script = step_script("Install full gate tools").split(
+                    "if ! command", 1
+                )[0]
+                subprocess.run(
+                    ["/bin/sh", "-eu", "-c", script],
+                    cwd=root,
+                    env=os.environ
+                    | {"PATH": f"{root}{os.pathsep}{os.environ['PATH']}"},
+                    check=True,
+                    capture_output=True,
+                )
+                self.assertEqual(
+                    (root / "calls").read_text().splitlines(),
+                    [
+                        "-m venv .venv",
+                        "-m pip install --require-hashes "
+                        "-r requirements-runtime.lock",
+                        "-m pip install -r requirements-dev.txt",
+                    ],
+                )

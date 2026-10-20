@@ -1,0 +1,1 @@
+{"schema_version":1,"changes":[{"action":"add","form":"note","kind":"constraint","scope":{"project_id":"project-key","task":null},"content":"Use a temporary home in tests.","conditions":["When testing installer writes."],"evidence_refs":["E_11111111111111111111111111111111"],"reason":"The owner specified isolation."}],"unresolved":[],"no_change_reason":null}

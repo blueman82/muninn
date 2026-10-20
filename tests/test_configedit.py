@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from install import configedit as ce
+from install import transforms
 from muninn.platform_io import is_private
 
 CRED = "sk-fake-" + "0123456789abcdef" * 2
@@ -84,6 +85,23 @@ class TomlSectionTest(unittest.TestCase):
                 ce.toml_check(TOML, gone, NAMED, MARKERS)
                 back = ce.put_section(gone, header, raw, at=at)
                 self.assertEqual(back, TOML)
+
+    def test_managed_edits_preserve_crlf(self) -> None:
+        original = (
+            'model = "gpt"\r\n\r\n[model_providers.fake]\r\n'
+            'name = "Fake"\r\n'
+        )
+        enabled = transforms.enable(original)
+        self.assertTrue(enabled.startswith(original))
+        self.assertNotIn("\n", enabled.replace("\r\n", ""))
+        self.assertEqual(transforms.drop_trust(enabled), enabled)
+
+    def test_windows_path_in_posix_style_hook_is_recognized(self) -> None:
+        command = (
+            "'C:\\Users\\runner\\.local\\bin\\muninn' hook"
+            " session-start --provider claude"
+        )
+        self.assertTrue(transforms.handler_ours({"command": command}))
 
     def test_parse_section_reads_only_that_block(self) -> None:
         self.assertEqual(

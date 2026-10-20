@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "phase": "pilot",
+  "families": {
+    "credential": "Synthetic credential procedure"
+  },
+  "cases": [
+    {
+      "id": "literal",
+      "family_id": "credential",
+      "partition": "pilot",
+      "chronology": 1,
+      "evidence": [],
+      "later_task": "renew credential",
+      "expected": {
+        "eligible_claim_keys": [
+          "SECRET_LABEL"
+        ],
+        "must_not_save_claim_keys": [],
+        "permitted_scope": {
+          "project_id": "synthetic",
+          "task": null
+        },
+        "retrieval_claim_keys": [
+          "SECRET_LABEL"
+        ],
+        "later_task_success_rule": "SECRET_RULE",
+        "labeler_id": "independent-labeler",
+        "label_evidence_paths": [
+          "fixture-labels"
+        ]
+      }
+    },
+    {
+      "id": "paraphrase",
+      "family_id": "credential",
+      "partition": "pilot",
+      "chronology": 2,
+      "evidence": [],
+      "later_task": "restore access after sign-in stops working",
+      "expected": {
+        "eligible_claim_keys": [
+          "SECRET_LABEL"
+        ],
+        "must_not_save_claim_keys": [],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [
+          "SECRET_LABEL"
+        ],
+        "later_task_success_rule": "SECRET_RULE",
+        "labeler_id": "independent-synthetic-labeler",
+        "label_evidence_paths": [
+          "fixture-labels"
+        ]
+      }
+    },
+    {
+      "id": "omitted",
+      "family_id": "credential",
+      "partition": "pilot",
+      "chronology": 3,
+      "evidence": [],
+      "later_task": "credential",
+      "expected": {
+        "eligible_claim_keys": [
+          "SECRET_LABEL"
+        ],
+        "must_not_save_claim_keys": [],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [
+          "SECRET_LABEL"
+        ],
+        "later_task_success_rule": "SECRET_RULE",
+        "labeler_id": "independent-synthetic-labeler",
+        "label_evidence_paths": [
+          "fixture-labels"
+        ]
+      }
+    }
+  ],
+  "sources": [
+    {
+      "case_id": "literal",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"renew expired credential\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "a372a99889aa3f18ba7b44176b4ad8b78fa1229fce74cbc9f3d1f5356a9b5d88",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 1,
+        "through_line": 2,
+        "boundary_hash": "b238850db12638d0e71cceac41c4c447d63dd762e1f12c2beffe8637e73b7884"
+      },
+      "mutation": "none"
+    },
+    {
+      "case_id": "paraphrase",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"renew expired credential\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":2,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Guide: renew expired credential. Unrelated preference: green status badges.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "5be8f7df59cc3e3f0b39512fbd7c3fd0d6f9221508ad84d4f07198c0eb1a08b9",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 3,
+        "through_line": 3,
+        "boundary_hash": "bd8c86ba80feadee9d8db3737a122a326acdb68ab5e2fc97e04e8843ad473e70"
+      },
+      "mutation": "none"
+    },
+    {
+      "case_id": "omitted",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"renew expired credential\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":2,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Guide: renew expired credential. Unrelated preference: green status badges.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":3,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"renew expired credential\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "0b21348faf1eaa6c2cff0233a2cd4247a14e77725b75095804a2f420b1da81db",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 4,
+        "through_line": 4,
+        "boundary_hash": "32f18bd97c0a3a7bf80834c6a307c8e56b81da921ae0a16a0ff4d340c8dea020"
+      },
+      "mutation": "none"
+    }
+  ]
+}

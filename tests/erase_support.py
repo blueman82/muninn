@@ -1,7 +1,7 @@
 """Shared fixtures for the erase test modules.
 
 Synthetic provider trees and a temp MUNINN_HOME only; knowledge rows are
-inserted directly.  Canaries are synthetic.
+committed from selected physical originals. Canaries are synthetic.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ import sqlite3
 from pathlib import Path
 
 from muninn import erase
+from muninn.review_evidence_models import EvidenceWindow, SourceRef
+from tests.knowledge_retirement_support import window_note
 from tests.test_ingest import IngestCase
 
 CANARY = "CANARY-ERASE-" + "q7" * 10  # 33 chars, one token
@@ -87,31 +89,40 @@ class EraseCase(IngestCase):
         row: sqlite3.Row = self.conn.execute(sql, args).fetchone()
         return row[0]
 
-    def knowledge(
-        self, text: str, cites: list[tuple[str, int, int, str]]
-    ) -> int:
-        """Insert a current knowledge entry with citations.
-
-        Args:
-            text: Entry text.
-            cites: ``(thread_id, line, part, quote)`` for each cited event.
-
-        Returns:
-            The new knowledge id.
-        """
-        sid = self.count("SELECT id FROM scope LIMIT 1")
-        kid = self.conn.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at) VALUES (?, 'fact', ?, 'current', 'user', 0)",
-            (sid, text),
-        ).lastrowid
-        assert kid is not None
-        for thread, line, part, quote in cites:
-            self.conn.execute(
-                "INSERT INTO citation(knowledge_id, provider, thread_id, line,"
-                " part, line_sha256, role, kind, quote, span_start, span_end)"
-                " VALUES (?, 'codex', ?, ?, ?, 'h', 'user', 'prompt', ?,"
-                " 0, 1)",
-                (kid, thread, line, part, quote),
+    def note(
+        self,
+        text: str,
+        thread: str,
+        line: int = 2,
+        *,
+        additional: tuple[tuple[str, int], ...] = (),
+        **updates: object,
+    ) -> str:
+        """Commit supported content from actual ingested fixture originals."""
+        windows = []
+        for thread_id, number in ((thread, line), *additional):
+            row = self.conn.execute(
+                "SELECT e.line_sha256 FROM event e JOIN source s "
+                "ON s.id=e.source_id WHERE s.provider='codex' "
+                "AND s.thread_id=? AND e.line=? AND e.part=1",
+                (thread_id, number),
+            ).fetchone()
+            windows.append(
+                EvidenceWindow(
+                    source=SourceRef(provider="codex", thread_id=thread_id),
+                    from_line=number,
+                    through_line=number,
+                    boundary_hash=row[0],
+                )
             )
-        return kid
+        return window_note(
+            self.home,
+            self.roots,
+            windows[0],
+            text,
+            max_bytes=65536,
+            allow_global=False,
+            extra_windows=tuple(windows[1:]),
+            kind="fact",
+            **updates,
+        )

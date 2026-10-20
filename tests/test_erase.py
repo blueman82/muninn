@@ -1,16 +1,17 @@
 """Erase contract: sessions, event lines, text matches and verification.
 
 Synthetic provider trees and a temp MUNINN_HOME only (IngestCase); knowledge
-rows are inserted directly.  Canaries are synthetic.
+uses selected physical originals and checked proposals. Canaries are synthetic.
 """
 
 from __future__ import annotations
 
 import pathlib
+import time
 import unittest
 from typing import Any
 
-from muninn import erase, erase_residue, store
+from muninn import erase, erase_residue, knowledge_write, store
 from tests.erase_support import CANARY, EraseCase, digest
 from tests.test_classify import codex_meta, reply, subagent_meta, user_msg
 from tests.test_ingest import BASE, SEG, TID, primary, rollout
@@ -110,76 +111,71 @@ class EventAndMatchTests(EraseCase):
             ):
                 self.erase(event_ref=bad)
 
-    def test_erase_match_scrubs_knowledge_and_quotes(self) -> None:
+    def test_erase_match_scrubs_knowledge_and_selected_evidence(self) -> None:
         self.write(
             rollout(),
             [
                 codex_meta("user", TID),
                 user_msg(1, f"my key is {CANARY} ok"),
-                reply(2, "fine"),
+                reply(2, f"reported {CANARY}"),
                 user_msg(3, "unrelated"),
             ],
         )
+        self.write(rollout("thr-keep"), primary("thr-keep"))
         self.run_ingest()
-        by_text = self.knowledge(
-            f"remember {CANARY}", [(TID, 4, 1, "unrelated")]
-        )
-        by_quote = self.knowledge("a fact", [(TID, 3, 1, f"x {CANARY} y")])
-        by_event = self.knowledge("cites it", [(TID, 2, 1, "my key is")])
-        mixed = self.knowledge(
-            "kept", [(TID, 2, 1, "my key"), (TID, 3, 1, "fine")]
-        )
+        by_text = self.note(f"remember {CANARY}", TID, 4)
+        by_excerpt = self.note("a fact", TID, 3)
+        by_event = self.note("cites it", TID, 2)
+        mixed = self.note("two supports", TID, 2, additional=((TID, 3),))
+        kept = self.note("independent knowledge", "thr-keep")
         out = self.erase(match=CANARY)
-        self.assertEqual(out["events"], 1)
-        status = dict(self.conn.execute("SELECT id, status FROM knowledge"))
+        # Matched output also tombstones its producing input against replay.
+        self.assertEqual(out["events"], 3)
+        states = dict(self.conn.execute("SELECT id,state FROM knowledge"))
         self.assertEqual(
-            [status[k] for k in (by_text, by_quote, by_event, mixed)],
-            ["erased", "erased", "erased", "current"],
+            [states[k] for k in (by_text, by_excerpt, by_event, mixed, kept)],
+            ["erased", "erased", "erased", "erased", "active"],
         )
-        texts = [
-            r[0]
-            for r in self.conn.execute(
-                "SELECT text FROM knowledge WHERE status = 'erased'"
-            )
-        ]
-        self.assertEqual(texts, [None, None, None])
-        states = [
-            tuple(r)
-            for r in self.conn.execute(
-                "SELECT state, quote IS NULL FROM citation ORDER BY id"
-            )
-        ]
         self.assertEqual(
-            states,
             [
-                ("live", 0),
-                ("erased", 1),
-                ("erased", 1),
-                ("erased", 1),
-                ("live", 0),
+                row[0]
+                for row in self.conn.execute(
+                    "SELECT v.content_json FROM knowledge_version v "
+                    "JOIN knowledge k "
+                    "ON k.id=v.knowledge_id WHERE k.state='erased'"
+                )
             ],
+            [None] * 4,
         )
-        logs = self.count(
-            "SELECT count(*) FROM knowledge_log WHERE action = 'erase'"
+        evidence = [
+            tuple(row)
+            for row in self.conn.execute(
+                "SELECT line,state,excerpt IS NULL FROM review_evidence "
+                "WHERE thread_id=? ORDER BY line",
+                (TID,),
+            )
+        ]
+        self.assertEqual(
+            evidence, [(2, "erased", 1), (3, "erased", 1), (4, "erased", 1)]
         )
-        self.assertEqual(logs, 3)
-        self.assertEqual(out["knowledge"], 3)
+        self.assertEqual(self.count("SELECT count(*) FROM review_receipt"), 5)
+        self.assertEqual((out["knowledge"], out["residue"]), (4, 0))
 
     def test_erase_match_scrubs_retract_reason(self) -> None:
         self.write(rollout(), primary())
         self.run_ingest()
-        kid = self.knowledge("harmless", [(TID, 2, 1, "q one")])
-        self.conn.execute(
-            "UPDATE knowledge SET status = 'retracted', retract_reason = ?"
-            " WHERE id = ?",
-            (f"wrong, it was {CANARY}", kid),
+        kid = self.note("harmless", TID)
+        knowledge_write.retract_knowledge(
+            self.conn, kid, 1, f"wrong, it was {CANARY}", time.time()
         )
         out = self.erase(match=CANARY, dry_run=True)
         self.assertEqual(out["knowledge"], 1)
         out = self.erase(match=CANARY)
         self.assertEqual((out["knowledge"], out["residue"]), (1, 0))
         row = self.conn.execute(
-            "SELECT status, text, retract_reason FROM knowledge"
+            "SELECT k.state,v.content_json,k.retracted_reason "
+            "FROM knowledge k "
+            "JOIN knowledge_version v ON v.knowledge_id=k.id"
         ).fetchone()
         self.assertEqual(tuple(row), ("erased", None, None))
 

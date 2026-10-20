@@ -10,8 +10,8 @@ also carries these fields:
 | `index_age_s` | seconds since the poller last finished a pass (`null` if it never has) |
 | `poller` | `ok`, or `stale` when the last pass is older than 3 poll intervals or there is none |
 | `logged` | `true` if the call was written to `calls.jsonl`, `false` if disabled or denied |
-| `error` | only on failure: `busy`, `hot_journal`, `tombstone_key`, `store_unavailable` or `refused` (with `reason`) |
-| `detail` | with `store_unavailable` only: the refusal message (at most 80 characters, such as `schema v1, need v3`), written by muninn and never from stored text. The same string is in the `calls.jsonl` line for that call and in the hook's trace (`hook session-start` and `hook prompt` lines) |
+| `error` | only on failure: stable command refusal code; shared store errors include `busy`, `hot_journal`, `tombstone_key`, `store_unavailable` and `refused` (with `reason`) |
+| `detail` | with `store_unavailable` only: the refusal message (at most 80 characters, such as `cutover_required`), written by muninn and never from stored text. The same string is in the `calls.jsonl` line for that call and in the hook's trace (`hook session-start` and `hook prompt` lines) |
 
 **Exit codes:** 0 ok; 1 `doctor` found an error-level problem; 2 refused or bad usage; 3
 busy (another writer holds the lock, retry); 4 store unavailable, a crashed writer's hot
@@ -32,7 +32,7 @@ out unless told not to.
 
 | Command | What it does | Main fields in the answer |
 |---|---|---|
-| `muninn search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]` (each flagged `restricted`), `knowledge_expired_omitted`, `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
+| `muninn search QUERY` | ranked knowledge and events for this repo (worktrees fold into the main repo) | `hits[]`, `knowledge[]` (current typed previews), `has_more`, `page`, `limit`, `stages`, `scope`, `other_scopes` |
 | `muninn open REF` | one event in full with neighbours; REF is an event id or `provider:thread_id:line.part` | `text`, `neighbours[]`, `provenance`, `hash_ok`, `redacted`, `truncated`, `next_offset` |
 | `muninn sessions` | sessions in scope, newest first | `sessions[]` (`session`, `provider`, `events`, `threads`, `forks`, `first_ts`, `last_ts`, `kinds`, `preview`) |
 | `muninn session ROOT` | one session's events across its threads, in order; ROOT is the `session` value from `sessions` | `events[]` (`id`, `ref`, `kind`, `role`, `ts`, `preview`, `answer_citable`, `tag`), `total`, `provider`, `next_from` (pass as `--from` for the next page) |
@@ -64,6 +64,12 @@ repo's scope; `candidates` the ranked rows fetched for this page (capped);
 `session_capped` and `tool_capped` dropped by the per-session and tool-call caps;
 `returned` hits on this page.
 
+**Knowledge preview fields:** `id` (`K_` UUID), `revision`, `state`, `form`,
+`kind`, `scope`, `text` and `evidence_refs`. These are current eligible previews,
+not complete guidance. Open `muninn know show K_ID` to verify the current revision
+and cited evidence before relying on it. A historical review can select its
+recorded revision with `--revision N`.
+
 **Event kinds:** `prompt` a user message, including one the owner typed while Claude was
 working. Only queued input whose origin is `human` is indexed; any other origin (task,
 peer, coordinator, auto-continuation, or none) and chat-channel participants are
@@ -78,47 +84,6 @@ desktop session that continues a ChatGPT conversation, `thread_source`
 ChatGPT composed, is stored as `harness`), `subagent`, `reviewer`, `other` (unrecognised
 format, never guessed primary). **Providers:** `claude`, `codex`, `cursor`. **Source
 roots:** `claude-projects`, `codex-sessions`, `codex-archived`, `cursor-imports`.
-
-## Knowledge ledger
-
-`muninn know add --kind decision|fact|preference|procedure|lesson|constraint --text T --cite REF --quote Q [--supersedes K] [--global]`
-records an entry; every entry needs a quote that is verbatim in a primary prompt, reply
-or tool call (a preference needs a user prompt). `--quote Q` alone searches the caller's
-session prompts. `know retract K [--reason R]`;
-`know list [--status current|superseded|retracted|erased|expired|all] [--kind K] [--tag T]... [--all-projects] [--scope-loop ID]`;
-`know show K` the entry with its chain and log; `know check` re-verifies every citation
-(`ok`, `changed`, `missing`, `erased`, `problems`) and counts `expired` entries. Entries
-are superseded or retracted, never edited. Only text the person typed is pushed
-unprompted: an entry is pushed (SessionStart, recall) only if a live user-prompt
-citation's quote backs the entry text, meaning the text is inside the quote or at least
-80% of its words of three or more characters occur in it. Otherwise it stays pull-only
-(still in `know list` and `search`) and `know add` answers with a `pull_only` line;
-re-add it in the user's own words. A restricted or an expired entry also gets a
-`pull_only` line, but a different one: it says the entry is restricted (or past its
-`valid_until`), because citing a user prompt would not change that. The rule is
-read-time, so it also covers older entries.
-
-Optional typed fields on `know add` preserve existing invocation behavior. Invalid
-values are refused with a stable code and no writes:
-
-| Flag | Meaning | Refusal code |
-|---|---|---|
-| `--confidence observed\|reported\|inferred` | how the claim is known; absent means not stated | `bad_confidence` |
-| `--valid-until DATE` | `YYYY-MM-DD` (midnight UTC) or an ISO 8601 datetime; no zone means UTC; must be after now, and a value equal to now is refused | `bad_valid_until` |
-| `--sensitivity normal\|restricted` | default `normal` | `bad_sensitivity` |
-| `--contradicts K` | informational link to an existing entry, like `--supersedes` but it changes nothing and logs no action | `bad_contradicts` |
-| `--tag T` (repeatable) | retrieval tag, lowercase `[a-z0-9_-]`, 1 to 32 characters, at most 10 tags (the count is checked on what was given, before duplicates are dropped, so 10 distinct plus a repeat is refused); stored sorted and unique, as data, not searched | `bad_tags` |
-| `--scope-loop ID` | store in the scope of a loop (`[A-Za-z0-9_.-]`, up to 64 characters) instead of the repo; not with `--global`. `know list --scope-loop ID` lists it; a loop scope is a `dir` scope keyed `loop:<ID>` and is never in the repo or global lists or pushed by hooks | `bad_loop_scope` |
-
-Entries print `confidence`, `valid_until` (UTC ISO or null), `expired`, `sensitivity`,
-`contradicts` and `tags`.
-
-**Expiry is derived, never written.** A current entry whose `valid_until` has passed is
-reported `expired: true` and is not current: `know list` (default `--status current`),
-search, the SessionStart block and recall leave it out. Its row and status are
-untouched; `know list --status expired` shows it, `--status all` and `know show` show it
-flagged, `know check` reports an `expired` count, and `stats` counts it under
-`knowledge.expired` instead of `knowledge.current`.
 
 **Retrieval outcomes are counted.** `stages` in a `search` or `hook prompt` line of
 `calls.jsonl` can carry 0/1 integer flags, present only when 1: `miss_zero` (searchable terms
@@ -136,65 +101,166 @@ and no knowledge; an errored call never sets one. A prompt the hook skips (fewer
 not proof that the answer was missing; only the labeled replay in
 `docs/REPLAY-BENCHMARK.md` shows true misses.
 
-**Withheld is counted.** The `hook session-start` line in `calls.jsonl` carries
-`withheld: {"expired": N, "restricted": N}` (counts of current entries in the repo and
-global scopes that the block left out, never text; the field passes the `obs_log`
-allowlist as a map of integer counts), so an empty block with a non-zero count is a
-decision the hook withheld, not an empty ledger. An entry that is both expired and
-restricted counts as `expired` only. The converse does not hold: an entry that is
-pull-only for lack of a backing user citation is in neither counter, so a zero count
-does not mean everything in scope was pushed. If the count cannot be computed because of
-a store fault the field is left out and the block is still sent; any other failure
-reaches the hook's outer handler and gives the `error` notice. `know list --scope-loop`
-refuses a malformed id with `bad_loop_scope`, as `know add` does; a well-formed id that
-has never had an entry lists 0 with `loop_not_found: true` (still exit 0, one JSON
-object). `--scope-loop` with `--all-projects` is refused with `loop_with_all_projects`
-(exit 2). `know list --tag T` (repeatable) keeps entries that carry every given tag, in
-any order, matched as whole tags (`run-1` does not match `run-10`); it combines with
-`--kind`, `--status` and the scope flags, `count` is taken after it, and a tag that
-`know add` would refuse gives `bad_tags` (exit 2). Search and the hooks have no tag
-filter.
+## Current knowledge and learning
 
-**Restricted entries are never pushed.** A `restricted` entry is left out of the
-SessionStart block and of per-prompt recall, even when a user prompt cites it. Explicit
-queries return it: `know list`, `know show` and `search`, where each `knowledge[]` hit
-carries `restricted: true|false`. An expired entry is not current, so `search` leaves it
-out and reports how many it left out as `knowledge_expired_omitted` (absent when 0). A
-loop-scope entry is never in SessionStart, recall or a repo-scoped search;
-`search --all-projects` drops the scope filter and does return it, as it does for any
-other scope. `stats` reports `knowledge_restricted`, a count of entries that are current
-in the same sense as `knowledge.current` (status `current` and not expired), so a
-restricted entry past its `valid_until` is counted under `knowledge.expired` instead.
+Knowledge IDs are `K_` plus 32 lowercase hexadecimal characters; request IDs use
+`R_` with the same shape. Numeric knowledge aliases are rejected. List/search
+return `knowledge: [KnowledgeView, ...]`; a single typed view keeps its fields at
+this JSON object's root alongside the common notice/freshness/logging metadata.
 
-**Schema v2 is a one-way upgrade.** The first writing command (`know add`, `ingest`, the
-poller) on a v1 store rebuilds the `knowledge` table once, in one transaction with
-`user_version` (ids, supersede chains, citations, the log and full-text index are kept;
-a crash leaves the v1 file intact). Before it commits, the row count of the new table
-must equal the old one and `PRAGMA foreign_key_check` must show no new violation, or the
-whole upgrade rolls back. If the commit, the rollback or the pragma restore itself
-fails, the original error is the one reported. Each attempt writes one `poller.log`
-line: `event` `migrated`, `migrate_raced` (another writer got there first) or
-`migrate_failed`, with `from_v`, `to_v`, `rows` (rows copied; absent unless it
-migrated), `ms` and, for a failure, `exc` (the exception class name, never its message).
-After that an older muninn release refuses the store as a schema mismatch. **`--upgrade`
-keeps this reversible.** Before it changes anything, an upgrade whose release has a
-higher `SCHEMA_VERSION` than the store's `user_version` (it reads the number from
-`muninn/store_schema.py` at `--sha`, as text) copies the store with SQLite's backup API
-to `muninn.sqlite.pre-upgrade-<12-hex sha>` (mode 0600, in the data dir); if the copy
-cannot be made or checked, or the store cannot be read, the upgrade stops before
-anything else changes. If the upgrade then fails and rolls back, and the store was
-migrated, the rollback stops the job, replaces `muninn.sqlite` with the copy (atomic
-rename, any journal beside it removed first) and starts the old release on it; a store
-the new release never touched is kept and the copy deleted. A successful upgrade deletes
-the copy after the prune, because it contains transcript text; if deletion fails the
-installer warns, and `doctor` warns `upgrade_snapshot` until it is removed.
-`install-record.json` records `snapshot` (name, byte size, `from` and `to` versions,
-`state`: `deleted`, `restored` or `kept`), never content; `--check` names the copy and
-writes nothing. Read-only callers (session-start and prompt hooks, `stats`,
-`doctor`) refuse a v1 or v2 file until a writer has migrated it, so these hooks
-fail open (they exit 0 with a
-`memory unavailable (store_unavailable)` notice) in that window. `muninn rebuild`
-accepts a v1 or v2 old store.
+| Command | Meaning/output |
+|---|---|
+| `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first. |
+| `muninn know search QUERY [--all-projects] [--task TASK]` | SQLite FTS5 search of current permitted knowledge; no embeddings. |
+| `muninn know show K_ID [--revision N]` | `KnowledgeView` with UUID, revision, state, body, origin, expiry and retraction metadata; historical revisions require `--revision`. Explicit show may retain withdrawn content. |
+| `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
+| `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local attempt and `Receipt`; no model invocation. |
+| `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision; returns `KnowledgeView`. |
+| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. |
+| `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
+| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence and receipt/null. Content is shown only when requested, never logged. |
+| `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
+| `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
+| `muninn learn replay --session REF --from-line N --through-line N --policy PATH` | Explicit bounded historical request through the same evidence/commit path; no automatic archive review. |
+
+`REF` for learning is an indexed `provider:thread_id` or an unambiguous session
+root. Request creation is admission, not completed review. Missing or invalid
+installed frozen policy refuses with `review_policy_required`; an explicit policy
+must match the admitted installed policy, not supply guessed model settings.
+Policy records explicit runner/model/reasoning, bytes/rounds, deadlines,
+retries/backoffs, concurrency and budget. This CLI does not install a policy.
+
+`ProposalInput` contains only `request_id` and `result`; `result` contains
+`schema_version: 1`, `changes`, `unresolved` and `no_change_reason`. Use evidence IDs
+from this request's admitted detail; IDs, claims and local files confer no owner
+authority. Proposal claims/fences the request's current attempt without stealing
+supervisor ownership, then rechecks physical evidence/revision/generation before
+atomic commit. Claim and commit use separate writer roots: intervening erasure or
+cancellation can refuse the commit. A successful receipt records `request_id`,
+`attempt_id`, `applied` revision pairs, `unresolved_ids`, `committed_at`, `outcome`
+and nullable `no_change_reason`. Existing successful receipts remain idempotent.
+Human correction uses a supported proposed replacement with `knowledge_id` and
+`expected_revision`; only explicit retract performs withdrawal without replacement.
+
+A note change requires `action: add`, `form: note`, `kind`, `scope`
+(`project_id`, `task`), `content`, `conditions` (a list), nonempty
+`evidence_refs` and `reason`. A guide change uses `form: guide`, `title`,
+`summary`, `applicability`, `steps`, `decision_points`, `pitfalls` plus the same
+kind/scope/reason. Each supported claim has `text` and `evidence_refs`; each guide
+step has `key`, `claim` and `depends_on` referring only to preceding steps.
+A replacement uses `action: replace` and additionally requires `knowledge_id`
+and `expected_revision`. `unresolved` entries have `claim`, `affected`
+(knowledge/revision pairs), `evidence_refs` and a specific missing-evidence
+`question`. `no_change_reason` is nonempty only when changes/unresolved are empty;
+otherwise it is null. Strict validation rejects extra fields and coercion.
+
+`know add`, `know check`, old tags/confidence/contradiction/loop flags and numeric
+ID coercion are retired. They have no compatibility aliases. `quote-check` still
+checks verbatim event text, but a match alone does not grant proposal authority.
+
+Current retrieval excludes disputed/withheld, expired, superseded, retracted,
+erased or unsupported guidance even if stale FTS rows remain. Project guidance
+applies to that project and its tasks; task guidance only to the same task.
+Global guidance is not inherited by project hooks. `--all-projects` explicitly
+unions read scopes and preserves each result's actual scope; it does not grant
+cross-project authority. Notes retain complete conditions and support/expiry;
+guides in context are navigation only. Open the requested current guide revision
+and cited originals before relying on its guidance. Already injected context
+cannot be retracted; request a fresh pull after changes.
+
+The current store requires both schema version 1 and the
+`store_meta` marker `muninn-knowledge`. Historical unmarked v1/v2/v3 stores need
+an explicit cutover; ordinary writers and rebuild refuse them. A numeric pragma
+alone is not a format or maintenance-authority certificate. Legacy activation and
+restart are not implemented by the current-format maintenance route.
+
+A current-format installer upgrade retains the live pathname. After proven
+quiescence it fences review attempts, preserves unknown charges and validates the
+permitted policy before activation. One actual maintenance owner spans pin/config;
+the writer is released during those steps and the owner before service start.
+Once live mutation may have happened, failure keeps current data and the selected
+runtime/configuration, leaves the service stopped, and records
+`outcome: recovery_required`. It does not restore an archive over newer data.
+Existing governed archives are retained. Any installer path that actually replaces
+a live store still requires its durable conservative publication record before
+replacement and before runtime/configuration rollback decisions.
+
+### Exact legacy exclusion and forward cutover
+
+For the exact inventoried legacy release `5c1a69b0edff81df80836d72a80971a91a8f9520`
+on macOS/Linux, the installer can stage managed launch exclusion. This requires
+stopping, and not starting, old manual commands, source/module invocations,
+imported clients and custom jobs throughout upgrade and recovery. It preserves the
+old database, tombstone key and erasure journal; prepares the candidate runtime;
+replaces the stable launcher with a terminal maintenance response; retains the old
+release in the private rollback directory; and removes the persistent service
+registration. The old `current` link deliberately remains selected but dangling.
+One stable private installer lock serializes upgrades and direct recovery.
+
+Only after those exclusions are durable and revalidated does the installer record
+`outcome: restart_required` and a supported boot identity. Ordinary commands remain
+unavailable; hooks return compact `{"error":"maintenance","reason":"restart_required"}`
+with exit 0, without queue acknowledgement. The installer exits nonzero because the
+upgrade is incomplete. The same `--upgrade --repo ... --sha ...` discovers the
+pending record before ordinary preflight. Same-boot resume refuses. A later boot
+must still match the original source, selected interpreter, candidate, private
+record and every exclusion. Missing or changed evidence yields refusal or
+`recovery_required`; replacing a lost fence cannot reuse its old boot baseline.
+
+The public installer continues after verified later-boot closure. Under the
+retained operation lock and one maintenance owner, it validates the exact schema3
+source and strict erasure intent, retains a durable private
+`muninn.sqlite.pre-upgrade-*` archive, and copies the seven base tables into an
+unpublished marked1 target. Indexed Cursor and missing-original history survive;
+legacy knowledge remains in the archive. Target replay completes pending erasure
+before replacement, without changing the legacy source, external key or journal.
+Archive and incomplete copy artifacts remain visible as erasure residue.
+
+Before one replacement attempt, the private record persists
+`publication: possible` with source, candidate, archive, home, lock, intent and
+prepared runtime bindings. A replacement error can mean the new store is already
+live. Recovery reads actual identity and format, retains every archive, and never
+restores old data/runtime or promotes an orphan. An unchanged original can be
+retried by building a fresh candidate. A proven marked replacement advances using
+the current witness rules; missing/uncertain witness after compatible runtime
+exposure cannot be repaired with an old installer boot observation.
+
+Compatible configuration completes while the maintenance launcher remains in
+place. The final writer revalidates the live path and replays new erasure intent.
+First policy activation, if requested, completes before removing that launcher;
+all maintenance roots close before service start. Interrupted unrecorded provider
+configuration remains excluded with `recovery_required`, because replaying a
+plugin mutation could overwrite its original before-values. Successful legacy
+operations retain their private recovery record and archive metadata. The
+preparation-only `verify_legacy_resume` interface still stops at
+`legacy_cutover_pending`; it does not perform publication.
+
+### Installer first-policy modifier
+
+`--review-policy PATH` is an optional modifier to the full existing installer
+invocation: `bin/muninn-install --repo DIR --sha SHA --fresh|--upgrade
+--review-policy PATH`. It is currently supported for macOS/Linux. The wrapper
+continues forwarding advanced arguments unchanged. Input is bounded UTF8 strict
+JSON: duplicate keys, nonfinite values, linked input, malformed policies and
+changed frozen snapshots refuse before disruption. The private record contains
+raw bytes/digest and canonical policy/digest, bound to the operation, home and
+prepared release. Install summaries contain `policy_status`, never policy values.
+
+Absent input yields `activation_pending` for a never-activated store. Existing
+policy and source baselines are immutable: identical input is a no-op preserving
+admission, including zero; different input requires a separately authorized
+policy transition. First activation records fixed time, store identity,
+generation and sorted source-boundary digest before committing policy and
+admission together. Recovery recognizes an exact committed activation without
+resetting those values; an already fenced admission remains zero and reports
+`activation_incomplete`. Records survive uncertain commit/completion failures.
+
+A valid policy grants no native capability, human production-policy approval or
+budget authority. Prompt, capability, host and admission checks still apply.
+Windows legacy boot/termination proof and actual native/live qualification remain
+separate requirements. Preserve the private operation record, source/archive,
+key and journal during recovery; manual restoration of the old launcher or
+service is unsupported.
 
 ## Running and maintaining
 
@@ -205,10 +271,61 @@ accepts a v1 or v2 old store.
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
 | `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
-| `muninn rebuild` | build a new store from the transcripts, then copy over what cannot be re-derived: scopes, tombstones, the knowledge ledger (entries, citations, log) and the events of sources that have gone missing. A store that cannot be read is never overwritten: it is renamed to `muninn.sqlite.unreadable-<UTC timestamp>` (mode 0600, only after checking for a hot journal, which exits 4) and the answer names it in `old_kept_as` (null otherwise) with a `warning` that its knowledge ledger, citations and scopes were not copied. If the new store cannot be moved into place the old one is renamed back (exit 4, `replace_failed`, `old_restored`); a missing or damaged `tombstone.key` stops the rebuild before anything is replaced |
-| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget content; without `--yes` it is a dry run. `--match` searches event text, knowledge text, tags, retract reasons and citation quotes. An erased knowledge entry also loses its tags, confidence, expiry, sensitivity and `contradicts` link (ids of other entries that point at it, scope and supersede links stay; a `loop:<id>` scope row stays too, it names a loop, not content). Writes tombstones so a rescan cannot restore it; each erased event also gets a content tombstone (a keyed HMAC of role and text, no text; see `tombstone.key`). It is applied only to a fork's replayed copy of its parent's history, never to a later identical turn, so erasing one `yes` does not drop the next. Copies already stored in the fork family are erased with it, whichever member the ref names: every matching event of an ancestor, and in a fork or sibling only the leading run of events that repeats its ancestors' history (matched by role and text), never the fork's own later turn. A dry run makes no `tombstone.key`. Answer also has `aside_files` and `aside_remove` (set-aside stores erase cannot scrub, including a leftover `muninn.sqlite.pre-upgrade-*` copy, and the command that removes them: `rm --` on macOS/Linux or PowerShell `Remove-Item -LiteralPath` with a literal path array on Windows; never run automatically). An erase made without a content tombstone has only its line tombstone: a fork that copies the erased line byte for byte is still kept from storing it, including after a classifier change re-reads every transcript, but a copy that differs in any byte is not recognised and no re-read can add the missing tag. Lists provider files and other derived copies it cannot reach (`not_covered`, `out_of_scope`) |
+| `muninn rebuild` | rebuild only a verified marked current store. Copy every governed family, retain DB-only Cursor and missing-source history, then fully re-ingest transcripts and replay current erasure intent. Fence admission/attempts and retain a private `muninn.sqlite.recovery-<id>` archive before candidate work. Unsupported, unreadable, changed or incomplete sources refuse; publication never restores an archive automatically. See the recovery contract below. |
+| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service quiescence before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
 | `muninn hook session-start\|prompt --provider claude\|codex\|cursor` | session and prompt hooks: payload on stdin, JSON on stdout (see the README) |
-| `muninn hook pre-compact --provider cursor` | refresh the unique exact `conversation_id` under valid native `workspace_roots`, bounded by `message_count`; ambiguous/mismatched identity or scope skips before writes; fail-open |
+| `muninn hook session-end\|pre-compact --provider claude\|codex\|cursor` | Capture bounded learning windows; Cursor imports the exact conversation before capture, with preCompact bounded by `message_count` and sessionEnd independent of that field. All hooks return compact provider-compatible JSON and exit 0. |
+
+
+Rebuild retains one maintenance owner and one acquisition deadline. Full transcript
+passes use fresh connections inside separate writer regions; fixed nonmaterial Git
+preparation runs between them with the writer free and all material connections
+closed. The original complete source/key/intent fingerprint is checked before each
+re-entry. A concurrent writer, changed file identity or unsettled sidecar refuses as
+`source_changed`. Only the database ctime change caused by the final writer's own
+private-permission normalization is tolerated within that same writer region.
+Own replay that changes source bytes also refuses. No failed or unreadable ingest
+attempt is hidden by a later successful pass.
+
+On success `rebuilt` and `old_readable` are true; `old_kept_as` names the retained
+archive, `copied` holds verified table-copy counts, `reapplied_tombstones` counts
+new intent rows applied to the candidate, and `ingest` holds invocation work totals
+as defined below. `warning` explains archive retention. `recovery_required` is
+false only for completed publication or refusal before uncertain mutation.
+`publication_possible` becomes true before attempting replacement and remains true
+on success or failure; an existing orphan candidate also keeps it true because
+prior exposure is uncertain. A failed replacement returns exit 4 `replace_failed`
+without an `old_restored` claim. Refusals return exit 2 with a bounded `reason`;
+writer contention remains exit 3. Check `recovery_required` even for a busy result.
+
+After any failure, preserve the actual live file, `tombstone.key`, current
+`tombstones.jsonl`, candidate and every archive as they exist. No restore, orphan
+promotion, retry or inferred admission reenable occurs. A crash before publication
+may leave admission off; a later invocation must not guess its lost prior value.
+A missing answer or log does not prove nonpublication. A fresh invocation validates
+current state again and refuses an existing `muninn.sqlite.rebuild` or unsafe live
+state. A retained archive, including a partial copy, is recovery evidence rather
+than permission to overwrite current data. Archive removal requires a separate
+owner decision; erasure reports retained archives as residue.
+
+
+Ingest counters describe work across the completed invocation. `files_seen`,
+`skipped_files` and `unreadable_files` count visits or open attempts across passes,
+not distinct files. `files_changed`, `events_added`, `events_removed` and
+`skipped_lines` sum committed work. A `--full` retry remains full and counts its
+repeated committed replacements. `failed` and `errors` include ordinary failed
+read attempts, even if a later attempt recovers that source; Git preparation
+misses do not count as failures. `missing` comes from the completed terminal pass,
+and `duration_s` includes preparation and lock waits. A completed sweep can still
+contain failures.
+
+Each pass holds the writer separately. Missing Git membership facts are probed
+while unlocked, then a fresh connection replans provider files and database state.
+There is no total retry or runtime limit under continuously changing inputs; each
+Git probe retains its ten-second timeout. Git facts reflect when they were
+observed, not a coherent or current repository snapshot. The poller publishes its
+completed heartbeat and clears its prior error only after the terminal pass;
+intermediate preparation can update liveness without claiming completion.
 
 ## Installing and removing (from a checkout)
 
@@ -223,10 +340,100 @@ accepts a v1 or v2 old store.
 - Leftover settings/transcripts: never installation evidence.
 - History import/existing index: independent of app detection.
 
+Fresh installation finishes transcript indexing and available Cursor history
+before activating the release. Its checklist reports the actual stored event
+counts by provider. Incomplete ingestion or erasure-cleanup failure prevents
+activation; already committed erasure remains in effect. Recall starts off, and
+learning admission remains off until explicitly configured. Service-start
+verification requires a new heartbeat after the completed initial ingest.
+
 | Command | What it does |
 |---|---|
 | `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); `--check` previews, `--status` compares the installed commit with `HEAD` |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | the same as `bin/muninn-install --uninstall`. Stops the poller; removes the launchd plist, Muninn's hooks from Claude's `settings.json` and Cursor's `hooks.json`, Muninn's sections from Codex's `config.toml`, the Codex plugin cache, `~/.local/lib/muninn` and the `~/.local/bin/muninn` link (only when it points into that release directory). Moves the data directory to `~/.local/share/muninn-removed-<ts>/muninn` (`--purge-data` deletes it instead). `--dry-run` writes nothing. Prints one line per action, then `uninstall done`, `dry run only: nothing was removed` or `muninn is not installed here`, and exits 0. A provider config it cannot edit safely, a taken data-move name, or a job launchd will not unload prints `FAILED: <why>` and exits 1; the config and name checks run first, in a dry run too, before anything is changed |
+
+## `muninn erase`
+
+Choose exactly one session, event reference or literal match (at least four
+characters after trimming surrounding whitespace). Event-reference syntax is
+checked before coordination;
+missing or ambiguous event resolution happens inside the governed store. Unknown
+sessions retain their existing zero-target/tombstone behavior. `--match` searches
+event text and governed knowledge content, reasons, expiry conditions, claims,
+evidence excerpts and unresolved content. Erasure follows support and review-read
+associations through prior revisions, withdraws whole affected guides, clears
+explanations and fences affected requests. IDs, statuses and uncertain charge
+history can remain; removed text is not written to the call log.
+
+Real erasure holds the owner barrier before the writer barrier. It may stop the
+**whole Muninn serve process**, including unrelated ingestion, and waits for
+contained children, discarded process buffers and durable completion before
+changing requested content. It selects at most one owner; a replacement produces
+`owner_changed` rather than another stop request. A missing store now returns exit
+4, `store_unavailable` with detail `store is absent`, without creating a database.
+This differs from the older erase behavior. Dry runs retain their writer-only,
+no-stop path and may initialize an empty store; they create no `tombstone.key`.
+Neither an absent nor an empty store establishes process-containment evidence.
+
+The Python APIs retain `run_erase` and caller-owned `erase`; the latter requires
+established quiescence as well as writer ownership for real erasure. Callers needing
+observable status use `run_erase_request(home, EraseRequest(...), status=...)`.
+The existing `wait_s=15.0` default is unchanged. For real erasure it is one
+coordination-acquisition budget, including owner and writer waits, **not** a limit
+on repair, physical I/O or total command duration. `wait_s=0` attempts immediate
+acquisition without publishing a stop, recording a repair baseline or sleeping;
+writer contention still raises Busy. There is no new CLI timeout flag.
+
+Every handled erase result, including mapped failures, adds `erasure_status`:
+
+| Field | Meaning |
+|---|---|
+| `stop_may_have_been_published` | Conservative latch set before possible stop visibility; it does not say whether the service is currently running or stopped. |
+| `repair_phase` | `none`, `baseline_recorded`, `reconciling` or `complete`, independently of the requested erase. |
+| `erasure_phase` | `not_started`; `intent_may_be_durable` before the append; `intent_durable` after its durable return; `committed` after SQL commit; `verified` only after existing checks complete with zero vocabulary remainder, zero reported residue and zero retained archives. |
+
+Only when a stop may have been published, status also contains
+`restart: "not_attempted"` and `next_action: "check_and_restart_if_needed"`.
+Check the service and arrange a manual restart if needed, including after a failed
+erase. Muninn never automatically restarts the service or reboots the host, and
+this status never asserts that service availability was restored. If containment
+is uncertain, a supported boot observation can record a bound repair baseline;
+the same boot refuses with `reboot_required`. A later supported boot permits
+reconciliation only while all required bindings still match. Do not delete witness
+or repair-baseline files to bypass refusal. Windows boot repair and retirement of
+an existing repair baseline remain **unsupported required-platform release
+blockers**. Normal valid-complete ownership without a baseline is a separate path;
+refusal is not completed Windows recovery support. Native containment and boot
+qualification remain separate release checks.
+
+Write-ahead tombstones survive interrupted erasure and are replayed before ordinary
+quiescent startup/erase entry. Pending intent refuses new foreground proposals and
+commits; an existing receipt still has receipt-first audit access until replay
+scrubs its governed explanation. The journal guard reads the whole log, with no
+constant byte, memory or duration bound. Preserve the current journal and durable
+`tombstone.key`; losing the key prevents keyed tombstones from being checked.
+Event content tombstones are keyed HMACs of role/text and apply only to fork replay,
+not to a later identical turn. Existing family copies are erased conservatively:
+all matching ancestor events, and only the replayed leading run of descendants or
+siblings. A historical erasure lacking a content tag can still suppress a byte-for-
+byte line copy; a differing copy is not recognized by that line tombstone.
+
+The `review` counts include removed working files and `retained_archives`.
+Only program-owned `review-work/<AttemptId>` material is removed after containment;
+symlink targets, unrelated siblings and provider transcripts are preserved.
+`vocab` and `residue` report the existing bounded-needle checks. `verified` is
+**not universal forensic absence**, nor a guarantee about remote/provider copies.
+Retained archives keep the phase `committed` even when no selected needle matches.
+Commands that finish with residue still return exit 0. `aside_files` lists retained
+unreadable, recovery and pre-upgrade stores; `aside_remove` provides the literal
+manual removal command (`rm --` on POSIX, `Remove-Item -LiteralPath` on Windows).
+These archives are never deleted automatically. Report `provider_files`,
+`not_covered` and `out_of_scope`, including backups and free filesystem blocks.
+
+Existing mapped exits remain: Busy 3; hot journal, tombstone key, unavailable store
+or filesystem access 4; value/lookup refusals 2. Status preserves the latest reached
+milestone and safe existing error details. Arbitrary SQLite failures still
+propagate; no output is guaranteed after process death or output failure.
 
 ## `muninn stats`
 
@@ -234,9 +441,9 @@ accepts a v1 or v2 old store.
 `events` per kind; `events_by_provider`; `flags` `marker` (text that looked like an
 injected block), `redacted` (secret removed), `truncated` (over 64 KiB); `skipped_lines`
 and `issues` (lines not parsed: `line_too_large`, `invalid_json`, `too_deep`,
-`not_object`); `other_threads` unrecognised threads by reason; `knowledge` by status
-(`current`, `expired`, `superseded`, `retracted`, `erased`) and `knowledge_restricted`
-(a count of current restricted entries); `citations` by state; `tombstones` by level
+`not_object`); `other_threads` unrecognised threads by reason; `knowledge` by durable
+state (`active`, `withheld`, `retracted`, `erased`); `evidence` by state (`live`,
+`changed`, `erased`); `tombstones` by level
 (`session`, `thread`, `line`); `db_bytes` file size; `db_space` `page_count`,
 `freelist_count`, `page_size`, `free_ratio`; `last_pass` (`last_pass_at`, `duration_s`,
 `files_changed`, `events_added`, `skipped_files`, `unreadable_files`, `last_error`
@@ -246,14 +453,51 @@ running pass last stamped alive: null between passes and when no usable stamp ex
 and growing if the poller was killed mid-pass and not restarted); `reread` (`pending`
 active sources still read under an older classifier version, `of` all active sources:
 the progress of the one-time re-read after a classifier change; it normally falls to 0,
-and a source that fails or is skipped stays pending, so look at `last_pass.failed`,
-`unreadable_files` and `skipped_files`); `install_sha`; `classifier_version`;
+and a source that remains failed or skipped stays pending. Inspect
+`last_pass.failed`, `unreadable_files` and `skipped_files` as invocation attempt
+totals, which can include later recovered sources, not unresolved source counts); `install_sha`; `classifier_version`;
 `hash_mismatches` (open-time line hash failures seen in the call log). `--usage` adds
 `usage` (per session `calls`, `errors`, `last_ts` of muninn calls seen in transcripts)
 and `usage_totals` per provider. `stats` always reports `retrieval_outcomes` (counts from
 the same call-log window: `window_lines`; `search` `calls`, `zero`, `outside`, `noterms`;
 `hook_prompt` `calls`, `zero`, `outside`, `floor`; calls without `stages` count in `calls`
 only; facts, not proof of a miss).
+
+
+`review` is a schema-1 `ReviewStats` object. `requests_by_state` and
+`calls_by_state` count durable rows; absent states have zero rows.
+`oldest_pending_age_seconds` covers pending/waiting requests;
+`last_progress_age_seconds` measures the newest durable attempt progress. Ages are
+nonnegative, or null when there is no matching row. `unresolved_items` counts open
+items. `usage` sums actual per-call reports once: unknown components stay null,
+unconcluded calls stay unknown even with retained usage, reservations never become
+measured costs, and mixed/unknown or unsafe currencies leave cost
+and currency null. Diagnostic currency must match `[A-Z]{3}`. `--usage` remains
+separate transcript-observed CLI usage.
+
+`eligible_records` and `completed_records` count currently indexed logical
+prompt/reply records, deduplicated by provider, thread and physical line. They are
+neither absolute source cursors nor lifetime counts of erased/removed data.
+Activation archive records are excluded unless explicitly admitted for historical
+review. Overlapping admitted windows count once; only success receipts, including
+no-change receipts, can count completion, and only with current indexed provenance.
+The request endpoint must still match its admitted hash; that hash proves only the
+endpoint. Interior records require matching live evidence linked to the same
+request. Missing/changed/erased input or unprovable provenance remains an uncertain
+gap, reducing metric availability without changing historical audit receipts.
+No original transcript is read by health, so these are indexed observations rather
+than live physical validation. A later explicit receipt can count work while
+an earlier gap remains. Historical replay never changes the activation baseline.
+Durable states, receipts and gaps survive log rotation or disabled logging; exact
+per-source reconciliation refusal reasons are not durable.
+
+`observed_enqueue_busy` counts only retained `review_enqueue_busy` log records (null
+when no readable valid log record remains). `busy_count_complete` is always false.
+Zero observed busy records never proves no missed acknowledgment. Later recovery
+can capture indexed content, but cannot prove the exact lost lifecycle event or
+cutoff. Cursor recovery waits for the next native import or explicit full ingest.
+Governed explanations belong in explicitly requested `learn show`, never health or
+logs. An `active` knowledge state alone does not establish current eligibility.
 
 ## `muninn doctor`
 
@@ -264,7 +508,7 @@ four fields:
 - **`ok`**: `true` passed; `false` failed; `null` could not be verified.
 - **`level`**: how much a failure matters. `error`: `ok: false` makes the whole answer
   `ok: false` and the exit code 1. `warn`: shown, does not fail the run. `info`:
-  informational, always `ok: true`.
+  informational; `null` still means unverified.
 - **`detail`**: a short string whose meaning depends on the check (below); empty when
   there is nothing to add.
 
@@ -274,22 +518,21 @@ four fields:
 | `file_modes` | error | no data file is readable by group or others | names of loose files |
 | `unexpected_files` | error | only known files are in the data dir | names of stray files |
 | `unowned_journal` | error | no crashed writer's journal is lying around | explanation |
-| `store_readable` | error | the database opens read-only and has the right schema | the refusal message if not, such as `schema v1, need v3` or `cannot read the store (SQLITE_BUSY)` |
+| `store_readable` | error | the database opens read-only and has the right schema | the refusal message if not, such as `store format marker missing` or `cannot read the store (SQLITE_BUSY)` |
 | `journal_mode` | error | SQLite journal mode is `delete` | the mode |
 | `fts_secure_delete` | error | both full-text indexes have secure delete on | none |
 | `quick_check` | error | SQLite's `quick_check` says `ok` | its first 80 characters |
 | `missing_sources` | info | always | count of indexed files no longer on disk |
 | `other_threads` | info | always | count of unrecognised thread types |
-| `reread` | info | always | `N of M`: active sources still to be re-read after a classifier change; failing sources are reported by `failed_sources` |
-| `citations_resolve` | warn | every live knowledge citation still matches its original line | count that do not |
+| `reread` | info | always | `N of M`: active sources still to be re-read after a classifier change; inspect `failed_sources` and `stats` `last_pass.unreadable_files` as attempt totals, not distinct or unresolved source counts |
 | `db_size` | warn | the database is under 2 GB | its size; the threshold |
 | `db_free_space` | warn | free pages are under 25% or under 64 MB | free size and ratio; `run: muninn compact` |
 | `writer_secure_delete` | error | writer connections turn secure delete on | none |
 | `heartbeat` | error | the poller finished a pass, or a running pass stamped `alive_at`, within 3 intervals (`poller: ok`) | `index_age_s` |
-| `failed_sources` | warn | no file failed in the last pass | count failed; the SessionStart block, and a recall block that has a hit, also say so |
+| `failed_sources` | warn | no ordinary source read attempt failed during the last completed invocation | failed read attempts, including repeated attempts and possibly subsequently recovered sources; preparation misses are excluded. The SessionStart block, and a recall block that has a hit, also report these attempts |
 | `poller_error` | warn | the last poller pass did not end in an exception; the poller's next good pass clears it, a manual `ingest` does not | the exception class name only |
-| `unreadable_files` | warn | the last pass could open every transcript file | count of files it could not open (permissions; a file that vanished does not count); the SessionStart block, and a recall block that has a hit, also say so |
-| `aside_files` | warn | no unreadable store set aside by `rebuild` is left in the data dir | names of `muninn.sqlite.unreadable-*` files |
+| `unreadable_files` | warn | no transcript open attempt failed during the last completed invocation | failed open attempts (permissions; a vanished file does not count), possibly including subsequently recovered sources. The SessionStart block, and a recall block that has a hit, also report these attempts |
+| `aside_files` | warn | no historical unreadable stores or retained recovery copies remain | names of retained store artifacts; inspect the actual reported paths |
 | `upgrade_snapshot` | warn | no pre-upgrade copy of the store is left in the data dir | names of leftover `muninn.sqlite.pre-upgrade-*` files |
 | `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
 | `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
@@ -297,6 +540,37 @@ four fields:
 | `managed_service` | error | on Linux/Windows, the managed user service/task is owned and its heartbeat identifies the actual writer; unavailable inspection reports `null`, never success; paths compare by resolved identity; each command is limited to 60 s and a timeout fails the check | constant code and process id |
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `roots_present` | info | always | names of provider roots that do not exist |
+
+
+Review diagnostics also use the same four-field check contract:
+
+| check | level | meaning of `detail` |
+|---|---|---|
+| `review_backlog` | info | durable pending/waiting request count |
+| `review_policy` | warn | installed durable policy configured, or absent/invalid while admission is enabled |
+| `review_auth`, `review_config` | warn | attempt-history counts with those finite error codes; invalid stored attempt policies count as configuration failures |
+| `review_process_deadline` | warn | recorded deadline failures, or unfinished attempts past their explicit policy deadline with unended calls; not proof of a live process or completed kill |
+| `review_commit_delay` | warn | overdue running attempts without an unended call, awaiting durable finalization |
+| `review_cancel_delay` | warn | overdue cancelled requests with unfinished attempts |
+| `review_abandoned` | warn | recorded abandoned attempts, or unfinished attempts from an older generation |
+| `review_coverage_gaps` | warn | the same eligible set as stats, including admitted historical replay, lacking success receipts with current matching provenance; untouched activation archive stays excluded |
+| `review_capture_gaps` | warn | indexed new records beyond the eligible cursor or eligible records whose prior admission provenance cannot be verified, even after refusal or log loss |
+| `review_quiescence` | info | witness presence only; always null because containment is unverified |
+| `review_repair` | warn | repair-baseline presence requires manual recovery assessment |
+| `review_erasure_intent` | info | journal presence, with consistency unverified; presence does not prove an outstanding intent |
+| `review_windows_repair` | warn | Windows boot repair and durable repair-baseline retirement remain unqualified |
+
+Doctor never initializes, resets or deletes supervisor/repair records. Missing
+DB, absent PID or free locks do not prove containment. Preserve
+`review.supervisor.lock`, `review.supervisor.json`, `review.supervisor.repair.json`,
+`tombstones.jsonl`, keys and retained archives. Do not delete protocol evidence to
+bypass a refusal. Erase may interrupt the whole service; inspect its existing
+`erasure_status` and `restart: not_attempted`, then check and restart manually if
+needed. A retained archive prevents verified erasure even if selected needles are
+absent. Windows uncertain-state repair and baseline retirement are required-platform
+release blockers; passing fakes or ordinary absent-baseline operation are not native
+qualification. Original-source read budgets bound neither erasure-journal work nor
+total I/O or command time. Process deadlines do not bound delayed DB commit/cancel.
 
 ## Per-prompt recall switch (`recall.off`)
 
@@ -330,8 +604,8 @@ instruction; the call log carries `review_error: 1` and that delivery is uncount
 The report includes `total`, `reviewed_batches`, `batch`, `complete`, `deliveries`,
 `review_prompt`, `acknowledged`, and (for nonempty batches) `self_assessments`.
 Each delivery holds its `id`, `at`, `provider`, `session`, `prompt_sha256`,
-`scope_ids`, final `sources` (ref and excerpt cap), final `knowledge` (id, cited refs,
-excerpt cap and text hash), `context_sha256`, and `characters`. Once indexed, a
+`scope_ids`, final `sources` (ref and excerpt cap), final `knowledge` (`id`, `revision`, `evidence_refs`,
+`cap`, `sha256` of the source preview, and `evidence_sources`), `context_sha256`, and `characters`. Once indexed, a
 unique request matching its redacted text hash, provider/session and timestamp
 within two minutes supplies `request_ref` and `request_preview`; otherwise
 `request_status` is `unresolved`. `assessment` contains the model's matching
@@ -341,35 +615,56 @@ Both request and assessment previews are redacted again before printing, includi
 text indexed before a redaction rule existed. A store that becomes unavailable
 during request or assessment resolution returns a JSON error with exit code 4.
 Historical full block text isn't retained, and current knowledge may differ.
+Use `muninn know show K_ID --revision N` with the recorded UUID and revision
+to inspect that knowledge version. Its E_UUIDs are evidence identities, not
+arguments to `muninn open`. Each recorded `evidence_sources` row maps an
+`evidence_id` to an openable `ref` and the original `line_sha256`, bound to that
+exact knowledge revision. Open that recorded `ref` with `muninn open REF --context 3`;
+require `hash_ok: true` and `provenance.line_sha256` equal to the recorded hash.
+A recorded locator does not prove the source remains available or unchanged.
+Missing mapping fields or null `ref`/`line_sha256`, missing originals and changed
+hashes remain unresolved; never substitute current knowledge or other evidence.
+The preview `sha256` identifies the pre-rendering source preview, not the complete
+knowledge body or redacted, shortened historical block. The mapping records no
+transcript text or filesystem path.
 `--ack` requires `--batch`, a completed batch, and sequential review. Invalid
 arguments exit 2; unavailable metadata or transcript store exits 4. Acknowledgement
 records review, not approval of recall quality. Follow `review_prompt` and report
 missing evidence before acknowledging.
 
 The ordinary call log now distinguishes selected `returned_ids`/`knowledge_ids`
-from `delivered_ids`/`delivered_knowledge_ids` that survive shortening. A recorded
+from `delivered_ids`/`delivered_knowledge_ids` that survive shortening.
+Knowledge IDs use `K_` UUIDs; event IDs remain numeric. A recorded
 block also has its numeric `delivery_id` and, when due, `review_due_batch`. No query text or fingerprints enter the
 prompt-hook call log; request fingerprints live only in the review database.
 
 ### Switch behavior
 
-**Function.** Before each prompt, the UserPromptSubmit hook (`muninn hook prompt`) can
-add a short block of up to 1,500 characters: matching knowledge entries first, then up
-to 3 earlier prompts or replies from this repo. If a file named `recall.off` exists in
-the data directory, that hook prints `{}` and never opens the database, so no recall is
-added. SessionStart (`muninn hook session-start`) is not affected;
-`MUNINN_HOOK_DISABLE=1` silences both hooks. Its block opens with a usage line,
-identical for Claude Code and Codex, that tells an agent how to search, open a hit and
-record an owner decision with
-`muninn know add --kind decision --text … --cite REF --quote "<verbatim>"`.
+**Function.** Before each prompt, `muninn hook prompt` can add current eligible
+knowledge previews followed by at most three prior prompt/reply events from the
+mapped project, excluding the caller's own session. It requires at least three
+distinct query terms and skips slash commands. UTF-8 caps are 1,500 bytes for Claude
+and 900 for Codex. With `recall.off` present it prints `{}` without opening the
+store. `MUNINN_HOOK_DISABLE=1` silences all hooks.
 
-The hook output also carries a top-level `systemMessage` for the user (Claude Code shows
-it in the transcript; Codex records it as a `warning` hook entry). At SessionStart it
-lists every pushed knowledge entry's headline (its `text`, in full, control characters
-replaced by spaces), one per line under `muninn: memory loaded (N knowledge entries)`;
-when the store cannot be read it is `muninn: memory unavailable (<code>)`. The entry
-text is never written to the call log. Per-prompt recall adds a human-facing line
-only when a 50-delivery review is due.
+Verified SessionStart refreshes (`startup|resume|clear|compact` for Claude/Codex)
+render complete applicable supported notes and a compact guide index as untrusted
+data, bounded by installed `context_bytes` and 4,000 bytes (Codex 2,800). No arbitrary
+eight-item limit or actor/quote heuristic remains. Unfitting items are omitted
+whole with a truthful notice. The usage text tells agents to verify current
+revisions and open cited originals; preview eligibility is not a truth guarantee.
+Claude/Codex `systemMessage` lists exactly displayed items with control characters
+replaced and distinguishes omitted knowledge from no eligible knowledge. The
+status's content is never logged. Prompt recall adds a human-facing line only when a 50-delivery review is due.
+
+End/precompact capture admission is separate from startup refresh. Only a durable
+request is internally acknowledged; SQLite busy yields the provider-safe empty
+response and content-free `review_enqueue_busy`. Later recovery can capture later
+indexed content, not prove the exact missed event/cutoff. Cursor waits for the next
+native import or explicit full ingest. A recovery gap is not proof of coverage.
+Cursor startup uses its native `sessionStart` envelope (`additional_context`);
+resume/postcompact injection remains unproven. Explicitly run `muninn know context`
+after resume or compaction. Context already injected cannot be retracted.
 
 **Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints
 how to turn recall on. `--upgrade` never creates or removes it, so an existing machine
@@ -408,9 +703,9 @@ HMAC-SHA256 tags (`ev2:`) instead of plain hashes, so an erased short text canno
 confirmed by guessing. A new key is never made while keyed tombstones exist, because it
 would stop them matching: if the file is missing or damaged then, `ingest`, `rebuild`
 and `erase` exit 4 with `tombstone_key` and `doctor` fails `tombstone_key`; restore the
-file from a backup; `muninn.sqlite.unreadable-<UTC timestamp>` a store `rebuild` set
-aside because it could not be read. `erase` cannot scrub it (it is not a readable
-database), so it may still hold erased text: `erase` names every such file in
+file from a backup; `muninn.sqlite.unreadable-*` historical unreadable copies and
+`muninn.sqlite.recovery-*` retained rebuild archives, including interrupted partial
+copies. `erase` cannot scrub these retained copies, so they may hold erased text: `erase` names every such file in
 `aside_files` with the exact command in `aside_remove` (`rm -- <path>` on macOS/Linux;
 PowerShell `Remove-Item -LiteralPath` with a literal path array on Windows), and
 `doctor` warns (`aside_files`) while one exists. It is not deleted automatically;
@@ -418,9 +713,12 @@ salvage what you need, then run that command; `muninn.sqlite-journal` SQLite's r
 journal, allowed by `unexpected_files` but a leftover one fails `unowned_journal`;
 `recall-review.sqlite` private delivery metadata and review checkpoints, with
 `recall-review.sqlite-journal` its transient SQLite journal; neither stores transcript
-text. `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). During an
-upgrade that migrates the schema, `muninn.sqlite.pre-upgrade-<sha>` (mode 0600) exists
-briefly and is allowed. Anything else fails `unexpected_files`.
+text. `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). Retained `muninn.sqlite.pre-upgrade-<sha>` archives (mode 0600) are also governed
+residue; their presence is not automatic restore authority. `review.supervisor.lock` is the unchanged lifetime lock;
+`review.supervisor.json` the private completion witness;
+`review.supervisor.repair.json` the private uncertain-owner repair baseline.
+`stop.json` targets one selected service generation. These are known protocol files,
+not cleanup instructions. Anything else fails `unexpected_files`.
 
 On Windows, heartbeat and stop metadata publication retries native access-denied or
 sharing-violation errors (5/32) for at most one second. A reader held longer causes
@@ -431,8 +729,9 @@ refusal and retains the previous state.
 The installer renders hook JSON with native paths rather than inserting raw paths into
 JSON text. On Windows, Claude uses a real Windows PowerShell executable with an `args`
 array; Codex uses its `command_windows` override with an encoded PowerShell command.
-Both invoke the validated Muninn bootstrap without Git Bash. Their configured timeout
-remains five seconds. Changing a hook definition requires the owner's provider approval.
+Both invoke the validated Muninn bootstrap without Git Bash.
+Codex SessionEnd uses a three-second configured timeout; the other Claude and Codex
+hooks use five seconds. Changing a hook definition requires the owner's provider approval.
 
 Windows installer calls prefer a trusted `codex.exe` on `PATH`. An official npm
 `codex.cmd` installation is dispatched through its existing
@@ -444,6 +743,8 @@ Automatic Codex hook trust requires a successful version command: `codex-cli 0.1
 Windows, or `codex-cli 0.159.2`/`codex-cli 0.159.3` on macOS and Linux. The selected CLI
 files and version must remain unchanged from discovery through the check before trust is
 written. Otherwise, the installer leaves trust to the owner in `/hooks`.
+Observed Codex `0.162.1` is not admitted by this older version allowlist without
+new evidence; bounded compatibility observations are not native qualification.
 
 Repository scopes use local native filesystem paths. Foreign-platform absolute paths and
 Windows UNC paths resolve to `unknown` without probing the network; existing scope ids

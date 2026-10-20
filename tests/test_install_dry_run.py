@@ -54,14 +54,17 @@ class UpgradePlanTest(unittest.TestCase):
 
     def test_names_the_release_a_real_upgrade_deletes(self) -> None:
         self.assertIn(
-            f"would move the previous release {self.first} aside, then delete",
+            f"would delete the previous release {self.first} in place",
             self.said,
         )
         self.assertIn("no way back", self.said)
 
-    def test_says_provider_config_is_left_alone(self) -> None:
+    def test_says_provider_hooks_would_be_reconciled(self) -> None:
         self.assertNotIn("config keys", self.said)
-        self.assertIn("would not touch provider settings", self.said)
+        self.assertIn(
+            "reconcile the muninn lifecycle and prompt hooks", self.said
+        )
+        self.assertIn("trust its hooks", self.said)
 
     def test_explains_history_import_would_be_skipped(self) -> None:
         self.assertIn(

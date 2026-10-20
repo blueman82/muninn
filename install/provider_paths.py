@@ -13,16 +13,21 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install.constants import CLAUDE_EVENTS
+from install.constants import CLAUDE_EVENTS, CURSOR_EVENTS
 from install.context import Ctx
 from install.provider_apps import installed
-from install.transforms import ours
+from install.transforms import cursor_handlers, cursor_ours, ours
 from install.trust import codex_hooks
 from muninn import platform_windows
 from muninn.platform_io import open_regular
 
 _VERBS = {
     "SessionStart": "session-start",
+    "SessionEnd": "session-end",
+    "PreCompact": "pre-compact",
+    "sessionStart": "session-start",
+    "sessionEnd": "session-end",
+    "preCompact": "pre-compact",
     "UserPromptSubmit": "prompt",
 }
 
@@ -48,11 +53,17 @@ def _windows_command(ctx: Ctx, verb: str, provider: str) -> str:
     )
 
 
-def cursor_command(ctx: Ctx) -> str:
-    """Return Cursor's hook command using the native installed launcher."""
+def cursor_command(ctx: Ctx, event: str = "preCompact") -> str:
+    """Return Cursor's event command using the native installed launcher."""
+    verb = _VERBS[event]
     if ctx.platform == "win32":
-        return _windows_command(ctx, "pre-compact", "cursor")
-    return f"{shlex.quote(str(ctx.muninn))} hook pre-compact --provider cursor"
+        return _windows_command(ctx, verb, "cursor")
+    return f"{shlex.quote(str(ctx.muninn))} hook {verb} --provider cursor"
+
+
+def cursor_commands(ctx: Ctx) -> dict[str, str]:
+    """Return the full set of event commands owned by this installation."""
+    return {event: cursor_command(ctx, event) for event in CURSOR_EVENTS}
 
 
 def render_pinned(ctx: Ctx, relative: str, data: bytes) -> bytes:
@@ -74,8 +85,9 @@ def render_pinned(ctx: Ctx, relative: str, data: bytes) -> bytes:
         return data.replace(b"@HOME@", str(ctx.home).encode())
     doc: dict[str, Any] = json.loads(data)
     if "/cursor/" in relative:
-        [handler] = doc["hooks"]["preCompact"]
-        handler["command"] = cursor_command(ctx)
+        for event, handlers in doc["hooks"].items():
+            for handler in handlers:
+                handler["command"] = cursor_command(ctx, event)
         return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()
     provider = "claude" if "/claude/" in relative else "codex"
     for event, groups in doc["hooks"].items():
@@ -146,6 +158,18 @@ def hook_invocations(ctx: Ctx) -> list[list[str]]:
         calls.extend(
             shlex.split(hook["command"])
             for hook in codex_hooks(path.read_bytes(), platform=ctx.platform)
+        )
+    if (
+        ctx.cursor_hooks
+        and installed(ctx, "cursor")
+        and ctx.cursor_settings.exists()
+    ):
+        doc = ce.load_json(ce.read_file(ctx.cursor_settings))
+        calls.extend(
+            shlex.split(command)
+            for event, command in cursor_commands(ctx).items()
+            for handler in cursor_handlers(doc, event)
+            if cursor_ours(handler, command)
         )
     return calls
 

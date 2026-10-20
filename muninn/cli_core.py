@@ -9,12 +9,16 @@ prints nothing (the poller).
 from __future__ import annotations
 
 import sqlite3
-from argparse import Namespace
+from argparse import ArgumentTypeError, Namespace
 from collections.abc import Callable, Mapping
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter, ValidationError
+
 from muninn import store
+from muninn.knowledge_models import KnowledgeId, RequestId
 
 __all__ = [
     "WRITER_WAIT_S",
@@ -99,6 +103,31 @@ def counts(out: Mapping[str, Any]) -> dict[str, int]:
     }
 
 
-def knowledge_id(entry: Mapping[str, Any]) -> int:
-    """Return the numeric part of an entry id such as ``K12``."""
-    return int(entry["id"][1:])
+def knowledge_argument(value: str) -> KnowledgeId:
+    """Require the typed knowledge UUID rather than an integer alias."""
+    try:
+        return TypeAdapter(KnowledgeId).validate_python(value, strict=True)
+    except ValidationError:
+        raise ArgumentTypeError("invalid_knowledge_id") from None
+
+
+def request_argument(value: str) -> RequestId:
+    """Require the typed review request UUID."""
+    try:
+        return TypeAdapter(RequestId).validate_python(value, strict=True)
+    except ValidationError:
+        raise ArgumentTypeError("invalid_request_id") from None
+
+
+def knowledge_id(entry: Mapping[str, Any]) -> KnowledgeId:
+    """Return a validated opaque knowledge identity for content-free logs."""
+    return TypeAdapter(KnowledgeId).validate_python(entry["id"], strict=True)
+
+
+def write_store[T](home: Path, work: Callable[[sqlite3.Connection], T]) -> T:
+    """Run one checked writer operation under the existing shared lock."""
+    with (
+        store.writer_lock(home, wait_s=WRITER_WAIT_S),
+        closing(store.connect_rw(store.db_path(home))) as conn,
+    ):
+        return work(conn)

@@ -1,7 +1,7 @@
 """Secret redaction for text that is about to be stored or shown.
 
 The patterns here are the privacy boundary of the whole store: every event
-text and knowledge entry text passes through ``redact`` before it is
+text and knowledge entry text passes through these patterns before it is
 written. Do not edit a pattern without re-running the hostile-input tests.
 """
 
@@ -99,6 +99,32 @@ SECRET_PATTERNS = (
 )
 
 
+def _secret_spans(text: str) -> list[tuple[int, int]]:
+    """Find ordered secret spans, merging overlaps but keeping adjacency."""
+    spans: list[tuple[int, int]] = []
+    for pattern in SECRET_PATTERNS:
+        group = "v" if "v" in pattern.groupindex else 0
+        spans.extend(m.span(group) for m in pattern.finditer(text))
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _replace_spans(text: str, spans: list[tuple[int, int]]) -> str:
+    """Replace ordered disjoint spans without changing surrounding text."""
+    pieces: list[str] = []
+    pos = 0
+    for start, end in spans:
+        pieces += [text[pos:start], REDACTED]
+        pos = end
+    pieces.append(text[pos:])
+    return "".join(pieces)
+
+
 def redact(text: str) -> tuple[str, bool]:
     """Replace secret spans with ``REDACTED``.
 
@@ -111,20 +137,33 @@ def redact(text: str) -> tuple[str, bool]:
     Returns:
         The redacted text and whether it differs from ``text``.
     """
-    spans: list[tuple[int, int]] = []
-    for pattern in SECRET_PATTERNS:
-        group = "v" if "v" in pattern.groupindex else 0
-        spans.extend(m.span(group) for m in pattern.finditer(text))
-    if not spans:
-        return text, False
-    pieces: list[str] = []
-    pos = 0
-    for start, end in sorted(spans):
-        if start >= pos:
-            pieces += [text[pos:start], REDACTED]
-            pos = end
-        elif end > pos:  # overlaps the previous span: extend it
-            pos = end
-    pieces.append(text[pos:])
-    new = "".join(pieces)
+    new = _replace_spans(text, _secret_spans(text))
     return new, new != text
+
+
+def redact_parts(parts: list[str]) -> list[str]:
+    """Redact newline-composed text while retaining each field's boundary.
+
+    Args:
+        parts: Human text fields in their final projection order.
+
+    Returns:
+        Equally many fields with recognized secret spans removed. A span
+        crossing boundaries places a marker in every field it overlaps.
+    """
+    spans = _secret_spans("\n".join(parts))
+    output: list[str] = []
+    offset = cursor = 0
+    for part in parts:
+        end = offset + len(part)
+        while cursor < len(spans) and spans[cursor][1] <= offset:
+            cursor += 1
+        clipped: list[tuple[int, int]] = []
+        index = cursor
+        while offset < end and index < len(spans) and spans[index][0] < end:
+            start, stop = spans[index]
+            clipped.append((max(start - offset, 0), min(stop, end) - offset))
+            index += 1
+        output.append(_replace_spans(part, clipped))
+        offset = end + 1
+    return output

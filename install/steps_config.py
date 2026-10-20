@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 from install import configedit as ce
+from install import legacy_state
 from install.constants import (
     CODEX_VERIFIED,
     CURSOR_DOC_URL,
@@ -23,12 +25,14 @@ from install.constants import (
 )
 from install.context import Ctx, StepFailedError, dry, link_text, must
 from install.provider_apps import installed
-from install.provider_paths import codex_argv, codex_identity, cursor_command
+from install.provider_paths import codex_argv, codex_identity, cursor_commands
 from install.record import Record, codex_record, json_entry, save
 from install.transforms import (
     claude_paths,
     codex_check,
+    cursor_handlers,
     cursor_ours,
+    cursor_paths,
     drop_trust,
     edit_cursor_settings,
     edit_settings,
@@ -59,7 +63,7 @@ def choose_cursor_hooks(ctx: Ctx) -> bool:
         return False
     try:
         choice = input(
-            f"Set up Muninn's Cursor preCompact hook in "
+            f"Set up Muninn's Cursor lifecycle hooks in "
             f"{ctx.cursor_settings}? "
             "[a]utomatic or [m]anual (default m)? "
         )
@@ -76,6 +80,10 @@ def choose_cursor_hooks(ctx: Ctx) -> bool:
 
 def record(ctx: Ctx, rec: Record) -> None:
     """Snapshot the before-values of our config keys and the links."""
+    if "legacy" in rec:
+        legacy_state.validate(ctx, rec)
+        if rec.get("config_snapshot_complete"):
+            return
     settings = (
         ce.load_json(ce.read_file(ctx.settings)) if rec["has_claude"] else {}
     )
@@ -94,29 +102,28 @@ def record(ctx: Ctx, rec: Record) -> None:
         else {}
     )
     rec["cursor"] = (
-        [
-            json_entry(cursor_obj, ("version",)),
-            json_entry(cursor_obj, ("hooks", "preCompact")),
-        ]
+        [json_entry(cursor_obj, path) for path in cursor_paths()]
         if rec["cursor_hooks"]
         else []
     )
     rec["cursor_ours"] = [
-        {"index": index, "value": handler}
-        for index, handler in enumerate(
-            cursor_obj.get("hooks", {}).get("preCompact", [])
-        )
-        if cursor_ours(handler, cursor_command(ctx))
+        {
+            "event": event,
+            "event_index": ce.jget(cursor_obj, ("hooks", event))[2],
+            "index": index,
+            "value": handler,
+        }
+        for event, command in cursor_commands(ctx).items()
+        for index, handler in enumerate(cursor_handlers(cursor_obj, event))
+        if rec["cursor_hooks"] and cursor_ours(handler, command)
     ]
     links = (ctx.lib / "current", ctx.lib / "python", ctx.muninn)
     rec["links"] = {
         str(p): link_text(p) if p.is_symlink() else None for p in links
     }
     plan = (
-        "would not touch provider settings"
-        if ctx.upgrade
-        else "would note the current links and the provider "
-        "settings entries this install changes, so a failure can be undone"
+        "would note the current links and the provider settings entries "
+        "this install changes, so a failure can be undone"
     )
     if dry(ctx, plan):
         return
@@ -126,12 +133,34 @@ def record(ctx: Ctx, rec: Record) -> None:
     rec["codex_version"] = version
     rec["codex_identity"] = list(identity)
     rec["trust"] = "auto" if version else "owner"
-    ctx.rdir.mkdir(mode=PRIVATE_DIR_MODE, parents=True)
+    if "legacy" not in rec:
+        ctx.rdir.mkdir(mode=PRIVATE_DIR_MODE, parents=True)
+    if rec["has_codex"]:
+        _snapshot_cache(ctx, rec)
+    rec["config_snapshot_complete"] = True
     save(ctx, rec)
 
 
+def _snapshot_cache(ctx: Ctx, rec: Record) -> None:
+    """Complete the owned plugin-cache snapshot before any cache mutation."""
+    manifest = ce.tree_snapshot(ctx.cache)
+    backup = ctx.rdir / "codex-cache"
+    if ctx.cache.exists():
+        shutil.copytree(ctx.cache, backup)
+        if (
+            ce.tree_snapshot(backup) != manifest
+            or ce.tree_snapshot(ctx.cache) != manifest
+        ):
+            raise StepFailedError("Codex cache changed during snapshot")
+    rec["codex_cache"] = {
+        "complete": True,
+        "present": ctx.cache.exists(),
+        "manifest": {key: list(value) for key, value in manifest.items()},
+    }
+
+
 def claude(ctx: Ctx, rec: Record) -> None:
-    """Merge our two hooks into Claude settings."""
+    """Reconcile our lifecycle and prompt hooks in Claude settings."""
     if not rec["has_claude"]:
         if not installed(ctx, "claude"):
             ctx.say("Claude app not installed: setup skipped")
@@ -145,7 +174,7 @@ def claude(ctx: Ctx, rec: Record) -> None:
                 f"into {ctx.settings} after initializing Claude Code."
             )
         return
-    added = "add the muninn SessionStart and UserPromptSubmit hooks to"
+    added = "reconcile the muninn lifecycle and prompt hooks in"
     if dry(ctx, f"would {added} {ctx.settings}"):
         return
     frag = ctx.release / "integrations/claude/settings-hooks.json"
@@ -178,6 +207,22 @@ def _add_plugin(ctx: Ctx, rec: Record) -> bytes:
         StepFailedError: If Codex put the plugin somewhere unexpected, or
             its cached hooks.json is not the pinned one.
     """
+    snapshot = rec["codex_cache"]
+    current = {
+        key: list(value) for key, value in ce.tree_snapshot(ctx.cache).items()
+    }
+    backup = {
+        key: list(value)
+        for key, value in ce.tree_snapshot(ctx.rdir / "codex-cache").items()
+    }
+    if (
+        snapshot["complete"] is not True
+        or current != snapshot["manifest"]
+        or backup != snapshot["manifest"]
+    ):
+        raise StepFailedError("Codex cache changed before plugin install")
+    rec["codex_cache_changed"] = True
+    save(ctx, rec)
     before = ce.read_file(ctx.config)
     env = dict(os.environ, CODEX_HOME=str(ctx.codex_home))
     argv = codex_argv(ctx, "plugin", "add", PLUGIN_ID, "--json")
@@ -295,23 +340,24 @@ def _can_trust(ctx: Ctx, rec: Record) -> bool:
 
 
 def cursor(ctx: Ctx, rec: Record) -> None:
-    """Merge Muninn's preCompact hook into Cursor's user hooks.json."""
+    """Merge Muninn's lifecycle hooks into Cursor's user hooks.json."""
     if not rec["cursor_hooks"]:
         return
     if dry(
         ctx,
-        f"would merge Muninn's preCompact hook into {ctx.cursor_settings}",
+        f"would merge Muninn's lifecycle hooks into {ctx.cursor_settings}",
     ):
         return
     fragment = json.loads((ctx.release / CURSOR_HOOKS_PIN).read_bytes())
-    [handler] = fragment["hooks"]["preCompact"]
     ensure_private_dir(ctx.cursor_settings.parent)
     ce.create_file(ctx.cursor_settings, EMPTY_CURSOR_CONFIG, 0o600)
 
     def edit(data: bytes) -> bytes:
-        return edit_cursor_settings(data, cursor_command(ctx), handler)
+        return edit_cursor_settings(
+            data, cursor_commands(ctx), fragment["hooks"]
+        )
 
     def check(before: bytes, after: bytes) -> None:
-        ce.json_check(before, after, [("version",), ("hooks", "preCompact")])
+        ce.json_check(before, after, cursor_paths())
 
     ce.edit_file(ctx.cursor_settings, edit, check)

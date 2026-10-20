@@ -30,7 +30,9 @@ TOOL_STEPS: tuple[tuple[str, ...], ...] = (
 )
 INSTALL_HINT = (
     "install the dev tools: python3.13 -m venv .venv && "
-    ".venv/bin/pip install -r requirements-dev.txt"
+    ".venv/bin/python3.13 -m pip install --require-hashes "
+    "-r requirements-runtime.lock && .venv/bin/python3.13 -m pip install "
+    "-r requirements-dev.txt"
 )
 HOOKS_HINT = "switch the git hooks on: git config core.hooksPath .githooks"
 BARE_HINT = (
@@ -64,8 +66,8 @@ def git_output(*args: str) -> str:
 def main_checkout() -> Path:
     """Find the main working tree, which may differ from ``ROOT``.
 
-    A linked worktree has no ``.venv`` of its own; the dev tools live in the
-    main checkout, whose ``.git`` directory is the shared common dir.
+    Linked worktrees may provision their own venv; the shared Git directory
+    also identifies the main checkout for the existing tool fallback.
 
     Returns:
         The main checkout, or ``ROOT`` when git cannot say.

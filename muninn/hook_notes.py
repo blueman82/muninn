@@ -8,12 +8,12 @@ from muninn import obs
 
 
 def index_notes(home: Path) -> tuple[str, ...]:
-    """Warning lines about the index: no sign of life, or sources failing.
+    """Warning lines about the index: no sign of life, or failed attempts.
 
     Returns:
         A line when the poller shows no sign of life for 3 intervals, and a
-        line when the last finished pass could not read some sources; none
-        when both are fine.
+        line for failed read/open attempts in the last completed invocation.
+        Attempts may include subsequently recovered sources.
     """
     status = obs.read_status(home)
     fresh = obs.freshness(status)
@@ -28,15 +28,19 @@ def index_notes(home: Path) -> tuple[str, ...]:
     failed = obs.count_field(status, "failed")
     if failed:
         notes.append(
-            f"muninn: the last finished pass could not read {failed}"
-            " source(s); recent sessions may be missing."
+            f"muninn: the last finished invocation recorded {failed}"
+            " failed source read attempt(s);"
+            " may include subsequently recovered sources."
+            " Recent sessions may be missing."
             " run: muninn doctor"
         )
     unreadable = obs.count_field(status, "unreadable_files")
     if unreadable:
         notes.append(
-            f"muninn: the last pass could not open {unreadable} transcript"
-            " file(s); check file permissions. run: muninn doctor"
+            f"muninn: the last finished invocation recorded {unreadable}"
+            " failed transcript open attempt(s);"
+            " may include subsequently recovered sources."
+            " Check file permissions. run: muninn doctor"
         )
     err = obs.poller_error(status)
     if err and _failed_since_pass(status):

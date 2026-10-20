@@ -15,9 +15,12 @@ from pathlib import Path
 
 from muninn import platform_io, poller_stop, store
 from tests.ingest_support import ROOT
+from tests.review_quiescence_support import initialize
+from tests.store_support import direct_python
 from tests.test_bootstrap_guards import compile_marker, diagnose_bootstrap
 
 if sys.platform == "win32":
+    TRUSTED_PYTHON = os.environ.get("MUNINN_PYTHON", sys.executable)
 
     class NativeLauncherTests(unittest.TestCase):
         """Run the actual native wrappers, including quoting and exit codes."""
@@ -48,7 +51,7 @@ if sys.platform == "win32":
                 for key, value in os.environ.items()
                 if not key.startswith("MUNINN_")
             } | {
-                "MUNINN_PYTHON": sys.executable,
+                "MUNINN_PYTHON": TRUSTED_PYTHON,
                 "MUNINN_HOME": str(self.root / "data"),
                 "HOME": str(self.root),
             }
@@ -93,6 +96,11 @@ if sys.platform == "win32":
             self,
         ) -> None:
             self.env["MUNINN_PYTHON"] = str(self.root / "missing.exe")
+            self.env["PATH"] = (
+                str(Path(TRUSTED_PYTHON).parent)
+                + os.pathsep
+                + self.env["PATH"]
+            )
             done = self.run_cmd(["stats"])
             self.assertEqual(done.returncode, 17, done.stderr)
             self.assertEqual(done.stderr, "")
@@ -136,7 +144,7 @@ if sys.platform == "win32":
             )
             self.env.pop("MUNINN_PYTHON")
             self.env["PATH"] = (
-                str(Path(sys.executable).parent)
+                str(Path(TRUSTED_PYTHON).parent)
                 + os.pathsep
                 + self.env["PATH"]
             )
@@ -163,7 +171,7 @@ if sys.platform == "win32":
             self.env["PATH"] = os.pathsep.join(
                 [
                     str(first),
-                    str(Path(sys.executable).parent),
+                    str(Path(TRUSTED_PYTHON).parent),
                     self.env["PATH"],
                 ]
             )
@@ -259,6 +267,7 @@ if sys.platform == "win32":
             with tempfile.TemporaryDirectory() as temp:
                 home = Path(temp) / "data"
                 platform_io.ensure_private_dir(home)
+                initialize(home)
                 env = {
                     key: value
                     for key, value in os.environ.items()
@@ -270,9 +279,10 @@ if sys.platform == "win32":
                     "HOME": temp,
                 }
                 code = "from muninn.cli import main; raise SystemExit(main())"
+                executable, environment = direct_python()
                 process = subprocess.Popen(
                     [
-                        sys.executable,
+                        executable,
                         "-X",
                         "utf8",
                         "-c",
@@ -282,7 +292,7 @@ if sys.platform == "win32":
                         "30",
                     ],
                     cwd=ROOT,
-                    env=env,
+                    env=env | environment,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
@@ -297,7 +307,35 @@ if sys.platform == "win32":
                         if status.get("passes", 0):
                             break
                         if process.poll() is not None:
-                            self.fail(str(process.communicate(timeout=2)))
+                            process.communicate(timeout=2)
+                            events: list[dict[str, object]] = []
+                            log = home / "poller.log"
+                            if log.exists():
+                                for raw in log.read_bytes().splitlines()[-8:]:
+                                    with contextlib.suppress(ValueError):
+                                        entry = json.loads(raw)
+                                        if isinstance(entry, dict):
+                                            events.append(
+                                                {
+                                                    key: entry[key]
+                                                    for key in (
+                                                        "event",
+                                                        "error",
+                                                        "exc",
+                                                        "passes",
+                                                    )
+                                                    if key in entry
+                                                }
+                                            )
+                            codes = {
+                                key: status[key]
+                                for key in ("passes", "error", "poller")
+                                if key in status
+                            }
+                            self.fail(
+                                f"exit={process.returncode}, status={codes},"
+                                f" events={events}"
+                            )
                         time.sleep(0.05)
                     self.assertEqual(status.get("pid"), process.pid)
                     generation = str(status["stop_generation"])

@@ -14,17 +14,25 @@ import signal
 import sqlite3
 import sys
 import time
-import uuid
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
 from types import FrameType
 from typing import Any, cast
 
-from muninn import ingest, obs, poller_stop, store
+from muninn import (
+    ingest,
+    obs,
+    poller_stop,
+    review_quiescence_state,
+    scope,
+    store,
+)
 from muninn.cli_core import Env, Record, Result
 from muninn.cli_maint import heartbeat
 from muninn.query.index_age import ALIVE_AT
+from muninn.review_models import ReviewPolicy
+from muninn.review_supervisor import Supervisor
 
 __all__ = ["serve"]
 
@@ -91,26 +99,17 @@ class _Poller:
         self.alive_at = _NEVER  # monotonic time of the last write
         self.beat_failed = False  # logged already in this pass
         self.stop_requested = False  # a stop signal has arrived
-        self.stop_generation = uuid.uuid4().hex
+        self.stop_generation: str | None = None
+        self.supervisor: Supervisor | None = None
+        self.owner: int | None = None
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
-        """Stop now if idle, else after the open transaction ends."""
-        # Remembered on the poller too: the connection wrapper below is made
-        # anew each pass, so its flag is lost if no COMMIT or ROLLBACK ever
-        # goes through it (SQLite can roll back by itself).
+        """Remember stopping without touching interrupted resources."""
         self.stop_requested = True
-        conn = self.conn
-        try:
-            busy = conn is not None and conn.in_transaction
-        except sqlite3.ProgrammingError:  # already closed
-            busy = False
-        if conn is not None and busy:
-            conn.stop = True  # finish this source's transaction first
-        else:
-            raise _ServeStopError
 
     def prepare(self) -> None:
         """Tighten the log mode, install signal handlers, log the start."""
+        self._start_review()
         # launchd opens StandardOutPath before Umask applies, leaving it
         # 0644; the log must be owner-only.
         with contextlib.suppress(FileNotFoundError):  # not run by launchd
@@ -139,9 +138,54 @@ class _Poller:
             },
         )
 
+    def _start_review(self) -> None:
+        """Acquire lifetime ownership with the installed explicit policy."""
+        try:
+            with contextlib.closing(
+                store.connect_ro(store.db_path(self.home))
+            ) as conn:
+                row = conn.execute(
+                    "SELECT admission,policy_json FROM review_control"
+                ).fetchone()
+        except store.StoreUnavailableError:
+            row = None
+        if row is not None and row[0] and row[1] is not None:
+            self.supervisor = Supervisor(
+                self.home, ReviewPolicy.model_validate_json(row[1])
+            )
+            self.supervisor.start(time.time())
+            self.stop_generation = self.supervisor.stop_generation
+        else:
+            try:
+                self.owner, self.stop_generation = (
+                    review_quiescence_state.begin_owner(self.home)
+                )
+            except BlockingIOError:
+                raise ValueError("supervisor_busy") from None
+
+    def close(self) -> None:
+        """Retain ownership through monitor containment and fencing."""
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+        if self.supervisor is not None:
+            self.supervisor.stop(time.time())
+        if self.owner is not None:
+            assert self.stop_generation is not None
+            review_quiescence_state.complete_owner(
+                self.home, self.owner, self.stop_generation
+            )
+            os.close(self.owner)
+            self.owner = None
+
+    def _review_tick(self) -> None:
+        """Advance SQLite only on main between ingestion transactions."""
+        if self.supervisor is not None and not self.stop_requested:
+            self.supervisor.tick(time.time())
+
     def _requested(self) -> bool:
         """Remember a native stop request at a transaction boundary."""
-        if sys.platform == "win32" and poller_stop.requested(
+        if self.stop_generation is not None and poller_stop.requested(
             self.home, os.getpid(), self.stop_generation
         ):
             self.stop_requested = True
@@ -150,9 +194,16 @@ class _Poller:
     def _alive(self) -> None:
         """Record that a pass is making progress, at most every few seconds.
 
-        Called only from inside a pass that holds the writer lock, so a
-        poller that keeps failing or finding the lock busy never earns it.
+        Called during source work or real unlocked Git preparation. Busy
+        acquisitions never earn it; only a terminal pass earns a heartbeat.
+
+        Raises:
+            _ServeStopError: If a signal is pending outside a transaction.
         """
+        if self._requested() and (
+            self.conn is None or not self.conn.in_transaction
+        ):
+            raise _ServeStopError
         now = time.monotonic()
         if now - self.alive_at < ALIVE_EVERY_S:
             return
@@ -192,22 +243,37 @@ class _Poller:
             obs.write_status(self.home, {ALIVE_AT: None})
 
     def _ingest(self) -> ingest.PassStats:
-        """Run one ingest pass under the writer lock, never waiting for it."""
-        with store.writer_lock(self.home, wait_s=0):
-            raw = store.connect_rw(store.db_path(self.home))
-            # The proxy only adds a stop hook around COMMIT/ROLLBACK and
-            # forwards every other attribute, so it stands in for the
-            # connection.
-            self.conn = _StopAfterCommit(raw, self._requested)
+        """Run writer passes and unlocked Git preparation without waiting."""
+        started, total = time.monotonic(), ingest.PassStats()
+        facts: scope.CommitFacts = {}
+        while True:
+            if self._requested():
+                raise _ServeStopError
             try:
-                return ingest.ingest(
-                    cast(sqlite3.Connection, self.conn),
-                    self.roots,
-                    on_source=self._alive,
-                )
-            finally:
-                raw.close()
-                self.conn = None
+                with store.writer_lock(self.home, wait_s=0):
+                    raw = store.connect_rw(store.db_path(self.home))
+                    self.conn = _StopAfterCommit(raw, self._requested)
+                    try:
+                        stats = ingest.ingest(
+                            cast(sqlite3.Connection, self.conn),
+                            self.roots,
+                            on_source=self._alive,
+                            commit_facts=facts,
+                        )
+                    finally:
+                        raw.close()
+                        self.conn = None
+            except ingest.IngestPreparationRequiredError as pending:
+                total.accumulate(pending.stats)
+                self._alive()
+                scope.prepare_commit(pending.lookup, facts)
+                self._alive()
+            else:
+                if self._requested():
+                    raise _ServeStopError
+                total.accumulate(stats)
+                total.duration_s = time.monotonic() - started
+                return total
 
     def _record_pass(self, stats: ingest.PassStats) -> None:
         """Write the heartbeat and, on news or once an hour, a log line."""
@@ -222,6 +288,8 @@ class _Poller:
             passes=self.passes,
             busy_skips=self.skipped,
         )
+        if self.stop_requested:
+            raise _ServeStopError
         news = bool(stats.files_changed or stats.failed)
         self.quiet = 0 if news else self.quiet + 1
         if news or self.quiet % self.idle_every == 0:
@@ -262,22 +330,21 @@ class _Poller:
         try:
             while not self._requested():
                 began = time.monotonic()
+                self._review_tick()
                 self.step()
+                self._review_tick()
                 if not self.stop_requested:
                     # Sleep the rest of the interval so a slow pass does not
                     # stretch the cadence.
                     remaining = max(
                         0.0, self.interval - (time.monotonic() - began)
                     )
-                    if sys.platform == "win32":
-                        self.stop_requested = poller_stop.wait(
-                            self.home,
-                            os.getpid(),
-                            self.stop_generation,
-                            remaining,
-                        )
-                    else:
-                        time.sleep(remaining)
+                    deadline = time.monotonic() + remaining
+                    while not self._requested() and remaining > 0:
+                        time.sleep(min(0.1, remaining))
+                        self._review_tick()
+                        remaining = deadline - time.monotonic()
+
         except _ServeStopError:
             pass
         obs.log_poller(self.home, {"event": "stop", "passes": self.passes})
@@ -354,4 +421,10 @@ def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             obs.write_status(
                 home, {"last_error": name, "last_error_at": time.time()}
             )
-        return 1, None
+        return 1, (
+            {"error": "supervisor_busy"}
+            if str(exc) == "supervisor_busy"
+            else None
+        )
+    finally:
+        poller.close()

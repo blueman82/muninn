@@ -89,6 +89,20 @@ class ParseStart:
     saved: str | None
     parent_id: int | None
 
+    @classmethod
+    def from_source(
+        cls, prior: sqlite3.Row | None, parent_id: int | None
+    ) -> ParseStart:
+        """Return a source's saved parse cursor, or the file start."""
+        if prior is None:
+            return cls((0, 0), (None, None), None, parent_id)
+        return cls(
+            (prior["cursor_bytes"], prior["cursor_line"]),
+            (prior["anchor_offset"], prior["anchor_sha256"]),
+            prior["parse_state"],
+            parent_id,
+        )
+
 
 @dataclass(frozen=True)
 class ParseResult:
@@ -130,6 +144,7 @@ def parse_source(
     source_id: int,
     start: ParseStart,
     scopes: dict[str | None, int],
+    facts: scope.CommitFacts,
 ) -> ParseResult:
     """Classify and insert the new lines of one source.
 
@@ -139,11 +154,12 @@ def parse_source(
         source_id: Its source row id.
         start: Where to begin reading.
         scopes: Cache of cwd to scope id, shared across sources of a pass.
+        facts: Invocation-local Git observations; misses interrupt the pass.
 
     Returns:
         The progress to commit and the counts gathered.
     """
-    return _SourceParser(conn, w, source_id, start, scopes).run()
+    return _SourceParser(conn, w, source_id, start, scopes, facts).run()
 
 
 class _SourceParser:
@@ -156,6 +172,7 @@ class _SourceParser:
         source_id: int,
         start: ParseStart,
         scopes: dict[str | None, int],
+        facts: scope.CommitFacts,
     ) -> None:
         """Load resume state, line tombstones and the fork-prefix hashes."""
         self.conn = conn
@@ -163,6 +180,7 @@ class _SourceParser:
         self.source_id = source_id
         self.start = start
         self.scopes = scopes
+        self.facts = facts
         self.provider = PROVIDER[w.name]
         self.state, self.pending, self.extra = _load_state(start.saved, w.info)
         self.events_of = (
@@ -284,7 +302,10 @@ class _SourceParser:
         if cwd not in self.scopes:
             # The commit hint lets a deleted cwd resolve to its repo.
             self.scopes[cwd] = scope.scope_id(
-                self.conn, cwd or "", self.w.info.commit_hash
+                self.conn,
+                cwd or "",
+                self.w.info.commit_hash,
+                commit_facts=self.facts,
             )
         parent = None
         if ev.kind == "tool_error" and ev.call_id:

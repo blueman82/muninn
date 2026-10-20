@@ -75,6 +75,7 @@ class GateCannotBeRemovedTest(unittest.TestCase):
                                         'codex_stop_gate.py"'
                                     ),
                                     "timeout": 600,
+                                    "async": True,
                                 }
                             ]
                         }

@@ -6,6 +6,18 @@
         "command": "@HOME@/.local/bin/muninn hook pre-compact --provider cursor",
         "timeout": 90
       }
+    ],
+    "sessionStart": [
+      {
+        "command": "@HOME@/.local/bin/muninn hook session-start --provider cursor",
+        "timeout": 90
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "@HOME@/.local/bin/muninn hook session-end --provider cursor",
+        "timeout": 90
+      }
     ]
   }
 }

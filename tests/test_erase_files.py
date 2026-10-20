@@ -1,7 +1,7 @@
 """Erase contract: tombstone files, scope reporting and residue filters.
 
 Synthetic provider trees and a temp MUNINN_HOME only (IngestCase); knowledge
-rows are inserted directly.  Canaries are synthetic.
+uses selected physical originals and checked proposals. Canaries are synthetic.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 
 from muninn import erase, store
 from tests.erase_support import CANARY, EraseCase, digest
+from tests.review_quiescence_support import initialize
 from tests.store_support import assert_private
 from tests.test_classify import codex_meta, user_msg
 from tests.test_ingest import HOLD_LOCK, ROOT, TID, primary, rollout
@@ -49,7 +50,7 @@ class TombstoneFileTests(EraseCase):
         logs = json.dumps(
             [
                 tuple(r)
-                for r in self.conn.execute("SELECT * FROM knowledge_log")
+                for r in self.conn.execute("SELECT * FROM review_receipt")
             ]
         )
         journal = (self.home / "tombstones.jsonl").read_text()
@@ -115,8 +116,13 @@ class ScopeOfEraseTests(EraseCase):
             self.assertTrue(any(note in n for n in not_covered))
 
     def test_run_erase_takes_the_writer_lock(self) -> None:
+        self.conn.close()
+        initialize(self.home)
+        self.conn = store.connect_rw(store.db_path(self.home))
+        self.addCleanup(self.conn.close)
         self.write(rollout(), primary())
         self.run_ingest()
+        self.conn.close()
         holder = subprocess.Popen(
             [
                 sys.executable,
@@ -142,6 +148,8 @@ class ScopeOfEraseTests(EraseCase):
         holder.wait()
         out = erase.run_erase(self.home, session=TID, env=self.env)
         self.assertEqual(out["events"], 2)
+        self.conn = store.connect_ro(store.db_path(self.home))
+        self.addCleanup(self.conn.close)
         self.assertEqual(len(self.events()), 0)
 
 
@@ -164,21 +172,24 @@ class ResidueFilterTests(EraseCase):
         self.write(rollout(), primary())
         self.write(rollout("thr-keep"), primary("thr-keep"))
         self.run_ingest()
-        gone = self.knowledge("only from the erased", [(TID, 2, 1, "q one")])
-        kept = self.knowledge(
-            "two sources", [(TID, 3, 1, "a one"), ("thr-keep", 2, 1, "q one")]
-        )
+        gone = self.note("only from the erased", TID)
+        mixed = self.note("two sources", TID, 3, additional=(("thr-keep", 2),))
+        kept = self.note("independent surviving fact", "thr-keep", 3)
         out = self.erase(session=TID)
-        status = dict(self.conn.execute("SELECT id, status FROM knowledge"))
-        self.assertEqual((status[gone], status[kept]), ("erased", "current"))
-        self.assertEqual((out["knowledge"], out["citations"]), (1, 2))
-        quotes = [
+        states = dict(self.conn.execute("SELECT id,state FROM knowledge"))
+        self.assertEqual(
+            (states[gone], states[mixed], states[kept]),
+            ("erased", "erased", "active"),
+        )
+        self.assertEqual((out["knowledge"], out["evidence"]), (2, 2))
+        excerpts = [
             r[0]
             for r in self.conn.execute(
-                "SELECT quote FROM citation WHERE state = 'live'"
+                "SELECT excerpt FROM review_evidence WHERE state='live' "
+                "AND thread_id='thr-keep' AND line=2"
             )
         ]
-        self.assertEqual(quotes, ["q one"])  # the surviving session's quote
+        self.assertEqual(excerpts, ["q one"])
 
 
 class RefFormatTests(EraseCase):

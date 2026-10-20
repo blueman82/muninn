@@ -161,7 +161,7 @@ def _knowledge_part(
     everywhere: bool,
     push_only: bool,
 ) -> Answer:
-    """Return the knowledge hits and, for a pull, the expired-omitted count."""
+    """Return current previews and supported expired omission counts."""
     part: Answer = {
         "knowledge": knowledge(conn, fts, ids, everywhere, push_only=push_only)
     }
@@ -233,7 +233,8 @@ def search(
     """Return ranked events and knowledge: OR of terms, bm25.
 
     Default scope is the repo of cwd (worktrees and subdirs fold in) plus
-    global knowledge; ``scope`` narrows to events whose cwd equals it
+    global transcript scope; knowledge stays in its mapped project.
+    ``scope`` narrows to events whose cwd equals it
     exactly, ``all_projects`` drops the filter. The caller's own session
     (env, or ``current_session``) is left out unless ``include_current``.
     ``session`` lists matches in one session (a root or unambiguous
@@ -249,11 +250,11 @@ def search(
             ``kinds``, ``provider``, ``since``, ``until``, ``session``,
             ``recent``, ``limit`` (default 10), ``page`` (default 1),
             ``include_current``, ``scope``, ``include_subagents``,
-            ``current_session``, ``per_session_cap`` (default PER_SESSION; a
-            tuning knob, not a CLI flag), ``terms`` (query-term rule, default
-            ``list``; also a tuning knob), ``push_only`` (knowledge a hook may
-            push; the CLI also gets restricted entries, flagged) and
-            ``status`` (a parsed status.json).
+            ``current_session``, ``per_session_cap`` (default PER_SESSION;
+            a tuning knob, not a CLI flag), ``terms`` (query-term rule,
+            default ``list``; also a tuning knob), ``push_only`` (current
+            eligible knowledge requested by a hook) and ``status`` (a
+            parsed status.json).
 
     Returns:
         The answer, or ``{"error": code}`` for bad input.

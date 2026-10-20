@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
 from install.context import Ctx, run_real
-from muninn import platform_windows
+from muninn import knowledge_read, platform_windows, store
+from muninn.knowledge_models import Scope
 from tests.provider_native import (
     baselines,
     emitter_baseline,
+    fixture,
     pe_machine,
     prove_hooks,
 )
@@ -82,8 +88,10 @@ class MachineCodesTest(unittest.TestCase):
             with (
                 mock.patch("tests.provider_native.configedit.atomic_write"),
                 mock.patch(
-                    "tests.provider_native.hook_invocations",
-                    return_value=[["synthetic"]],
+                    "tests.provider_native._context_calls",
+                    return_value=[
+                        ["synthetic", "session-start", "--provider", "claude"]
+                    ],
                 ),
                 mock.patch(
                     "tests.provider_native.subprocess.run",
@@ -167,8 +175,10 @@ class MachineCodesTest(unittest.TestCase):
             with (
                 mock.patch("tests.provider_native.configedit.atomic_write"),
                 mock.patch(
-                    "tests.provider_native.hook_invocations",
-                    return_value=[["synthetic"]],
+                    "tests.provider_native._context_calls",
+                    return_value=[
+                        ["synthetic", "session-start", "--provider", "claude"]
+                    ],
                 ),
                 mock.patch(
                     "tests.provider_native.subprocess.run",
@@ -197,3 +207,79 @@ class MachineCodesTest(unittest.TestCase):
         ):
             self.assertEqual(emitter_baseline({}), {})
             run.assert_not_called()
+
+
+class NativeFixtureTests(unittest.TestCase):
+    """Keep fixture content checked without claiming native host acceptance."""
+
+    def test_windows_fixture_preserves_trusted_python_selection(self) -> None:
+        """Keep the private interpreter selected by the native proof host."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Ctx(
+                Path(tmp).resolve() / "home",
+                run_real,
+                "synthetic",
+                platform="win32",
+            )
+            trusted = str(Path(tmp).resolve() / "private-python.exe")
+            with mock.patch.dict(os.environ, {"MUNINN_PYTHON": trusted}):
+                env = fixture(ctx, lambda phase: None)
+            self.assertEqual(env["MUNINN_PYTHON"], trusted)
+            self.assertEqual(
+                json.loads((ctx.lib / "selection.json").read_text())["python"],
+                trusted,
+            )
+
+    def test_rendered_context_routes_accept_native_lifecycle_payloads(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Ctx(
+                Path(tmp).resolve() / "space café 雪 owner's $ % home",
+                run_real,
+                "synthetic",
+            )
+            env = fixture(ctx, lambda phase: None)
+            with (
+                mock.patch(
+                    "install.provider_paths.installed", return_value=False
+                ),
+                mock.patch.dict(
+                    os.environ, {"MUNINN_NATIVE_SCRATCH": str(ctx.data)}
+                ),
+            ):
+                results = prove_hooks(ctx, env)
+            self.assertTrue(
+                (
+                    ctx.data
+                    / "muninn-native-diagnostics/muninn-provider-proof.json"
+                ).is_file()
+            )
+            self.assertEqual(len(results), 2)
+            self.assertEqual([item["route"] for item in results], [0, 1])
+
+    def test_fixture_retains_real_normalized_support_and_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve() / "home"
+            ctx = Ctx(home, run_real, "synthetic", platform=sys.platform)
+            phases: list[str] = []
+            fixture(ctx, phases.append)
+            with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
+                views = knowledge_read.search_knowledge(
+                    conn, "nativealpha", Scope(project_id=str(home), task=None)
+                )
+                self.assertEqual(len(views), 1)
+                self.assertIsNotNone(views[0].body)
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM review_receipt"
+                    ).fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT count(*) FROM knowledge_support"
+                    ).fetchone()[0],
+                    1,
+                )
+            self.assertIn("fixture_knowledge", phases)

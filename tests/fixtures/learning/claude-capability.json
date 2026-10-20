@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "provenance": "synthetic",
+  "runner": "claude_cli",
+  "version": "2.1.295",
+  "status": "unverified",
+  "purpose": "Unit fixture only; never native proof or executable admission",
+  "empty_mcp": "{\"mcpServers\":{}}",
+  "observed": {
+    "runner": null,
+    "version": null,
+    "model": null,
+    "reasoning": null
+  },
+  "usage": null,
+  "output_contract_digest": "825d7f3411cab299fff557b907276c44037c50c37ffd5697d4a7c982a271590d"
+}

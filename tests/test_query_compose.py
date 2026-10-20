@@ -6,7 +6,7 @@ import json
 import time
 from typing import Any
 
-from muninn import scope
+from muninn import knowledge_write, scope
 from tests.query_support import NOTICE, QueryCase
 
 
@@ -220,77 +220,58 @@ class SearchAroundTests(QueryCase):
         self.repo = self.add_scope("/repo")
         self.beta = self.add_scope("/proj/beta")
 
-    def know(
-        self,
-        text: str,
-        scope_id: int | None = None,
-        status: str = "current",
-        **kw: Any,
-    ) -> int:
-        """Insert one knowledge entry.
-
-        Args:
-            text: The entry text.
-            scope_id: The scope; defaults to the repo scope.
-            status: The entry status, such as ``current``.
-            **kw: Overrides for ``kind``, ``actor`` and ``at``.
-
-        Returns:
-            The knowledge id.
-        """
-        row = {"kind": "decision", "actor": "claude:abc", "at": 1790000000.0}
-        row |= kw
-        cursor = self.rw.execute(
-            "INSERT INTO knowledge(scope_id, kind, text, status, actor,"
-            " created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                scope_id or self.repo,
-                row["kind"],
-                text,
-                status,
-                row["actor"],
-                row["at"],
-            ),
-        )
-        assert cursor.lastrowid is not None
-        return cursor.lastrowid
-
     def test_knowledge_hits_first(self) -> None:
         wide = scope.global_scope_id(self.rw)
-        k1 = self.know("use zebra caching for lookups")
-        self.rw.execute(
-            "INSERT INTO citation(knowledge_id, provider, thread_id, line,"
-            " part, line_sha256, role, kind) VALUES (?, 'codex', 'thr', 12,"
-            " 1, 'h', 'user', 'prompt')",
-            (k1,),
+        k1 = self.add_note(self.repo, "use zebra caching for lookups")
+        k2 = self.add_note(wide, "global zebra preference", kind="fact")
+        old = self.add_note(self.repo, "old zebra decision")
+        self.add_note(
+            self.repo,
+            "current apple decision",
+            action="replace",
+            knowledge_id=old,
+            expected_revision=1,
         )
-        k2 = self.know("global zebra preference", scope_id=wide, kind="fact")
-        self.know("old zebra decision", status="superseded")
-        self.know("retracted zebra", status="retracted")
-        self.know("beta zebra decision", scope_id=self.beta)
-        self.know("unrelated apples")
+        withdrawn = self.add_note(self.repo, "retracted zebra")
+        knowledge_write.retract_knowledge(
+            self.rw, withdrawn, 1, "Synthetic withdrawal", time.time()
+        )
+        beta = self.add_note(self.beta, "beta zebra decision")
+        self.add_note(self.repo, "unrelated apples")
         self.add_event(self.add_source("a"), self.repo, "an event about zebra")
         self.noise(self.repo)
         got = self.search("zebra")
         self.assertLess(list(got).index("knowledge"), list(got).index("hits"))
         entries = {e["id"]: e for e in got["knowledge"]}
-        self.assertEqual(set(entries), {f"K{k1}", f"K{k2}"})
-        first = entries[f"K{k1}"]
+        self.assertEqual(set(entries), {k1})
+        first = entries[k1]
         self.assertEqual(first["kind"], "decision")
-        self.assertEqual(first["scope"], "repo")
-        self.assertEqual(first["actor"], "claude:abc")
-        self.assertEqual(first["date"], "2026-09-21")
+        self.assertEqual(first["scope"], {"project_id": "/repo", "task": None})
+        self.assertEqual(
+            (first["revision"], first["state"], first["form"]),
+            (1, "active", "note"),
+        )
         self.assertEqual(first["text"], "use zebra caching for lookups")
-        self.assertEqual(first["cites"], ["codex:thr:12.1"])
-        self.assertEqual(entries[f"K{k2}"]["cites"], [])
-        self.assertEqual(len(got["hits"]), 1)  # episodic memory stays apart
+        evidence = self.rw.execute(
+            "SELECT evidence_id FROM knowledge_support WHERE knowledge_id=?",
+            (k1,),
+        ).fetchone()[0]
+        self.assertEqual(first["evidence_refs"], [evidence])
+        self.assertEqual(len(got["hits"]), 1)
         self.assertEqual(self.search("zebra", page=2)["knowledge"], [])
         every = self.search("zebra", all_projects=True)["knowledge"]
-        self.assertEqual(len(every), 3)  # top 3 of the 3 current ones
+        self.assertEqual({entry["id"] for entry in every}, {k1, k2, beta})
+        self.assertEqual(
+            self.rw.execute(
+                "SELECT count(*) FROM knowledge_version WHERE knowledge_id=?",
+                (old,),
+            ).fetchone()[0],
+            2,
+        )
 
     def test_knowledge_top_3_and_no_drilldown_section(self) -> None:
         for i in range(5):
-            self.know(f"zebra decision {i}")
+            self.add_note(self.repo, f"zebra decision {i}")
         self.add_event(self.add_source("a"), self.repo, "zebra event")
         self.noise(self.repo)
         self.assertEqual(len(self.search("zebra")["knowledge"]), 3)
@@ -315,24 +296,28 @@ class SearchAroundTests(QueryCase):
         wide = self.search("zebra", all_projects=True)
         self.assertEqual(wide["other_scopes"], {})
 
-    def test_knowledge_text_is_cut_and_only_live_cites_show(self) -> None:
-        k = self.know("zebra " + "long " * 100)
-        for state, line in (
-            ("erased", 1),
-            ("live", 2),
-            ("live", 3),
-            ("live", 4),
-        ):
-            self.rw.execute(
-                "INSERT INTO citation(knowledge_id, provider, thread_id,"
-                " line, part, line_sha256, role, kind, state) VALUES"
-                " (?, 'codex', 'thr', ?, 1, 'h', 'user', 'prompt', ?)",
-                (k, line, state),
-            )
+    def test_preview_is_cut_and_erased_support_withholds_knowledge(
+        self,
+    ) -> None:
+        ident = self.add_note(self.repo, "zebra " + "long " * 100)
         self.noise(self.repo)
         entry = self.search("zebra")["knowledge"][0]
         self.assertEqual(len(entry["text"]), 300)
-        self.assertEqual(entry["cites"], ["codex:thr:2.1", "codex:thr:3.1"])
+        supports = [
+            row[0]
+            for row in self.rw.execute(
+                "SELECT evidence_id FROM knowledge_support "
+                "WHERE knowledge_id=?",
+                (ident,),
+            )
+        ]
+        self.assertEqual(entry["evidence_refs"], supports)
+        self.rw.execute(
+            "UPDATE review_evidence SET state='erased',excerpt=NULL "
+            "WHERE id=?",
+            (supports[0],),
+        )
+        self.assertEqual(self.search("zebra")["knowledge"], [])
 
     def test_exact_cwd_mode_counts_other_cwds_as_outside(self) -> None:
         self.add_event(

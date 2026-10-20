@@ -14,17 +14,76 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from muninn import hook, hook_cursor, obs, store
+from muninn import hook, hook_cursor, hook_learn, obs, store
 
 __all__ = ["HOOKS", "PROVIDERS", "hook_main"]
 
 PROVIDERS = ("claude", "codex", "cursor")
 type HookRunner = Callable[..., dict[str, Any]]
+
+
+def _session_start(
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Refresh verified start events using the native context envelope."""
+    trace = {} if trace is None else trace
+    if provider == "cursor":
+        cwd = hook_cursor.refresh_start(payload, provider, env, trace=trace)
+        if cwd is None:
+            return {}
+        env = {**env, "CURSOR_PROJECT_DIR": cwd}
+    elif not hook_learn.valid_event(
+        provider, "session-start", hook.as_payload(payload)
+    ):
+        trace["skipped"] = "native_event_unavailable"
+        return {}
+    out = hook.session_start(payload, provider, env, trace=trace)
+    if provider == "cursor" and out:
+        specific = hook.as_payload(out["hookSpecificOutput"])
+        return {"additional_context": specific["additionalContext"]}
+    return out
+
+
+def _session_end(
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Capture the committed end prefix using an empty native envelope."""
+    trace = {} if trace is None else trace
+    if provider == "cursor":
+        return hook_cursor.session_end(payload, provider, env, trace=trace)
+    hook_learn.capture_event(payload, provider, "session-end", env, trace)
+    return {}
+
+
+def _pre_compact(
+    payload: object,
+    provider: str,
+    env: Mapping[str, str],
+    *,
+    trace: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Capture before compaction after the existing exact Cursor refresh."""
+    trace = {} if trace is None else trace
+    if provider == "cursor":
+        return hook_cursor.pre_compact(payload, provider, env, trace=trace)
+    hook_learn.capture_event(payload, provider, "pre-compact", env, trace)
+    return {}
+
+
 # Tests patch entries in this dict, so it must stay the one shared object.
 HOOKS: dict[str, HookRunner] = {
-    "session-start": hook.session_start,
+    "session-start": _session_start,
     "prompt": hook.prompt_submit,
-    "pre-compact": hook_cursor.pre_compact,
+    "session-end": _session_end,
+    "pre-compact": _pre_compact,
 }
 
 
@@ -123,7 +182,7 @@ def hook_main(argv: Sequence[str], env: Mapping[str, str]) -> int:
     out: dict[str, Any] = {}
     if run and provider:
         out = _run_hook(run, payload, provider, env, trace)
-    body = json.dumps(out)
+    body = json.dumps(out, separators=(",", ":"))
     with contextlib.suppress(OSError):  # a closed pipe must not fail us
         print(body)
         sys.stdout.flush()

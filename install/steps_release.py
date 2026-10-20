@@ -1,23 +1,18 @@
-"""Install steps that manage the pinned release and the launchd job.
-
-``pin`` unpacks the commit into ``lib/<sha>`` and relinks; ``restart`` and
-``start_new`` bring the job up on it; ``prune`` removes superseded releases.
-"""
+"""Prepare immutable releases, activate them and manage native jobs."""
 
 from __future__ import annotations
 
 import io
-import json
 import os
 import plistlib
 import shutil
-import sys
 import tarfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
 from install import configedit as ce
+from install import legacy_baseline as baseline
 from install import lifecycle
 from install.constants import (
     GIT_ENV,
@@ -37,6 +32,7 @@ from install.context import (
 from install.provider_paths import render_pinned
 from install.record import Record
 from install.release_io import publish, write_private, write_selection
+from install.runtime import prepare_runtime, retired_runtimes
 from muninn import platform_io
 from muninn.cursor_import import default_database
 from muninn.obs_service import literal, powershell
@@ -105,36 +101,45 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
                 path.write_bytes(render_pinned(ctx, relative, data))
 
 
+def prepare_release(ctx: Ctx, rec: Record) -> None:
+    """Publish source before provisioning an immutable candidate runtime."""
+    sha, dest = rec["sha"], ctx.lib / rec["sha"]
+    if dry(ctx, f"would prepare the release and runtime at {dest}"):
+        return
+    if not dest.exists():
+        argv = ["git", "-C", rec["repo"], "archive", "--format=tar", sha]
+        tar = must(ctx, argv, env=GIT_ENV).stdout
+        tmp = ctx.lib / f".{sha}.tmp-{ctx.ts}"
+        platform_io.ensure_private_dir(tmp)
+        _unpack(ctx, tar, tmp)
+        publish(tmp, dest, replace=False, directory=True)
+    python = prepare_runtime(ctx, dest)
+    rec["python"]["path"] = str(python)
+    rec["runtime_prepared"] = True
+    if ctx.review_policy is not None:
+        rec["prepared_runtime"] = baseline.tree_state(dest, links=True)
+
+
 def pin(ctx: Ctx, rec: Record) -> None:
-    """Unpack the pinned commit into lib/<sha>, fill @HOME@, and relink."""
+    """Activate a fully verified candidate without moving its runtime."""
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
     if dry(ctx, f"would pin {sha} as {dest} and point current at it"):
         return
-    argv = ["git", "-C", rec["repo"], "archive", "--format=tar", sha]
-    # Archive first: a failure here must not leave a half-made temp dir.
-    tar = must(ctx, argv, env=GIT_ENV).stdout
-    tmp = ctx.lib / f".{sha}.tmp-{ctx.ts}"
-    platform_io.ensure_private_dir(tmp)
-    _unpack(ctx, tar, tmp)
-    if dest.exists():
-        # Re-pinning the same commit: keep the old copy until prune.
-        dest.rename(ctx.lib / f"{sha}.superseded-{ctx.ts}")
-    publish(tmp, dest, replace=False, directory=True)
+    if not rec.get("runtime_prepared"):
+        prepare_release(ctx, rec)
+    python = rec["python"]["path"]
     if ctx.platform == "win32":
         platform_io.ensure_private_dir(ctx.muninn.parent)
-        for name in (
-            "muninn.cmd",
-            "muninn.ps1",
-        ):
+        for name in ("muninn.cmd", "muninn.ps1"):
             write_private(
                 ctx.muninn.parent / name, (dest / "bin" / name).read_bytes()
             )
-        write_selection(ctx.lib, sha, sys.executable)
+        write_selection(ctx.lib, sha, python)
         return
     relink(ctx.lib / "current", sha, ctx.ts)
-    relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
-    # bin/muninn reads this link to find the interpreter that ran the install.
-    relink(ctx.lib / "python", sys.executable, ctx.ts)
+    if "legacy" not in rec:
+        relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
+    relink(ctx.lib / "python", python, ctx.ts)
 
 
 def muninn_env(home: Path, **extra: str) -> dict[str, str]:
@@ -153,28 +158,33 @@ def muninn_env(home: Path, **extra: str) -> dict[str, str]:
     return dict(env, MUNINN_HOME=str(home), **extra)
 
 
-def fresh(ctx: Ctx, since: float) -> bool:
+def fresh(ctx: Ctx, since: float, previous: int | None = None) -> bool:
     """Say whether the job wrote a heartbeat after ``since``.
 
     Args:
         ctx: The run context.
         since: Timestamp the heartbeat must not predate by more than one
             second.
+        previous: Pre-start modification time that cannot prove service work.
 
     Returns:
         True when status.json was written at most one second before
         ``since`` or later, and is less than ``HEARTBEAT_S`` old.
     """
     try:
-        mtime = (ctx.data / "status.json").stat().st_mtime
+        status = (ctx.data / "status.json").stat()
     except FileNotFoundError:
         return False
     # One second of slack: filesystem mtimes can be coarser than our clock.
-    return mtime >= since - 1 and ctx.now() - mtime < HEARTBEAT_S
+    return (
+        status.st_mtime_ns != previous
+        and status.st_mtime >= since - 1
+        and ctx.now() - status.st_mtime < HEARTBEAT_S
+    )
 
 
 def ingest_fresh(ctx: Ctx, rec: Record) -> None:
-    """Create the data dir and index what already exists (fresh install).
+    """Report completed fresh indexing and initialize the recall switch.
 
     Also creates ``recall.off`` so per-prompt recall starts off, and says how
     to turn it on; only a fresh install does, never an upgrade.
@@ -190,7 +200,7 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
         status = (
             "found; would index"
             if detected and ctx.dry_run
-            else "found; indexing..." if detected else "no history found"
+            else "found; indexed" if detected else "no history found"
         )
         ctx.say(f"  {provider}: {status}")
     if dry(
@@ -212,24 +222,18 @@ def ingest_fresh(ctx: Ctx, rec: Record) -> None:
         "project, so recall waits for a re-check (docs/adr/0007). "
         f"To turn recall on: unlink {flag}"
     )
-    env = installed_env(ctx)
-    must(ctx, command(ctx, "ingest", "--full"), env=env)
-    raw_stats: object = json.loads(
-        must(ctx, command(ctx, "stats"), env=env).stdout
-    )
-    if not isinstance(raw_stats, dict):
-        raise StepFailedError("muninn stats omitted provider event counts")
-    stats = cast(dict[str, object], raw_stats)
-    raw_counts = stats.get("events_by_provider")
+    raw_counts: object = rec.get("events_by_provider")
     if not isinstance(raw_counts, dict):
-        raise StepFailedError("muninn stats omitted provider event counts")
+        raise StepFailedError(
+            "fresh preparation omitted provider event counts"
+        )
     counts = cast(dict[str, object], raw_counts)
     totals: list[str] = []
     for provider in ("Claude", "Codex", "Cursor"):
         count: object = counts.get(provider.lower(), 0)
         if not isinstance(count, int) or isinstance(count, bool):
             raise StepFailedError(
-                "muninn stats returned invalid provider counts"
+                "fresh preparation returned invalid provider counts"
             )
         noun = "event" if count == 1 else "events"
         totals.append(f"{provider} {count} {noun}")
@@ -267,6 +271,8 @@ def restart(ctx: Ctx, rec: Record) -> None:
     started = ctx.now()
     if ctx.platform != "darwin":
         lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
+    elif rec.get("quiesced"):
+        must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     else:
         must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
     wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "job has no live PID")
@@ -279,12 +285,8 @@ PRUNING = ".pruning-"
 def prune(ctx: Ctx, rec: Record) -> None:
     """Move every release dir but the one being installed out of the way.
 
-    Runs last, so a failed install can still roll back to the old release.
-    Only renames happen here, and one that fails is undone, so the old
-    release is whole whenever a rollback can still happen; ``sweep``
-    deletes the moved dirs after the point of no return.
-    A dry run has not pinned yet, so it keeps ``rec["sha"]``, which is what
-    ``current`` points at once the real run gets here.
+    Legacy releases move aside reversibly. Provisioned runtimes stay at
+    their immutable paths until ``sweep`` deletes them after rollback ends.
 
     Args:
         ctx: The run context.
@@ -306,12 +308,20 @@ def prune(ctx: Ctx, rec: Record) -> None:
     ]
     if ctx.dry_run:
         for p in old:
+            if (p / ".venv").exists():
+                dry(
+                    ctx,
+                    f"would delete the previous release {p.name} in place "
+                    "once the install succeeds (no way back)",
+                )
+                continue
             dry(
                 ctx,
                 f"would move the previous release {p.name} aside, then delete"
                 " it once the install succeeds (no way back)",
             )
         return
+    old = [p for p in old if not (p / ".venv").exists()]
     moved: list[tuple[Path, Path]] = []
     try:
         for path in old:
@@ -348,7 +358,8 @@ def sweep(ctx: Ctx) -> list[str]:
     if ctx.dry_run or not ctx.lib.is_dir():
         return []
     stuck: list[str] = []
-    for path in sorted(ctx.lib.glob(f"{PRUNING}*")):
+    stale = [*ctx.lib.glob(f"{PRUNING}*"), *retired_runtimes(ctx)]
+    for path in sorted(stale):
         try:
             shutil.rmtree(path)
         except OSError as exc:
@@ -383,13 +394,15 @@ def start_new(ctx: Ctx, rec: Record) -> None:
     src = ctx.lib / PLIST_SOURCE
     if dry(ctx, f"would install the launchd job {ctx.plist} and start it"):
         return
+    status = ctx.data / "status.json"
+    previous = status.stat().st_mtime_ns if status.exists() else None
     if ctx.platform != "darwin":
         started = ctx.now()
         lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
         wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "new job has no live PID")
         wait(
             ctx,
-            lambda: fresh(ctx, started),
+            lambda: fresh(ctx, started, previous),
             HEARTBEAT_S,
             "heartbeat not fresh",
         )
@@ -403,7 +416,7 @@ def start_new(ctx: Ctx, rec: Record) -> None:
     wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "new job has no live PID")
     wait(
         ctx,
-        lambda: fresh(ctx, started),
+        lambda: fresh(ctx, started, previous),
         HEARTBEAT_S,
         "heartbeat not fresh in 120 s",
     )
@@ -425,9 +438,7 @@ def command(ctx: Ctx, *args: str) -> Sequence[str | Path]:
 
 def quiesce(ctx: Ctx, rec: Record) -> None:
     """Stop the managed native writer before any upgrade mutation."""
-    if ctx.platform == "darwin" or dry(
-        ctx, "would quiesce the owned writer before upgrade"
-    ):
+    if dry(ctx, "would quiesce the owned writer before upgrade"):
         return
     lifecycle.stop(ctx)
     rec["quiesced"] = True

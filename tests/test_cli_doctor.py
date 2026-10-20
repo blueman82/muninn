@@ -16,6 +16,7 @@ from unittest import mock
 
 from muninn import cli, obs, store
 from tests.cli_support import ALWAYS, CliCase, fake_run
+from tests.review_quiescence_support import initialize
 from tests.store_support import public_read
 from tests.test_classify import codex_meta, function_call
 from tests.test_ingest import TID, fc_output, rollout
@@ -88,7 +89,7 @@ class StatsDoctorTests(CliCase):
                 "flags",
                 "issues",
                 "knowledge",
-                "citations",
+                "evidence",
                 "tombstones",
                 "db_bytes",
                 "db_space",
@@ -300,7 +301,9 @@ class GoldenTests(CliCase):
 
     def test_every_answer_has_notice_freshness_and_logged(self) -> None:
         self.session(TID, "hello there", "hi")
-        self.run_ingest()
+        self.conn.close()
+        initialize(self.home)
+        self.assertEqual(self.muninn("ingest")[0], 0)
         ref = f"codex:{TID}:2.1"
         commands = (
             ("search", "hello"),
@@ -318,7 +321,9 @@ class GoldenTests(CliCase):
         for argv in commands:
             with self.subTest(argv=argv):
                 with mock.patch.object(cli.obs, "run", fake_run()):
-                    _, out, _ = self.muninn(*argv)
+                    code, out, _ = self.muninn(*argv)
+                if argv == ("rebuild",):
+                    self.assertEqual(code, 0, out)
                 self.assertIsInstance(out, dict)
                 self.assertLessEqual(ALWAYS, set(out))
                 self.assertEqual(out["notice"], cli.NOTICE)

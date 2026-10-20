@@ -15,6 +15,8 @@ from install import configedit as ce
 from install.context import Ctx, StepFailedError, job, must, wait
 from install.release_io import write_private
 from install.writer_binding import writer_mismatch
+from install.writer_chain import same_process as _same_process
+from install.writer_chain import windows_chain as _windows_chain
 from muninn import obs_status, platform_io, platform_windows, poller_stop
 from muninn.obs_linux_service import (
     query_unit,
@@ -35,6 +37,7 @@ from muninn.obs_service import (
     task_matches,
 )
 from muninn.obs_service_commands import render_unit
+from muninn.platform_lock import released
 from muninn.platform_paths import read_selection
 
 _NAMESPACE = "http://schemas.microsoft.com/windows/2004/02/mit/task"
@@ -241,19 +244,6 @@ def _task_running(ctx: Ctx) -> bool:
     return bool(_task_engines(ctx))
 
 
-def _same_process(ctx: Ctx, process: dict[str, object]) -> bool:
-    """Bind waits to process creation identity rather than a reused PID."""
-    pid = process["pid"]
-    if not isinstance(pid, int) or isinstance(pid, bool):
-        raise StepFailedError("process identity is invalid")
-    result = ctx.run(process_command(pid))
-    if result.returncode == 3:
-        return False
-    if result.returncode:
-        raise StepFailedError("cannot establish process quiescence")
-    return parse_process(result.stdout)["created"] == process["created"]
-
-
 def _stop_windows(ctx: Ctx) -> None:
     """Disable starts, bind writer and launcher identities, and await exit."""
     definition = _task_owned(ctx)
@@ -269,16 +259,8 @@ def _stop_windows(ctx: Ctx) -> None:
         writer = parse_process(
             must(ctx, process_command(pid), quiet=True).stdout
         )
-        parent = writer["parent"]
-        if (
-            not isinstance(parent, int)
-            or isinstance(parent, bool)
-            or parent <= 0
-        ):
-            raise StepFailedError("writer launcher identity is unavailable")
-        launcher = parse_process(
-            must(ctx, process_command(parent), quiet=True).stdout
-        )
+        selected = read_selection(ctx.lib.parent)
+        launcher, redirector = _windows_chain(ctx, writer, selected)
         command = definition.findtext(
             "t:Actions/t:Exec/t:Command", namespaces=_NS
         )
@@ -287,12 +269,13 @@ def _stop_windows(ctx: Ctx) -> None:
         )
         if (
             writer_mismatch(
-                read_selection(ctx.lib.parent),
+                selected,
                 writer,
                 launcher,
                 found["cmd"],
                 (command, args),
                 _task_engines(ctx),
+                redirector=redirector,
             )
             is not None
         ):
@@ -303,21 +286,21 @@ def _stop_windows(ctx: Ctx) -> None:
         generation = status.get("stop_generation")
         if status.get("pid") != pid or not isinstance(generation, str):
             raise StepFailedError("writer stop generation is unavailable")
-        if not _same_process(ctx, writer) or not _same_process(ctx, launcher):
-            raise StepFailedError("writer or launcher changed before stop")
+        processes = (
+            (writer, redirector, launcher)
+            if redirector is not None
+            else (writer, launcher)
+        )
+        if any(not _same_process(ctx, process) for process in processes):
+            raise StepFailedError("writer chain changed before stop")
         poller_stop.request(ctx.data, pid, generation)
-        wait(
-            ctx,
-            lambda: not _same_process(ctx, writer),
-            30,
-            "writer did not quiesce; retained state unchanged",
-        )
-        wait(
-            ctx,
-            lambda: not _same_process(ctx, launcher),
-            30,
-            "launcher did not quiesce; retained state unchanged",
-        )
+        for process in processes:
+            wait(
+                ctx,
+                lambda process=process: not _same_process(ctx, process),
+                30,
+                "writer chain did not quiesce; retained state unchanged",
+            )
     wait(
         ctx,
         lambda: not _task_running(ctx),
@@ -351,7 +334,7 @@ def stop(ctx: Ctx) -> None:
             ) from exc
     elif ctx.platform != "linux":
         ctx.run(["launchctl", "bootout", ctx.target])
-        wait(ctx, lambda: job(ctx) is None, 30, "job still loaded")
+        wait(ctx, lambda: not job(ctx) and released(ctx.data), 30, "busy")
 
 
 def start(ctx: Ctx, python: Path, release: Path) -> None:

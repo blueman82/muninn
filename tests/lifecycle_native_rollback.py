@@ -1,4 +1,4 @@
-"""Actual managed migration rollback across a synthetic release and path."""
+"""Actual managed current-store recovery across synthetic releases."""
 
 from __future__ import annotations
 
@@ -15,38 +15,47 @@ from unittest.mock import patch
 
 from install import installer, lifecycle, snapshot_io
 from install.context import Ctx, StepFailedError, wait
+from install.runtime import runtime_python
 from muninn import (
     obs,
     obs_linux_service,
     obs_status,
     platform_io,
+    store,
     tombstone_key,
 )
 from tests import lifecycle_native_doctor
 from tests.native_diagnostics import write
 
-_ANCHOR = "    if version in (1, 2):\n"
-_MIGRATION = (
-    "    if version == 3:\n"
-    "        conn.executescript(\n"
-    '            "BEGIN IMMEDIATE;"\n'
-    '            "CREATE TABLE native_upgrade_marker(value INTEGER);"\n'
-    '            "INSERT INTO native_upgrade_marker VALUES(1);"\n'
-    '            "PRAGMA user_version=4;COMMIT;"\n'
-    "        )\n"
-    "        return\n"
+_ANCHOR = (
+    "        if empty is not None or version != 0:\n"
+    "            assert_store_format(conn)\n"
+    "            # Read-only validation need not exclude readers.\n"
+    '            conn.execute("ROLLBACK")\n'
+)
+_WRITE = (
+    "        if empty is not None or version != 0:\n"
+    "            assert_store_format(conn)\n"
+    "            conn.execute(\n"
+    '                "CREATE TABLE IF NOT EXISTS native_upgrade_marker("\n'
+    '                "value INTEGER PRIMARY KEY CHECK(value=1))"\n'
+    "            )\n"
+    "            conn.execute(\n"
+    '                "INSERT OR IGNORE INTO native_upgrade_marker VALUES(1)"\n'
+    "            )\n"
+    '            conn.execute("COMMIT")\n'
 )
 
 
-def migration_source(source: str) -> str:
-    """Insert one real fixture migration only at the known current boundary."""
+def mutation_source(source: str) -> str:
+    """Add a fixture write inside the existing current-store transaction."""
     if source.count(_ANCHOR) != 1:
         raise ValueError("fixture_source_changed")
-    return source.replace(_ANCHOR, _MIGRATION + _ANCHOR)
+    return source.replace(_ANCHOR, _WRITE)
 
 
 def fixture_release(parent: Path, root: Path) -> tuple[Path, str]:
-    """Create a clean private release with a transactional schema change."""
+    """Create a private release with a transactional current-store write."""
     repo = parent / "rollback-repo"
     subprocess.run(
         ["git", "clone", "--no-hardlinks", str(root), str(repo)],
@@ -54,19 +63,13 @@ def fixture_release(parent: Path, root: Path) -> tuple[Path, str]:
         check=True,
         timeout=60,
     )
-    schema = repo / "muninn/store_schema.py"
-    source = schema.read_text()
-    assert source.count("SCHEMA_VERSION = 3") == 1
-    schema.write_text(
-        source.replace("SCHEMA_VERSION = 3", "SCHEMA_VERSION = 4")
-    )
-    store = repo / "muninn/store.py"
-    store.write_text(migration_source(store.read_text()))
+    source = repo / "muninn/store.py"
+    source.write_text(mutation_source(source.read_text()))
     for argv in (
         ["config", "user.name", "Muninn Native Fixture"],
         ["config", "user.email", "native-fixture@example.invalid"],
-        ["add", "muninn/store.py", "muninn/store_schema.py"],
-        ["commit", "-m", "Synthetic transactional native migration"],
+        ["add", "muninn/store.py"],
+        ["commit", "-m", "Synthetic transactional native write"],
     ):
         subprocess.run(
             ["git", "-C", str(repo), *argv], capture_output=True, check=True
@@ -104,11 +107,13 @@ def database_state(data: Path) -> tuple[int, int, int, bool]:
     """Read private committed schema/counts without provider content."""
     database = data / "muninn.sqlite"
     with (
-        snapshot_io.validated(database),
+        snapshot_io.validated(database) as revalidate,
         closing(
             sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)
         ) as conn,
     ):
+        revalidate()
+        store.assert_store_format(conn)
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
         sources = int(
             conn.execute("SELECT count(*) FROM source").fetchone()[0]
@@ -134,11 +139,13 @@ def observe_writer(
     old_pid: int,
     before: tuple[int, int, int, bool],
 ) -> int:
-    """Require migrated rows and the distinct executable/root identity."""
+    """Require committed rows and the distinct executable/root identity."""
     state = database_state(ctx.data)
-    assert state == (4, before[1], before[2], True)
+    assert state == (before[0], before[1], before[2], True)
     selected, executable, sha = obs_linux_service.selection(ctx.home)
-    assert sha == new_sha and executable == alternate
+    assert sha == new_sha
+    assert executable == runtime_python(ctx.lib / new_sha, ctx.platform)
+    assert executable.resolve(strict=True) == alternate
     pid = obs_status.read_status(ctx.data)["pid"]
     assert isinstance(pid, int) and pid != old_pid
     _, actual_exe, _ = obs_linux_service.process_identity(pid)
@@ -172,21 +179,26 @@ def wait_healthy(ctx: Ctx, previous: object) -> int:
     return pid
 
 
-def rollback(ctx: Ctx, root: Path) -> None:
-    """Require a real new writer/migration and an old writer after rollback."""
+def rollback(ctx: Ctx, root: Path) -> Path:
+    """Retain exposed current data and runtime after failed verification.
+
+    Returns:
+        The synthetic source repository matching the retained selection.
+    """
     if sys.platform != "linux":
         raise OSError("native_linux_required")
     write("lifecycle", "rollback_upgrade")
     old_release, old_python, old_sha = obs_linux_service.selection(ctx.home)
+    old_root = old_release.resolve(strict=True)
     key = tombstone_key.load_key(ctx.data, create=False)
     before = database_state(ctx.data)
-    assert before[0] == 3 and not before[3]
+    assert before[0] == store.SCHEMA_VERSION and not before[3]
     prior_pid = obs_status.read_status(ctx.data).get("pid")
     lifecycle.start(ctx, old_python, old_release)
     old_pid = wait_healthy(ctx, prior_pid)
     repo, new_sha = fixture_release(ctx.home.parent, root)
     assert new_sha != old_sha
-    alternate = alternate_interpreter(old_python)
+    alternate = alternate_interpreter(old_python.resolve(strict=True))
     observed: list[int] = []
 
     def run(
@@ -218,16 +230,25 @@ def rollback(ctx: Ctx, root: Path) -> None:
     except StepFailedError as error:
         assert "verify failed" in str(error) and observed
     else:
-        raise AssertionError("synthetic migration did not enter rollback")
-    restored, python, sha = obs_linux_service.selection(ctx.home)
+        raise AssertionError("synthetic write did not enter recovery")
+    retained, python, sha = obs_linux_service.selection(ctx.home)
     assert (
-        sha == old_sha
-        and python == old_python
-        and restored.resolve() == old_release.resolve()
+        sha == new_sha
+        and python == runtime_python(ctx.lib / new_sha, ctx.platform)
+        and python.resolve(strict=True) == alternate
+        and retained.resolve().name == new_sha
     )
-    assert database_state(ctx.data) == before
+    assert old_root.is_dir() and retained.resolve(strict=True).is_dir()
+    assert database_state(ctx.data) == (*before[:3], True)
     assert tombstone_key.load_key(ctx.data, create=False) == key
-    pid = wait_healthy(ctx, observed[0])
-    assert obs_linux_service.process_identity(pid)[1] == old_python
-    lifecycle.stop(ctx)
+    assert platform_io.is_private(ctx.data, directory=True)
+    for path in (store.db_path(ctx.data), ctx.data / tombstone_key.KEY_FILE):
+        assert platform_io.is_private(path)
+    record = json.loads((ctx.lib / installer.INSTALL_RECORD).read_text())
+    assert record["failed"] == {"step": "verify", "error": "StepFailedError"}
+    assert record["outcome"] == "recovery_required"
+    assert record["recovery_required"] is True
+    assert record["store"]["phase"] == "current_prepared"
     assert not ((found := lifecycle.job(ctx)) and found["pid"])
+    assert obs_linux_service.unit_stopped(obs.run)
+    return repo

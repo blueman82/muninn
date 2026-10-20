@@ -9,12 +9,52 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 GLOBAL_KEY = "global"
 # A full-length object id only: an abbreviated hint could match the wrong
 # repo, and the value reaches `git cat-file`, so it must be plain hex.
 _COMMIT = re.compile(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")
+
+
+class CommitLookup(NamedTuple):
+    """One invocation-local Git membership question, without a scope id."""
+
+    repo: str
+    commit: str
+
+
+type CommitFacts = dict[CommitLookup, bool]
+
+
+class ScopePreparationRequiredError(Exception):
+    """Require one missing fact before ordered scope resolution continues."""
+
+    def __init__(self, lookup: CommitLookup) -> None:
+        """Keep the exact repository key and full commit hash to probe."""
+        super().__init__("scope_preparation_required")
+        self.lookup = lookup
+
+
+def prepare_commit(lookup: CommitLookup, facts: CommitFacts) -> None:
+    """Observe one Git fact outside every writer region.
+
+    The synchronous fixed probe carries only a repository path and full
+    commit hash, never lock descriptors or transcript material. A retained
+    maintenance owner is permitted. This is a time-of-probe observation,
+    not a coherent snapshot or a guarantee against later Git changes.
+    """
+    facts[lookup] = _has_commit(lookup.repo, lookup.commit)
+
+
+def _commit_fact(repo: str, commit: str, facts: CommitFacts | None) -> bool:
+    """Use prepared membership, or preserve standalone resolver probing."""
+    if facts is None:
+        return _has_commit(repo, commit)
+    lookup = CommitLookup(repo, commit)
+    if lookup not in facts:
+        raise ScopePreparationRequiredError(lookup)
+    return facts[lookup]
 
 
 def _gitfile_repo(root: str, dotgit: Path) -> tuple[str, str] | None:
@@ -67,6 +107,7 @@ def _has_commit(repo: str, commit: str) -> bool:
             env=env,
             stdin=subprocess.DEVNULL,
             capture_output=True,
+            close_fds=True,
             timeout=10,
             check=False,
         )
@@ -80,6 +121,7 @@ def resolve_key(
     commit_hint: str | None = None,
     *,
     repos: Iterable[str] = (),
+    commit_facts: CommitFacts | None = None,
 ) -> tuple[str, str, str]:
     """Resolve a cwd to a scope key from the filesystem alone.
 
@@ -92,6 +134,7 @@ def resolve_key(
         cwd: Working directory recorded in a transcript.
         commit_hint: Commit id recorded beside the cwd, if any.
         repos: Known git scope keys, searched for ``commit_hint``.
+        commit_facts: Prepared observations; None permits direct Git probes.
 
     Returns:
         (key, kind ``git|dir``, method ``git|worktree|cwd``).
@@ -113,7 +156,7 @@ def resolve_key(
             return found[0], "git", found[1]
     elif commit_hint and _COMMIT.fullmatch(commit_hint):
         for repo in repos:
-            if _has_commit(repo, commit_hint):
+            if _commit_fact(repo, commit_hint, commit_facts):
                 return repo, "git", "git"
     return str(path), "dir", "cwd"
 
@@ -165,7 +208,11 @@ def _git_roots(conn: sqlite3.Connection) -> list[str]:
 
 
 def _resolve(
-    conn: sqlite3.Connection, cwd: str, commit_hint: str | None = None
+    conn: sqlite3.Connection,
+    cwd: str,
+    commit_hint: str | None = None,
+    *,
+    commit_facts: CommitFacts | None = None,
 ) -> tuple[int | None, str, str, str]:
     """Resolve a cwd without writing anything.
 
@@ -176,7 +223,9 @@ def _resolve(
         (scope id if already known, key, kind, method).
     """
     repos = _git_roots(conn) if commit_hint else ()
-    key, kind, method = resolve_key(cwd, commit_hint, repos=repos)
+    key, kind, method = resolve_key(
+        cwd, commit_hint, repos=repos, commit_facts=commit_facts
+    )
     if method == "cwd" and Path(key).is_absolute() and not Path(key).is_dir():
         sid = _prefix_scope(conn, key)  # the cwd is gone
         if sid is not None:
@@ -198,7 +247,11 @@ def _new_scope(conn: sqlite3.Connection, key: str, kind: str) -> int:
 
 
 def scope_id(
-    conn: sqlite3.Connection, cwd: str, commit_hint: str | None = None
+    conn: sqlite3.Connection,
+    cwd: str,
+    commit_hint: str | None = None,
+    *,
+    commit_facts: CommitFacts | None = None,
 ) -> int:
     """Return the scope id for a cwd, creating it on first sight.
 
@@ -210,6 +263,7 @@ def scope_id(
         conn: Read-write store connection.
         cwd: Exact working directory string from the transcript.
         commit_hint: Commit id used to place a deleted cwd in its repo.
+        commit_facts: Prepared observations; None permits direct Git probes.
 
     Returns:
         The scope row id.
@@ -217,7 +271,9 @@ def scope_id(
     sid = _cached(conn, cwd)
     if sid is not None:
         return sid
-    sid, key, kind, method = _resolve(conn, cwd, commit_hint)
+    sid, key, kind, method = _resolve(
+        conn, cwd, commit_hint, commit_facts=commit_facts
+    )
     if sid is None:
         sid = _new_scope(conn, key, kind)
     conn.execute(

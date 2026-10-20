@@ -1,4 +1,4 @@
-"""Synthetic native upgrade migration performs actual transactional DDL."""
+"""Synthetic native current-store writes retain real transaction boundaries."""
 
 from __future__ import annotations
 
@@ -6,50 +6,62 @@ import ast
 import sqlite3
 import tempfile
 import unittest
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from install.context import Ctx, run_real
+from muninn import store
 from tests import lifecycle_native_rollback
 from tests.lifecycle_native_rollback import (
     alternate_interpreter,
-    migration_source,
+    mutation_source,
 )
 from tools.standards import check_source
 
 
-class NativeMigrationTests(unittest.TestCase):
-    """Execute the modified current function on a real schema-three store."""
+def fixture_initializer() -> Callable[[sqlite3.Connection], None]:
+    """Compile the checked fixture initializer against current contracts."""
+    root = Path(__file__).resolve().parents[1]
+    source = mutation_source((root / "muninn/store.py").read_text())
+    function = next(
+        node
+        for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "initialize_store"
+    )
+    code = ast.get_source_segment(source, function)
+    assert code is not None
+    namespace: dict[str, object] = {
+        "sqlite3": sqlite3,
+        "SCHEMA_VERSION": store.SCHEMA_VERSION,
+        "SCHEMA_SQL": store.SCHEMA_SQL,
+        "assert_store_format": store.assert_store_format,
+    }
+    exec(compile(code, "synthetic_native_write", "exec"), namespace)
+    return cast(
+        Callable[[sqlite3.Connection], None], namespace["initialize_store"]
+    )
 
-    def test_migration_creates_marker_and_commits_version_together(
+
+class NativeMutationTests(unittest.TestCase):
+    """Execute the modified initializer on a real marked current store."""
+
+    def test_write_commits_marker_without_changing_current_format(
         self,
     ) -> None:
-        root = Path(__file__).resolve().parents[1]
-        source = migration_source((root / "muninn/store.py").read_text())
-        function = next(
-            node
-            for node in ast.parse(source).body
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "_init_schema"
-        )
-        code = ast.get_source_segment(source, function)
-        assert code is not None
-        namespace: dict[str, object] = {
-            "sqlite3": sqlite3,
-            "Path": Path,
-            "SCHEMA_VERSION": 4,
-        }
-        exec(compile(code, "synthetic_native_migration", "exec"), namespace)
-        migrate = namespace["_init_schema"]
-        assert callable(migrate)
+        initialize = fixture_initializer()
         with closing(
             sqlite3.connect(":memory:", isolation_level=None)
         ) as conn:
-            conn.execute("PRAGMA user_version=3")
-            migrate(conn, Path("/unused"))
+            store.initialize_store(conn)
+            initialize(conn)
+            initialize(conn)
+            store.assert_store_format(conn)
             self.assertEqual(
-                conn.execute("PRAGMA user_version").fetchone()[0], 4
+                conn.execute("PRAGMA user_version").fetchone()[0], 1
             )
             self.assertEqual(
                 conn.execute(
@@ -59,11 +71,51 @@ class NativeMigrationTests(unittest.TestCase):
             )
             self.assertFalse(conn.in_transaction)
 
+    def test_failed_write_rolls_back_marker_and_preserves_current_store(
+        self,
+    ) -> None:
+        initialize = fixture_initializer()
+
+        def refuse(
+            operation: int,
+            table: str | None,
+            column: str | None,
+            database: str | None,
+            trigger: str | None,
+        ) -> int:
+            return (
+                sqlite3.SQLITE_DENY
+                if operation == sqlite3.SQLITE_INSERT
+                and table == "native_upgrade_marker"
+                else sqlite3.SQLITE_OK
+            )
+
+        with closing(
+            sqlite3.connect(":memory:", isolation_level=None)
+        ) as conn:
+            store.initialize_store(conn)
+            before = "\n".join(conn.iterdump())
+            conn.set_authorizer(refuse)
+            with self.assertRaisesRegex(
+                sqlite3.DatabaseError, "not authorized"
+            ):
+                initialize(conn)
+            conn.set_authorizer(None)
+            self.assertFalse(conn.in_transaction)
+            self.assertEqual("\n".join(conn.iterdump()), before)
+            store.assert_store_format(conn)
+            self.assertIsNone(
+                conn.execute(
+                    "SELECT 1 FROM sqlite_schema "
+                    "WHERE name='native_upgrade_marker'"
+                ).fetchone()
+            )
+
     def test_unrecognized_source_shape_refuses_without_guessed_insertion(
         self,
     ) -> None:
         with self.assertRaisesRegex(ValueError, "fixture_source_changed"):
-            migration_source("def unrelated(): pass\n")
+            mutation_source("def unrelated(): pass\n")
 
     def test_existing_alternate_binary_is_retained(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -92,5 +144,5 @@ class NativeMigrationTests(unittest.TestCase):
 
     def test_fixture_source_meets_installer_standards(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        source = migration_source((root / "muninn/store.py").read_text())
+        source = mutation_source((root / "muninn/store.py").read_text())
         self.assertEqual(check_source("muninn/store.py", source), [])

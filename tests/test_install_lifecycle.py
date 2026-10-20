@@ -3,21 +3,52 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
+from contextlib import closing
 from pathlib import Path
 
 from install import installer
 from install.context import Ctx, run_real
 from install.lifecycle import _identity, linux_unit, task_xml
+from muninn import store
 from muninn.obs_service import task_matches
+from tests import test_install_cursor_ingest
 
 
 class LifecycleDefinitionTests(unittest.TestCase):
     """Check the effective settings rather than a backend class hierarchy."""
+
+    def test_cleanup_failure_preserves_scrub_in_failed_install(self) -> None:
+        fixture = test_install_cursor_ingest.FreshCursorReplayTests()
+        self.addCleanup(fixture.doCleanups)
+        fixture.setUp()
+        world = fixture.fixture.world
+        fixture.ctx.rdir.rmdir()
+        with (
+            fixture.operation("query"),
+            self.assertRaises(sqlite3.DatabaseError),
+        ):
+            installer.install(fixture.ctx, world.repo, world.sha)
+        self.assertIsNone(world.fake.loaded)
+        self.assertFalse((fixture.ctx.lib / "current").exists())
+        retained = fixture.ctx.failed / "data"
+        with closing(store.connect_ro(store.db_path(retained))) as conn:
+            fixture.assert_scrubbed(conn)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT count(*) FROM source WHERE provider='cursor'"
+                ).fetchone()[0],
+                0,
+            )
+        self.assertTrue(
+            (retained / "review-work" / fixture.work.name).is_dir()
+        )
+        self.assertFalse((retained / "status.json").exists())
 
     def test_linux_never_force_kills_a_writer(self) -> None:
         ctx = Ctx(Path("/synthetic/home"), run_real, "test", platform="linux")
@@ -136,7 +167,7 @@ class LifecycleDefinitionTests(unittest.TestCase):
         self.assertNotIn("quiesce", fresh)
         self.assertEqual(upgrade.count("quiesce"), 1)
         self.assertLess(
-            upgrade.index("quiesce"), upgrade.index("snapshot_store")
+            upgrade.index("quiesce"), upgrade.index("prepare_store")
         )
         self.assertEqual(fresh[-1], "prune")
         self.assertEqual(upgrade[-1], "prune")

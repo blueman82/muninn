@@ -5,7 +5,7 @@ description: Search past Claude Code, Codex and Cursor sessions with `muninn sea
 
 # muninn search
 
-Returns ranked knowledge entries and events from earlier sessions in this repository. Worktrees share the main repository scope.
+Returns current eligible knowledge previews and ranked events from earlier sessions in this repository. Worktrees share the main repository scope. Knowledge previews carry `K_` UUIDs, revisions, scope and evidence IDs; open `muninn know show K_ID` to verify the current revision and cited originals before relying on guidance.
 
     muninn search "words that were actually said"
 

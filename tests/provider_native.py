@@ -16,15 +16,17 @@ from typing import Any
 
 from install import configedit
 from install.context import Ctx, run_real
-from install.provider_paths import hook_invocations, powershell, render_pinned
-from install.trust import codex_hooks
-from muninn import ingest, knowledge, obs, platform_io, platform_windows
+from install.provider_paths import powershell, render_pinned
+from muninn import ingest, obs, platform_io, platform_windows
 from tests.ingest_support import ROOT, TID, line, rollout
+from tests.knowledge_retirement_support import native_note
 from tests.native_diagnostics import write
 from tests.provider_native_codex import prove_codex
+from tests.provider_native_routes import context_calls as _context_calls
 from tests.provider_native_security import probe
 from tests.provider_native_stages import launcher_stages
 from tests.provider_native_stderr import classify
+from tests.review_quiescence_support import initialize
 from tests.test_classify import codex_meta, user_msg
 
 _SHA = "a" * 40
@@ -60,43 +62,40 @@ def fixture(ctx: Ctx, checkpoint: Callable[[str], None]) -> dict[str, str]:
         release / "muninn",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
+    python = (
+        os.environ.get("MUNINN_PYTHON") or sys.executable
+        if ctx.platform == "win32"
+        else sys.executable
+    )
     for name in (
         ("muninn.cmd", "muninn.ps1")
-        if sys.platform == "win32"
+        if ctx.platform == "win32"
         else ("muninn",)
     ):
         shutil.copyfile(ROOT / "bin" / name, ctx.muninn.parent / name)
     checkpoint("fixture_selection")
-    if sys.platform == "win32":
-        record = json.dumps({"sha": _SHA, "python": sys.executable}).encode()
+    if ctx.platform == "win32":
+        record = json.dumps({"sha": _SHA, "python": python}).encode()
         configedit.atomic_write(ctx.lib / "selection.json", record, 0o600)
     else:
         (ctx.lib / "current").symlink_to(release)
-        (ctx.lib / "python").symlink_to(sys.executable)
+        (ctx.lib / "python").symlink_to(python)
         ctx.muninn.unlink()
         ctx.muninn.symlink_to(ROOT / "bin/muninn")
     source = ctx.home / "synthetic transcripts"
     source.mkdir()
-    records = [codex_meta("user", TID), user_msg(1, _WORDS)]
+    records = [codex_meta("user", TID), user_msg(1, f"Use {_WORDS}.")]
     records[0]["payload"]["cwd"] = str(ctx.home)
     path = source / rollout()
     path.parent.mkdir(parents=True)
     path.write_bytes(b"".join(map(line, records)))
     roots = {"codex-sessions": source}
     checkpoint("fixture_ingest")
+    initialize(ctx.data)
     stats = ingest.run_pass(ctx.data, roots)
     assert stats.events_added == 1
     checkpoint("fixture_knowledge")
-    knowledge.run_add(
-        ctx.data,
-        kind="decision",
-        text=_WORDS,
-        cites=[(f"codex:{TID}:2.1", _WORDS)],
-        cwd=str(ctx.home),
-        actor="user",
-        roots=roots,
-        env={},
-    )
+    native_note(ctx.data, roots, _WORDS)
     checkpoint("fixture_status")
     obs.write_status(ctx.data, {"last_pass_at": time.time(), "interval_s": 60})
     env = {
@@ -110,7 +109,7 @@ def fixture(ctx: Ctx, checkpoint: Callable[[str], None]) -> dict[str, str]:
         CODEX_HOME=str(ctx.codex_home),
         CLAUDE_CONFIG_DIR=str(ctx.settings.parent),
         MUNINN_HOME=str(ctx.data),
-        MUNINN_PYTHON=sys.executable,
+        MUNINN_PYTHON=python,
         MUNINN_ROOTS=json.dumps(
             {name: str(root) for name, root in roots.items()}
         ),
@@ -142,30 +141,15 @@ def prove_hooks(ctx: Ctx, env: dict[str, str]) -> list[dict[str, Any]]:
             "session_id": "different-session",
             "prompt": _WORDS,
             "hook_event_name": "SessionStart",
+            "transcript_path": None,
+            "source": "startup",
+            "model": "synthetic",
+            "permission_mode": "default",
         }
     ).encode()
-    calls: list[str | list[str]] = []
-    calls.extend(hook_invocations(ctx)[:2])
-    for hooks_path in sorted(ctx.cache.glob("*/hooks/hooks.json")):
-        for hook in codex_hooks(
-            hooks_path.read_bytes(), platform=ctx.platform
-        ):
-            if sys.platform == "win32":
-                comspec = env.get("COMSPEC", "cmd.exe")
-                platform_windows.assert_executable(Path(comspec))
-                calls.append(
-                    subprocess.list2cmdline([comspec])
-                    + ' /C "'
-                    + hook["command"]
-                    + '"'
-                )
-            else:
-                calls.append(
-                    [env.get("SHELL", "/bin/sh"), "-lc", hook["command"]]
-                )
     argv: str | list[str] = []
     try:
-        for index, argv in enumerate(calls):
+        for index, argv in enumerate(_context_calls(ctx, env)):
             write(
                 "provider",
                 "routes",
@@ -388,6 +372,9 @@ def main() -> None:
             metrics = probe(ctx.codex_home / "synthetic-security-probe.json")
             codex = prove_codex(ctx, env, checkpoint)
             timings = prove_hooks(ctx, env)
+            assert (
+                len(timings) == 4
+            ), "rendered provider context routes missing"
             metrics.update(baselines(env))
             write(
                 "provider",

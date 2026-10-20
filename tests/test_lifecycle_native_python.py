@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import io
+import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -79,6 +81,62 @@ class PrivatePythonTests(unittest.TestCase):
                 self.prefix, self.exe, self.target, self.exe.stat().st_uid
             )
         self.assertEqual(marker.read_bytes(), b"keep")
+
+    def test_safe_host_is_copied_before_dependency_provisioning(self) -> None:
+        self.exe.chmod(0o755)
+        self.exe.parent.chmod(0o755)
+        before = self.exe.stat().st_mode
+        copied = lifecycle_native_python.prepare(
+            self.prefix, self.exe, self.target, self.exe.stat().st_uid
+        )
+        self.assertEqual(copied, self.target / "bin/python3.13")
+        self.assertEqual(copied.read_bytes(), b"synthetic executable")
+        self.assertEqual(self.exe.stat().st_mode, before)
+
+    def test_private_runtime_is_installed_before_isolated_readiness(
+        self,
+    ) -> None:
+        calls: list[list[str]] = []
+        copied = self.target / "bin/python3.13"
+
+        def record(
+            argv: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes]:
+            calls.append(argv)
+            return subprocess.CompletedProcess(
+                argv, 0, b"native_private_python_ready", b""
+            )
+
+        with (
+            patch.object(lifecycle_native_python.sys, "platform", "linux"),
+            patch.object(os, "getuid", return_value=0, create=True),
+            patch.object(
+                lifecycle_native_python, "prepare", return_value=copied
+            ),
+            patch.object(subprocess, "run", record),
+            patch.dict(
+                os.environ,
+                {
+                    "MUNINN_NATIVE_SCRATCH": str(self.parent),
+                    "GITHUB_OUTPUT": str(self.parent / "output"),
+                    "GITHUB_PATH": str(self.parent / "path"),
+                },
+            ),
+        ):
+            self.assertEqual(lifecycle_native_python.main(), 0)
+        self.assertEqual(
+            calls[0],
+            [
+                str(copied),
+                "-m",
+                "pip",
+                "install",
+                "--require-hashes",
+                "-r",
+                "requirements-runtime.lock",
+            ],
+        )
+        self.assertEqual(calls[1][:3], [str(copied), "-I", "-c"])
 
     def test_unrecognized_source_refuses_before_copy(self) -> None:
         for candidate in (self.exe.parent, self.parent / "absent"):

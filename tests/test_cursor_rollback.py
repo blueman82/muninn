@@ -40,7 +40,9 @@ class CursorRollbackTests(unittest.TestCase):
         source = self.path.read_bytes() if before is not None else b"{}"
         self.path.write_bytes(
             edit_cursor_settings(
-                source, self.command, {"command": self.command, "timeout": 90}
+                source,
+                {"preCompact": self.command},
+                {"preCompact": [{"command": self.command, "timeout": 90}]},
             )
         )
 

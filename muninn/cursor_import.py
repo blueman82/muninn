@@ -6,13 +6,14 @@ import sqlite3
 import sys
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from muninn import classify, scope, store, tombstones
 from muninn.cursor_import_read import Conversation, read
 from muninn.tombstone_key import key_for
 
-__all__ = ["default_database", "run"]
+__all__ = ["PreparedImport", "apply", "default_database", "prepare", "run"]
 
 
 def default_database(
@@ -204,6 +205,139 @@ def _line_tombstones(
     }
 
 
+@dataclass(frozen=True)
+class PreparedImport:
+    """Decoded read-only input, not authority or a source-freshness proof."""
+
+    conversations: tuple[Conversation, ...]
+    skipped_rows: int
+    stat: tuple[int, int, int]
+    database: str
+    cwd: str
+    conversation_id: str | None
+
+
+def prepare(
+    path: Path,
+    cwd: str,
+    *,
+    max_bubbles: int | None = None,
+    conversation_id: str | None = None,
+) -> PreparedImport:
+    """Read Cursor's database before the caller acquires its writer.
+
+    Args:
+        path: User-supplied Cursor database file.
+        cwd: Scope directory for imported events.
+        max_bubbles: Hook message-count bound; None imports without a cap.
+        conversation_id: Exact hook composer identity; None imports all.
+
+    Returns:
+        Decoded conversations and their read-time metadata. The provider may
+        change after the read; this proves neither identity nor quiescence.
+
+    Raises:
+        ValueError: If the file is unsupported or the selection is invalid.
+    """
+    conversations, skipped, stat = read(
+        path, max_bubbles, conversation_id=conversation_id
+    )
+    return PreparedImport(
+        tuple(conversations),
+        skipped,
+        stat,
+        str(path.resolve()),
+        cwd,
+        conversation_id,
+    )
+
+
+def _counts(prepared: PreparedImport) -> dict[str, int]:
+    """Initialize independent counters for one application."""
+    return {
+        "conversations_seen": len(prepared.conversations),
+        "events_added": 0,
+        "events_unchanged": 0,
+        "skipped_rows": prepared.skipped_rows,
+        "events_skipped_erased": 0,
+    }
+
+
+def apply(
+    conn: sqlite3.Connection, home: Path, prepared: PreparedImport
+) -> dict[str, int]:
+    """Import prepared conversations using the caller's writer connection.
+
+    The caller must hold the actual writer, open the current marked store
+    inside that region, and close it before release or pathname replacement.
+    Path validation cannot authenticate SQLite's backing descriptor. This
+    function acquires no lock, opens no writable connection, never closes the
+    caller's connection, and starts no process. Delegated tombstone cleanup
+    may open the same current store read-only, solely to authenticate existing
+    governed attempt directories under the caller's writer. Those auxiliary
+    connections close before cleanup returns or raises.
+
+    Replay commits logical scrub before filesystem cleanup. Cleanup failures
+    propagate before any Cursor writes; they do not undo committed scrub.
+    Earlier conversation commits also survive a later failure.
+
+    Args:
+        conn: Caller-owned current store.connect_rw connection without a TX.
+        home: Muninn data directory owning the store and tombstone journal.
+        prepared: Data returned by prepare, without any ownership authority.
+
+    Returns:
+        Counts only, accumulated after each conversation commits.
+
+    Raises:
+        ValueError: If the connection uses transactions or another store path.
+        store.StoreUnavailableError: If the current format marker is absent.
+    """
+    autocommit = conn.autocommit is True or (
+        conn.autocommit == sqlite3.LEGACY_TRANSACTION_CONTROL
+        and conn.isolation_level is None
+    )
+    if not autocommit or conn.in_transaction:
+        raise ValueError("cursor_import_autocommit_required")
+    paths = [
+        row[2]
+        for row in conn.execute("PRAGMA database_list")
+        if row[1] == "main"
+    ]
+    if (
+        not paths
+        or not paths[0]
+        or Path(paths[0]).resolve() != store.db_path(home).resolve()
+    ):
+        raise ValueError("cursor_import_store_mismatch")
+    store.assert_store_format(conn)
+    counts = _counts(prepared)
+    if prepared.conversation_id is not None and not prepared.conversations:
+        return counts
+    tombstones.reapply_tombstones(conn, home)
+    key = key_for(conn)
+    for conversation in prepared.conversations:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            added, unchanged, erased = _write_conversation(
+                conn,
+                conversation,
+                prepared.database,
+                prepared.stat,
+                prepared.cwd,
+                key,
+                prepared.conversation_id is not None,
+            )
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        counts["events_added"] += added
+        counts["events_unchanged"] += unchanged
+        counts["events_skipped_erased"] += erased
+    return counts
+
+
 def run(
     home: Path,
     path: Path,
@@ -213,7 +347,7 @@ def run(
     max_bubbles: int | None = None,
     conversation_id: str | None = None,
 ) -> dict[str, int]:
-    """Import visible Cursor chat text from one copied SQLite database.
+    """Import visible Cursor chat text using a read-only SQLite snapshot.
 
     Args:
         home: Muninn data directory.
@@ -230,42 +364,14 @@ def run(
     Raises:
         ValueError: If the file is not a supported Cursor database.
     """
-    conversations, skipped, stat = read(
-        path, max_bubbles, conversation_id=conversation_id
+    prepared = prepare(
+        path, cwd, max_bubbles=max_bubbles, conversation_id=conversation_id
     )
-    counts = {
-        "conversations_seen": len(conversations),
-        "events_added": 0,
-        "events_unchanged": 0,
-        "skipped_rows": skipped,
-        "events_skipped_erased": 0,
-    }
-    if conversation_id is not None and not conversations:
-        return counts
+    if conversation_id is not None and not prepared.conversations:
+        return _counts(prepared)
     with store.writer_lock(home, wait_s=wait_s):
         conn = store.connect_rw(store.db_path(home))
         try:
-            tombstones.reapply_tombstones(conn, home)
-            key = key_for(conn)
-            for conversation in conversations:
-                conn.execute("BEGIN IMMEDIATE")
-                try:
-                    added, unchanged, erased = _write_conversation(
-                        conn,
-                        conversation,
-                        str(path.resolve()),
-                        stat,
-                        cwd,
-                        key,
-                        conversation_id is not None,
-                    )
-                    conn.execute("COMMIT")
-                except BaseException:
-                    conn.execute("ROLLBACK")
-                    raise
-                counts["events_added"] += added
-                counts["events_unchanged"] += unchanged
-                counts["events_skipped_erased"] += erased
+            return apply(conn, home, prepared)
         finally:
             conn.close()
-    return counts

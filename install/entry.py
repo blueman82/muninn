@@ -38,6 +38,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args in (["--help"], ["-h"]):
         print("usage: muninn-install [--check | --status | --uninstall]")
         print("Other arguments pass through to install.installer.")
+        print(
+            "Explicit first policy: --repo DIR --sha SHA "
+            "--fresh|--upgrade --review-policy PATH"
+        )
     elif args not in ([], ["--check"], ["--status"]):
         return installer.main(args)
     else:

@@ -14,15 +14,21 @@ from muninn import cli_serve, ingest, obs, obs_linux_service
 from muninn.cli_maint import heartbeat
 from muninn.obs_service_commands import render_unit
 from tests.cli_support import CliCase
+from tests.review_quiescence_support import initialize
 
 
 class WriterIdentityTests(CliCase):
     """Manual ingest cannot relabel an existing writer's loaded release."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        initialize(self.home)
+
     def test_manual_heartbeat_preserves_actual_writer_release(self) -> None:
         loaded = "a" * 40
         env = {**self.env, "MUNINN_INSTALL_SHA": loaded}
         writer = cli_serve._Poller(self.home, env, 60)
+        self.addCleanup(writer.close)
         with patch.object(cli_serve.signal, "signal"):
             writer.prepare()
         before = obs.read_status(self.home)

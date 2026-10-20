@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import closing
 from typing import cast
 from unittest import mock
 
-from muninn import hook_recall
+from muninn import hook_recall, store
 from tests.hook_support import RecallCase
 
 TERMS = ["rareone", "raretwo", "commonone"]
@@ -29,15 +30,16 @@ class MinTermsTests(RecallCase):
         """Run ``recall_block`` on the rare/common prompt; return the trace."""
         request = hook_recall.RecallRequest(
             terms=terms or TERMS,
-            cwd="/repo",
+            cwd=str(self.scope.project_id),
             notes=lambda: (),
             limit=4000,
         )
         payload = {"prompt": " ".join(TERMS), "session_id": "sess-now"}
         trace: dict[str, object] = {}
-        hook_recall.recall_block(
-            self.ro(), payload, self.env, trace, request, min_terms
-        )
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
+            hook_recall.recall_block(
+                conn, payload, self.env, trace, request, min_terms
+            )
         return trace
 
     def stages(self, min_terms: int = hook_recall.MIN_TERMS) -> dict[str, int]:

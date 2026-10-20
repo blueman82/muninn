@@ -1,4 +1,4 @@
-"""Provision only a job-local copy when Linux CI's interpreter is writable."""
+"""Provision private Linux CI Python with hashed runtime dependencies."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def prepare(prefix: Path, executable: Path, target: Path, uid: int) -> Path:
         uid: Current CI user id; source owner must be that user or root.
 
     Returns:
-        Original safe executable or relocated private executable.
+        Relocated private executable for dependency provisioning.
 
     Raises:
         OSError: If source identity, runtime layout or copied state is unsafe.
@@ -48,8 +48,6 @@ def prepare(prefix: Path, executable: Path, target: Path, uid: int) -> Path:
         or not source.is_relative_to(base)
     ):
         raise OSError("unrecognized CI interpreter source")
-    if not codes["write_mask"] and not codes["parent_write_mask"]:
-        return executable
     if os.path.lexists(target):
         raise FileExistsError("unknown CI interpreter copy retained")
     if not platform_io.is_private(target.parent, directory=True):
@@ -111,11 +109,13 @@ def _private_copy(target: Path) -> None:
 def readiness_command(selected: Path, expected: Path) -> list[str]:
     """Prove prefix, stdlib and extension relocation without path output."""
     script = (
-        "import encodings,sqlite3,sys,_sqlite3;from pathlib import Path;"
+        "import encodings,pydantic,sqlite3,sys,_sqlite3;"
+        "from pathlib import Path;"
         "root=Path(sys.argv[1]).resolve();"
         "assert Path(sys.prefix).resolve()==root;"
         "assert Path(encodings.__file__).resolve().is_relative_to(root);"
         "assert Path(_sqlite3.__file__).resolve().is_relative_to(root);"
+        "assert Path(pydantic.__file__).resolve().is_relative_to(root);"
         "assert sys.version_info[:2]==(3,13);"
         "assert sqlite3.sqlite_version_info==(3,50,4);"
         'print("native_private_python_ready")'
@@ -131,9 +131,20 @@ def main() -> int:
     selected = prepare(
         Path(sys.base_prefix), Path(sys.executable), target, os.getuid()
     )
-    expected = target if selected != Path(sys.executable) else Path(sys.prefix)
+    subprocess.run(
+        [
+            str(selected),
+            "-m",
+            "pip",
+            "install",
+            "--require-hashes",
+            "-r",
+            "requirements-runtime.lock",
+        ],
+        check=True,
+    )
     result = subprocess.run(
-        readiness_command(selected, expected),
+        readiness_command(selected, target),
         capture_output=True,
         check=True,
         timeout=30,
@@ -147,11 +158,8 @@ def main() -> int:
         "a", encoding="utf-8"
     ) as output:
         output.write("executable=" + str(selected) + "\n")
-    if selected != Path(sys.executable):
-        with Path(os.environ["GITHUB_PATH"]).open(
-            "a", encoding="utf-8"
-        ) as output:
-            output.write(str(selected.parent) + "\n")
+    with Path(os.environ["GITHUB_PATH"]).open("a", encoding="utf-8") as output:
+        output.write(str(selected.parent) + "\n")
     return 0
 
 

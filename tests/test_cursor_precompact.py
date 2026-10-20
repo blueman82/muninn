@@ -12,6 +12,7 @@ from unittest import mock
 from muninn import cursor_import, hook_cursor
 from tests.cli_support import CliCase
 from tests.hook_support import launcher_args
+from tests.review_quiescence_support import initialize
 
 
 class CursorPrecompactTests(CliCase):
@@ -226,6 +227,7 @@ class CursorPrecompactTests(CliCase):
         )
 
     def test_scope_rewrite_preserves_erased_event(self) -> None:
+        initialize(self.home)
         foreign = self.tmp / "foreign"
         foreign.mkdir()
         cursor_import.run(self.home, self.database, str(foreign), 1)

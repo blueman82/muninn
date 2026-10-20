@@ -76,7 +76,7 @@ class NativeDiagnosticsTest(unittest.TestCase):
                 / "muninn-native-diagnostics"
                 / "muninn-lifecycle-proof.json"
             )
-            for phase in ("busy_stop", "crash_restart", "rollback_upgrade"):
+            for phase in ("busy_stop", "crash_refusal", "rollback_upgrade"):
                 write("lifecycle", phase, error=RuntimeError("not logged"))
                 self.assertEqual(json.loads(path.read_text())["phase"], phase)
             write(
