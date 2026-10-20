@@ -147,6 +147,14 @@ class CodexProductionLaunchTests(IngestCase):
                 "synthetic-fixture-owner",
                 10.0,
             )
+            revised = prepare_codex_policy.prepare(
+                self.home,
+                Path(self.policy.runner.executable),
+                self.binding.auth_home,
+                "synthetic-fixture-owner",
+                11.0,
+                revision=2,
+            )
         raw = path.read_bytes()
         selected = (
             self.home
@@ -161,6 +169,10 @@ class CodexProductionLaunchTests(IngestCase):
         self.assertTrue(capability.proof_path.is_file())
         self.assertEqual(
             json.loads(raw)["budget"]["kind"], "ongoing_production"
+        )
+        self.assertNotEqual(path, revised)
+        self.assertEqual(
+            json.loads(revised.read_bytes())["max_input_bytes"], 1_048_576
         )
 
     def test_other_project_allowed_but_recall_and_executable_drift_refuse(
