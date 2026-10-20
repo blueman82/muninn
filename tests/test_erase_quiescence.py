@@ -21,8 +21,10 @@ from muninn import (
 )
 from muninn import review_quiescence_state as state
 from muninn.review_quiescence import EraseStatus
+from tests.erase_quiescence_process import process_gone
 from tests.ingest_support import TID, IngestCase
 from tests.review_quiescence_support import initialize
+from tests.store_support import direct_python
 from tests.test_review_commit import CommitCase
 from tests.test_review_supervisor import SupervisorCase
 
@@ -226,8 +228,9 @@ class EraseQuiescenceTests(IngestCase):
             "import owner_fixture; "
             f"owner_fixture(Path({str(control)!r}), {replacement!r})"
         )
+        executable, environment = direct_python()
         proc = subprocess.Popen(
-            [sys.executable, "-c", code],
+            [executable, "-c", code],
             cwd=Path(__file__).resolve().parent.parent,
             env={
                 "HOME": str(self.tmp),
@@ -240,6 +243,7 @@ class EraseQuiescenceTests(IngestCase):
                     for key in ("LD_LIBRARY_PATH", "SYSTEMROOT")
                     if key in os.environ
                 },
+                **environment,
             },
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -269,8 +273,7 @@ class EraseQuiescenceTests(IngestCase):
 
         def after_cleanup(*args: Any) -> None:
             wait_file(self.tmp / "control" / "cleaned")
-            with self.assertRaises(ProcessLookupError):
-                os.kill(ready["cli_pid"], 0)
+            self.assertTrue(process_gone(ready["cli_pid"]))
             self.assertEqual((work / "prompt").read_text(), MARKER)
             self.assertTrue(status.stop_may_have_been_published)
             append(*args)
