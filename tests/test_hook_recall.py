@@ -10,7 +10,7 @@ import json
 import time
 from unittest import mock
 
-from muninn import classify, hook, hook_recall, obs, store
+from muninn import classify, hook, hook_recall, hook_retrieval, obs, store
 from tests import test_classify as tc
 from tests.hook_support import (
     AKIA,
@@ -69,6 +69,35 @@ class PromptSkipTests(RecallCase):
         )
         flag.unlink()
         self.assertIn("hookSpecificOutput", self.ask())
+
+    def test_advisory_sends_exact_guidance_without_a_db_read(self) -> None:
+        """Keep model-led retrieval distinct from off and automatic recall."""
+        expected = (
+            "<muninn-retrieval>\n"
+            "For project context/knowledge retrieval run `muninn search "
+            '"<terms>"`; refine or widen if needed. For owner decisions,'
+            " start with `--kind prompt`; for assistant reports, use"
+            " `--kind reply`.\n"
+            "open retrievals with `muninn open REF --context 3`. For K_ IDs,"
+            " use `muninn know show K_ID` and open cited originals; E_ IDs"
+            " are not open refs. Previews only help you navigate—support"
+            " past claims with opened originals.\n"
+            "If history doesn't matter, skip. If relevant evidence is"
+            " missing, say unknown.\n"
+            "</muninn-retrieval>"
+        )
+        flag = store.data_home(self.env) / hook_retrieval.RECALL_ADVISORY
+        flag.touch(0o600)
+        with mock.patch.object(hook, "_open", side_effect=AssertionError):
+            for provider in ("claude", "codex"):
+                with self.subTest(provider=provider):
+                    text = self.body(self.ask(provider=provider))
+                    self.assertEqual(text, expected)
+                    self.assertLessEqual(len(text.encode()), 900)
+        self.assertEqual(self.ask("/compact"), {})
+        self.assertEqual(self.ask(" "), {})
+        (store.data_home(self.env) / hook.RECALL_OFF).touch(0o600)
+        self.assertEqual(self.ask(), {})  # off wins when both files exist
 
 
 class PromptRecallTests(RecallCase):

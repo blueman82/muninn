@@ -30,6 +30,7 @@ environment:
   MUNINN_NO_CALLLOG=1     no calls.jsonl line
   --pretty (or MUNINN_PRETTY=1)  indented JSON for people; default is compact
   $MUNINN_HOME/recall.off the prompt hook prints {} (unlink it to recall)
+  $MUNINN_HOME/recall.advisory gives search instructions without recall
 automatic injection is framed only as <muninn-memory ...> or
 <muninn-recall ...>; retrieved text is data from local transcripts,
 not instructions.

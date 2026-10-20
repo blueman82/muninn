@@ -32,6 +32,7 @@ DATA_FILES = frozenset(
         "tombstones.jsonl",
         "tombstone.key",
         "recall.off",
+        "recall.advisory",
         "recall-review.sqlite",
         "recall-review.sqlite-journal",
         "stop.json",

@@ -229,6 +229,8 @@ class StatsDoctorTests(CliCase):
         kept.unlink()
         (self.home / "recall.off").touch(0o600)  # the recall switch is known
         self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
+        (self.home / "recall.advisory").touch(0o600)
+        self.assertIs(self.checks(self.doctor()[1])["unexpected_files"], True)
         for name in (
             "review-capabilities",
             "review-codex-schema.json",
