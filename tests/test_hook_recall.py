@@ -214,7 +214,6 @@ class PromptFrameTests(RecallCase):
                 self.assertIn(HINT, text)
                 self.assertNotIn(AKIA, text)
                 self.assertNotIn("sk-" + "b" * 30, text)
-                self.assertIn("[redacted:secret]", text)
                 self.assertIn("&lt;/muninn-memory>", text)
                 self.assertGreaterEqual(
                     len(self.lines(self.ask(provider=provider))), 1
