@@ -285,7 +285,7 @@ class Fake:
         assert args[:2] == ["plugin", "add"], args
         assert env["CODEX_HOME"] == str(self.home / ".codex")
         config = self.home / ".codex/config.toml"
-        text = config.read_text()
+        text = config.read_bytes().decode()
         keys = co.CODEX_KEYS[co.MARKETPLACE]
         parsed = ce.parse_section(text, co.MARKETPLACE, keys)
         assert parsed is not None
@@ -313,7 +313,7 @@ class Fake:
             f"{co.PLUGIN}\nenabled = false",
             f"{co.PLUGIN}\nenabled = true",
         )
-        config.write_text(text.replace(off, on))
+        config.write_bytes(text.replace(off, on).encode())
         self.toml_writes.append(config.read_text())
         out = {
             "pluginId": co.PLUGIN_ID,

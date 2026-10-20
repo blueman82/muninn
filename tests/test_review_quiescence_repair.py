@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import sqlite3
+import unittest
 from pathlib import Path
 from typing import cast
 from unittest import mock
@@ -78,6 +79,17 @@ class QuiescenceRepairTests(QuiescenceCase):
             self.assertIs(caught.exception, original)
             self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
             self.assertEqual(baseline.read_bytes(), retained)
+        if os.name == "nt":
+            with (
+                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+                quiescence.erase_connection(
+                    self.home, wait_s=1, status=self.status
+                ),
+            ):
+                self.fail("Windows retired an unverified baseline")
+            self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
+            self.assertEqual(baseline.read_bytes(), retained)
+            return
         with (
             mock.patch.object(
                 quiescence.review_boot_identity, "observe"
@@ -196,6 +208,11 @@ class QuiescenceRepairTests(QuiescenceCase):
             self.fail("publication failure admitted")
         self.assertEqual(self.status.repair_phase, "reconciling")
         self.assertTrue((self.home / state.BASELINE).exists())
+        if os.name == "nt":
+            with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+                state.begin_owner(self.home)
+            self.assertTrue((self.home / state.BASELINE).exists())
+            return
         fd, token = state.begin_owner(self.home)
         self.addCleanup(os.close, fd)
         self.assertFalse((self.home / state.BASELINE).exists())
@@ -265,6 +282,7 @@ class QuiescenceRepairTests(QuiescenceCase):
         (self.home / state.BASELINE).write_bytes(b"corrupt")
         self.refuse(BOOT_B)
 
+    @unittest.skipIf(os.name == "nt", "Windows refuses baseline retirement")
     def test_latest_intent_replay_preserves_key_current_store_and_archive(
         self,
     ) -> None:
@@ -332,6 +350,7 @@ class QuiescenceRepairTests(QuiescenceCase):
         self.assertEqual(archive.read_bytes(), b"retained archive fixture")
         self.assertEqual(store.db_path(self.home).stat().st_ino, inode)
 
+    @unittest.skipIf(os.name == "nt", "Windows refuses baseline retirement")
     def test_original_consumer_error_wins_over_close_failure(self) -> None:
         self.abandon()
         self.refuse()
@@ -376,7 +395,7 @@ class QuiescenceRepairTests(QuiescenceCase):
         child = Child(
             self,
             """
-import json, sys, time
+import json, os, sys, time
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from muninn import cli_serve
@@ -384,6 +403,7 @@ home = Path(sys.argv[2])
 env = {"HOME": str(home / "unused"), "MUNINN_ROOTS": json.dumps({})}
 poller = cli_serve._Poller(home, env, 60)
 poller._start_review()
+(home / "fixture-child.pid").write_text(str(os.getpid()))
 print("ready", flush=True)
 deadline = time.monotonic() + 10
 while not poller._requested():
@@ -402,7 +422,10 @@ poller.close()
                 state.inspect(self.home, state.WITNESS)[0], state.Witness
             )
             assert witness is not None and witness.owner is not None
-            self.assertEqual(witness.owner.pid, child.proc.pid)
+            self.assertEqual(
+                witness.owner.pid,
+                int((self.home / "fixture-child.pid").read_text()),
+            )
             self.assertEqual(witness.state, "complete")
         out, err = child.proc.communicate(timeout=5)
         self.assertEqual((child.proc.returncode, out, err), (0, "", ""))

@@ -285,6 +285,7 @@ class CurrentStoreTests(CommitCase):
         )
         self.assertEqual((self.home / state.WITNESS).read_bytes(), witness)
 
+    @unittest.skipIf(os.name == "nt", "Windows locks open SQLite stores")
     def test_replaced_source_rejected_before_fencing_stale_connection(
         self,
     ) -> None:
@@ -338,6 +339,7 @@ class CurrentStoreTests(CommitCase):
             self.row("SELECT generation FROM review_control")[0], 1
         )
 
+    @unittest.skipIf(os.name == "nt", "Windows locks open SQLite stores")
     def test_replaced_path_does_not_mask_original_replay_error(self) -> None:
         self.ready()
         failure = LookupError("replay interrupted")

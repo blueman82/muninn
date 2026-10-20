@@ -17,6 +17,7 @@ from unittest import mock
 from muninn import review_process as process
 from muninn import review_process_identity as identity
 from muninn import review_process_protocol as protocol
+from muninn.review_launch_spec import worker_launch
 from muninn.review_models import ReviewPolicy
 from tests.test_review_shared_models import policy_data
 
@@ -46,22 +47,11 @@ def start_worker(
     with (
         stderr_path.open("wb") if stderr_path else Path(os.devnull).open("wb")
     ) as errors:
+        command, environment = worker_launch(deadline, 8192, 4096)
         return subprocess.Popen(
-            [
-                sys.executable,
-                "-E",
-                "-s",
-                "-m",
-                "muninn.review_worker",
-                "--deadline",
-                str(deadline),
-                "--max-input-bytes",
-                "8192",
-                "--max-output-bytes",
-                "4096",
-            ],
+            command,
             cwd=ROOT,
-            env={},
+            env=environment,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=errors,

@@ -97,6 +97,9 @@ class FingerprintTests(unittest.TestCase):
                     st_mtime_ns=actual.st_mtime_ns,
                     st_ctime_ns=ctime_ns,
                     st_birthtime_ns=30,
+                    st_file_attributes=getattr(
+                        actual, "st_file_attributes", 0
+                    ),
                 ),
             )
 
@@ -301,7 +304,13 @@ class FingerprintTests(unittest.TestCase):
                     )
                 replacement = path.with_name("replacement")
                 self.write(replacement, path.read_bytes())
-                replacement.replace(path)
+                try:
+                    replacement.replace(path)
+                except BaseException:
+                    # A blocked native replacement never transfers ownership.
+                    for handle in handles:
+                        handle.close()
+                    raise
                 return (
                     handles[0]
                     if after_open
@@ -380,7 +389,16 @@ class FingerprintTests(unittest.TestCase):
                     if changed == "absent_key":
                         self.write(self.key, saved[1])
                     elif changed == "database":
+                        before = self.db.stat()
                         self.db.write_bytes(b"changed" + saved[0][7:])
+                        # Do not rely on two writes crossing a clock tick.
+                        os.utime(
+                            self.db,
+                            ns=(
+                                before.st_atime_ns,
+                                before.st_mtime_ns + 1000000000,
+                            ),
+                        )
                     else:
                         self.write(Path(f"{self.db}-journal"), b"pending")
                 return actual_open(path, root=root, expected=expected)

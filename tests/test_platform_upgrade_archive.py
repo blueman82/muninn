@@ -100,7 +100,13 @@ class UpgradeArchiveTests(StoreCase):
             with self.assertRaises(FileExistsError):
                 self.retain()
         self.assertEqual(archive.read_bytes(), b"original old knowledge")
-        self.assertEqual(erase_residue.aside_files(self.home), [str(archive)])
+        expected = [str(archive)]
+        if sys.platform == "win32":
+            partial = archive.with_name(f"{archive.name}.partial")
+            self.assertEqual(partial.read_bytes(), b"original old knowledge")
+            self.assertTrue(platform_io.is_private(partial))
+            expected.append(str(partial))
+        self.assertEqual(erase_residue.aside_files(self.home), expected)
         self.assert_untouched()
 
     def test_write_sync_and_close_failures_keep_private_enumerable_artifacts(

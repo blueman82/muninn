@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 import unittest
 from collections.abc import Callable
 from contextlib import ExitStack, closing
@@ -278,6 +279,10 @@ class RebuildPreparationTests(CliCase):
     def test_original_deadline_bounds_reacquisition_after_git(self) -> None:
         prepare, writer = scope.prepare_commit, q.maintenance_writer
         owners: list[q.MaintenanceOwner] = []
+        clock = mock.Mock(wraps=q.time)
+        clock.sleep.side_effect = AssertionError(
+            "expired reacquisition waited"
+        )
         with ExitStack() as resources:
 
             def region(owner: q.MaintenanceOwner) -> object:
@@ -288,28 +293,24 @@ class RebuildPreparationTests(CliCase):
                 lookup: scope.CommitLookup, facts: scope.CommitFacts
             ) -> None:
                 prepare(lookup, facts)
+                # External process waits yield independently of coordination.
+                time.sleep(0)
                 resources.enter_context(store.writer_lock(self.home, wait_s=0))
-                resources.enter_context(
-                    mock.patch.object(
-                        q.time,
-                        "monotonic",
-                        return_value=owners[0].deadline + 1,
-                    )
-                )
+                clock.monotonic.return_value = owners[0].deadline + 1
 
             with (
                 mock.patch.object(q, "maintenance_writer", side_effect=region),
                 mock.patch.object(
                     scope, "prepare_commit", side_effect=contend
                 ),
-                mock.patch.object(q.time, "sleep") as sleep,
+                mock.patch.object(q, "time", clock),
             ):
                 code, out, _ = self.muninn("rebuild")
             self.assertEqual((code, out["error"]), (3, "busy"))
             self.assertFalse(out["publication_possible"])
             self.assertTrue(out["recovery_required"])
             self.assertEqual(len({id(owner) for owner in owners}), 1)
-            sleep.assert_not_called()
+            clock.sleep.assert_not_called()
 
     def test_unreadable_source_refuses_despite_valid_candidate_database(
         self,

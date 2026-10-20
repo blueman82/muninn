@@ -170,6 +170,9 @@ def _journal(home: Path) -> tuple[IntentRow, ...]:
     try:
         discovered = path.lstat()
     except FileNotFoundError:
+        # Windows also reports a missing child when its parent is a file.
+        if not stat.S_ISDIR(home.stat().st_mode):
+            raise NotADirectoryError("erasure_journal_parent") from None
         return ()
     if stat.S_ISDIR(discovered.st_mode):
         raise IsADirectoryError("erasure_journal_directory")

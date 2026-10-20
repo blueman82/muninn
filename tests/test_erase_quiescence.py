@@ -231,6 +231,9 @@ class EraseQuiescenceTests(IngestCase):
             cwd=Path(__file__).resolve().parent.parent,
             env={
                 "HOME": str(self.tmp),
+                "TMPDIR": str(self.tmp),
+                "TEMP": str(self.tmp),
+                "TMP": str(self.tmp),
                 **{
                     key: os.environ[key]
                     for key in ("LD_LIBRARY_PATH", "SYSTEMROOT")

@@ -6,6 +6,7 @@ Every helper works on temp dirs only; nothing here touches a live data dir.
 from __future__ import annotations
 
 import contextlib
+import os
 import queue
 import sqlite3
 import stat
@@ -241,6 +242,19 @@ def insert_event(
     )
 
 
+def direct_python() -> tuple[str, dict[str, str]]:
+    """Run fixture Python directly while preserving its selected venv."""
+    executable, environment = sys.executable, {}
+    if sys.platform == "win32":
+        base: object = getattr(sys, "_base_executable", None)
+        if not isinstance(base, str) or not base:
+            raise OSError("fixture_interpreter_unavailable")
+        executable = base
+        if sys.executable != base:
+            environment = {"__PYVENV_LAUNCHER__": sys.executable}
+    return executable, environment
+
+
 class Child:
     """A python subprocess that prints 'ready' once it holds its resource.
 
@@ -258,9 +272,11 @@ class Child:
             code: Python source run with ``-c``; argv[1] is the repo root.
             *args: Extra arguments, stringified, passed after the repo root.
         """
+        executable, environment = direct_python()
         self.proc = subprocess.Popen(
-            [sys.executable, "-I", "-B", "-c", code, str(ROOT)]
+            [executable, "-I", "-B", "-c", code, str(ROOT)]
             + [str(a) for a in args],
+            env=os.environ | environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

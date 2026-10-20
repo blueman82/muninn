@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -220,10 +221,21 @@ class NativeFixtureTests(unittest.TestCase):
                 "synthetic",
             )
             env = fixture(ctx, lambda phase: None)
-            with mock.patch(
-                "install.provider_paths.installed", return_value=False
+            with (
+                mock.patch(
+                    "install.provider_paths.installed", return_value=False
+                ),
+                mock.patch.dict(
+                    os.environ, {"MUNINN_NATIVE_SCRATCH": str(ctx.data)}
+                ),
             ):
                 results = prove_hooks(ctx, env)
+            self.assertTrue(
+                (
+                    ctx.data
+                    / "muninn-native-diagnostics/muninn-provider-proof.json"
+                ).is_file()
+            )
             self.assertEqual(len(results), 2)
             self.assertEqual([item["route"] for item in results], [0, 1])
 

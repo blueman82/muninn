@@ -32,7 +32,9 @@ def ours(group: Mapping[str, Any]) -> bool:
 def handler_ours(handler: Mapping[str, Any]) -> bool:
     """Recognize an installed Muninn handler without taking a foreign one."""
     command = handler.get("command", "")
-    if re.search(r"/\.local/bin/muninn['\"]? hook ", command):
+    if re.search(
+        r"/\.local/bin/muninn['\"]? hook ", command.replace("\\", "/")
+    ):
         return True
     arguments = handler.get("args", [])
     return (
@@ -238,9 +240,11 @@ def set_line(text: str, header: str, key: str, value: str) -> str:
         RefusedError: For a stray marker or unrecognised layout.
     """
     codex_scan(text)
-    raw, line = ce.get_section(text, header), f"{key} = {value}\n"
+    newline = "\r\n" if "\r\n" in text else "\n"
+    raw, line = ce.get_section(text, header), f"{key} = {value}{newline}"
     if raw is None:
-        return ce.put_section(text, header, f"\n{header}\n{line}")
+        block = f"{newline}{header}{newline}{line}"
+        return ce.put_section(text, header, block)
     lines = raw.splitlines(keepends=True)
     hits = [i for i, ln in enumerate(lines) if re.match(rf"\s*{key}\s*=", ln)]
     if hits:
@@ -314,6 +318,10 @@ def write_trust(text: str, hooks: Sequence[TrustedHook]) -> str:
         if not hook["suffix"].endswith(":0:0"):
             raise ce.RefusedError(f"no trust key for hook {hook['suffix']}")
         header = TRUST[hook["event"]]
-        block = f'\n{header}\ntrusted_hash = "{hook["hash"]}"\n'
+        newline = "\r\n" if "\r\n" in text else "\n"
+        block = (
+            f'{newline}{header}{newline}trusted_hash = "{hook["hash"]}"'
+            f"{newline}"
+        )
         text = ce.put_section(text, header, block)
     return text
