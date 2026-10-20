@@ -130,29 +130,28 @@ class ReviewScopeCommitTests(ScopeCommitCase):
         )
 
     def test_inapplicable_stored_scope_cannot_commit(self) -> None:
-        project = self.scope.project_id
-        for source, target in (
-            (
-                Scope(project_id="other", task=None),
-                Scope(project_id=project, task="parser"),
-            ),
-            (
-                Scope(project_id=project, task="parser"),
-                Scope(project_id=project, task="writer"),
-            ),
-            (
-                Scope(project_id=project, task="parser"),
-                Scope(project_id=project, task=None),
-            ),
-            (
-                Scope(project_id=None, task=None),
-                Scope(project_id=project, task=None),
-            ),
+        for source_project, source_task, target_task in (
+            ("other", None, "parser"),
+            ("same", "parser", "writer"),
+            ("same", "parser", None),
+            (None, None, None),
         ):
-            with self.subTest(source=source, target=target):
+            with self.subTest(
+                source_project=source_project,
+                source_task=source_task,
+                target_task=target_task,
+            ):
                 case = ScopeCommitCase()
                 case.setUp()
                 self.addCleanup(case.doCleanups)
+                project = case.scope.project_id
+                source = Scope(
+                    project_id=(
+                        project if source_project == "same" else source_project
+                    ),
+                    task=source_task,
+                )
+                target = Scope(project_id=project, task=target_task)
                 case.scope = target
                 case.context = case.start()
                 case.conn.execute(
