@@ -62,19 +62,24 @@ def fixture(ctx: Ctx, checkpoint: Callable[[str], None]) -> dict[str, str]:
         release / "muninn",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
+    python = (
+        os.environ.get("MUNINN_PYTHON") or sys.executable
+        if ctx.platform == "win32"
+        else sys.executable
+    )
     for name in (
         ("muninn.cmd", "muninn.ps1")
-        if sys.platform == "win32"
+        if ctx.platform == "win32"
         else ("muninn",)
     ):
         shutil.copyfile(ROOT / "bin" / name, ctx.muninn.parent / name)
     checkpoint("fixture_selection")
-    if sys.platform == "win32":
-        record = json.dumps({"sha": _SHA, "python": sys.executable}).encode()
+    if ctx.platform == "win32":
+        record = json.dumps({"sha": _SHA, "python": python}).encode()
         configedit.atomic_write(ctx.lib / "selection.json", record, 0o600)
     else:
         (ctx.lib / "current").symlink_to(release)
-        (ctx.lib / "python").symlink_to(sys.executable)
+        (ctx.lib / "python").symlink_to(python)
         ctx.muninn.unlink()
         ctx.muninn.symlink_to(ROOT / "bin/muninn")
     source = ctx.home / "synthetic transcripts"
@@ -104,7 +109,7 @@ def fixture(ctx: Ctx, checkpoint: Callable[[str], None]) -> dict[str, str]:
         CODEX_HOME=str(ctx.codex_home),
         CLAUDE_CONFIG_DIR=str(ctx.settings.parent),
         MUNINN_HOME=str(ctx.data),
-        MUNINN_PYTHON=sys.executable,
+        MUNINN_PYTHON=python,
         MUNINN_ROOTS=json.dumps(
             {name: str(root) for name, root in roots.items()}
         ),

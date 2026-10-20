@@ -52,6 +52,38 @@ class QuiescenceCase(unittest.TestCase):
         ):
             self.fail("uncertain predecessor admitted")
 
+    def refuse_retirement(self, baseline: bytes) -> None:
+        """Require failed retirement to block every material access path."""
+        with (
+            mock.patch.object(
+                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+            ),
+            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            quiescence.erase_connection(
+                self.home, wait_s=1, status=self.status
+            ),
+        ):
+            self.fail("repair admitted without retiring its baseline")
+        complete = (self.home / state.WITNESS).read_bytes()
+        witness = json.loads(complete)
+        self.assertEqual(
+            (witness["state"], witness["owner"]), ("complete", None)
+        )
+        self.assertEqual(self.status.repair_phase, "reconciling")
+        self.assertEqual((self.home / state.BASELINE).read_bytes(), baseline)
+        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+            fd, _ = state.begin_owner(self.home)
+            os.close(fd)
+        with (
+            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            quiescence.erase_connection(
+                self.home, wait_s=0, status=quiescence.EraseStatus()
+            ),
+        ):
+            self.fail("maintenance admitted with retained repair authority")
+        self.assertEqual((self.home / state.WITNESS).read_bytes(), complete)
+        self.assertEqual((self.home / state.BASELINE).read_bytes(), baseline)
+
 
 class QuiescenceTests(QuiescenceCase):
     """Keep acquisition bounded and preserve original failure reporting."""
@@ -174,24 +206,7 @@ class QuiescenceTests(QuiescenceCase):
         self.assertEqual((self.home / state.BASELINE).read_bytes(), baseline)
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
         if os.name == "nt":
-            with (
-                mock.patch.object(
-                    quiescence.review_boot_identity,
-                    "observe",
-                    return_value=BOOT_B,
-                ),
-                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-                quiescence.erase_connection(
-                    self.home, wait_s=1, status=self.status
-                ),
-            ):
-                self.fail("Windows retired a baseline without durable proof")
-            self.assertEqual(
-                (self.home / state.WITNESS).read_bytes(), original
-            )
-            self.assertEqual(
-                (self.home / state.BASELINE).read_bytes(), baseline
-            )
+            self.refuse_retirement(baseline)
             return
         with (
             mock.patch.object(
@@ -215,6 +230,16 @@ class QuiescenceTests(QuiescenceCase):
         self.assertEqual(
             (witness["state"], witness["owner"]), ("complete", None)
         )
+
+    def test_retirement_refusal_blocks_reconciled_completion(self) -> None:
+        self.abandon()
+        self.refuse()
+        baseline = (self.home / state.BASELINE).read_bytes()
+        windows_os = mock.Mock(wraps=os)
+        windows_os.name = "nt"
+        # Exercise the unavailable directory-sync boundary on every platform.
+        with mock.patch.object(state, "os", windows_os):
+            self.refuse_retirement(baseline)
 
     def test_changed_predecessor_or_baseline_requires_another_boot(
         self,

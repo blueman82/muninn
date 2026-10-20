@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
-from unittest import mock
+from unittest import TestCase, mock, skipIf
 
 from muninn import review_codex_launch as launch
 from muninn import review_runner
@@ -20,6 +21,7 @@ from tests.test_review_rounds import context
 from tools import prepare_codex_policy
 
 
+@skipIf(sys.platform == "win32", "macOS private-path contract")
 class CodexProductionLaunchTests(IngestCase):
     """Exercise actual preparation and drift checks without launching a CLI."""
 
@@ -179,3 +181,14 @@ class CodexProductionLaunchTests(IngestCase):
             review_runner.prepare_launch(
                 self.context, self.capability, self.prompt
             )
+
+
+class CodexWindowsBoundaryTests(TestCase):
+    """Keep the explicit platform rejection covered on every host."""
+
+    def test_windows_private_path_refused(self) -> None:
+        with (
+            mock.patch.object(review_runner.sys, "platform", "win32"),
+            self.assertRaisesRegex(ValueError, "capability_platform"),
+        ):
+            review_runner.check_private_path(Path("/unused"), directory=True)
