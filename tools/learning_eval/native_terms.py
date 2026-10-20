@@ -12,7 +12,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
-from muninn.review_models import PilotBudget
+from muninn.review_models import (
+    OngoingBudget,
+    PilotBudget,
+    require_pilot_budget,
+)
 from muninn.review_runner import check_private_path, read_private_file
 from tools.learning_eval.account import Account
 from tools.learning_eval.cases import digest, strict_json
@@ -53,8 +57,11 @@ def authority_bytes(path: Path, expected: str) -> bytes:
     return raw
 
 
-def validate_budget(budget: PilotBudget, carried: int = 1) -> None:
+def validate_budget(
+    budget: PilotBudget | OngoingBudget, carried: int = 1
+) -> None:
     """Reserve the carried launch outside the remaining account allowance."""
+    budget = require_pilot_budget(budget)
     if (
         budget.max_model_calls > 50 - carried
         or budget.max_wall_seconds > 14400
@@ -220,7 +227,10 @@ def assessment_deadline(terms: NativeTerms, assessment: Assessment) -> float:
     return terms.started_at + min(
         14400,
         assessment.budget.max_wall_seconds,
-        *(p.budget.max_wall_seconds for p in assessment.policies),
+        *(
+            require_pilot_budget(p.budget).max_wall_seconds
+            for p in assessment.policies
+        ),
     )
 
 

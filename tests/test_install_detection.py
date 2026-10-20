@@ -30,12 +30,17 @@ class AppDetectionTest(unittest.TestCase):
         self.w.ctx().settings.write_text("malformed leftover JSON")
         self.w.ctx().config.write_text("malformed leftover TOML")
         real_is_dir = Path.is_dir
-        with mock.patch.object(
-            Path,
-            "is_dir",
-            autospec=True,
-            side_effect=lambda path: (
-                False if path.suffix == ".app" else real_is_dir(path)
+        with (
+            mock.patch.object(
+                Path,
+                "is_dir",
+                autospec=True,
+                side_effect=lambda path: (
+                    False if path.suffix == ".app" else real_is_dir(path)
+                ),
+            ),
+            mock.patch(
+                "install.provider_apps.shutil.which", return_value=None
             ),
         ):
             rec = co.install(self.w.ctx(fresh=True), self.w.repo, self.w.sha)
@@ -46,6 +51,50 @@ class AppDetectionTest(unittest.TestCase):
         self.assertFalse(
             any("--provider" in call for call in self.w.fake.calls)
         )
+
+    def test_macos_standalone_codex_cli_selects_setup_with_owner_trust(
+        self,
+    ) -> None:
+        (self.w.home / "Applications/Codex.app").rmdir()
+        binary = (
+            self.w.home / "bin" / ("codex.exe" if os.name == "nt" else "codex")
+        )
+        binary.parent.mkdir()
+        binary.write_text("#!/bin/sh\nexit 99\n")
+        binary.chmod(0o700)
+        self.w.fake.version = b"codex-cli 0.163.0\n"
+        search = str(binary.parent) + os.pathsep + os.environ.get("PATH", "")
+        with mock.patch.dict(os.environ, {"PATH": search}):
+            rec = co.install(self.w.ctx(fresh=True), self.w.repo, self.w.sha)
+        self.assertTrue(rec["has_codex"])
+        self.assertEqual(rec["trust"], "owner")
+        self.assertTrue(
+            any(
+                call[:3] == ["codex", "plugin", "add"]
+                for call in self.w.fake.calls
+            )
+        )
+        config = self.w.ctx().config.read_text()
+        self.assertIn("enabled = true", config)
+        self.assertNotIn("trusted_hash", config)
+
+    def test_macos_codex_cli_requires_executable_file(self) -> None:
+        (self.w.home / "Applications/Codex.app").rmdir()
+        binary = (
+            self.w.home / "bin" / ("codex.exe" if os.name == "nt" else "codex")
+        )
+        binary.parent.mkdir()
+        with mock.patch.dict(os.environ, {"PATH": str(binary.parent)}):
+            self.assertFalse(installed(self.w.ctx(), "codex"))
+            binary.write_text("synthetic")
+            if os.name != "nt":
+                binary.chmod(0o600)
+                self.assertFalse(installed(self.w.ctx(), "codex"))
+            binary.chmod(0o700)
+            self.assertTrue(installed(self.w.ctx(), "codex"))
+            binary.unlink()
+            binary.mkdir()
+            self.assertFalse(installed(self.w.ctx(), "codex"))
 
     def test_installed_apps_without_config_receive_manual_guidance(
         self,

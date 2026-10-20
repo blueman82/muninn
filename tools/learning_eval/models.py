@@ -298,6 +298,8 @@ class Assessment(StrictModel):
             raise ValueError("incomplete_settings")
         if set(self.comparators) != self.comparator_config_digests.keys():
             raise ValueError("comparator_config_mismatch")
+        if any(not isinstance(p.budget, PilotBudget) for p in self.policies):
+            raise ValueError("finite_pilot_budget_required")
         if any(
             p.budget.account_id != self.budget.account_id
             for p in self.policies

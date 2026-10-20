@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "policy_id": "PROPOSED-inactive-ongoing-production",
+  "prompt_digest": "09b308c73ec4360172657c83e8f1cb46f1d9b7e6ceebb9a36ab4477531a2e937",
+  "projection_version": "permitted-fields-v2",
+  "result_schema_digest": "6773332024b9eedb43841d3814fb9cf34bb8b4bb6499e558e972fa5e68195feb",
+  "runner": {
+    "runner": "codex_cli",
+    "executable": "/absolute/path/to/pinned/codex",
+    "version": "0.163.0",
+    "model": "gpt-6.1-sol",
+    "reasoning": "low"
+  },
+  "max_rounds": 2,
+  "max_input_bytes": 65536,
+  "max_output_bytes": 32768,
+  "context_bytes": 12000,
+  "deadline_seconds": 120.0,
+  "max_attempts": 1,
+  "retry_backoff_seconds": [],
+  "concurrency": 1,
+  "hook_wait_seconds": 0.0,
+  "allow_global": false,
+  "budget": {
+    "kind": "ongoing_production",
+    "account_id": "muninn-codex-production",
+    "conservative_call_cost_decimal": null,
+    "currency": null,
+    "approved_by": "PROPOSED-NOT-APPROVED",
+    "approved_at": 0.0
+  },
+  "experimental_codex": {
+    "kind": "ongoing-mac-codex-v1",
+    "activation_authorized": false,
+    "host_identity": "0000000000000000000000000000000000000000000000000000000000000000",
+    "data_home": "/Users/harrison/.local/share/muninn",
+    "accepted_uncertainties": "posthoc-actions;unknown-requests-and-billing;incomplete-tool-source-isolation;deferred-C6-assessment"
+  }
+}

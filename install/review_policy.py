@@ -15,9 +15,16 @@ from install import legacy_baseline as baseline
 from install import legacy_state, record, snapshot_io
 from install.context import Ctx, StepFailedError, link_text
 from install.record import Record
-from muninn import file_sync, platform_io, store, store_fingerprint, tombstones
+from muninn import (
+    file_sync,
+    platform_io,
+    store,
+    store_fingerprint,
+    tombstones,
+)
 from muninn import review_quiescence as q
-from muninn.review_json import canonical_json
+from muninn.review_codex_policy import check_activation, check_host
+from muninn.review_json import canonical_json, reject_constant
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import bootstrap_policy, checked_policy, digest
 
@@ -34,18 +41,13 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _constant(value: str) -> object:
-    """Refuse nonfinite JSON numbers with a content-free error."""
-    raise ValueError("nonfinite_policy_value")
-
-
 def _policy(raw: str) -> ReviewPolicy:
     """Validate strict JSON before applying the accepted policy contract."""
     try:
-        value = json.loads(
-            raw, object_pairs_hook=_object, parse_constant=_constant
+        json.loads(
+            raw, object_pairs_hook=_object, parse_constant=reject_constant
         )
-        return checked_policy(ReviewPolicy.model_validate(value))
+        return checked_policy(ReviewPolicy.model_validate_json(raw))
     except (ValueError, RecursionError, TypeError):
         raise StepFailedError("review_policy_invalid") from None
 
@@ -91,6 +93,11 @@ def capture(ctx: Ctx, sha: str) -> Record:
             raise StepFailedError("review_policy_unsupported")
         raw = _read(ctx.review_policy)
         policy = _policy(raw)
+        if policy.experimental_codex is not None:
+            try:
+                check_host(policy.experimental_codex, ctx.data)
+            except ValueError:
+                raise StepFailedError("review_policy_unsupported") from None
         result.update(
             raw=raw,
             raw_digest=hashlib.sha256(raw.encode()).hexdigest(),
@@ -312,6 +319,8 @@ def _bootstrap(
     )
     conn.execute("BEGIN IMMEDIATE")
     try:
+        if policy.experimental_codex is not None:
+            check_activation(policy.experimental_codex, ctx.data)
         bootstrap_policy(conn, policy, now)
         intent = _activation(conn, path)
         if previous and previous["intent"] != intent:
