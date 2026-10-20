@@ -231,6 +231,7 @@ class EraseQuiescenceTests(IngestCase):
             cwd=Path(__file__).resolve().parent.parent,
             env={
                 "HOME": str(self.tmp),
+                "USERPROFILE": str(self.tmp),
                 "TMPDIR": str(self.tmp),
                 "TEMP": str(self.tmp),
                 "TMP": str(self.tmp),

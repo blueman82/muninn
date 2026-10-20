@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -210,6 +211,24 @@ class MachineCodesTest(unittest.TestCase):
 
 class NativeFixtureTests(unittest.TestCase):
     """Keep fixture content checked without claiming native host acceptance."""
+
+    def test_windows_fixture_preserves_trusted_python_selection(self) -> None:
+        """Keep the private interpreter selected by the native proof host."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = Ctx(
+                Path(tmp).resolve() / "home",
+                run_real,
+                "synthetic",
+                platform="win32",
+            )
+            trusted = str(Path(tmp).resolve() / "private-python.exe")
+            with mock.patch.dict(os.environ, {"MUNINN_PYTHON": trusted}):
+                env = fixture(ctx, lambda phase: None)
+            self.assertEqual(env["MUNINN_PYTHON"], trusted)
+            self.assertEqual(
+                json.loads((ctx.lib / "selection.json").read_text())["python"],
+                trusted,
+            )
 
     def test_rendered_context_routes_accept_native_lifecycle_payloads(
         self,

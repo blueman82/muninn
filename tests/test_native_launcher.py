@@ -15,6 +15,8 @@ from pathlib import Path
 
 from muninn import platform_io, poller_stop, store
 from tests.ingest_support import ROOT
+from tests.review_quiescence_support import initialize
+from tests.store_support import direct_python
 from tests.test_bootstrap_guards import compile_marker, diagnose_bootstrap
 
 if sys.platform == "win32":
@@ -265,6 +267,7 @@ if sys.platform == "win32":
             with tempfile.TemporaryDirectory() as temp:
                 home = Path(temp) / "data"
                 platform_io.ensure_private_dir(home)
+                initialize(home)
                 env = {
                     key: value
                     for key, value in os.environ.items()
@@ -276,9 +279,10 @@ if sys.platform == "win32":
                     "HOME": temp,
                 }
                 code = "from muninn.cli import main; raise SystemExit(main())"
+                executable, environment = direct_python()
                 process = subprocess.Popen(
                     [
-                        sys.executable,
+                        executable,
                         "-X",
                         "utf8",
                         "-c",
@@ -288,7 +292,7 @@ if sys.platform == "win32":
                         "30",
                     ],
                     cwd=ROOT,
-                    env=env,
+                    env=env | environment,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
