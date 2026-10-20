@@ -1,6 +1,6 @@
 ---
 name: muninn-learn
-description: Control bounded muninn learning requests with `muninn learn request|list|show|cancel|retry|replay`. Use when the user asks to review a session, inspect learning progress or receipts, cancel, restart, or explicitly replay a historical window.
+description: Control bounded muninn learning requests with `muninn learn request|list|show|cancel|retry|resume|replay`. Use when the user asks to review a session, inspect learning progress or receipts, cancel, restart, or explicitly replay a historical window.
 ---
 
 # muninn learn
@@ -10,6 +10,7 @@ description: Control bounded muninn learning requests with `muninn learn request
     muninn learn show R_ID
     muninn learn cancel R_ID
     muninn learn retry R_ID
+    muninn learn resume --policy PATH --failed-request R_ID
     muninn learn replay --session REF --from-line N --through-line N --policy PATH
 
 - `REF` identifies an indexed `provider:thread_id` or an unambiguous session root. Request IDs are `R_` plus 32 lowercase hex characters.
@@ -18,6 +19,7 @@ description: Control bounded muninn learning requests with `muninn learn request
 - Request/cancel/retry return current `RequestView`; list returns `requests: [RequestView, ...]`. State is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`.
 - Show returns `ReviewDetail` with request, attempts, durable calls, governed evidence and receipt/null. Evidence is content, never suitable for logs. Open cited originals before making factual claims.
 - Retry is an explicit operator restart of the same request, including cancelled state when current guards permit. Completed requests preserve existing state/receipt without another commit.
+- Resume re-enables stopped ongoing Codex admission only after the latest attempt is an inspected `rejected_authority` failure. It requires the exact installed policy, no unfinished work, uncertain call, abandoned attempt or other failure type. The failed request stays failed; other stops remain disabled.
 - Replay requires explicit bounds and policy and uses the same request/evidence/commit path. Never implicitly enqueue an archive.
 - Local correction is `muninn know propose --input FILE`; it uses admitted evidence and checked authority without a model call. Proposal text cannot mint owner authority.
 - End/precompact capture and startup context refresh are separate. Busy enqueue is not durable acknowledgment; later recovery cannot prove the exact missed event/cutoff. Cursor waits for the next native import or explicit full ingest.
