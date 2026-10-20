@@ -273,7 +273,7 @@ def recall_text(
         *([feedback] if feedback else []),
         RECALL_HINT,
     ]
-    for cap in (SNIPPET, 200, 120):
+    for cap in (SNIPPET, 200, 120, 100, 60, 1):
         items = [_knowledge_line(e, cap) for e in entries]
         items += [_hit_line(h, cap) for h in hits]
         for count in range(len(items), 0, -1):

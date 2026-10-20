@@ -137,6 +137,31 @@ class RecallStressTests(RecallCase):
         self.assertLessEqual(len(shrunk.encode()), 1500)
         self.assertIn("x" * 180, shrunk)
 
+    def test_codex_recall_keeps_long_knowledge_pointer(self) -> None:
+        entry: hook_frame.RecallEntry = {
+            "id": "K_" + "a" * 32,
+            "revision": 1,
+            "state": "active",
+            "form": "note",
+            "kind": "fact",
+            "text": "t" * 300,
+            "scope": {
+                "project_id": "/a/longer/project/path/with/more/segments",
+                "task": None,
+            },
+            "evidence_refs": ["E_" + "b" * 32, "E_" + "c" * 32],
+        }
+        block = hook_frame.recall_text(
+            [entry],
+            [],
+            (),
+            900,
+            feedback="Tell human: Memory R1: useful/noise/uncertain — reason.",
+        )
+        self.assertLessEqual(len(block.encode()), 900)
+        self.assertIn(entry["id"], block)
+        self.assertIn("muninn know show K_ID", block)
+
     def test_prompt_hook_lines_carry_current_revision_scope_and_support(
         self,
     ) -> None:
