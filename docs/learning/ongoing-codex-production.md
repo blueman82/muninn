@@ -43,6 +43,12 @@ its event is detected. The code contains it when observed and durably disables
 further admission on terminal errors, uncertain output, validation failure,
 configuration drift or an interrupted attempt. Existing disabled admission is
 preserved through reinstall; routine startup does not re-enable it.
+After inspecting a contained `rejected_authority` failure, an operator can run
+`muninn learn resume --policy PATH --failed-request R_ID`. It requires the exact
+installed policy, the latest attempt as that exact failure, no unfinished work,
+uncertain call, abandoned attempt or other failure type in the store. It does
+not retry the failed request or alter the frozen
+policy. Other stops remain disabled for investigation.
 
 ## Reproducible artifact preparation
 

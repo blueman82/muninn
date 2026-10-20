@@ -22,7 +22,12 @@ from muninn.review_evidence_models import (
     EvidenceWindow,
     SourceRef,
 )
-from muninn.review_json import canonical_json
+from muninn.review_json import (
+    canonical_json,
+    finite_float,
+    reject_constant,
+    unique_object,
+)
 from muninn.review_models import (
     ProposalInput,
     Receipt,
@@ -142,6 +147,23 @@ def _request(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
     ).model_dump(mode="json")
 
 
+def _resume(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
+    """Reopen only the inspected contained refusal under exact local terms."""
+    try:
+        raw = Path(a.policy).read_bytes()
+        json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+            parse_float=finite_float,
+        )
+        policy = checked_policy(ReviewPolicy.model_validate_json(raw))
+    except (OSError, UnicodeError, ValueError):
+        raise ValueError("recovery_refused") from None
+    review_requests.resume_admission(conn, policy, a.failed_request, now)
+    return {"admission": True, "policy_id": policy.policy_id}
+
+
 def _receipt(conn: sqlite3.Connection, ident: RequestId) -> Receipt | None:
     """Render the unique durable receipt without altering request state."""
     row = conn.execute(
@@ -230,6 +252,8 @@ def _write(conn: sqlite3.Connection, a: Namespace) -> Out:
     try:
         if a.learn_cmd in {"request", "replay"}:
             out = _request(conn, a, now)
+        elif a.learn_cmd == "resume":
+            out = _resume(conn, a, now)
         else:
             operation = (
                 review_requests.cancel_request

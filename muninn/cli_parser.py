@@ -39,6 +39,7 @@ knowledge and learning:
   know retract K_ID requires --expected-revision N and --reason TEXT.
   learn request requires installed frozen policy; line bounds must be paired.
   learn retry explicitly restarts the same request; completed receipts persist.
+  learn resume requires the exact installed policy and one inspected refusal.
   learn replay requires --from-line, --through-line and --policy.
   No implicit runner/model/budget settings. Old know add/check flags retired.
   Cursor resume/postcompact injection is unproven: pull muninn know context.
@@ -229,6 +230,9 @@ def _add_learning(cmd: _Commands) -> None:
     )
     for name in ("show", "cancel", "retry"):
         learn.add(name).add_argument("request_id", type=request_argument)
+    p = learn.add("resume")
+    p.add_argument("--policy", required=True)
+    p.add_argument("--failed-request", type=request_argument, required=True)
 
 
 def _add_hook(cmd: _Commands) -> None:

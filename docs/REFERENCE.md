@@ -121,6 +121,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence and receipt/null. Content is shown only when requested, never logged. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
+| `muninn learn resume --policy PATH --failed-request R_ID` | Re-enable stopped ongoing Codex admission after inspecting the latest exact `rejected_authority` failure. The file must equal the installed policy. All attempts must be terminal, all calls completed, and no other failure type, abandoned attempt or pending work may exist. Failed requests remain failed; output is `{"admission":true,"policy_id":...}`. |
 | `muninn learn replay --session REF --from-line N --through-line N --policy PATH` | Explicit bounded historical request through the same evidence/commit path; no automatic archive review. |
 
 `REF` for learning is an indexed `provider:thread_id` or an unambiguous session

@@ -266,6 +266,51 @@ def fail_attempt(
     return request_view(request_row(conn, attempt.request_id))
 
 
+def resume_admission(
+    conn: sqlite3.Connection,
+    policy: ReviewPolicy,
+    request_id: RequestId,
+    now: float,
+) -> None:
+    """Resume exact ongoing authority after an inspected contained refusal."""
+    require_transaction(conn, now)
+    policy = checked_policy(policy)
+    control = conn.execute("SELECT * FROM review_control").fetchone()
+    if (
+        control is None
+        or control["admission"]
+        or policy.experimental_codex is None
+        or control["policy_digest"] != digest(policy)
+        or control["policy_json"] != canonical_json(policy)
+    ):
+        raise ValueError("recovery_refused")
+    failure = conn.execute(
+        "SELECT a.request_id,a.error_code,a.ended_at,a.outcome,r.state "
+        "FROM review_attempt a JOIN review_request r ON r.id=a.request_id "
+        "ORDER BY a.started_at DESC,a.id DESC LIMIT 1"
+    ).fetchone()
+    unsafe = conn.execute(
+        "SELECT 1 FROM review_request WHERE state IN "
+        "('pending','running','waiting') "
+        "UNION ALL SELECT 1 FROM review_attempt WHERE ended_at IS NULL "
+        "UNION ALL SELECT 1 FROM review_attempt WHERE error_code IS NOT NULL "
+        "AND error_code!='rejected_authority' "
+        "UNION ALL SELECT 1 FROM review_attempt WHERE outcome='abandoned' "
+        "UNION ALL SELECT 1 FROM review_call WHERE state!='completed' LIMIT 1"
+    ).fetchone()
+    if (
+        failure is None
+        or failure["request_id"] != request_id
+        or failure["state"] != "failed"
+        or failure["error_code"] != "rejected_authority"
+        or failure["outcome"] != "failed"
+        or failure["ended_at"] is None
+        or unsafe is not None
+    ):
+        raise ValueError("recovery_refused")
+    conn.execute("UPDATE review_control SET admission=1")
+
+
 def _retry_state(
     conn: sqlite3.Connection, row: sqlite3.Row, permitted: bool, now: float
 ) -> None:
