@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import copy
 import os
-import shutil
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -57,6 +56,7 @@ from install.cutover import (
     prepare_store,
     prepared_install_store,
 )
+from install.finish import complete
 from install.preflight import preflight
 from install.probe import codex_probe
 from install.record import (
@@ -69,7 +69,7 @@ from install.record import (
 )
 from install.rollback import rollback_owned
 from install.runtime import prepare_runtime, verify_runtime
-from install.snapshot import discard, snapshot_store
+from install.snapshot import snapshot_store
 from install.steps_config import (
     choose_cursor_hooks,
     claude,
@@ -327,30 +327,7 @@ def _install(
             ctx.say("recovery_required: cleanup failed")
         raise
     check()
-    return _finish(ctx, rec)
-
-
-def _finish(ctx: Ctx, rec: Record) -> Record:
-    """Retain activation authority and publish a value-free final outcome."""
-    # After the last rollback chance: a failure only warns, and is noted in
-    # the install record for support.
-    rec["sweep_failed"] = sweep(ctx)
-    discard(ctx, rec)
-    if ctx.upgrade and not ctx.dry_run and not rec.get("policy_activation"):
-        shutil.rmtree(ctx.rdir)
-        rec["record_removed"] = True
-    rec["install_complete"] = True
-    if not ctx.dry_run and not rec.get("record_removed"):
-        save(ctx, rec)
-    install_record(ctx, rec, "ok")
-    if ctx.dry_run:
-        ctx.say("dry run only: nothing was written")
-    else:
-        where = (
-            ctx.lib / INSTALL_RECORD if rec.get("record_removed") else ctx.rdir
-        )
-        ctx.say(f"install done; record in {where}")
-    return rec
+    return complete(ctx, rec)
 
 
 def _parser() -> argparse.ArgumentParser:

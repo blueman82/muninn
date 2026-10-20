@@ -38,6 +38,11 @@ DATA_FILES = frozenset(
         "review.supervisor.lock",
         "review.supervisor.json",
         "review.supervisor.repair.json",
+        "review-capabilities",
+        "review-codex-schema.json",
+        "review-policy-codex-ongoing.json",
+        "review-prompts",
+        "review-runner-cwd",
     }
 )
 
