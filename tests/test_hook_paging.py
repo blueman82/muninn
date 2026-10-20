@@ -6,6 +6,7 @@ root.
 
 from __future__ import annotations
 
+import json
 from contextlib import closing
 from typing import cast
 from unittest import mock
@@ -89,6 +90,7 @@ class RecallStressTests(RecallCase):
         self.assertIn("hookSpecificOutput", self.ask("hook_core.py lives"))
 
     def test_recall_text_drops_from_the_end_first(self) -> None:
+        # A fixed scope keeps row-size expectations independent of temp paths.
         entries: list[hook_frame.RecallEntry] = [
             {
                 "id": self.add(content=f"note {n}"),
@@ -97,7 +99,7 @@ class RecallStressTests(RecallCase):
                 "form": "note",
                 "kind": "fact",
                 "text": "e" * 200,
-                "scope": self.scope.model_dump(),
+                "scope": {"project_id": "/work/repo", "task": None},
                 "evidence_refs": [self.evidence[0].id],
             }
             for n in (3, 2, 1)
@@ -145,7 +147,7 @@ class RecallStressTests(RecallCase):
         self.noise(self.repo)
         text = self.body(self.ask())
         self.assertIn(f"{ident} revision 1", text)
-        self.assertIn(str(self.scope.project_id), text)
+        self.assertIn(json.dumps(self.scope.project_id), text)
         self.assertIn(f"(evidence: {self.evidence[0].id})", text)
         self.assertNotIn("«", text)
         self.assertNotIn("»", text)

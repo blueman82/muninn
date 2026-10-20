@@ -60,7 +60,7 @@ class SessionStartTests(HookCase):
                 self.assertTrue(text.endswith("\n" + CLOSE))
                 self.assertEqual(len(TAG.findall(text)), 2)
                 self.assertIn(f"{first} revision 1 [decision", text)
-                self.assertIn(str(self.scope.project_id), text)
+                self.assertIn(json.dumps(self.scope.project_id), text)
                 self.assertIn("Use the zebra cache", text)
                 self.assertIn(self.evidence[0].id, text)
                 self.assertIn(USAGE, text)

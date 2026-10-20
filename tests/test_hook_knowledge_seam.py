@@ -119,7 +119,7 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
             "Only for offline work",
             "After explicit approval",
             "Until the owner changes it",
-            str(self.scope.project_id),
+            json.dumps(self.scope.project_id),
             self.evidence[0].id,
             self.evidence[1].id,
         ):
@@ -254,14 +254,14 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
         self.write(
             rollout("caller"),
             [
-                codex_meta("user", "caller"),
+                codex_meta("user", "caller", cwd=self.scope.project_id),
                 user_msg(1, "alphaterm betaterm gammaterm CALLER_MARKER"),
             ],
         )
         self.write(
             rollout("other"),
             [
-                codex_meta("user", "other"),
+                codex_meta("user", "other", cwd=self.scope.project_id),
                 user_msg(1, "alphaterm betaterm gammaterm OTHER_MARKER"),
                 function_call(
                     2, "alphaterm", '{"q":"betaterm gammaterm TOOL_MARKER"}'
@@ -300,7 +300,7 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
         self.write(
             rollout("target"),
             [
-                codex_meta("user", "target"),
+                codex_meta("user", "target", cwd=self.scope.project_id),
                 user_msg(1, "alphaterm betaterm gammaterm TARGET_MARKER"),
             ],
         )
@@ -309,7 +309,7 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
             self.write(
                 rollout(thread),
                 [
-                    codex_meta("user", thread),
+                    codex_meta("user", thread, cwd=self.scope.project_id),
                     user_msg(1, "alphaterm betaterm NOISE_MARKER"),
                 ],
             )
@@ -362,14 +362,16 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
     def test_small_policy_distinguishes_omitted_from_empty_context(
         self,
     ) -> None:
-        self.policy = self.policy.model_copy(update={"context_bytes": 500})
+        empty_status = self.dispatch()["systemMessage"]
+        ident = self.add()
+        # Fit the complete typed note while leaving no room for frame overhead.
+        limit = len(canonical_json(self.context_view()).encode())
+        self.policy = self.policy.model_copy(update={"context_bytes": limit})
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",
             (canonical_json(self.policy), self.digest(self.policy)),
         )
-        empty_status = self.dispatch()["systemMessage"]
-        ident = self.add()
-        context = self.context_view(500)
+        context = self.context_view(limit)
         self.assertEqual([view.id for view in context.notes], [ident])
         self.assertFalse(context.truncated)
         answer = self.dispatch()
@@ -377,7 +379,7 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
         with self.subTest(field="frame"):
             self.assertIn("omitted", text)
             self.assertNotIn(ident, text)
-            self.assertLessEqual(len(text.encode()), 500)
+            self.assertLessEqual(len(text.encode()), limit)
             self.assertTrue(text.endswith("</muninn-memory>"))
         with self.subTest(field="status"):
             self.assertNotEqual(answer["systemMessage"], empty_status)
