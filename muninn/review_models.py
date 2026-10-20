@@ -159,7 +159,11 @@ class ReviewPolicy(StrictModel):
             return
         expected = {
             "max_rounds": 2,
-            "max_input_bytes": 65536,
+            "max_input_bytes": (
+                1_048_576
+                if self.policy_id == "muninn-codex-ongoing-production-v2"
+                else 65536
+            ),
             "max_output_bytes": 32768,
             "context_bytes": 12000,
             "deadline_seconds": 120.0,

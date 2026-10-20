@@ -38,9 +38,16 @@ def _write(path: Path, raw: bytes) -> None:
 
 
 def policy(
-    home: Path, executable: Path, approved_by: str, approved_at: float
+    home: Path,
+    executable: Path,
+    approved_by: str,
+    approved_at: float,
+    *,
+    revision: int = 1,
 ) -> tuple[ReviewPolicy, bytes]:
     """Construct recorded ongoing production approval and a bounded prompt."""
+    if revision not in (1, 2):
+        raise ValueError("policy_revision")
     prompt = PromptArtifact(
         schema_version=1,
         assembly="muninn-review-prompt-v1",
@@ -58,7 +65,11 @@ def policy(
     value = ReviewPolicy.model_validate(
         {
             "schema_version": 1,
-            "policy_id": "muninn-codex-ongoing-production",
+            "policy_id": (
+                "muninn-codex-ongoing-production-v2"
+                if revision == 2
+                else "muninn-codex-ongoing-production"
+            ),
             "prompt_digest": hashlib.sha256(raw).hexdigest(),
             "projection_version": "permitted-fields-v2",
             "result_schema_digest": hashlib.sha256(
@@ -72,7 +83,7 @@ def policy(
                 "reasoning": "low",
             },
             "max_rounds": 2,
-            "max_input_bytes": 65536,
+            "max_input_bytes": 1_048_576 if revision == 2 else 65536,
             "max_output_bytes": 32768,
             "context_bytes": 12000,
             "deadline_seconds": 120.0,
@@ -110,6 +121,8 @@ def prepare(
     auth_home: Path,
     approved_by: str,
     approved_at: float,
+    *,
+    revision: int = 1,
 ) -> Path:
     """Write approved artifacts without activating production.
 
@@ -119,6 +132,7 @@ def prepare(
         auth_home: Existing normal Codex sign-in directory.
         approved_by: Actual recorded approver identity.
         approved_at: UTC timestamp of the recorded approval.
+        revision: Exact ongoing policy revision to prepare.
 
     Returns:
         The private policy file to supply to the installer.
@@ -127,7 +141,9 @@ def prepare(
         ValueError: If the selection or recorded approval is invalid.
         OSError: If private artifacts cannot be durably published.
     """
-    value, prompt = policy(home, executable, approved_by, approved_at)
+    value, prompt = policy(
+        home, executable, approved_by, approved_at, revision=revision
+    )
     if approved_at > time.time():
         raise ValueError("approval_time_invalid")
     assert value.experimental_codex is not None
@@ -185,6 +201,10 @@ def prepare(
         / (hashlib.sha256(policy_raw).hexdigest() + ".json")
     )
     _write(selected, canonical_json(capability).encode())
-    path = home / "review-policy-codex-ongoing.json"
+    path = home / (
+        "review-policy-codex-ongoing-v2.json"
+        if revision == 2
+        else "review-policy-codex-ongoing.json"
+    )
     _write(path, policy_raw)
     return path

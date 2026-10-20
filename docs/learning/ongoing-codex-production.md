@@ -25,8 +25,14 @@ home, Codex 0.163.0 executable SHA256
 select this path.
 
 Each attempt retains two rounds, one attempt/no automatic retry, concurrency one,
-120 seconds, 65536 input bytes, 32768 output bytes, 12000 context bytes and zero
-hook wait. Recall remains off. Existing configured-project scope mapping governs
+120 seconds, 32768 output bytes, 12000 context bytes and zero hook wait.
+The original policy caps original-record reads at 65536 bytes. A separately
+recorded v2 approval raises only that raw-read allowance to 1048576 bytes;
+native Codex sessions on this Mac contained more than 160000 raw bytes even
+for a short exchange. The v2 transition requires a later approval timestamp,
+unchanged model and other call controls, and no learning requests or knowledge
+in the installed store. It preserves the original activation time and fences
+the supervisor generation. Recall remains off. Existing configured-project scope mapping governs
 admission and commits; there is no Muninn-only allowlist. Global saves remain
 disabled. Evidence, erasure, receipt and commit checks are unchanged.
 
@@ -57,6 +63,7 @@ policy_path = prepare(
     Path("/Users/harrison/.codex"),
     approved_by="Harrison: recorded ongoing-production authorization",
     approved_at=datetime.fromisoformat("RECORDED_APPROVAL_UTC").timestamp(),
+    revision=2,
 )
 print(policy_path)
 ```

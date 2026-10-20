@@ -53,6 +53,16 @@ class CodexProductionPolicyTests(unittest.TestCase):
         self.assertNotIn("expires_at", data["experimental_codex"])
         self.assertEqual(self.policy.deadline_seconds, 120.0)
 
+    def test_revised_raw_read_limit_keeps_other_call_bounds(self) -> None:
+        data = self.policy.model_dump(mode="json")
+        data["policy_id"] = "muninn-codex-ongoing-production-v2"
+        data["max_input_bytes"] = 1_048_576
+        revised = ReviewPolicy.model_validate_json(json.dumps(data))
+        self.assertEqual(revised.max_input_bytes, 1_048_576)
+        data["max_input_bytes"] += 1
+        with self.assertRaises(ValidationError):
+            ReviewPolicy.model_validate_json(json.dumps(data))
+
     def test_ongoing_authority_refuses_caps_and_weakened_call_controls(
         self,
     ) -> None:

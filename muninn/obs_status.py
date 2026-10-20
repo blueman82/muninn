@@ -41,6 +41,7 @@ DATA_FILES = frozenset(
         "review-capabilities",
         "review-codex-schema.json",
         "review-policy-codex-ongoing.json",
+        "review-policy-codex-ongoing-v2.json",
         "review-prompts",
         "review-runner-cwd",
     }

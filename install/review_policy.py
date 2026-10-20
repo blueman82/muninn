@@ -15,6 +15,9 @@ from install import legacy_baseline as baseline
 from install import legacy_state, record, snapshot_io
 from install.context import Ctx, StepFailedError, link_text
 from install.record import Record
+from install.review_policy_parse import policy as _policy
+from install.review_policy_transition import apply as apply_transition
+from install.review_policy_transition import compatible as compatible
 from muninn import (
     file_sync,
     platform_io,
@@ -24,32 +27,11 @@ from muninn import (
 )
 from muninn import review_quiescence as q
 from muninn.review_codex_policy import check_activation, check_host
-from muninn.review_json import canonical_json, reject_constant
+from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
-from muninn.review_progress import bootstrap_policy, checked_policy, digest
+from muninn.review_progress import bootstrap_policy, digest
 
 LIMIT = 1024 * 1024
-
-
-def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    """Reject duplicate keys before JSON decoding discards information."""
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate_policy_key")
-        result[key] = value
-    return result
-
-
-def _policy(raw: str) -> ReviewPolicy:
-    """Validate strict JSON before applying the accepted policy contract."""
-    try:
-        json.loads(
-            raw, object_pairs_hook=_object, parse_constant=reject_constant
-        )
-        return checked_policy(ReviewPolicy.model_validate_json(raw))
-    except (ValueError, RecursionError, TypeError):
-        raise StepFailedError("review_policy_invalid") from None
 
 
 def _read(path: Path) -> str:
@@ -151,30 +133,6 @@ def frozen(
     return policy
 
 
-def compatible(conn: sqlite3.Connection, policy: ReviewPolicy | None) -> None:
-    """Refuse policy replacement without changing installed admission."""
-    control = conn.execute("SELECT * FROM review_control").fetchone()
-    if control is None:
-        raise StepFailedError("review_policy_state_invalid")
-    if control["policy_json"] is None:
-        if (
-            control["policy_digest"] is not None
-            or control["activated_at"] is not None
-        ):
-            raise StepFailedError("review_policy_state_invalid")
-        if control["admission"] or any(
-            conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-            for table in ("review_source", "review_request")
-        ):
-            raise StepFailedError("review_policy_state_invalid")
-        return
-    installed = _policy(control["policy_json"])
-    if control["policy_digest"] != digest(installed):
-        raise StepFailedError("review_policy_state_invalid")
-    if policy is not None and digest(policy) != digest(installed):
-        raise StepFailedError("review_policy_transition_required")
-
-
 def preflight(ctx: Ctx, rec: Record) -> None:
     """Check installed policy before stopping the current runtime."""
     policy = frozen(ctx, rec)
@@ -266,6 +224,7 @@ def activate(
             authority()
             tombstones.reapply_tombstones(conn, ctx.data)
             compatible(conn, policy)
+            apply_transition(conn, policy)
             control = conn.execute("SELECT * FROM review_control").fetchone()
             previous = rec.get("policy_activation")
             if control["policy_json"] is not None:
