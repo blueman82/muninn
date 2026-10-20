@@ -652,7 +652,10 @@ knowledge previews followed by at most three prior prompt/reply events from the
 mapped project, excluding the caller's own session. It requires at least three
 distinct query terms and skips slash commands. UTF-8 caps are 1,500 bytes for Claude
 and 900 for Codex. With `recall.off` present it prints `{}` without opening the
-store. `MUNINN_HOOK_DISABLE=1` silences all hooks.
+store. A nonempty recall block tells the agent to inspect `K_` records with
+`muninn know show`, and to search for a transcript ref before opening evidence
+shown as `E_`; the IDs themselves are not `muninn open` refs.
+`MUNINN_HOOK_DISABLE=1` silences all hooks.
 
 Verified SessionStart refreshes (`startup|resume|clear|compact` for Claude/Codex)
 render complete applicable supported notes and a compact guide index as untrusted

@@ -96,7 +96,15 @@ class PromptRecallTests(RecallCase):
         self.assertEqual(kinds.count("E"), 3)  # at most three events
         self.assertIn(classify.NOTICE, text)
         hint = "Open a hit with " + HINT + "."
-        self.assertEqual(text.split("\n")[-2], hint)  # it ends on the hint
+        self.assertIn(hint, text)
+        self.assertIn(
+            "K_ ID: read the full saved record with "
+            "`muninn know show K_ID`",
+            text,
+        )
+        self.assertIn(
+            "E_ ID: find its transcript ref with `muninn search`", text
+        )
 
     def test_prompt_hook_term_floor_min3(self) -> None:
         two = self.talk("two", "only alphaterm betaterm appear in this chat")
