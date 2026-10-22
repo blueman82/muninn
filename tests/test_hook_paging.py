@@ -125,19 +125,42 @@ class RecallStressTests(RecallCase):
 
         full = hook_frame.recall_text(entries, hits, ())
         self.assertLessEqual(len(full.encode()), 1500)
-        self.assertEqual(rows(full), [item["id"] for item in entries])
+        self.assertEqual(rows(full), [item["id"] for item in entries[:2]])
         text = hook_frame.recall_text(entries[:1], hits, ())
         self.assertLessEqual(len(text.encode()), 1500)
-        self.assertEqual(len(rows(text)), 3)
+        self.assertEqual(len(rows(text)), 2)
         self.assertEqual(rows(text)[0], entries[0]["id"])
         self.assertNotIn("codex:thr:3.1", text)
         self.assertNotIn("«", text)
-        self.assertTrue(
-            text.endswith("`muninn open <ref> --context 3`.\n" + CLOSE)
-        )
+        self.assertTrue(text.endswith(hook_frame.RECALL_HINT + "\n" + CLOSE))
         shrunk = hook_frame.recall_text(entries[:1], hits, ("x" * 180,))
         self.assertLessEqual(len(shrunk.encode()), 1500)
         self.assertIn("x" * 180, shrunk)
+
+    def test_codex_recall_keeps_long_knowledge_pointer(self) -> None:
+        entry: hook_frame.RecallEntry = {
+            "id": "K_" + "a" * 32,
+            "revision": 1,
+            "state": "active",
+            "form": "note",
+            "kind": "fact",
+            "text": "t" * 300,
+            "scope": {
+                "project_id": "/a/longer/project/path/with/more/segments",
+                "task": None,
+            },
+            "evidence_refs": ["E_" + "b" * 32, "E_" + "c" * 32],
+        }
+        block = hook_frame.recall_text(
+            [entry],
+            [],
+            (),
+            900,
+            feedback="Tell human: Memory R1: useful/noise/uncertain — reason.",
+        )
+        self.assertLessEqual(len(block.encode()), 900)
+        self.assertIn(entry["id"], block)
+        self.assertIn("muninn know show K_ID", block)
 
     def test_prompt_hook_lines_carry_current_revision_scope_and_support(
         self,

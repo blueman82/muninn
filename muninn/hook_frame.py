@@ -43,7 +43,11 @@ OPEN_HINT = (
 RECALL_HINT = (
     "Previews: navigation only; use opened, cited eligible originals or"
     " say unknown.\n"
-    "Open a hit with `muninn open <ref> --context 3`."
+    "Open a hit with `muninn open <ref> --context 3`.\n"
+    "K_ ID: read the full saved record with `muninn know show K_ID`;"
+    " do not `muninn open K_ID`.\n"
+    "E_ ID: in `muninn know show K_ID`, match"
+    " `evidence_sources[].evidence_id`; open its `ref`, not E_ID."
 )
 
 # The `<` of a frame delimiter, however spaced or cased. Only the `<` is
@@ -269,7 +273,7 @@ def recall_text(
         *([feedback] if feedback else []),
         RECALL_HINT,
     ]
-    for cap in (SNIPPET, 200, 120):
+    for cap in (SNIPPET, 200, 120, 100, 60, 1):
         items = [_knowledge_line(e, cap) for e in entries]
         items += [_hit_line(h, cap) for h in hits]
         for count in range(len(items), 0, -1):
