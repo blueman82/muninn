@@ -51,8 +51,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _automatic(args: list[str]) -> int:
     """Plan or run the inferred install mode against the exact source HEAD."""
-    if args not in ([], ["--check"], ["--status"]):
-        return installer.main(args)
     ctx = Ctx(Path.home(), run_real, "status", default_home=True)
     selection = read_selection(ctx.lib.parent)
     installed = selection[0].name if selection else None

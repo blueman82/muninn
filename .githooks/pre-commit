@@ -11,4 +11,15 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX \
   GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_QUARANTINE_PATH \
   GIT_NAMESPACE
 cd "$root"
-exec "${MUNINN_PYTHON:-python3.13}" -m tools.check --full
+python=${MUNINN_PYTHON:-}
+if [ -z "$python" ]; then
+  for candidate in "$root/.venv/bin/python3.13" \
+    "$root/.venv/Scripts/python.exe"; do
+    if [ -x "$candidate" ]; then
+      python=$candidate
+      break
+    fi
+  done
+fi
+case "$python" in */*) PATH=$(dirname "$python"):$PATH; export PATH ;; esac
+exec "${python:-python3.13}" -m tools.check --full

@@ -29,7 +29,19 @@ class WrapperTest(unittest.TestCase):
         self.log = Path(tmp.name) / "argv"
         self.stub = Path(tmp.name) / "python-stub"
         self.stub.write_text(
-            f'#!/bin/sh\necho "$@" >> {shlex.quote(self.log.as_posix())}\n'
+            '#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "venv" ]; then '
+            'if [ "${VENV_DIR:-bin}" = "Scripts" ]; then '
+            'mkdir -p "$3/Scripts"; cp "$0" "$3/Scripts/python.exe"; '
+            'else mkdir -p "$3/bin"; cp "$0" "$3/bin/python3"; '
+            'cp "$0" "$3/bin/python3.13"; fi; exit 0; fi\n'
+            'if [ "$3" = "-c" ] && '
+            '[ "$4" = "import sys; print(sys.platform)" ]; then '
+            'echo "${PY_PLATFORM:-linux}"; exit 0; fi\n'
+            'if [ "$3" = "-c" ]; then '
+            'if [ "$0" = "$MUNINN_PYTHON" ] && '
+            '[ "${IMPORT_RC:-0}" -ne 0 ]; then exit "$IMPORT_RC"; fi\n'
+            'exit "${PINNED_VERSION_RC:-0}"; fi\n'
+            f'echo "$@" >> {shlex.quote(self.log.as_posix())}\n'
             'exit "${STUB_RC:-0}"\n'
         )
         self.stub.chmod(0o755)
@@ -38,7 +50,12 @@ class WrapperTest(unittest.TestCase):
         self.data = self.home / ".local/share/muninn"
 
     def run_wrapper(
-        self, *args: str, rc: int = 0, script: Path = WRAPPER
+        self,
+        *args: str,
+        rc: int = 0,
+        script: Path = WRAPPER,
+        input: str | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run a ``bin`` script against the temp HOME.
 
@@ -46,6 +63,8 @@ class WrapperTest(unittest.TestCase):
             *args: Command-line arguments.
             rc: Exit status the stub Python should return.
             script: The script to run, ``bin/muninn-install`` by default.
+            input: Text sent to the wrapper's stdin.
+            extra_env: Additional variables for the wrapper process.
 
         Returns:
             The finished process, with text output.
@@ -56,6 +75,7 @@ class WrapperTest(unittest.TestCase):
             MUNINN_PYTHON=str(self.stub),
             STUB_RC=str(rc),
         )
+        env.update(extra_env or {})
         command: list[str | Path] = [script, *args]
         if sys.platform == "win32":
             shell = shutil.which("sh")
@@ -65,7 +85,13 @@ class WrapperTest(unittest.TestCase):
             env.update(
                 HOME=self.home.as_posix(), MUNINN_PYTHON=self.stub.as_posix()
             )
-        return subprocess.run(command, env=env, capture_output=True, text=True)
+        return subprocess.run(
+            command,
+            env=env,
+            input=input,
+            capture_output=True,
+            text=True,
+        )
 
     def installed(self, sha: str) -> None:
         """Make the temp HOME look like a machine running release ``sha``."""
@@ -76,6 +102,26 @@ class WrapperTest(unittest.TestCase):
     def argv(self) -> str:
         """Return what the stub Python was run with, or empty if never."""
         return self.log.read_text() if self.log.exists() else ""
+
+    def hook_repo(self) -> Path:
+        """Create a temporary checkout for Git-hook setup tests."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "bin").mkdir()
+        script = root / "bin" / "muninn-install"
+        shutil.copyfile(WRAPPER, script)
+        script.chmod(0o755)
+        shutil.copyfile(
+            ROOT / "requirements-runtime.lock",
+            root / "requirements-runtime.lock",
+        )
+        shutil.copyfile(
+            ROOT / "requirements-dev.txt", root / "requirements-dev.txt"
+        )
+        git(root, "init", "-q")
+        git(root, "commit", "--allow-empty", "-qm", "initial")
+        return root
 
     def test_windows_facade_runs_the_same_script_with_required_sh(
         self,
@@ -206,6 +252,65 @@ class WrapperTest(unittest.TestCase):
         r = self.run_wrapper("--check", rc=1)
         self.assertEqual(r.returncode, 1)
         self.assertNotIn("OK to run", r.stdout)
+
+    def test_missing_runtime_dependencies_prompt_before_running_installer(
+        self,
+    ) -> None:
+        result = self.run_wrapper(
+            "--check", input="n\n", extra_env={"IMPORT_RC": "1"}
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Set up", result.stderr)
+        self.assertIn("setup declined", result.stderr)
+        self.assertEqual(self.argv(), "")
+
+    def test_incompatible_pydantic_version_prompts_before_installing(
+        self,
+    ) -> None:
+        result = self.run_wrapper(
+            "--check",
+            input="n\n",
+            extra_env={"IMPORT_RC": "0", "PINNED_VERSION_RC": "1"},
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("incompatible", result.stderr)
+        self.assertIn("setup declined", result.stderr)
+        self.assertEqual(self.argv(), "")
+
+    def test_accepting_git_hook_setup_installs_dev_tools_and_enables_hooks(
+        self,
+    ) -> None:
+        root = self.hook_repo()
+        result = self.run_wrapper(
+            script=root / "bin/muninn-install", input="y\n"
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        hook_path = git(root, "config", "--get", "core.hooksPath")
+        self.assertEqual(hook_path.decode().strip(), ".githooks")
+        self.assertTrue((root / ".venv" / "bin" / "python3.13").is_file())
+        self.assertIn("-m pip install -r", self.argv())
+        self.assertIn("requirements-dev.txt", self.argv())
+
+    def test_windows_setup_uses_windows_venv_interpreter(self) -> None:
+        root = self.hook_repo()
+        result = self.run_wrapper(
+            script=root / "bin/muninn-install",
+            input="y\ny\n",
+            extra_env={
+                "IMPORT_RC": "1",
+                "PY_PLATFORM": "win32",
+                "VENV_DIR": "Scripts",
+            },
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((root / ".venv" / "Scripts" / "python.exe").is_file())
+        self.assertFalse((root / ".venv" / "bin").exists())
+        self.assertEqual(
+            git(root, "config", "--get", "core.hooksPath").decode().strip(),
+            ".githooks",
+        )
 
     def test_status_compares_the_installed_commit_with_head(self) -> None:
         self.installed("a" * 40)

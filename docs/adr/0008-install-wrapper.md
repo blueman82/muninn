@@ -19,8 +19,15 @@ error-prone, and a successful upgrade deletes the previous release (ADR 0001).
 - Without arguments, it installs this checkout's HEAD: `--fresh` when there is no
   current release and no data directory, `--upgrade` when both exist. If only one of
   them exists it refuses with an incomplete-installation diagnostic.
-- `--check` runs the installer's dry run and writes nothing, not even the install log.
-  It ends with the command to run.
+- If the selected Python cannot import the pinned Pydantic version, the wrapper asks
+  before creating the checkout's `.venv` and installing the hashed runtime lock. Declining
+  runs no installer.
+- On macOS/Linux first install, the wrapper also offers to enable this checkout's Git hooks. Accepting
+  installs `requirements-dev.txt` in `.venv` and sets local `core.hooksPath` to `.githooks`;
+  an existing custom hooks path is left unchanged.
+- `--check` runs the installer's dry run without changing installed state or writing an
+  install log. Accepted runtime or Git-hook setup may create `.venv` and change local Git
+  configuration. It ends with the command to run.
 - `--status` compares the installed commit with this checkout's HEAD and runs no
   installer code.
 - `--help` describes the three forms above.

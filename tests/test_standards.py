@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -39,6 +43,46 @@ class GateCannotBeRemovedTest(unittest.TestCase):
         text = HOOK.read_text(encoding="utf-8")
         self.assertIn("tools.check --full", text)
         self.assertNotIn("exit 0", text)
+
+    def test_git_hooks_prefer_checkout_venv(self) -> None:
+        if sys.platform == "win32":
+            for name in ("pre-commit", "pre-merge-commit"):
+                text = (ROOT / ".githooks" / name).read_text(encoding="utf-8")
+                self.assertIn(".venv/Scripts/python.exe", text)
+            return
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            python = root / ".venv" / "bin" / "python3.13"
+            python.parent.mkdir(parents=True)
+            python.write_text(
+                '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$HOOK_ARGS_FILE"\n',
+                encoding="utf-8",
+            )
+            python.chmod(0o755)
+            log = root / "args.txt"
+            env = dict(os.environ)
+            env.pop("MUNINN_PYTHON", None)
+            env["HOOK_ARGS_FILE"] = str(log)
+            for name in ("pre-commit", "pre-merge-commit"):
+                with self.subTest(hook=name):
+                    command = [str(ROOT / ".githooks" / name)]
+                    if sys.platform == "win32":
+                        shell = shutil.which("sh")
+                        self.assertIsNotNone(shell)
+                        command = [shell or "sh", *command]
+                    subprocess.run(
+                        command,
+                        cwd=root,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    self.assertEqual(
+                        log.read_text(encoding="utf-8").splitlines(),
+                        ["-m", "tools.check", "--full"],
+                    )
 
     def test_claude_code_blocks_stopping_on_a_failing_gate(self) -> None:
         settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
