@@ -419,12 +419,9 @@ def prompt_submit(
 ) -> dict[str, object]:
     """Handle UserPromptSubmit in off, advisory or automatic mode.
 
-    Matching current eligible knowledge previews come first. Then come at most
-    ``MAX_EVENTS`` prompt and reply events of this repo, never the caller's
-    own session, each matching at least ``MIN_TERMS`` distinct query terms.
-    Short, slash and subagent prompts recall nothing. Advisory mode sends
-    static guidance without a store read. Automatic blocks use the provider
-    recall limit.
+    Eligible knowledge precedes up to ``MAX_EVENTS`` matching earlier events.
+    Short, slash and subagent prompts recall nothing. Advisory sends static
+    guidance without a store read; automatic blocks use the provider limit.
 
     Args:
         payload: The provider's hook payload; non-objects count as empty.
@@ -438,14 +435,15 @@ def prompt_submit(
     """
     env = env_for_provider(env, provider)
     trace = {} if trace is None else trace
+    if env.get("MUNINN_HOOK_DISABLE") == "1":
+        trace["skipped"] = "disabled"
+        return {}
     if (store.data_home(env) / RECALL_OFF).exists():  # owner switch
         trace["skipped"] = "recall_off"
         return {}
     if (store.data_home(env) / RECALL_ADVISORY).exists():
         trace["skipped"] = "recall_advisory"
-        if env.get("MUNINN_HOOK_DISABLE") == "1" or _skip_as_subagent(
-            as_payload(payload), provider
-        ):
+        if _skip_as_subagent(as_payload(payload), provider):
             return {}
         return advisory_output(payload)
     terms = prompt_terms(as_payload(payload), trace)
