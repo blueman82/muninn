@@ -29,7 +29,9 @@ class WrapperTest(unittest.TestCase):
         self.log = Path(tmp.name) / "argv"
         self.stub = Path(tmp.name) / "python-stub"
         self.stub.write_text(
-            f'#!/bin/sh\necho "$@" >> {shlex.quote(self.log.as_posix())}\n'
+            '#!/bin/sh\nif [ "$3" = "-c" ]; then '
+            'exit "${IMPORT_RC:-0}"; fi\n'
+            f'echo "$@" >> {shlex.quote(self.log.as_posix())}\n'
             'exit "${STUB_RC:-0}"\n'
         )
         self.stub.chmod(0o755)
@@ -206,6 +208,26 @@ class WrapperTest(unittest.TestCase):
         r = self.run_wrapper("--check", rc=1)
         self.assertEqual(r.returncode, 1)
         self.assertNotIn("OK to run", r.stdout)
+
+    def test_missing_runtime_dependencies_prompt_before_running_installer(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [WRAPPER, "--check"],
+            env=dict(
+                os.environ,
+                HOME=str(self.home),
+                MUNINN_PYTHON=str(self.stub),
+                IMPORT_RC="1",
+            ),
+            input="n\n",
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Set up", result.stderr)
+        self.assertIn("setup declined", result.stderr)
+        self.assertEqual(self.argv(), "")
 
     def test_status_compares_the_installed_commit_with_head(self) -> None:
         self.installed("a" * 40)

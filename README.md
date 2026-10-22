@@ -12,11 +12,12 @@ Automatic recall keeps separate private review metadata. Everything it returns i
 - Hook setup: installed app required; absent apps skipped; installed Claude/Codex without config: manual setup guidance.
 
     git clone https://github.com/blueman82/muninn && cd muninn
-    bin/muninn-install --check   # plain-sentence preview, writes nothing
+    bin/muninn-install --check   # preview; prompts to set up .venv if needed
     bin/muninn-install           # fresh install, or upgrade if installed
 
 - Upgrade: `git pull`, then the same two commands (`--status` compares the installed commit with
   `HEAD`). One pinned release is kept.
+- If the selected Python lacks Muninn's pinned runtime dependencies, the installer asks before creating `.venv` and installing `requirements-runtime.lock`; answer `n` to stop. Developer tools install separately below.
 - Recovery: after possible live-store mutation, a failed current-format upgrade keeps current data
   and the selected runtime/configuration, leaves the service stopped, and reports `recovery_required`. Retained archives are not automatic restore authority. See the recovery contract in `docs/REFERENCE.md`.
 - Codex: if the installer prints `OWNER STEP`, run `/hooks` and trust the managed hooks.

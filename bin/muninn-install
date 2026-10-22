@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install or upgrade muninn from this checkout at its HEAD.
 #   bin/muninn-install           fresh install, or upgrade when already installed
-#   bin/muninn-install --check   say what would happen; write nothing
+#   bin/muninn-install --check   preview; may set up .venv if needed
 #   bin/muninn-install --status  installed commit against this checkout's HEAD
 #   bin/muninn-install --uninstall [--dry-run] [--purge-data]  remove muninn
 #   bin/muninn-install --help    describe the above
@@ -29,6 +29,35 @@ if [ -z "$py" ]; then
     "set MUNINN_PYTHON=/path/to/python3.13" >&2
   exit 127
 fi
+
+ensure_runtime() {
+  if "$py" -E -s -c 'import pydantic' >/dev/null 2>&1; then
+    return
+  fi
+  printf 'Pinned runtime dependencies are missing. Set up %s/.venv and continue? [y/N] ' \
+    "$root" >&2
+  IFS= read -r answer || answer=
+  case "$answer" in
+    [yY]*) ;;
+    [nN]* | '') echo "muninn-install: setup declined; no install was run" >&2; exit 1 ;;
+    *) echo "muninn-install: answer y or n; no install was run" >&2; exit 1 ;;
+  esac
+  env_python=$root/.venv/bin/python3
+  "$py" -m venv "$root/.venv" || {
+    echo "muninn-install: could not create $root/.venv" >&2
+    exit 1
+  }
+  "$env_python" -m pip install --require-hashes \
+    -r "$root/requirements-runtime.lock" || {
+    echo "muninn-install: could not install pinned runtime dependencies" >&2
+    exit 1
+  }
+  "$env_python" -E -s -c 'import pydantic' >/dev/null 2>&1 || {
+    echo "muninn-install: runtime dependency check failed in $root/.venv" >&2
+    exit 1
+  }
+  py=$env_python
+}
 
 # Removing needs no commit, so it must work where git is missing or this
 # copy of the repo is not a git checkout.
@@ -63,7 +92,7 @@ Install or upgrade muninn from this checkout at its HEAD. It picks a fresh
 install or an upgrade by looking at what is on this machine.
 
   (no argument)  install or upgrade, restart the poller, run doctor
-  --check        say what would happen; write nothing
+  --check        preview the install; may set up .venv if needed
   --status       show the installed commit against this checkout's HEAD
   --uninstall    remove muninn (bin/muninn-uninstall); takes --dry-run and
                  --purge-data
@@ -87,6 +116,7 @@ HELP
     ;;
   --check | "") ;;
   *)
+    ensure_runtime
     cd "$root"
     exec "$py" -E -s -B -m install.installer "$@"
     ;;
@@ -97,6 +127,8 @@ if [ "$mode" = half ]; then
     "release link disagree; fix that by hand first" >&2
   exit 1
 fi
+
+ensure_runtime
 
 cd "$root"
 if [ "${1:-}" = --check ]; then
