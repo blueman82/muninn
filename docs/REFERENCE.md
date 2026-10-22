@@ -579,7 +579,7 @@ release blockers; passing fakes or ordinary absent-baseline operation are not na
 qualification. Original-source read budgets bound neither erasure-journal work nor
 total I/O or command time. Process deadlines do not bound delayed DB commit/cancel.
 
-## Per-prompt recall switch (`recall.off`)
+## Per-prompt retrieval modes
 
 ### Reviewing automatic recall
 
@@ -651,12 +651,23 @@ prompt-hook call log; request fingerprints live only in the review database.
 knowledge previews followed by at most three prior prompt/reply events from the
 mapped project, excluding the caller's own session. It requires at least three
 distinct query terms and skips slash commands. UTF-8 caps are 1,500 bytes for Claude
-and 900 for Codex. With `recall.off` present it prints `{}` without opening the
-store. A nonempty recall block tells the agent to inspect `K_` records with
+and 900 for Codex. With `recall.off` present, the prompt hook prints `{}`.
+With `recall.advisory` present and `recall.off` absent, ordinary prompts
+receive the static `<muninn-retrieval>` instruction without opening the store
+or delivering automatic recall. Empty prompts and slash commands print `{}`.
+With neither file present, automatic recall is on.
+A nonempty automatic recall block tells the agent to inspect `K_` records with
 `muninn know show`, match an `E_` ID in `evidence_sources`, and open its exact
 `ref`; the IDs themselves are not `muninn open` refs. Verify the opened
 original's hash against the source's `line_sha256`.
 `MUNINN_HOOK_DISABLE=1` silences all hooks.
+
+The static instruction asks the model to search on demand when project history
+matters, start with `--kind prompt` for owner decisions or `--kind reply` for
+assistant reports, refine or widen as needed, and open original refs before
+using past claims. `K_` IDs go through `muninn know show`; `E_` IDs are not open
+refs. Missing relevant evidence must be reported as unknown. This instruction
+does not search or count as an automatic recall delivery.
 
 Verified SessionStart refreshes (`startup|resume|clear|compact` for Claude/Codex)
 render complete applicable supported notes and a compact guide index as untrusted
@@ -678,8 +689,8 @@ resume/postcompact injection remains unproven. Explicitly run `muninn know conte
 after resume or compaction. Context already injected cannot be retracted.
 
 **Default for new installs: OFF.** `--fresh` creates `recall.off` (mode 0600) and prints
-how to turn recall on. `--upgrade` never creates or removes it, so an existing machine
-keeps whatever it had: a machine installed before this default has no file and stays on.
+how to turn recall on. `--upgrade` never changes either mode file, so an existing
+machine keeps its selected mode. If both files exist, off wins.
 
 **Rationale.** Automatic recall can introduce irrelevant material from another project.
 Retrieval relevance has not been revalidated, so fresh installs disable recall until
@@ -687,12 +698,15 @@ that validation passes. See `docs/adr/0007-recall-off-by-default.md`.
 
 | To | Run |
 |---|---|
-| turn recall on | `unlink ~/.local/share/muninn/recall.off` |
-| turn recall off | `install -m 600 /dev/null ~/.local/share/muninn/recall.off` |
-| check | `ls ~/.local/share/muninn/recall.off` (present = off) |
+| on: automatic previews | remove both `recall.off` and `recall.advisory` |
+| advisory: model chooses when to search | create `recall.advisory` with mode 0600; remove `recall.off` |
+| off: no prompt context | create `recall.off` with mode 0600; remove `recall.advisory` |
+| check | `ls ~/.local/share/muninn/recall.{off,advisory}`; off wins if both exist |
 
-The file must be mode 0600, otherwise `muninn doctor` fails `file_modes`. Its contents
-are ignored. The change takes effect on the next prompt; no restart is needed.
+Mode files must be 0600, otherwise `muninn doctor` fails `file_modes`. Their
+contents are ignored. The change takes effect on the next prompt; no restart is
+needed. Experimental Codex learning activation still requires true off mode;
+advisory mode supplies prompt context and is refused by that boundary.
 
 ## Files in the data directory
 
@@ -724,7 +738,8 @@ salvage what you need, then run that command; `muninn.sqlite-journal` SQLite's r
 journal, allowed by `unexpected_files` but a leftover one fails `unowned_journal`;
 `recall-review.sqlite` private delivery metadata and review checkpoints, with
 `recall-review.sqlite-journal` its transient SQLite journal; neither stores transcript
-text. `recall.off` if present, the prompt hook prints `{}` (must be mode 0600). Retained `muninn.sqlite.pre-upgrade-<sha>` archives (mode 0600) are also governed
+text. `recall.off` and `recall.advisory` select prompt retrieval mode (both must
+be mode 0600). Retained `muninn.sqlite.pre-upgrade-<sha>` archives (mode 0600) are also governed
 residue; their presence is not automatic restore authority. `review.supervisor.lock` is the unchanged lifetime lock;
 `review.supervisor.json` the private completion witness;
 `review.supervisor.repair.json` the private uncertain-owner repair baseline.

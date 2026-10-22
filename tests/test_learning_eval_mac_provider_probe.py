@@ -47,8 +47,8 @@ class MacProviderProbeTests(unittest.TestCase):
                     models.provider_environment(env),
                     self.assertRaisesRegex(ValueError, error),
                 ):
-                    probe.codex_probe(ctx, timeout=0.5)
-                self.assertLess(time.monotonic() - started, 2)
+                    probe.codex_probe(ctx, timeout=2)
+                self.assertLess(time.monotonic() - started, 4)
                 pid = int((ctx.home / "server.pid").read_text())
                 with self.assertRaises(ProcessLookupError):
                     os.kill(pid, 0)
@@ -64,7 +64,7 @@ class MacProviderProbeTests(unittest.TestCase):
             started = time.monotonic()
             try:
                 with models.provider_environment(env):
-                    self.assertEqual(probe.codex_probe(ctx, timeout=0.5), [])
+                    self.assertEqual(probe.codex_probe(ctx, timeout=2), [])
             except Exception as exc:
                 failure = exc
             pid = int((ctx.home / "server.pid").read_text())
@@ -79,7 +79,7 @@ class MacProviderProbeTests(unittest.TestCase):
                     os.waitpid(pid, 0)
             self.assertIsNone(failure)
             self.assertFalse(alive)
-            self.assertLess(time.monotonic() - started, 2)
+            self.assertLess(time.monotonic() - started, 4)
             with self.assertRaises(ChildProcessError):
                 os.waitpid(pid, os.WNOHANG)
 

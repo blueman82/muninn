@@ -11,6 +11,8 @@ Returns current eligible knowledge previews and ranked events from earlier sessi
 
 Search terms match stored text. Use distinctive words from the source.
 
+With `recall.advisory`, the prompt hook gives search instructions but does not search. `recall.off` stays silent; with neither mode file, automatic recall can supply previews.
+
 When recalling what the owner said, requested or decided, start with `--kind prompt`. For what an assistant reported, use `--kind reply`. Add `--provider` when the user names a provider. If the first pass misses, widen the kinds and open the surrounding conversation; an assistant's report alone does not prove an owner instruction. Verify authorship after opening: prompt events can contain pasted text or local command output.
 
 ## Flags

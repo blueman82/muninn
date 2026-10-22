@@ -139,9 +139,14 @@ earlier prompts to each of your prompts. Session-start memory and `muninn search
 available. Automatic recall is disabled by default pending retrieval relevance
 validation (`docs/adr/0007-recall-off-by-default.md`).
 
+Advisory mode gives the model a short `<muninn-retrieval>` instruction to search
+project history when it matters, without automatic recall or a hook store read.
+Create `~/.local/share/muninn/recall.advisory` with mode 0600 and remove
+`recall.off` to select it. With both files present, off wins.
+
 To turn recall on: `unlink ~/.local/share/muninn/recall.off`. To turn it off again:
 `install -m 600 /dev/null ~/.local/share/muninn/recall.off`. Details in
-`docs/REFERENCE.md`. An `--upgrade` never changes the file.
+`docs/REFERENCE.md`. An `--upgrade` never changes either mode file.
 
 With recall enabled, supplied context asks the model for a short `Memory R<number>:
 useful/noise/uncertain` assessment. At 50 recorded nonempty blocks, the hook gives you

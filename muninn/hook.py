@@ -1,12 +1,6 @@
-"""Muninn provider hooks: SessionStart and UserPromptSubmit.
+"""Provider hooks for SessionStart and UserPromptSubmit.
 
-``session_start`` and ``prompt_submit`` take the provider's hook payload and
-return its hook output: ``{"hookSpecificOutput": {"hookEventName",
-"additionalContext"}}`` or ``{}``. Whatever comes from the store is framed
-as untrusted data, redacted, delimiter-escaped and bounded (see
-``hook_frame``). A failing store gives a short framed notice instead of
-silence; ``{}`` is returned only when ``MUNINN_HOOK_DISABLE=1`` or the
-transcript belongs to a subagent or reviewer thread.
+Stored context is framed as untrusted data, redacted and bounded.
 """
 
 from __future__ import annotations
@@ -37,6 +31,7 @@ from muninn.hook_recall import (
     prompt_terms,
     recall_block,
 )
+from muninn.hook_retrieval import RECALL_ADVISORY, advisory_output
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
 
@@ -422,14 +417,11 @@ def prompt_submit(
     *,
     trace: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Handle UserPromptSubmit: recall for the prompt, or ``{}``.
+    """Handle UserPromptSubmit in off, advisory or automatic mode.
 
-    Matching current eligible knowledge previews come first. Then come at most
-    ``MAX_EVENTS`` prompt and reply events of this repo, never the caller's
-    own session, each matching at least ``MIN_TERMS`` distinct query terms.
-    Prompts with fewer terms, slash commands and subagent transcripts
-    recall nothing. The block is capped at ``RECALL_LIMIT``, or
-    ``CODEX_RECALL_LIMIT`` for Codex.
+    Eligible knowledge precedes up to ``MAX_EVENTS`` matching earlier events.
+    Short, slash and subagent prompts recall nothing. Advisory sends static
+    guidance without a store read; automatic blocks use the provider limit.
 
     Args:
         payload: The provider's hook payload; non-objects count as empty.
@@ -443,9 +435,17 @@ def prompt_submit(
     """
     env = env_for_provider(env, provider)
     trace = {} if trace is None else trace
+    if env.get("MUNINN_HOOK_DISABLE") == "1":
+        trace["skipped"] = "disabled"
+        return {}
     if (store.data_home(env) / RECALL_OFF).exists():  # owner switch
         trace["skipped"] = "recall_off"
         return {}
+    if (store.data_home(env) / RECALL_ADVISORY).exists():
+        trace["skipped"] = "recall_advisory"
+        if _skip_as_subagent(as_payload(payload), provider):
+            return {}
+        return advisory_output(payload)
     terms = prompt_terms(as_payload(payload), trace)
     if terms is None:  # nothing to recall: the store is not even opened
         return {}

@@ -225,7 +225,13 @@ class HookOutcomeTests(RecallCase):
             "prompt": "alphaterm betaterm gammaterm",
         }
         self.env["MUNINN_HOOK_DISABLE"] = "1"
-        self.assertEqual(self.calls(payload), [])  # disabled: no line
+        for mode in (None, "recall.off", "recall.advisory"):
+            with self.subTest(mode=mode):
+                if mode is not None:
+                    (self.home / mode).write_text("")
+                self.assertEqual(self.calls(payload), [])
+                if mode is not None:
+                    (self.home / mode).unlink()
         del self.env["MUNINN_HOOK_DISABLE"]
         (self.home / "recall.off").write_text("")
         (call,) = self.calls(payload)  # a skipped call still logs once
