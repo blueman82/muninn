@@ -11,11 +11,11 @@ import subprocess
 import sys
 import time
 
+from muninn.review_json import canonical_json_value
 from muninn.review_process_identity import identify
 from muninn.review_process_protocol import (
     activation_size,
     decode_activation,
-    encode,
     packet,
 )
 from muninn.review_process_windows import NativeChild, launch
@@ -35,7 +35,12 @@ class _Worker:
         )
         self.incoming = bytearray()
         self.outgoing = bytearray(
-            packet(b"R", encode(identify(os.getpid()).model_dump()))
+            packet(
+                b"R",
+                canonical_json_value(
+                    identify(os.getpid()).model_dump()
+                ).encode(),
+            )
         )
         self.expected = 12
         self.prompt = b""
@@ -103,12 +108,12 @@ class _Worker:
         self.outgoing.extend(
             packet(
                 b"L",
-                encode(
+                canonical_json_value(
                     {
                         "launched_at": time.time(),
                         "identity": identify(self.cli.pid).model_dump(),
                     }
-                ),
+                ).encode(),
             )
         )
 
@@ -148,7 +153,12 @@ class _Worker:
         if len(self.closed) == 2 and not self.outgoing:
             code = self.cli.poll()
             if code is not None:
-                self.outgoing.extend(packet(b"T", encode({"exit_code": code})))
+                self.outgoing.extend(
+                    packet(
+                        b"T",
+                        canonical_json_value({"exit_code": code}).encode(),
+                    )
+                )
                 self.completed = True
 
     def run(self) -> None:

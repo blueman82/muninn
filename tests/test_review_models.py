@@ -14,7 +14,12 @@ from muninn.knowledge_models import (
     ReplaceGuide,
     ReplaceNote,
 )
-from muninn.review_json import canonical_json, parse_result, result_schema
+from muninn.review_json import (
+    canonical_json,
+    canonical_json_value,
+    parse_result,
+    result_schema,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "learning"
 EVIDENCE = "E_11111111111111111111111111111111"
@@ -36,6 +41,14 @@ def encoded(value: object) -> bytes:
 
 class ReviewModelTests(unittest.TestCase):
     """Exercise permitted wire shapes and rejection at trust boundaries."""
+
+    def test_canonical_json_value_preserves_exact_options(self) -> None:
+        value = {"z": "café", "a": [True, None]}
+        self.assertEqual(
+            canonical_json_value(value), '{"a":[true,null],"z":"café"}'
+        )
+        with self.assertRaises(ValueError):
+            canonical_json_value({"value": float("nan")})
 
     def assert_invalid(self, value: object) -> None:
         """Require an external result to fail validation."""

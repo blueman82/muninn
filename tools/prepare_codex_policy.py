@@ -14,7 +14,11 @@ from muninn.review_codex_policy import (
     check_host,
     host_identity,
 )
-from muninn.review_json import canonical_json, result_schema
+from muninn.review_json import (
+    canonical_json,
+    canonical_json_value,
+    result_schema,
+)
 from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_models import ReviewPolicy
 from muninn.review_rounds import round_schema
@@ -73,7 +77,7 @@ def policy(
             "prompt_digest": hashlib.sha256(raw).hexdigest(),
             "projection_version": "permitted-fields-v2",
             "result_schema_digest": hashlib.sha256(
-                review_codex_launch.encode(result_schema())
+                canonical_json_value(result_schema()).encode()
             ).hexdigest(),
             "runner": {
                 "runner": "codex_cli",
@@ -177,7 +181,7 @@ def prepare(
         auth_home=auth_home,
         schema_path=schema,
     )
-    raw = review_codex_launch.encode(binding.model_dump(mode="json"))
+    raw = canonical_json_value(binding.model_dump(mode="json")).encode()
     proof = (
         home
         / "review-capabilities"
@@ -189,7 +193,7 @@ def prepare(
         status="unverified",
         proof_path=proof,
         schema_digest=hashlib.sha256(
-            review_codex_launch.encode(round_schema())
+            canonical_json_value(round_schema()).encode()
         ).hexdigest(),
         config_digest=review_codex_launch.fingerprint(binding),
     )

@@ -13,7 +13,7 @@ from muninn import review_codex_launch as launch
 from muninn import review_runner
 from muninn.knowledge_models import Scope
 from muninn.review_codex_output import output_contract_digest
-from muninn.review_json import result_schema
+from muninn.review_json import canonical_json_value, result_schema
 from muninn.review_rounds import round_schema
 from tests.ingest_support import IngestCase
 from tests.test_review_codex_production import experimental_policy
@@ -40,7 +40,7 @@ class CodexProductionLaunchTests(IngestCase):
                     update={"executable": str(executable)}
                 ),
                 "result_schema_digest": hashlib.sha256(
-                    launch.encode(result_schema())
+                    canonical_json_value(result_schema()).encode()
                 ).hexdigest(),
             }
         )
@@ -67,7 +67,9 @@ class CodexProductionLaunchTests(IngestCase):
             auth_home=auth,
             schema_path=schema,
         )
-        raw = launch.encode(self.binding.model_dump(mode="json"))
+        raw = canonical_json_value(
+            self.binding.model_dump(mode="json")
+        ).encode()
         proofs = self.home / "review-capabilities"
         proofs.mkdir(mode=0o700)
         proof = proofs / (hashlib.sha256(raw).hexdigest() + ".json")
@@ -77,7 +79,7 @@ class CodexProductionLaunchTests(IngestCase):
             **self.policy.runner.model_dump(),
             status="unverified",
             schema_digest=hashlib.sha256(
-                launch.encode(round_schema())
+                canonical_json_value(round_schema()).encode()
             ).hexdigest(),
             config_digest=launch.fingerprint(self.binding),
             proof_path=proof,
@@ -95,9 +97,9 @@ class CodexProductionLaunchTests(IngestCase):
         ):
             patch.start()
             self.addCleanup(patch.stop)
-        self.prompt = launch.encode(
+        self.prompt = canonical_json_value(
             {"instructions": launch.JSON_ONLY_INSTRUCTION, "data": {}}
-        )
+        ).encode()
 
     def test_explicit_selection_uses_fixed_recipe_and_envelope(self) -> None:
         spec = review_runner.prepare_launch(
