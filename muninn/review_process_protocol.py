@@ -9,7 +9,12 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from muninn.knowledge_models import StrictModel, UtcSeconds
-from muninn.review_json import finite_float, reject_constant, unique_object
+from muninn.review_json import (
+    canonical_json_value,
+    finite_float,
+    reject_constant,
+    unique_object,
+)
 from muninn.review_models import ProcessIdentity
 
 CONTROL_HEADER_MAX = 1024 * 1024
@@ -36,17 +41,6 @@ class TerminalNotice(StrictModel):
     exit_code: int
 
 
-def encode(value: object) -> bytes:
-    """Encode canonical UTF8 protocol metadata."""
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode()
-
-
 def load(raw: bytes) -> object:
     """Parse strict bounded metadata without duplicate or nonfinite values."""
     if len(raw) > CONTROL_HEADER_MAX:
@@ -67,7 +61,9 @@ def activation(
     limit: int,
 ) -> bytes:
     """Keep raw prompt length separate from escaped launch metadata."""
-    header = encode({"argv": argv, "cwd": str(cwd), "env": env})
+    header = canonical_json_value(
+        {"argv": argv, "cwd": str(cwd), "env": env}
+    ).encode()
     if len(header) > CONTROL_HEADER_MAX or len(prompt) > limit:
         raise ValueError("activation_limit")
     total = 4 + len(header) + len(prompt)

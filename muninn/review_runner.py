@@ -18,6 +18,7 @@ from muninn import review_codex_launch
 from muninn.knowledge_models import Digest, SchemaVersion, StrictModel, Text
 from muninn.platform_io import open_regular
 from muninn.review_json import (
+    canonical_json_value,
     finite_float,
     reject_constant,
     result_schema,
@@ -80,17 +81,6 @@ class HostProof(StrictModel):
         if value is not True:
             raise ValueError("capability_unverified")
         return value
-
-
-def _json(value: object) -> str:
-    """Encode canonical JSON for schema and configuration identities."""
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
 
 
 def _digest(raw: bytes) -> str:
@@ -229,7 +219,7 @@ def config_fingerprint(
         else:
             raise ValueError("capability_config")
     return _digest(
-        _json(
+        canonical_json_value(
             {
                 "recipe": _RECIPE,
                 "cwd": str(cwd),
@@ -352,9 +342,9 @@ def prepare_launch(
         ):
             raise ValueError("capability_changed")
         if capability.schema_digest != _digest(
-            _json(round_schema()).encode()
+            canonical_json_value(round_schema()).encode()
         ) or context.policy.result_schema_digest != _digest(
-            _json(result_schema()).encode()
+            canonical_json_value(result_schema()).encode()
         ):
             raise ValueError("capability_changed")
         proof = _proof(capability)

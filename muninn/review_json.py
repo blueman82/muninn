@@ -55,15 +55,20 @@ def parse_result(raw: bytes, limit: int) -> ReviewResult:
     return ReviewResult.model_validate_json(raw, strict=True)
 
 
-def canonical_json(value: StrictModel) -> str:
-    """Encode a model using stable UTF-8-compatible canonical JSON."""
+def canonical_json_value(value: object) -> str:
+    """Encode a JSON value with stable ordering and formatting."""
     return json.dumps(
-        value.model_dump(mode="json"),
+        value,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         allow_nan=False,
     )
+
+
+def canonical_json(value: StrictModel) -> str:
+    """Encode a model using stable UTF-8-compatible canonical JSON."""
+    return canonical_json_value(value.model_dump(mode="json"))
 
 
 def result_schema() -> dict[str, object]:

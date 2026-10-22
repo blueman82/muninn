@@ -16,7 +16,7 @@ from muninn.review_codex_policy import (
     PINNED_EXECUTABLE,
     host_identity,
 )
-from muninn.review_json import result_schema
+from muninn.review_json import canonical_json_value, result_schema
 from muninn.review_launch_spec import LaunchSpec, codex_cli_argv, launch_spec
 from muninn.review_models import ReviewContext, RunnerConfig
 from muninn.review_rounds import round_schema
@@ -44,33 +44,22 @@ class ExperimentalBinding(StrictModel):
     schema_path: Path
 
 
-def encode(value: object) -> bytes:
-    """Return canonical finite schema and binding bytes."""
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode()
-
-
 def wire_schema() -> bytes:
     """Use the same strict object envelope as the measured native trial."""
-    return encode(
+    return canonical_json_value(
         {
             "type": "object",
             "properties": {"payload_json": {"type": "string"}},
             "required": ["payload_json"],
             "additionalProperties": False,
         }
-    )
+    ).encode()
 
 
 def fingerprint(binding: ExperimentalBinding) -> str:
     """Bind exact selected inputs, decoder, argv and disposable cwd state."""
     return hashlib.sha256(
-        encode(
+        canonical_json_value(
             {
                 "binding": binding.model_dump(mode="json"),
                 "argv": codex_cli_argv(
@@ -84,7 +73,7 @@ def fingerprint(binding: ExperimentalBinding) -> str:
                 "json_instruction": JSON_ONLY_INSTRUCTION,
                 "wire_instruction": WIRE_INSTRUCTION,
             }
-        )
+        ).encode()
     ).hexdigest()
 
 
@@ -159,9 +148,13 @@ def prepare(
             for key, value in policy.runner.model_dump().items()
         )
         or capability.schema_digest
-        != hashlib.sha256(encode(round_schema())).hexdigest()
+        != hashlib.sha256(
+            canonical_json_value(round_schema()).encode()
+        ).hexdigest()
         or policy.result_schema_digest
-        != hashlib.sha256(encode(result_schema())).hexdigest()
+        != hashlib.sha256(
+            canonical_json_value(result_schema()).encode()
+        ).hexdigest()
     ):
         raise ValueError("capability_changed")
     data = cast(dict[str, object], json.loads(prompt))
@@ -175,7 +168,7 @@ def prepare(
         raise ValueError("native_prompt_instruction")
     data["instructions"] = instructions + " " + WIRE_INSTRUCTION
     data["payload_schema"] = round_schema()
-    native = encode(data)
+    native = canonical_json_value(data).encode()
     if len(native) > policy.max_input_bytes:
         raise ValueError("invalid_prompt_size")
     return launch_spec(
