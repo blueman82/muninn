@@ -75,9 +75,12 @@ large stores may require additional time. Monitor progress with `muninn stats`
 holds the writer lock longer, so other writers see exit 3 meanwhile, and it can leave
 free pages: if `doctor` then warns `db_free_space`, run `muninn compact`. A failed
 upgrade may require recovery instead of returning to the old release, as described
-above. Historical unmarked stores require an explicit cutover; ordinary writers
-and rebuild refuse them. Legacy activation/restart is not implemented by the
-current-format maintenance route.
+above. Ordinary writers and rebuild refuse unmarked stores. During `--upgrade`, a
+recognized schema v3 store is copied
+into the marked format after the managed poller stops. The installer keeps a private
+copy of the entire old database, including its old knowledge ledger; only indexed
+history is copied into the new store, and the latest erasure is applied before
+publication. Other unmarked schemas remain untouched and refuse upgrade.
 
 The exact legacy release `5c1a69b0edff81df80836d72a80971a91a8f9520`
 has a macOS/Linux continuation after managed launch exclusion and a later OS boot.
@@ -97,8 +100,9 @@ admission after store preparation and provider configuration:
 
     bin/muninn-install --repo /path/to/muninn --sha FULL_40_HEX_SHA --fresh --review-policy /path/to/policy.json
 
-Use `--upgrade` for the exact legacy route or a marked store that has never been
-activated. These are the existing two install modes. There is no policy discovery
+Use `--upgrade` for a supported schema v3 store, the exact legacy route, or a marked
+store that has never been activated. These are the existing two install modes. There
+is no policy discovery
 or default policy. Without this modifier, a never-activated store completes with
 `policy_status: activation_pending` and review admission remains disabled.
 A configured current store preserves its existing admission and reports

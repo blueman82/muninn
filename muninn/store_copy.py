@@ -38,16 +38,51 @@ GOVERNED_TABLES = (
     "unresolved",
     "review_receipt",
 )
-# Whole DDL identities reject unknown tables, columns, constraints or triggers.
+# The marked current format keeps an exact DDL identity.
 _SHAPES = {
-    3: "8c97c998a70c43dd3d6e5e7d419e9f5dafad4685a11adde90310b40142c53a42",
     1: "535cd228a984e4d5cd6f98787a33c657359bf780753c73ec33885a2ed62ddc3c",
 }
+_LEGACY_TABLES = {
+    "citation",
+    "event",
+    "knowledge",
+    "knowledge_log",
+    "scope",
+    "scope_path",
+    "source",
+    "source_issue",
+    "tombstone",
+    "usage",
+}
+_LEGACY_VIRTUAL = {"event_fts", "knowledge_fts"}
 
 
 def _shape(conn: sqlite3.Connection) -> int:
-    """Require the single legacy shape or the complete marked current shape."""
+    """Require a supported legacy table set or marked current schema."""
     version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version == 3:
+        tables = {
+            row[1]: row[2]
+            for row in conn.execute("PRAGMA main.table_list")
+            if row[0] == "main" and not row[1].startswith("sqlite_")
+        }
+        ordinary = {name for name, kind in tables.items() if kind == "table"}
+        virtual = {name for name, kind in tables.items() if kind == "virtual"}
+        shadows = {name for name, kind in tables.items() if kind == "shadow"}
+        if (
+            ordinary != _LEGACY_TABLES
+            or virtual != _LEGACY_VIRTUAL
+            or any(
+                kind not in {"table", "virtual", "shadow"}
+                for kind in tables.values()
+            )
+            or any(
+                not name.startswith(("event_fts_", "knowledge_fts_"))
+                for name in shadows
+            )
+        ):
+            raise ValueError("cutover_source_mismatch")
+        return version
     rows = [
         tuple(row)
         for row in conn.execute(
@@ -119,6 +154,8 @@ def _copy(
     result: dict[str, int] = {}
     for table in tables:
         columns = _columns(source, table)
+        if columns != _columns(target, table):
+            raise ValueError("cutover_source_mismatch")
         if table in ("store_meta", "review_control"):
             target.execute(f'DELETE FROM "{table}"')
         marks = ",".join("?" for _ in columns.split(","))
@@ -174,7 +211,7 @@ def _validate(conn: sqlite3.Connection) -> None:
 
 
 def validate_source(conn: sqlite3.Connection) -> int:
-    """Read-check the exact legacy or marked source without acquiring state.
+    """Read-check supported legacy or marked sources without acquiring state.
 
     The caller owns the connection, snapshot and maintenance barriers. This
     operation opens, initializes, writes and commits nothing. Validation
@@ -184,7 +221,7 @@ def validate_source(conn: sqlite3.Connection) -> int:
         conn: Caller-owned readable connection to a supported source.
 
     Returns:
-        Three for the exact legacy schema or one for marked current format.
+        Three for the legacy table contract or one for marked current format.
 
     Raises:
         ValueError: If source shape, foreign keys or integrity are invalid.

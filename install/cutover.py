@@ -18,6 +18,7 @@ from install import (
     record,
     review_policy,
     snapshot_io,
+    store_migration,
 )
 from install.context import Ctx, StepFailedError
 from install.record import Record, install_record, save
@@ -244,7 +245,7 @@ def _current(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
                 revalidate()
                 store.assert_store_format(conn)
         except store.StoreUnavailableError as exc:
-            raise StepFailedError("cutover_source_mismatch") from exc
+            raise StepFailedError(str(exc)) from exc
         rec["store"] = {
             "phase": "current_mutation_possible",
             "path": str(path),
@@ -305,7 +306,12 @@ def _prepared(
             )
             path = prepare(ctx, rec, owner, check)
         else:
-            path = _current(ctx, rec, owner)
+            try:
+                path = _current(ctx, rec, owner)
+            except StepFailedError as exc:
+                if str(exc) != "cutover_required":
+                    raise
+                path = store_migration.prepare(ctx, rec, owner)
         rec["policy_store_identity"] = list(
             rec["legacy"]["publication_binding"]["candidate"]["identity"]
             if "legacy" in rec

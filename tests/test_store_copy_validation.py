@@ -1,4 +1,4 @@
-"""Read-only validation of the two exact supported source formats."""
+"""Read-only validation of supported source format contracts."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class SourceValidationTests(StoreCase):
         self.assertTrue(hasattr(store_copy, "validate_source"))
         return store_copy.validate_source(conn)
 
-    def test_current_and_exact_legacy_validate_without_writes_or_roots(
+    def test_current_and_legacy_validate_without_writes_or_roots(
         self,
     ) -> None:
         legacy = self.home / "legacy.sqlite"

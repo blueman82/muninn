@@ -218,10 +218,7 @@ class KnowledgeCutoverTests(CommitCase):
         )
 
     def test_unknown_shape_refused_before_target_write(self) -> None:
-        for sql in (
-            "CREATE TABLE surprise(value TEXT)",
-            "DROP TRIGGER event_immutable",
-        ):
+        for sql in ("CREATE TABLE surprise(value TEXT)",):
             with self.subTest(sql=sql):
                 source = self.legacy()
                 source.execute(sql)
