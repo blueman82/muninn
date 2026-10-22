@@ -14,6 +14,10 @@ lib=${HOME:-/nonexistent}/.local/lib/muninn
 data=${HOME:-/nonexistent}/.local/share/muninn
 py=${MUNINN_PYTHON:-}
 [ -x "$py" ] || py=$lib/python
+# Invoke the venv path, not its outer alias: Python uses that path to find pyvenv.cfg.
+if [ "$py" = "$lib/python" ] && [ -L "$py" ]; then
+  py=$(readlink "$py")
+fi
 if [ ! -x "$py" ]; then
   py=
   for c in python3.13 python3.14 python3; do
@@ -38,6 +42,12 @@ ensure_runtime() {
   if "$py" -E -s -c \
     'import pydantic, sys; sys.exit(pydantic.__version__ != "2.14.0")' \
     >/dev/null 2>&1; then
+    return
+  fi
+  if [ -x "$env_python" ] && "$env_python" -E -s -c \
+    'import pydantic, sys; sys.exit(pydantic.__version__ != "2.14.0")' \
+    >/dev/null 2>&1; then
+    py=$env_python
     return
   fi
   printf 'Pinned runtime dependencies are missing or incompatible. Set up %s/.venv and continue? [y/N] ' \

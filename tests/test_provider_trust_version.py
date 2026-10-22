@@ -120,7 +120,7 @@ class ProviderVersionTest(unittest.TestCase):
             codex(ctx, rec)
         self.assertEqual(edits.call_count, 3)
         self.assertEqual(rec["trust"], "owner")
-        self.assertIn("OWNER STEP", messages[-1])
+        self.assertEqual(messages, [])
 
     def test_identity_detects_byte_change_and_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
