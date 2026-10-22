@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install or upgrade muninn from this checkout at its HEAD.
 #   bin/muninn-install           fresh install, or upgrade when already installed
-#   bin/muninn-install --check   preview; may set up .venv if needed
+#   bin/muninn-install --check   preview; may set up .venv and Git hooks
 #   bin/muninn-install --status  installed commit against this checkout's HEAD
 #   bin/muninn-install --uninstall [--dry-run] [--purge-data]  remove muninn
 #   bin/muninn-install --help    describe the above
@@ -63,6 +63,42 @@ ensure_runtime() {
   py=$env_python
 }
 
+ensure_git_hooks() {
+  hook_path=$(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+    git -C "$root" config --get core.hooksPath || true)
+  [ "$hook_path" = .githooks ] && return
+  if [ -n "$hook_path" ]; then
+    echo "muninn-install: existing Git hooks path left unchanged: $hook_path" >&2
+    return
+  fi
+  printf "Enable this checkout's Git hooks? This sets up .venv and developer tools. [y/N] " >&2
+  IFS= read -r answer || answer=
+  case "$answer" in
+    [yY]*) ;;
+    *) echo "muninn-install: Git hooks not enabled" >&2; return ;;
+  esac
+  env_python=$root/.venv/bin/python3
+  if [ ! -x "$env_python" ]; then
+    "$py" -m venv "$root/.venv" || {
+      echo "muninn-install: could not create $root/.venv" >&2
+      return 1
+    }
+  fi
+  "$env_python" -E -s -c \
+    'import pydantic, sys; sys.exit(pydantic.__version__ != "2.14.0")' \
+    >/dev/null 2>&1 || "$env_python" -m pip install --require-hashes \
+    -r "$root/requirements-runtime.lock" || {
+    echo "muninn-install: could not install pinned runtime dependencies" >&2
+    return 1
+  }
+  "$env_python" -m pip install -r "$root/requirements-dev.txt" || {
+    echo "muninn-install: could not install developer tools" >&2
+    return 1
+  }
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+    git -C "$root" config --local core.hooksPath .githooks
+}
+
 # Removing needs no commit, so it must work where git is missing or this
 # copy of the repo is not a git checkout.
 if [ "${1:-}" = --uninstall ]; then
@@ -96,7 +132,7 @@ Install or upgrade muninn from this checkout at its HEAD. It picks a fresh
 install or an upgrade by looking at what is on this machine.
 
   (no argument)  install or upgrade, restart the poller, run doctor
-  --check        preview the install; may set up .venv if needed
+  --check        preview; may set up .venv and enable repository Git hooks
   --status       show the installed commit against this checkout's HEAD
   --uninstall    remove muninn (bin/muninn-uninstall); takes --dry-run and
                  --purge-data
@@ -121,6 +157,7 @@ HELP
   --check | "") ;;
   *)
     ensure_runtime
+    ensure_git_hooks
     cd "$root"
     exec "$py" -E -s -B -m install.installer "$@"
     ;;
@@ -133,6 +170,7 @@ if [ "$mode" = half ]; then
 fi
 
 ensure_runtime
+ensure_git_hooks
 
 cd "$root"
 if [ "${1:-}" = --check ]; then

@@ -20,7 +20,11 @@ required check is skipped.
 
 One-time setup per clone (the first two are checked by the gate and the tests):
 
-    git config core.hooksPath .githooks                  # pre-commit and pre-merge-commit run the gate
+    git config core.hooksPath .githooks                  # hooks prefer .venv/bin/python3.13 when present
+
+The macOS/Linux `bin/muninn-install` offers this Git-hook setup on first install and
+installs the pinned runtime plus developer requirements in `.venv`. Install ShellCheck
+separately; the hooks run the full gate and fail if a required tool is missing.
 
 ```sh
 python3.13 -m venv .venv
