@@ -30,7 +30,8 @@ class WrapperTest(unittest.TestCase):
         self.stub = Path(tmp.name) / "python-stub"
         self.stub.write_text(
             '#!/bin/sh\nif [ "$3" = "-c" ]; then '
-            'exit "${IMPORT_RC:-0}"; fi\n'
+            'if [ "${IMPORT_RC:-0}" -ne 0 ]; then exit "$IMPORT_RC"; fi\n'
+            'exit "${PINNED_VERSION_RC:-0}"; fi\n'
             f'echo "$@" >> {shlex.quote(self.log.as_posix())}\n'
             'exit "${STUB_RC:-0}"\n'
         )
@@ -226,6 +227,27 @@ class WrapperTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("Set up", result.stderr)
+        self.assertIn("setup declined", result.stderr)
+        self.assertEqual(self.argv(), "")
+
+    def test_incompatible_pydantic_version_prompts_before_installing(
+        self,
+    ) -> None:
+        result = subprocess.run(
+            [WRAPPER, "--check"],
+            env=dict(
+                os.environ,
+                HOME=str(self.home),
+                MUNINN_PYTHON=str(self.stub),
+                IMPORT_RC="0",
+                PINNED_VERSION_RC="1",
+            ),
+            input="n\n",
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("incompatible", result.stderr)
         self.assertIn("setup declined", result.stderr)
         self.assertEqual(self.argv(), "")
 

@@ -31,10 +31,12 @@ if [ -z "$py" ]; then
 fi
 
 ensure_runtime() {
-  if "$py" -E -s -c 'import pydantic' >/dev/null 2>&1; then
+  if "$py" -E -s -c \
+    'import pydantic, sys; sys.exit(pydantic.__version__ != "2.14.0")' \
+    >/dev/null 2>&1; then
     return
   fi
-  printf 'Pinned runtime dependencies are missing. Set up %s/.venv and continue? [y/N] ' \
+  printf 'Pinned runtime dependencies are missing or incompatible. Set up %s/.venv and continue? [y/N] ' \
     "$root" >&2
   IFS= read -r answer || answer=
   case "$answer" in
@@ -52,7 +54,9 @@ ensure_runtime() {
     echo "muninn-install: could not install pinned runtime dependencies" >&2
     exit 1
   }
-  "$env_python" -E -s -c 'import pydantic' >/dev/null 2>&1 || {
+  "$env_python" -E -s -c \
+    'import pydantic, sys; sys.exit(pydantic.__version__ != "2.14.0")' \
+    >/dev/null 2>&1 || {
     echo "muninn-install: runtime dependency check failed in $root/.venv" >&2
     exit 1
   }

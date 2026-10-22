@@ -19,8 +19,9 @@ error-prone, and a successful upgrade deletes the previous release (ADR 0001).
 - Without arguments, it installs this checkout's HEAD: `--fresh` when there is no
   current release and no data directory, `--upgrade` when both exist. If only one of
   them exists it refuses with an incomplete-installation diagnostic.
-- If the selected Python cannot import Pydantic, the wrapper asks before creating the
-  checkout's `.venv` and installing the hashed runtime lock. Declining runs no installer.
+- If the selected Python cannot import the pinned Pydantic version, the wrapper asks
+  before creating the checkout's `.venv` and installing the hashed runtime lock. Declining
+  runs no installer.
 - `--check` runs the installer's dry run without changing installed state or writing an
   install log. An accepted dependency setup may create the checkout's `.venv`. It ends
   with the command to run.
