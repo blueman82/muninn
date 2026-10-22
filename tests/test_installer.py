@@ -137,7 +137,7 @@ class FreshInstallTest(unittest.TestCase):
     def test_trust_auto_only_for_verified_codex_versions(self) -> None:
         self.w.fake.version = b"codex-cli 9.9.9\n"
         self.assertEqual(self.install()["trust"], "owner")
-        self.assertTrue(any("OWNER STEP" in x for x in self.w.out))
+        self.assertEqual(sum("OWNER STEP" in x for x in self.w.out), 1)
 
     def test_no_claude_or_codex_is_left_unconfigured(self) -> None:
         w, h = self.w, self.w.home
@@ -333,6 +333,13 @@ class UpgradeTest(unittest.TestCase):
             "Cursor is not re-imported.",
             output,
         )
+
+    def test_upgrade_prints_owner_step_once(self) -> None:
+        """Verification owns the final Codex trust instruction."""
+        self.w.fake.version = b"codex-cli 9.9.9\n"
+        self.w.out.clear()
+        co.install(self.ctx, self.w.repo, self.sha2)
+        self.assertEqual(sum("OWNER STEP" in line for line in self.w.out), 1)
 
     def test_upgrade_leaves_the_recall_switch_as_the_owner_set_it(
         self,

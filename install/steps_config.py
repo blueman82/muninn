@@ -19,7 +19,6 @@ from install import legacy_state
 from install.constants import (
     CODEX_VERIFIED,
     CURSOR_DOC_URL,
-    OWNER_STEP,
     PLUGIN_ID,
     PRIVATE_DIR_MODE,
 )
@@ -284,8 +283,6 @@ def codex(ctx: Ctx, rec: Record) -> None:
                 text, codex_hooks(pinned, platform=ctx.platform)
             ),
         )
-    else:
-        ctx.say(OWNER_STEP)
 
 
 def _codex_observation(ctx: Ctx) -> tuple[str, tuple[str, ...]]:

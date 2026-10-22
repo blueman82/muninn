@@ -40,6 +40,12 @@ ensure_runtime() {
     >/dev/null 2>&1; then
     return
   fi
+  if [ -x "$env_python" ] && "$env_python" -E -s -c \
+    'import pydantic, sys; sys.exit(pydantic.__version__ != "2.14.0")' \
+    >/dev/null 2>&1; then
+    py=$env_python
+    return
+  fi
   printf 'Pinned runtime dependencies are missing or incompatible. Set up %s/.venv and continue? [y/N] ' \
     "$root" >&2
   IFS= read -r answer || answer=
