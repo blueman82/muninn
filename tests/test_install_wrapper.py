@@ -105,8 +105,9 @@ class WrapperTest(unittest.TestCase):
 
     def hook_repo(self) -> Path:
         """Create a temporary checkout for Git-hook setup tests."""
-        root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
         (root / "bin").mkdir()
         script = root / "bin" / "muninn-install"
         shutil.copyfile(WRAPPER, script)
