@@ -308,6 +308,32 @@ class WrapperTest(unittest.TestCase):
                 self.assertNotIn("Pinned runtime dependencies", result.stderr)
         self.assertIn("--upgrade --dry-run", self.argv())
 
+    def test_installed_python_alias_uses_venv_target(self) -> None:
+        root = self.hook_repo()
+        sha = "a" * 40
+        self.installed(sha)
+        target = self.lib / sha / ".venv/bin/python3"
+        target.parent.mkdir(parents=True)
+        target.write_text(
+            '#!/bin/sh\nif [ "$4" = "import sys; print(sys.platform)" ]; '
+            "then echo linux; exit 0; fi\n"
+            '[ "$0" = "$EXPECTED_VENV_PY" ] || exit 1\n'
+            'if [ "$3" = "-c" ]; then exit 0; fi\n'
+            f'echo "$@" >> {shlex.quote(self.log.as_posix())}\n'
+        )
+        target.chmod(0o755)
+        (self.lib / "python").symlink_to(target)
+
+        result = self.run_wrapper(
+            "--check",
+            script=root / "bin/muninn-install",
+            extra_env={"MUNINN_PYTHON": "", "EXPECTED_VENV_PY": str(target)},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Pinned runtime dependencies", result.stderr)
+        self.assertIn("--upgrade --dry-run", self.argv())
+
     def test_accepting_git_hook_setup_installs_dev_tools_and_enables_hooks(
         self,
     ) -> None:

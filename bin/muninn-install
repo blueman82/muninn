@@ -14,6 +14,10 @@ lib=${HOME:-/nonexistent}/.local/lib/muninn
 data=${HOME:-/nonexistent}/.local/share/muninn
 py=${MUNINN_PYTHON:-}
 [ -x "$py" ] || py=$lib/python
+# Invoke the venv path, not its outer alias: Python uses that path to find pyvenv.cfg.
+if [ "$py" = "$lib/python" ] && [ -L "$py" ]; then
+  py=$(readlink "$py")
+fi
 if [ ! -x "$py" ]; then
   py=
   for c in python3.13 python3.14 python3; do
