@@ -30,17 +30,6 @@ class SearchCoreTests(QueryCase):
         """
         return self.add_event(self.add_source(name), self.repo, text, **kw)
 
-    def ids(self, result: dict[str, Any]) -> list[int]:
-        """Return the hit ids in rank order.
-
-        Args:
-            result: A search answer.
-
-        Returns:
-            One event id per hit.
-        """
-        return [h["id"] for h in result["hits"]]
-
     def test_or_query_matches_any_term(self) -> None:
         a = self.one("a", "apple pie")
         b = self.one("b", "banana bread")
@@ -49,8 +38,8 @@ class SearchCoreTests(QueryCase):
         self.noise(self.repo)
         got = self.search("apple banana")
         self.assertEqual(got["notice"], NOTICE)
-        self.assertEqual(self.ids(got)[0], d)  # both terms rank first
-        self.assertEqual(set(self.ids(got)), {a, b, d})
+        self.assertEqual(self.ranked_ids(got)[0], d)  # both terms rank first
+        self.assertEqual(set(self.ranked_ids(got)), {a, b, d})
 
     def test_query_syntax_is_neutralized(self) -> None:
         alpha = self.one("a", "alpha only here")
@@ -77,8 +66,10 @@ class SearchCoreTests(QueryCase):
                 self.assertIsInstance(got["hits"], list)
                 self.assertEqual(got["notice"], NOTICE)
         got = self.search("alpha AND NOT beta")
-        self.assertEqual(set(self.ids(got)), {alpha, beta})
-        self.assertEqual(self.ids(self.search("naïve CAFÉ über")), [cafe])
+        self.assertEqual(set(self.ranked_ids(got)), {alpha, beta})
+        self.assertEqual(
+            self.ranked_ids(self.search("naïve CAFÉ über")), [cafe]
+        )
         self.assertEqual(self.search("()")["hits"], [])
 
     def test_identifier_phrase_parts(self) -> None:
@@ -86,7 +77,7 @@ class SearchCoreTests(QueryCase):
         self.one("b", "the hook needs a core py script")
         self.noise(self.repo)
         got = self.search("hook_core.py")
-        self.assertEqual(self.ids(got)[0], exact)
+        self.assertEqual(self.ranked_ids(got)[0], exact)
 
     def test_hit_shape(self) -> None:
         ts = "2026-09-30T10:11:12.000Z"
@@ -146,12 +137,15 @@ class SearchCoreTests(QueryCase):
         ev("r1", "sentinel reviewer", cls="reviewer")
         ev("o1", "sentinel other", cls="other")
         self.noise(self.repo)
-        self.assertEqual(set(self.ids(self.search("sentinel"))), want)
+        self.assertEqual(set(self.ranked_ids(self.search("sentinel"))), want)
         self.assertEqual(
-            self.ids(self.search("sentinel", kinds={"tool_call"})), [call]
+            self.ranked_ids(self.search("sentinel", kinds={"tool_call"})),
+            [call],
         )
         only = self.search("sentinel", kinds={"harness"})
-        self.assertEqual(self.ids(only), [harness])  # explicit, still primary
+        self.assertEqual(
+            self.ranked_ids(only), [harness]
+        )  # explicit, still primary
 
     def test_scope_spans_worktrees(self) -> None:
         repo = self.tmp / "wtrepo"
@@ -167,7 +161,7 @@ class SearchCoreTests(QueryCase):
         for cwd in (repo, wt, repo / "sub", wt / "sub"):
             with self.subTest(str(cwd)):
                 self.assertEqual(
-                    self.ids(self.search("needle", cwd=str(cwd))), [eid]
+                    self.ranked_ids(self.search("needle", cwd=str(cwd))), [eid]
                 )
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
@@ -179,7 +173,7 @@ class SearchCoreTests(QueryCase):
         eb = self.add_event(self.add_source("b"), beta, "shared zebra token")
         self.noise(self.repo)
         default = self.search("zebra", cwd="/repo")
-        self.assertEqual(self.ids(default), [ea])
+        self.assertEqual(self.ranked_ids(default), [ea])
         wide = self.search("zebra", cwd="/repo", all_projects=True)
         self.assertEqual(
             {h["id"]: h["scope"] for h in wide["hits"]},
