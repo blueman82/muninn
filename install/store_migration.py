@@ -56,11 +56,11 @@ def _source(ctx: Ctx, path: Path) -> None:
         raise StepFailedError("cutover_source_mismatch") from exc
 
 
-def _archive_matches(path: Path, expected: dict[str, object]) -> None:
-    """Refuse publication if the private original archive changed."""
+def _file_matches(path: Path, expected: dict[str, object], code: str) -> None:
+    """Refuse publication if a private migration file changed."""
     found = dataclasses.asdict(store_fingerprint.capture_file(path))
     if found != expected:
-        raise StepFailedError("cutover_archive_changed")
+        raise StepFailedError(code)
 
 
 def prepare(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
@@ -107,7 +107,7 @@ def prepare(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
             check()
         file_sync.sync_path(candidate)
         store_fingerprint.verify(ctx.data, original)
-        _archive_matches(archive, archive_fingerprint)
+        _file_matches(archive, archive_fingerprint, "cutover_archive_changed")
         if any(
             state.inspect(ctx.data, name)[1] is not None
             for name in (state.WITNESS, state.BASELINE)
@@ -119,13 +119,17 @@ def prepare(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
         )
         rec["store"].update(
             phase="migration_possible",
+            candidate_path=str(candidate),
             candidate_fingerprint=candidate_fingerprint,
             file_identity=candidate_fingerprint["identity"],
             copy_counts=counts,
         )
         record.save(ctx, rec)
         store_fingerprint.verify(ctx.data, original)
-        _archive_matches(archive, archive_fingerprint)
+        _file_matches(archive, archive_fingerprint, "cutover_archive_changed")
+        _file_matches(
+            candidate, candidate_fingerprint, "cutover_candidate_changed"
+        )
         platform_rebuild.publish_replacement(ctx.data, path, candidate)
         with (
             snapshot_io.validated(path) as check,

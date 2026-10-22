@@ -6,11 +6,12 @@ import sqlite3
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest import mock
 
 from install import cutover
 from install.context import StepFailedError
 from install.record import Record
-from muninn import store
+from muninn import store, store_fingerprint
 from tests.installer_support import World
 from tests.knowledge_cutover_support import legacy_schema
 
@@ -83,3 +84,34 @@ class StoreMigrationTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), original)
         self.assertEqual(self.path.stat().st_ino, identity)
         self.assertFalse(self.record.get("store"))
+
+    def test_changed_candidate_refuses_before_replacement(self) -> None:
+        original, identity = self.path.read_bytes(), self.path.stat().st_ino
+
+        capture_file = store_fingerprint.capture_file
+        candidate_reads = 0
+
+        def change_on_recheck(
+            path: Path,
+        ) -> store_fingerprint.FileFingerprint:
+            nonlocal candidate_reads
+            if "recovery-candidate-" in path.name:
+                candidate_reads += 1
+                if candidate_reads == 2:
+                    path.write_bytes(b"changed")
+            return capture_file(path)
+
+        with (
+            mock.patch.object(
+                store_fingerprint,
+                "capture_file",
+                side_effect=change_on_recheck,
+            ),
+            self.assertRaisesRegex(
+                StepFailedError, "cutover_candidate_changed"
+            ),
+        ):
+            cutover.prepare_store(self.ctx, self.record)
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.path.stat().st_ino, identity)
+        self.assertTrue(Path(self.record["store"]["candidate_path"]).is_file())
