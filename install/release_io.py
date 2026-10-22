@@ -48,16 +48,13 @@ def write_private(path: Path, data: bytes) -> None:
     platform_io.ensure_private_dir(path.parent)
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            platform_io.assert_private_fd(handle.fileno())
-            handle.write(data)
-            handle.flush()
-            file_sync.sync_fd(handle.fileno())
-        publish(temporary, path)
-    except BaseException:
-        # The unpublished copy remains evidence when publication is uncertain.
-        raise
+    # Keep pre-publication failures available for recovery; publish moves it.
+    with os.fdopen(fd, "wb") as handle:
+        platform_io.assert_private_fd(handle.fileno())
+        handle.write(data)
+        handle.flush()
+        file_sync.sync_fd(handle.fileno())
+    publish(temporary, path)
 
 
 def write_selection(lib: Path, sha: str, python: str) -> None:

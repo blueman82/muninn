@@ -88,6 +88,17 @@ class QueryCase(unittest.TestCase):
         self.addCleanup(conn.close)
         return conn
 
+    def ranked_ids(self, result: dict[str, Any]) -> list[int]:
+        """Return the hit ids in rank order.
+
+        Args:
+            result: A search answer.
+
+        Returns:
+            One event id per hit.
+        """
+        return [hit["id"] for hit in result["hits"]]
+
     def add_note(self, scope_id: int, text: str, **updates: object) -> str:
         """Commit knowledge through physical selection and proposal checks."""
         root = self.tmp / "knowledge-originals"

@@ -36,17 +36,6 @@ class SearchComposeTests(QueryCase):
         src = self.add_source(name)
         return self.add_event(src, scope_id or self.repo, text, **kw)
 
-    def ids(self, result: dict[str, Any]) -> list[int]:
-        """Return the hit ids in rank order.
-
-        Args:
-            result: A search answer.
-
-        Returns:
-            One event id per hit.
-        """
-        return [h["id"] for h in result["hits"]]
-
     def test_per_session_cap_2_and_explicit_tool_calls(self) -> None:
         crowd = self.add_source("crowd")
         for i in range(5):
@@ -177,7 +166,7 @@ class SearchComposeTests(QueryCase):
         self.assertEqual(
             [p["has_more"] for p in pages], [True, True, False, False]
         )
-        seen = [i for p in pages for i in self.ids(p)]
+        seen = [i for p in pages for i in self.ranked_ids(p)]
         self.assertEqual(len(seen), 25)
         self.assertEqual(len(set(seen)), 25)
         self.assertNotIn("note", pages[3])  # past the end is not "no matches"

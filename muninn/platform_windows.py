@@ -37,40 +37,39 @@ if sys.platform == "win32":
         fn.restype = result
         return fn
 
-    if sys.platform == "win32":
-        _create = _bind(
-            _KERNEL,
-            "CreateFileW",
-            [wintypes.LPCWSTR, _DWORD, _DWORD, _VOID, _DWORD, _DWORD, _VOID],
-            _VOID,
-        )
-        _close = _bind(_KERNEL, "CloseHandle", [_VOID], wintypes.BOOL)
-        _type = _bind(_KERNEL, "GetFileType", [_VOID], _DWORD)
-        _attrs = _bind(
-            _KERNEL,
-            "GetFileInformationByHandleEx",
-            [_VOID, ctypes.c_int, _VOID, _DWORD],
-            wintypes.BOOL,
-        )
-        _final = _bind(
-            _KERNEL,
-            "GetFinalPathNameByHandleW",
-            [_VOID, wintypes.LPWSTR, _DWORD, _DWORD],
-            _DWORD,
-        )
-        _move = _bind(
-            _KERNEL,
-            "MoveFileExW",
-            [wintypes.LPCWSTR, wintypes.LPCWSTR, _DWORD],
-            wintypes.BOOL,
-        )
-        _long = _bind(
-            _KERNEL,
-            "GetLongPathNameW",
-            [wintypes.LPCWSTR, wintypes.LPWSTR, _DWORD],
-            _DWORD,
-        )
-        _drive = _bind(_KERNEL, "GetDriveTypeW", [wintypes.LPCWSTR], _DWORD)
+    _create = _bind(
+        _KERNEL,
+        "CreateFileW",
+        [wintypes.LPCWSTR, _DWORD, _DWORD, _VOID, _DWORD, _DWORD, _VOID],
+        _VOID,
+    )
+    _close = _bind(_KERNEL, "CloseHandle", [_VOID], wintypes.BOOL)
+    _type = _bind(_KERNEL, "GetFileType", [_VOID], _DWORD)
+    _attrs = _bind(
+        _KERNEL,
+        "GetFileInformationByHandleEx",
+        [_VOID, ctypes.c_int, _VOID, _DWORD],
+        wintypes.BOOL,
+    )
+    _final = _bind(
+        _KERNEL,
+        "GetFinalPathNameByHandleW",
+        [_VOID, wintypes.LPWSTR, _DWORD, _DWORD],
+        _DWORD,
+    )
+    _move = _bind(
+        _KERNEL,
+        "MoveFileExW",
+        [wintypes.LPCWSTR, wintypes.LPCWSTR, _DWORD],
+        wintypes.BOOL,
+    )
+    _long = _bind(
+        _KERNEL,
+        "GetLongPathNameW",
+        [wintypes.LPCWSTR, wintypes.LPWSTR, _DWORD],
+        _DWORD,
+    )
+    _drive = _bind(_KERNEL, "GetDriveTypeW", [wintypes.LPCWSTR], _DWORD)
 
     def _raise_last() -> None:
         """Raise the calling thread's Win32 error without hiding its code."""
