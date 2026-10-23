@@ -33,6 +33,13 @@ The owner also selected a new knowledge format starting at schema 1 with a
 distinct format marker. That cutover is separate work; this runtime change does
 not reset the current store, retire migrations or import old knowledge.
 
+Implementation update (2026-10-22): `--upgrade` converts stores matching the
+schema v3 table contract into the marked format. It retains the complete old
+database as a private pre-upgrade archive, copies indexed history, reapplies
+current erasure, and leaves the legacy knowledge ledger in the archive. The
+conversion is keyed to the on-disk schema contract, not the installed release
+commit. Unknown tables or incompatible copied columns refuse the conversion.
+
 ## Rationale and consequences
 
 Pydantic supplies strict typed validation and matching JSON schema without

@@ -170,10 +170,15 @@ and cited originals before relying on its guidance. Already injected context
 cannot be retracted; request a fresh pull after changes.
 
 The current store requires both schema version 1 and the
-`store_meta` marker `muninn-knowledge`. Historical unmarked v1/v2/v3 stores need
-an explicit cutover; ordinary writers and rebuild refuse them. A numeric pragma
-alone is not a format or maintenance-authority certificate. Legacy activation and
-restart are not implemented by the current-format maintenance route.
+`store_meta` marker `muninn-knowledge`. Ordinary writers and rebuild refuse
+unmarked stores. During `--upgrade`, a schema v3 store with the supported table
+contract is copied into the marked format; recognition uses its schema version
+and table set, not the old release commit or SQL formatting. The full original
+database is retained in a private pre-upgrade archive, including the legacy
+knowledge ledger, which is not imported into the new format. Other unmarked
+layouts remain untouched and refuse upgrade. A numeric pragma alone is not a
+format or maintenance-authority certificate. The exact inventoried legacy
+release still uses the separate exclusion and restart route below.
 
 A current-format installer upgrade retains the live pathname. After proven
 quiescence it fences review attempts, preserves unknown charges and validates the
