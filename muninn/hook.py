@@ -32,6 +32,7 @@ from muninn.hook_recall import (
     recall_block,
 )
 from muninn.hook_retrieval import RECALL_ADVISORY, advisory_output
+from muninn.hook_status import printable, status_line
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
 
@@ -241,6 +242,14 @@ def _build_text(
         trace["error"] = "store_unavailable"
         trace["detail"] = str(exc)[:80]
         return _notice("store_unavailable")
+    except ValueError as exc:
+        code = (
+            "review_policy_required"
+            if str(exc) == "review_policy_required"
+            else "error"
+        )
+        trace["error"] = code
+        return _notice(code)
     except Exception:  # fail open: never break the provider's session
         trace["error"] = "error"
         return _notice("error")
@@ -281,44 +290,10 @@ def _respond(
             "additionalContext": text,
         }
     }
-    line = _status_line(event, trace, shown)
+    line = status_line(event, trace, shown)
     if line:
         out["systemMessage"] = line
     return out
-
-
-def _status_line(
-    event: str, trace: Mapping[str, object], shown: list[str]
-) -> str:
-    """What both providers show the human, apart from the model block.
-
-    SessionStart lists every pushed entry in full so the person can see what
-    the model was told. Recall stays silent because it runs on every prompt.
-
-    Returns:
-        The message, or an empty string when there is nothing to show.
-    """
-    if "error" in trace:
-        return f"muninn: memory unavailable ({trace['error']})"
-    if event != "SessionStart":
-        return ""
-    omitted = bool(trace.get("knowledge_omitted"))
-    if not shown:
-        status = (
-            "knowledge omitted by byte limit"
-            if omitted
-            else "no eligible knowledge displayed"
-        )
-        return f"muninn: memory loaded ({status})"
-    head = f"muninn: memory loaded ({len(shown)} knowledge entries)"
-    if omitted:
-        head += "; some knowledge omitted by byte limit"
-    return "\n".join([head, *shown])
-
-
-def _printable(text: str) -> str:
-    """Replace control characters so stored text cannot drive a terminal."""
-    return "".join(c if c.isprintable() else " " for c in text)
 
 
 def _limits(provider: str) -> tuple[int, int]:
@@ -359,7 +334,7 @@ def _start_block(
     trace["knowledge_omitted"] = context.truncated or len(shown) < (
         len(context.notes) + len(context.guides)
     )
-    trace["shown"] = [_printable(line) for line in shown]
+    trace["shown"] = [printable(line) for line in shown]
     return text
 
 
