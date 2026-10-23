@@ -6,8 +6,8 @@
   "result_schema_digest": "6773332024b9eedb43841d3814fb9cf34bb8b4bb6499e558e972fa5e68195feb",
   "runner": {
     "runner": "codex_cli",
-    "executable": "/absolute/path/to/pinned/codex",
-    "version": "0.163.0",
+    "executable": "/absolute/path/to/native/codex",
+    "version": "any",
     "model": "gpt-6.1-sol",
     "reasoning": "low"
   },

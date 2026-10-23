@@ -9,11 +9,7 @@ from pathlib import Path
 
 from muninn import file_sync, review_codex_launch, review_runner
 from muninn.review_codex_output import output_contract_digest
-from muninn.review_codex_policy import (
-    PINNED_EXECUTABLE,
-    check_host,
-    host_identity,
-)
+from muninn.review_codex_policy import check_host, host_identity
 from muninn.review_json import (
     canonical_json,
     canonical_json_value,
@@ -82,7 +78,7 @@ def policy(
             "runner": {
                 "runner": "codex_cli",
                 "executable": str(executable),
-                "version": "0.163.0",
+                "version": "any",
                 "model": "gpt-6.1-sol",
                 "reasoning": "low",
             },
@@ -132,7 +128,7 @@ def prepare(
 
     Args:
         home: Approved canonical Muninn data directory.
-        executable: Pinned native Codex executable.
+        executable: Current native Codex executable.
         auth_home: Existing normal Codex sign-in directory.
         approved_by: Actual recorded approver identity.
         approved_at: UTC timestamp of the recorded approval.
@@ -153,11 +149,9 @@ def prepare(
     assert value.experimental_codex is not None
     check_host(value.experimental_codex, home)
     review_runner.check_private_path(home, directory=True)
-    if (
-        review_runner.file_digest(executable, 256 * 1024 * 1024)[0]
-        != PINNED_EXECUTABLE
-    ):
-        raise ValueError("capability_changed")
+    initial_digest, _ = review_runner.file_digest(
+        executable, 256 * 1024 * 1024
+    )
     if (
         not auth_home.is_absolute()
         or auth_home.resolve() != auth_home
@@ -175,7 +169,7 @@ def prepare(
     binding = review_codex_launch.ExperimentalBinding(
         requested=value.runner,
         host_identity=host_identity(),
-        executable_sha256=PINNED_EXECUTABLE,
+        executable_sha256=initial_digest,
         output_contract_digest=output_contract_digest(),
         cli_cwd=cwd,
         auth_home=auth_home,

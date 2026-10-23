@@ -53,6 +53,15 @@ class CodexProductionPolicyTests(unittest.TestCase):
         self.assertNotIn("expires_at", data["experimental_codex"])
         self.assertEqual(self.policy.deadline_seconds, 120.0)
 
+    def test_codex_version_is_not_a_policy_boundary(self) -> None:
+        """Keep the explicit controls valid across Codex CLI upgrades."""
+        data = self.policy.model_dump(mode="json")
+        for version in ("0.163.0", "0.164.0", "any"):
+            with self.subTest(version=version):
+                data["runner"]["version"] = version
+                selected = ReviewPolicy.model_validate_json(json.dumps(data))
+                self.assertEqual(selected.runner.version, version)
+
     def test_revised_raw_read_limit_keeps_other_call_bounds(self) -> None:
         data = self.policy.model_dump(mode="json")
         data["policy_id"] = "muninn-codex-ongoing-production-v2"

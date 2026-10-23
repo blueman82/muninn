@@ -86,9 +86,6 @@ class CodexProductionLaunchTests(IngestCase):
         )
         for patch in (
             mock.patch.dict(os.environ, {"MUNINN_HOME": str(self.home)}),
-            mock.patch.object(
-                launch, "PINNED_EXECUTABLE", self.executable_hash
-            ),
             mock.patch.object(launch, "host_identity", return_value="1" * 64),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),
@@ -139,24 +136,21 @@ class CodexProductionLaunchTests(IngestCase):
     def test_preparation_writes_complete_artifacts_without_activation(
         self,
     ) -> None:
-        with mock.patch.object(
-            prepare_codex_policy, "PINNED_EXECUTABLE", self.executable_hash
-        ):
-            path = prepare_codex_policy.prepare(
-                self.home,
-                Path(self.policy.runner.executable),
-                self.binding.auth_home,
-                "synthetic-fixture-owner",
-                10.0,
-            )
-            revised = prepare_codex_policy.prepare(
-                self.home,
-                Path(self.policy.runner.executable),
-                self.binding.auth_home,
-                "synthetic-fixture-owner",
-                11.0,
-                revision=2,
-            )
+        path = prepare_codex_policy.prepare(
+            self.home,
+            Path(self.policy.runner.executable),
+            self.binding.auth_home,
+            "synthetic-fixture-owner",
+            10.0,
+        )
+        revised = prepare_codex_policy.prepare(
+            self.home,
+            Path(self.policy.runner.executable),
+            self.binding.auth_home,
+            "synthetic-fixture-owner",
+            11.0,
+            revision=2,
+        )
         raw = path.read_bytes()
         selected = (
             self.home
@@ -172,12 +166,19 @@ class CodexProductionLaunchTests(IngestCase):
         self.assertEqual(
             json.loads(raw)["budget"]["kind"], "ongoing_production"
         )
+        self.assertEqual(json.loads(raw)["runner"]["version"], "any")
+        self.assertEqual(
+            json.loads(capability.proof_path.read_bytes())[
+                "executable_sha256"
+            ],
+            self.executable_hash,
+        )
         self.assertNotEqual(path, revised)
         self.assertEqual(
             json.loads(revised.read_bytes())["max_input_bytes"], 1_048_576
         )
 
-    def test_other_project_allowed_but_recall_and_executable_drift_refuse(
+    def test_other_project_allowed_and_codex_upgrade_keeps_review_controls(
         self,
     ) -> None:
         other = self.context.model_copy(
@@ -190,11 +191,38 @@ class CodexProductionLaunchTests(IngestCase):
                 self.context, self.capability, self.prompt
             )
         (self.home / "recall.off").touch()
-        Path(self.policy.runner.executable).write_text("changed")
-        with self.assertRaisesRegex(ValueError, "capability_changed"):
-            review_runner.prepare_launch(
-                self.context, self.capability, self.prompt
-            )
+        Path(self.policy.runner.executable).write_text("new executable bytes")
+        spec = review_runner.prepare_launch(
+            self.context, self.capability, self.prompt
+        )
+        self.assertEqual(spec.cli_argv[0], self.policy.runner.executable)
+        self.assertIn("read-only", spec.cli_argv)
+
+    def test_existing_policy_survives_codex_upgrade(self) -> None:
+        """Keep old installed policy artifacts usable after the CLI changes."""
+        runner = self.policy.runner.model_copy(update={"version": "0.163.0"})
+        policy = self.policy.model_copy(update={"runner": runner})
+        binding = self.binding.model_copy(update={"requested": runner})
+        raw = canonical_json_value(binding.model_dump(mode="json")).encode()
+        proof = (
+            self.home
+            / "review-capabilities"
+            / (hashlib.sha256(raw).hexdigest() + ".json")
+        )
+        proof.write_bytes(raw)
+        proof.chmod(0o600)
+        capability = self.capability.model_copy(
+            update={
+                "version": "0.163.0",
+                "config_digest": launch.fingerprint(binding),
+                "proof_path": proof,
+            }
+        )
+        context = self.context.model_copy(update={"policy": policy})
+        review_runner.prepare_launch(context, capability, self.prompt)
+        Path(runner.executable).write_text("upgraded Codex executable")
+        spec = review_runner.prepare_launch(context, capability, self.prompt)
+        self.assertEqual(spec.cli_argv[0], runner.executable)
 
 
 class CodexWindowsBoundaryTests(TestCase):

@@ -12,10 +12,7 @@ from typing import cast
 from muninn import review_runner, store
 from muninn.knowledge_models import Digest, StrictModel
 from muninn.review_codex_output import output_contract_digest
-from muninn.review_codex_policy import (
-    PINNED_EXECUTABLE,
-    host_identity,
-)
+from muninn.review_codex_policy import host_identity
 from muninn.review_json import canonical_json_value, result_schema
 from muninn.review_launch_spec import LaunchSpec, codex_cli_argv, launch_spec
 from muninn.review_models import ReviewContext, RunnerConfig
@@ -97,7 +94,6 @@ def _binding(
         or not binding.auth_home.is_dir()
         or binding.auth_home == home
         or home in binding.auth_home.parents
-        or binding.executable_sha256 != PINNED_EXECUTABLE
         or binding.output_contract_digest != output_contract_digest()
         or fingerprint(binding) != capability.config_digest
     ):
@@ -111,9 +107,9 @@ def _binding(
     ):
         raise ValueError("capability_changed")
     executable = Path(binding.requested.executable)
-    if review_runner.file_digest(executable, 256 * 1024 * 1024)[
-        0
-    ] != PINNED_EXECUTABLE or not os.access(executable, os.X_OK):
+    # Check the file safely without revoking admission on Codex upgrades.
+    review_runner.file_digest(executable, 256 * 1024 * 1024)
+    if not os.access(executable, os.X_OK):
         raise ValueError("capability_changed")
     return binding
 

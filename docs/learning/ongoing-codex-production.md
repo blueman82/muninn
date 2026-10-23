@@ -17,10 +17,14 @@ production authority. The historical twenty-launch/$100-reserved pilot stays in
 its separate assessment artifacts and is never imported as production usage or
 quota. Unknown production usage/cost stays null in durable per-call records.
 
-The approved selection remains bound to this Darwin arm64 host, canonical data
-home, Codex 0.163.0 executable SHA256
-`8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31`, and requested
-`gpt-6.1-sol/low`. Ordinary policies still reject Codex, including forged
+The original approval used Codex 0.163.0 with executable SHA256
+`8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31`.
+Ongoing admission remains bound to the selected Darwin arm64 host, canonical
+data home and requested `gpt-6.1-sol/low`, but a Codex CLI version or binary
+update no longer requires a Muninn release or new policy. New policies record
+`runner.version: "any"`; existing policies retain their recorded version and
+initial executable hash as historical selection data. Neither is checked
+against the current binary at launch. Ordinary policies still reject Codex, including forged
 `verified` labels. Only the explicit ongoing policy and an `unverified` capability
 select this path.
 
@@ -38,7 +42,9 @@ disabled. Evidence, erasure, receipt and commit checks are unchanged.
 
 The shared fixed recipe uses ephemeral execution, ignored user config/rules,
 disabled hooks, a read-only sandbox, explicit empty cwd, explicit model/effort,
-and the measured strict object-envelope decoder. A tool/action can happen before
+and the strict object-envelope decoder. A CLI update may change how those flags
+or its output behave; an incompatible invocation or output stops the review.
+A tool/action can happen before
 its event is detected. The code contains it when observed and durably disables
 further admission on terminal errors, uncertain output, validation failure,
 configuration drift or an interrupted attempt. Existing disabled admission is
@@ -55,8 +61,9 @@ policy. Other stops remain disabled for investigation.
 `ongoing-codex-policy.proposed.json` is an inert example: false authorization
 intentionally fails validation. After actual authorization and review, the
 following helper writes complete prompt/schema/binding/selected-capability and
-policy artifacts. Supply the real recorded approval timestamp and native pinned
-binary path; a JavaScript wrapper fails the executable hash check.
+policy artifacts. Supply the real recorded approval timestamp and an absolute
+path to a native Codex executable. The helper records its initial hash but does
+not require a particular version or hash.
 
 ```python
 from datetime import datetime
@@ -65,7 +72,7 @@ from tools.prepare_codex_policy import prepare
 
 policy_path = prepare(
     Path("/Users/harrison/.local/share/muninn"),
-    Path("/absolute/path/to/pinned/native/codex"),
+    Path("/absolute/path/to/native/codex"),
     Path("/Users/harrison/.codex"),
     approved_by="Harrison: recorded ongoing-production authorization",
     approved_at=datetime.fromisoformat("RECORDED_APPROVAL_UTC").timestamp(),

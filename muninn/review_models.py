@@ -175,8 +175,8 @@ class ReviewPolicy(StrictModel):
         runner, budget = self.runner, self.budget
         if (
             any(getattr(self, key) != value for key, value in expected.items())
-            or (runner.runner, runner.version, runner.model, runner.reasoning)
-            != ("codex_cli", "0.163.0", "gpt-6.1-sol", "low")
+            or (runner.runner, runner.model, runner.reasoning)
+            != ("codex_cli", "gpt-6.1-sol", "low")
             or not isinstance(budget, OngoingBudget)
         ):
             raise ValueError("codex_experimental_policy")
