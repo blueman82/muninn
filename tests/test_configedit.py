@@ -10,6 +10,7 @@ from unittest import mock
 
 from install import configedit as ce
 from install import transforms
+from install.trust import TrustedHook
 from muninn.platform_io import is_private
 
 CRED = "sk-fake-" + "0123456789abcdef" * 2
@@ -38,6 +39,7 @@ source = "/fake/other"
 
 {TRUST}
 trusted_hash = "sha256:{"b" * 64}"
+trusted_content_hash = "sha256:{"c" * 64}"
 
 {PLUGIN}
 enabled = false
@@ -112,6 +114,30 @@ class TomlSectionTest(unittest.TestCase):
             ce.parse_section(TOML, PLUGIN, {"enabled"}), {"enabled": False}
         )
 
+    def test_write_trust_preserves_codex_content_hash(self) -> None:
+        hook: TrustedHook = {
+            "event": "session_start",
+            "suffix": "session_start:0:0",
+            "command": "muninn hook session-start",
+            "hash": "sha256:" + "d" * 64,
+        }
+
+        dropped = transforms.drop_trust(TOML)
+        dropped_section = transforms.codex_scan(dropped)[TRUST]
+        assert dropped_section is not None
+        self.assertNotIn("trusted_hash", dropped_section)
+        self.assertEqual(
+            dropped_section["trusted_content_hash"], "sha256:" + "c" * 64
+        )
+
+        updated = transforms.write_trust(dropped, [hook])
+        section = transforms.codex_scan(updated)[TRUST]
+
+        self.assertIsNotNone(section)
+        assert section is not None
+        self.assertEqual(section["trusted_hash"], hook["hash"])
+        self.assertEqual(section["trusted_content_hash"], "sha256:" + "c" * 64)
+
     def test_toml_check_catches_a_change_outside_named_sections(self) -> None:
         bad = TOML.replace('model = "gpt-test"', 'model = "other"')
         with self.assertRaises(ce.RefusedError) as cm:
@@ -141,7 +167,7 @@ class TomlSectionTest(unittest.TestCase):
         keys = {
             MKT: {"source_type", "source"},
             PLUGIN: {"enabled"},
-            TRUST: {"trusted_hash"},
+            TRUST: {"trusted_hash", "trusted_content_hash"},
         }
         ok = ce.scan_named(TOML, keys, MARKERS)  # pass-shaped control
         self.assertEqual(ok[PLUGIN], {"enabled": False})

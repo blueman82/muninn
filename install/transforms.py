@@ -256,20 +256,33 @@ def set_line(text: str, header: str, key: str, value: str) -> str:
 
 
 def drop_trust(text: str) -> str:
-    """Remove every hook trust section we manage.
+    """Remove our hook hashes while retaining other Codex hook state.
 
     Args:
         text: The whole config.toml.
 
     Returns:
-        The text without our trust sections.
+        The text without our hook hashes.
 
     Raises:
         RefusedError: For a stray marker or unrecognised layout.
     """
-    codex_scan(text)
+    states = codex_scan(text)
     for header in TRUST.values():
-        text = ce.put_section(text, header, None)
+        state = states[header]
+        if state is None or "trusted_hash" not in state:
+            continue
+        if len(state) == 1:
+            text = ce.put_section(text, header, None)
+            continue
+        raw = ce.get_section(text, header)
+        assert raw is not None
+        kept = "".join(
+            line
+            for line in raw.splitlines(keepends=True)
+            if line.partition("=")[0].strip() != "trusted_hash"
+        )
+        text = ce.put_section(text, header, kept)
     return text
 
 
@@ -318,10 +331,5 @@ def write_trust(text: str, hooks: Sequence[TrustedHook]) -> str:
         if not hook["suffix"].endswith(":0:0"):
             raise ce.RefusedError(f"no trust key for hook {hook['suffix']}")
         header = TRUST[hook["event"]]
-        newline = "\r\n" if "\r\n" in text else "\n"
-        block = (
-            f'{newline}{header}{newline}trusted_hash = "{hook["hash"]}"'
-            f"{newline}"
-        )
-        text = ce.put_section(text, header, block)
+        text = set_line(text, header, "trusted_hash", json.dumps(hook["hash"]))
     return text

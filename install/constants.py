@@ -25,7 +25,10 @@ TRUST = {
 CODEX_KEYS = {
     MARKETPLACE: {"source_type", "source", "last_updated", "last_revision"},
     PLUGIN: {"enabled"},
-    **{h: {"enabled", "trusted_hash"} for h in TRUST.values()},
+    **{
+        h: {"enabled", "trusted_hash", "trusted_content_hash"}
+        for h in TRUST.values()
+    },
 }
 # Substrings that mark a line as ours; none may appear outside our sections.
 MARKERS = (MKT_NAME, "muninn@")

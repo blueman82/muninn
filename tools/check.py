@@ -25,7 +25,7 @@ PY_PATHS = ("muninn", "install", "tools", "tests")
 TOOL_STEPS: tuple[tuple[str, ...], ...] = (
     ("ruff", "check", *PY_PATHS),
     ("black", "--check", "--quiet", *PY_PATHS),
-    ("pyright", *PY_PATHS),
+    ("pyright", "--pythonpath", sys.executable, *PY_PATHS),
     ("shellcheck", "bin/muninn", "bin/muninn-install"),
 )
 INSTALL_HINT = (
