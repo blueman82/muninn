@@ -14,7 +14,12 @@ from typing import Any
 
 from install import configedit as ce
 from install import runtime
-from install.constants import CLAUDE_EVENTS, OWNER_STEP, PLUGIN_ID
+from install.constants import (
+    CLAUDE_EVENTS,
+    CODEX_VERIFIED,
+    OWNER_STEP,
+    PLUGIN_ID,
+)
 from install.context import Ctx, StepFailedError, dry, is_new, job
 from install.provider_apps import installed
 from install.provider_paths import hook_invocations
@@ -123,17 +128,26 @@ def codex_checks(ctx: Ctx, rec: Record, check: Check) -> None:
         _resolves(got, want, active),
         ", ".join(sorted(got)),
     )
+    hash_verified = rec.get("codex_version") in CODEX_VERIFIED
     summary: dict[str, dict[str, Any]] = {
         k: {
             "trust": e["trustStatus"],
-            "hash_match": e.get("currentHash") == _expected_hash(want, k),
+            "hash_match": (
+                e.get("currentHash") == _expected_hash(want, k)
+                if hash_verified
+                else None
+            ),
         }
         for k, e in got.items()
     }
     check(
         "codex_hook_hashes_match",
-        all(value["hash_match"] for value in summary.values()),
-        "managed_hook_identity",
+        (
+            all(value["hash_match"] for value in summary.values())
+            if hash_verified
+            else None
+        ),
+        "managed_hook_identity" if hash_verified else "owner_trust_required",
     )
     rec["codex_hooks"] = summary
     if not all(v["trust"] == "trusted" for v in summary.values()):
