@@ -14,6 +14,7 @@ from unittest import mock
 
 from install import installer as co
 from install import rollback as rb
+from install.context import Ctx
 from install.provider_paths import cursor_command
 from tests import test_install_cursor_ingest
 from tests.installer_support import (
@@ -138,6 +139,23 @@ class FreshInstallTest(unittest.TestCase):
         self.w.fake.version = b"codex-cli 9.9.9\n"
         self.assertEqual(self.install()["trust"], "owner")
         self.assertEqual(sum("OWNER STEP" in x for x in self.w.out), 1)
+
+    def test_unknown_codex_hash_version_leaves_trust_to_owner(self) -> None:
+        def mismatched(ctx: Ctx) -> list[dict[str, Any]]:
+            entries = self.w.fake.probe(ctx)
+            entries[0]["currentHash"] = "sha256:" + "0" * 64
+            return entries
+
+        self.w.fake.version = b"codex-cli 0.164.0\n"
+        ctx = self.w.ctx(fresh=True)
+        ctx.probe = mismatched
+        rec = co.install(ctx, self.w.repo, self.w.sha)
+        self.assertEqual(rec["trust"], "owner")
+        self.assertIsNone(
+            rec["codex_hooks"][
+                "muninn@muninn-local:hooks/hooks.json:session_start:0:0"
+            ]["hash_match"]
+        )
 
     def test_no_claude_or_codex_is_left_unconfigured(self) -> None:
         w, h = self.w, self.w.home
