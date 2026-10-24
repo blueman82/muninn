@@ -428,6 +428,12 @@ blockers**. Normal valid-complete ownership without a baseline is a separate pat
 refusal is not completed Windows recovery support. Native containment and boot
 qualification remain separate release checks.
 
+For new macOS repair baselines, the binding includes the data volume's persistent
+UUID. A later boot may report a different temporary device number; Muninn then
+requires the same UUID, lock inode, witness inode and witness digest. If the UUID
+is unavailable, no new macOS repair baseline is recorded. A baseline created
+before this field existed cannot authorize a changed-device repair.
+
 Write-ahead tombstones survive interrupted erasure and are replayed before ordinary
 quiescent startup/erase entry. Pending intent refuses new foreground proposals and
 commits; an existing receipt still has receipt-first audit access until replay

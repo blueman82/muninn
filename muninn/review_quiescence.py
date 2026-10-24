@@ -13,11 +13,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from muninn import poller_stop, review_boot_identity, store
+from muninn import (
+    poller_stop,
+    review_boot_identity,
+    review_volume_identity,
+    store,
+)
 from muninn import review_quiescence_state as state
 from muninn.review_quiescence_state import (
     QuiescenceRefusedError as QuiescenceRefusedError,
 )
+from muninn.review_repair_binding import same_repair_binding
 from muninn.review_requests import recover_attempts
 from muninn.tombstones import reapply_tombstones
 
@@ -341,13 +347,27 @@ def _verify(
     boot = review_boot_identity.observe()
     baseline = state.parse(baseline_raw, state.Baseline)
     if (
-        baseline is None
-        or baseline.lock_identity != identity
-        or (
-            baseline.predecessor != predecessor
-            or baseline.boot.split(":")[0] != boot.split(":")[0]
+        baseline is not None
+        and baseline.boot.startswith("darwin:")
+        and baseline.volume_uuid is None
+        and (
+            baseline.boot.split(":")[0] != boot.split(":")[0]
+            or baseline.lock_identity != identity
+            or baseline.predecessor != predecessor
         )
     ):
+        status.repair_phase = "baseline_recorded"
+        raise QuiescenceRefusedError("quiescence_unverified")
+    if (
+        baseline is None
+        or baseline.boot.split(":")[0] != boot.split(":")[0]
+        or not same_repair_binding(home, baseline, identity, predecessor, boot)
+    ):
+        volume_uuid = (
+            review_volume_identity.observe(home)
+            if boot.startswith("darwin:")
+            else None
+        )
         state.publish(
             home,
             fd,
@@ -357,6 +377,7 @@ def _verify(
                 lock_identity=identity,
                 boot=boot,
                 predecessor=predecessor,
+                volume_uuid=volume_uuid,
             ),
         )
         status.repair_phase = "baseline_recorded"
