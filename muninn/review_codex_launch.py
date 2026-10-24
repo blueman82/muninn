@@ -83,9 +83,10 @@ def _has_acl(path: Path) -> bool:
     return granted
 
 
-def verify_codex_executable(executable: Path) -> str:
-    """Return the digest of an intact native Codex binary signed by OpenAI."""
-    before, _ = review_runner.file_digest(executable, 256 * 1024 * 1024)
+def _check_executable_storage(executable: Path) -> None:
+    """Require an executable path that a separate local user cannot replace."""
+    if sys.platform == "win32":
+        raise ValueError("capability_platform")
     for path in (executable, *executable.parents):
         info = path.lstat()
         kind = stat.S_ISREG if path == executable else stat.S_ISDIR
@@ -96,6 +97,12 @@ def verify_codex_executable(executable: Path) -> str:
             or _has_acl(path)
         ):
             raise ValueError("capability_executable_storage")
+
+
+def verify_codex_executable(executable: Path) -> str:
+    """Return the digest of an intact native Codex binary signed by OpenAI."""
+    before, _ = review_runner.file_digest(executable, 256 * 1024 * 1024)
+    _check_executable_storage(executable)
     if not os.access(executable, os.X_OK):
         raise ValueError("capability_changed")
     try:

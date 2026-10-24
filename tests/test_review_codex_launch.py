@@ -30,6 +30,7 @@ class CodexProductionLaunchTests(IngestCase):
         super().setUp()
         self.real_run = subprocess.run
         self.real_has_acl = launch._has_acl
+        self.real_storage = launch._check_executable_storage
         self.policy = experimental_policy(self.home)
         executable = self.home / "fake-codex"
         executable.write_text("synthetic bytes; not an executable program")
@@ -99,6 +100,9 @@ class CodexProductionLaunchTests(IngestCase):
                 return_value=subprocess.CompletedProcess([], 0),
             ),
             mock.patch.object(launch, "_has_acl", return_value=False),
+            mock.patch.object(
+                launch, "_check_executable_storage", return_value=None
+            ),
         ):
             patch.start()
             self.addCleanup(patch.stop)
@@ -309,8 +313,15 @@ class CodexProductionLaunchTests(IngestCase):
         executable = public / "codex"
         executable.write_bytes(b"synthetic")
         executable.chmod(0o755)
-        with self.assertRaisesRegex(
-            ValueError, "capability_executable_storage"
+        with (
+            mock.patch.object(
+                launch,
+                "_check_executable_storage",
+                side_effect=self.real_storage,
+            ),
+            self.assertRaisesRegex(
+                ValueError, "capability_executable_storage"
+            ),
         ):
             launch.verify_codex_executable(executable)
 
@@ -335,6 +346,11 @@ class CodexProductionLaunchTests(IngestCase):
             mock.patch.object(
                 launch, "_has_acl", side_effect=self.real_has_acl
             ),
+            mock.patch.object(
+                launch,
+                "_check_executable_storage",
+                side_effect=self.real_storage,
+            ),
             self.assertRaisesRegex(
                 ValueError, "capability_executable_storage"
             ),
@@ -356,8 +372,15 @@ class CodexProductionLaunchTests(IngestCase):
         executable = private / "codex"
         executable.write_bytes(b"synthetic")
         executable.chmod(0o700)
-        with mock.patch.object(
-            launch, "_has_acl", side_effect=self.real_has_acl
+        with (
+            mock.patch.object(
+                launch, "_has_acl", side_effect=self.real_has_acl
+            ),
+            mock.patch.object(
+                launch,
+                "_check_executable_storage",
+                side_effect=self.real_storage,
+            ),
         ):
             launch.verify_codex_executable(executable)
 
