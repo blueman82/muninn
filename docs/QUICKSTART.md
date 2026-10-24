@@ -93,28 +93,45 @@ Preserve its private operation directory and launch exclusion if interrupted;
 recovery proceeds forward from verified actual state. Windows legacy closure and
 live native qualification remain separate prerequisites. See [REFERENCE.md](REFERENCE.md).
 
-### Explicit first review policy
+### Default learning policy
 
-On macOS/Linux, an explicitly supplied validated policy can enable first review
-admission after store preparation and provider configuration:
+The repository carries a default learning policy in
+`tools/default_codex_policy.json`. A normal install applies it when the store has
+no learning policy and the host can run the native Codex runner. This works with
+`recall.off`, `recall.advisory` or `recall.on`; those switches select prompt
+recall behavior and do not control learning.
 
-    bin/muninn-install --repo /path/to/muninn --sha FULL_40_HEX_SHA --fresh --review-policy /path/to/policy.json
+The default runner requires Apple silicon macOS, a signed Codex CLI on `PATH`,
+and an existing canonical Codex sign-in directory. Muninn binds its private
+capability to that host, data directory and executable. If a requirement is
+missing, the install finishes with learning pending. Trust Codex hooks in
+`/hooks` when prompted; hook trust and the local learning policy are separate.
 
-Use `--upgrade` for a supported schema v3 store, the exact legacy route, or a marked
-store that has never been activated. These are the existing two install modes. There
-is no policy discovery
-or default policy. Without this modifier, a never-activated store completes with
-`policy_status: activation_pending` and review admission remains disabled.
-A configured current store preserves its existing admission and reports
-`policy_status: configured`.
-An identical installed policy preserves its admission and source boundaries;
-a different policy is refused. Disabled configured admission is never reenabled.
+The default allows up to two rounds per request, 1 MiB of input, 32 KiB of
+output, 12,000 bytes of context and 120 seconds. It allows one attempt at a time
+and project scope only. It has no aggregate call limit, cost limit or expiry.
+See the [policy flow](learning-policy-flow.html) for the install and upgrade
+paths.
 
-The private operation record freezes input bytes and canonical policy. On a
-restart use the same checkout and operation; omitting the policy path uses the
-frozen snapshot, while supplying changed input refuses. Actual production policy,
-budget approval and native runner capability still require separate evidence;
-a synthetic policy or successful installation does not establish them.
+To customize a new install, edit and commit `tools/default_codex_policy.json`
+in your private clone before you activate the policy. The installer requires a
+clean checkout. You can lower the byte, context, round and deadline limits
+within the enforced safety bounds. Record the actual approver and UTC approval
+time in `approved_by` and `approved_at`. Keep the Codex runner, model,
+reasoning, single-attempt and project-scope limits.
+
+Upgrades fill an unconfigured store. They also refresh a repository-default
+policy only when learning admission is enabled and there are no learning
+requests or knowledge entries. Refresh preserves the host and runner bindings,
+prompt, budget identity and admission; it requires a newer profile approval.
+Input may decrease, or increase only during the v1 to v2 transition up to 1 MiB;
+round, output, context and deadline limits may only decrease. Custom policies,
+used defaults and disabled admission remain unchanged. A changed
+`--review-policy PATH` is refused for an already configured store, except for
+the separately documented v1 to v2 input-size transition when its preconditions
+hold. Never edit the store by hand. See
+[the policy reference](REFERENCE.md#default-learning-policy) for the exact
+bounds and limitations.
 
 ## Uninstall
 

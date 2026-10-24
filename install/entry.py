@@ -39,7 +39,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("usage: muninn-install [--check | --status | --uninstall]")
         print("Other arguments pass through to install.installer.")
         print(
-            "Explicit first policy: --repo DIR --sha SHA "
+            "Custom first policy: --repo DIR --sha SHA "
             "--fresh|--upgrade --review-policy PATH"
         )
     elif args not in ([], ["--check"], ["--status"]):

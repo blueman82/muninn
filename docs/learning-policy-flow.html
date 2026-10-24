@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Muninn default learning policy</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --page: #f4f6fb;
+        --card: #ffffff;
+        --ink: #172033;
+        --muted: #526078;
+        --line: #cbd5e1;
+        --accent: #2563eb;
+        --accent-soft: #dbeafe;
+        --good: #047857;
+        --good-soft: #d1fae5;
+        --warn: #9a3412;
+        --warn-soft: #ffedd5;
+        --shadow: 0 12px 35px rgb(23 32 51 / 8%);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --page: #0b1220;
+          --card: #131e31;
+          --ink: #e5edf8;
+          --muted: #a7b4c8;
+          --line: #34445e;
+          --accent: #8ab4ff;
+          --accent-soft: #1d3558;
+          --good: #6ee7b7;
+          --good-soft: #12352e;
+          --warn: #fdba74;
+          --warn-soft: #442716;
+          --shadow: 0 12px 35px rgb(0 0 0 / 22%);
+        }
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--page);
+        color: var(--ink);
+        font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+      main { width: min(1100px, calc(100% - 32px)); margin: 40px auto 72px; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { max-width: 800px; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 1.08; }
+      h2 { font-size: clamp(1.35rem, 3vw, 1.8rem); margin-bottom: 12px; }
+      h3 { font-size: 1.05rem; margin-bottom: 6px; }
+      a { color: var(--accent); }
+      .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+      .lead { max-width: 780px; color: var(--muted); font-size: 1.15rem; }
+      .panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: clamp(18px, 3vw, 28px); }
+      .section { margin-top: 26px; }
+      .flow { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-top: 20px; }
+      .step { position: relative; border-top: 4px solid var(--accent); padding-top: 16px; }
+      .step::after { content: "→"; position: absolute; top: 42px; right: -17px; z-index: 1; color: var(--accent); font-size: 1.5rem; font-weight: 700; animation: drift 2.4s ease-in-out infinite; }
+      .step:last-child::after { content: none; }
+      .number { display: inline-grid; width: 30px; height: 30px; place-items: center; margin-bottom: 10px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 800; }
+      .step p, .branch p, .split p { margin-bottom: 0; color: var(--muted); }
+      .branches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+      .branch { border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+      .branch.good { border-color: var(--good); background: var(--good-soft); }
+      .branch.warn { border-color: var(--warn); background: var(--warn-soft); }
+      .branch h3 { color: var(--ink); }
+      .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .split > div { padding: 16px; border-radius: 14px; background: var(--accent-soft); }
+      .limit { border-left: 5px solid var(--warn); background: var(--warn-soft); padding: 18px 20px; border-radius: 12px; }
+      .limit strong { color: var(--warn); }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; overflow-wrap: anywhere; }
+      .tag { display: inline-block; margin: 3px 5px 3px 0; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .9rem; }
+      .foot { margin-top: 22px; color: var(--muted); font-size: .95rem; }
+
+      @keyframes drift { 50% { transform: translateX(4px); opacity: .65; } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+      }
+      @media (max-width: 760px) {
+        main { margin-top: 24px; }
+        .flow { grid-template-columns: 1fr 1fr; }
+        .step::after { content: "↓"; top: auto; bottom: -22px; right: 50%; }
+        .step:nth-child(2)::after { content: none; }
+        .branches { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 480px) {
+        .flow, .split { grid-template-columns: 1fr; }
+        .step::after, .step:nth-child(2)::after { content: "↓"; right: 50%; bottom: -22px; top: auto; }
+        .step:last-child::after { content: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Muninn · automatic learning</p>
+        <h1>A default policy that stays bound to the local machine</h1>
+        <p class="lead">
+          The repository supplies the policy values. The installer binds them to
+          a real Codex executable and the local Muninn store. Prompt recall
+          settings remain a separate choice.
+        </p>
+      </header>
+
+      <section class="panel section" aria-labelledby="install-flow">
+        <h2 id="install-flow">First install or first activation</h2>
+        <div class="flow">
+          <article class="step">
+            <span class="number">1</span>
+            <h3>Clone carries the profile</h3>
+            <p><code>tools/default_codex_policy.json</code> stores the editable limits and approval record.</p>
+          </article>
+          <article class="step">
+            <span class="number">2</span>
+            <h3>Installer checks the host</h3>
+            <p>It requires Apple silicon macOS, a signed <code>codex</code> CLI on <code>PATH</code>, and a canonical Codex sign-in directory.</p>
+          </article>
+          <article class="step">
+            <span class="number">3</span>
+            <h3>Muninn binds local facts</h3>
+            <p>After the store exists, Muninn writes private capability files bound to the host, data directory and executable.</p>
+          </article>
+          <article class="step">
+            <span class="number">4</span>
+            <h3>Policy and admission commit</h3>
+            <p>After provider setup succeeds, Muninn records the policy and source boundary in one activation transaction.</p>
+          </article>
+        </div>
+        <div class="branches" aria-label="Install outcomes">
+          <article class="branch good">
+            <h3>Fresh or unconfigured store</h3>
+            <p>The default profile is frozen, locally bound and activated after setup.</p>
+          </article>
+          <article class="branch">
+            <h3>Already configured store</h3>
+            <p>Custom policies, used defaults and disabled admission stay unchanged. An enabled repository default refreshes only with no requests or knowledge and a newer approved profile.</p>
+          </article>
+          <article class="branch warn">
+            <h3>Host checks fail</h3>
+            <p>The install can finish, but learning stays pending. Muninn does not invent an executable capability.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel section" aria-labelledby="learning-flow">
+        <h2 id="learning-flow">A session ends</h2>
+        <div class="split">
+          <div>
+            <h3>Learning path</h3>
+            <p>SessionEnd or PreCompact captures a bounded request. The policy controls whether the runner may review it. A result still passes through Muninn's knowledge admission and commit rules.</p>
+          </div>
+          <div>
+            <h3>Prompt recall path</h3>
+            <p><span class="tag">recall.off</span><span class="tag">recall.advisory</span><span class="tag">recall.on</span> select prompt-time behavior. None of these settings blocks SessionEnd or PreCompact learning.</p>
+          </div>
+        </div>
+        <p class="foot">Provider hook trust is separate. Codex may ask you to trust Muninn's hooks with <code>/hooks</code>.</p>
+      </section>
+
+      <section class="panel section" aria-labelledby="limits">
+        <h2 id="limits">Limits and their boundary</h2>
+        <p>The default allows two rounds, 1 MiB of input, 32 KiB of output, 12,000 bytes of context, a 120-second deadline, one attempt, one concurrent request and project scope only.</p>
+        <div class="limit">
+          <strong>The ongoing policy has no aggregate call limit, cost limit or expiry.</strong>
+          <p>Byte limits bound one request. They do not cap total use or total provider cost.</p>
+        </div>
+        <p class="foot">To customize, edit the profile in your private clone. Refresh preserves host, runner, prompt and budget bindings. It allows smaller limits and the approved v1-to-v2 input increase up to 1 MiB. Any learning request, knowledge entry, custom policy or disabled admission prevents automatic refresh.</p>
+      </section>
+    </main>
+  </body>
+</html>

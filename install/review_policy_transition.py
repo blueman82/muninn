@@ -42,6 +42,9 @@ def check(
     """Require only the recorded v1-to-v2 raw-read allowance change."""
     old = checked_policy(installed)
     new = checked_policy(selected)
+    if old.policy_source == new.policy_source == "repository_default":
+        _check_default_refresh(conn, old, new)
+        return
     if (
         old.policy_id != "muninn-codex-ongoing-production"
         or new.policy_id != "muninn-codex-ongoing-production-v2"
@@ -62,6 +65,63 @@ def check(
     expected["budget"]["approved_at"] = new.budget.approved_at
     if expected != new.model_dump(mode="json"):
         raise StepFailedError("review_policy_transition_required")
+
+
+def _check_default_refresh(
+    conn: sqlite3.Connection, old: ReviewPolicy, new: ReviewPolicy
+) -> None:
+    """Permit refresh before admission has produced learning state."""
+    control = conn.execute(
+        "SELECT admission FROM review_control WHERE singleton=1"
+    ).fetchone()
+    if (
+        control is None
+        or control["admission"] != 1
+        or not isinstance(old.budget, OngoingBudget)
+        or not isinstance(new.budget, OngoingBudget)
+        or new.budget.approved_at <= old.budget.approved_at
+        or any(
+            conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+            for table in ("review_request", "knowledge")
+        )
+        or not _default_bounds_compatible(old, new)
+    ):
+        raise StepFailedError("review_policy_transition_required")
+    expected = old.model_dump(mode="json")
+    fresh = new.model_dump(mode="json")
+    for key in (
+        "policy_id",
+        "max_input_bytes",
+        "max_rounds",
+        "max_output_bytes",
+        "context_bytes",
+        "deadline_seconds",
+    ):
+        expected[key] = fresh[key]
+    expected["budget"]["approved_at"] = new.budget.approved_at
+    if expected != fresh:
+        raise StepFailedError("review_policy_transition_required")
+
+
+def _default_bounds_compatible(old: ReviewPolicy, new: ReviewPolicy) -> bool:
+    """Allow the profile revision and reductions in its bounded controls."""
+    input_increase = new.max_input_bytes > old.max_input_bytes
+    allowed_increase = (
+        old.policy_id == "muninn-codex-ongoing-production"
+        and new.policy_id == "muninn-codex-ongoing-production-v2"
+        and new.max_input_bytes <= 1_048_576
+    )
+    valid_revision = old.policy_id == new.policy_id or allowed_increase
+    return (
+        valid_revision
+        and (not input_increase or allowed_increase)
+        and (
+            new.max_rounds <= old.max_rounds
+            and new.max_output_bytes <= old.max_output_bytes
+            and new.context_bytes <= old.context_bytes
+            and new.deadline_seconds <= old.deadline_seconds
+        )
+    )
 
 
 def apply(conn: sqlite3.Connection, selected: ReviewPolicy | None) -> None:
