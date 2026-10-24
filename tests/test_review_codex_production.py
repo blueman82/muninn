@@ -21,7 +21,7 @@ from muninn.review_models import (
 from tests.test_learning_eval_contracts import assessment_data
 from tests.test_review_shared_models import policy_data
 from tools.learning_eval.models import Assessment
-from tools.prepare_codex_policy import policy
+from tools.prepare_codex_policy import default_policy, policy
 
 
 def experimental_policy(home: Path) -> ReviewPolicy:
@@ -56,6 +56,31 @@ class CodexProductionPolicyTests(unittest.TestCase):
             self.assertNotIn(field, data["budget"])
         self.assertNotIn("expires_at", data["experimental_codex"])
         self.assertEqual(self.policy.deadline_seconds, 120.0)
+
+    def test_repository_default_uses_the_editable_v2_profile(self) -> None:
+        """Read the source-controlled profile with its documented bounds."""
+        selected, _ = default_policy(Path("/synthetic/home"), Path("/codex"))
+        self.assertEqual(
+            selected.policy_id, "muninn-codex-ongoing-production-v2"
+        )
+        self.assertEqual(selected.max_input_bytes, 1_048_576)
+        self.assertEqual(selected.max_output_bytes, 32768)
+        self.assertEqual(selected.context_bytes, 12000)
+        self.assertEqual(selected.max_rounds, 2)
+
+    def test_default_profile_can_only_reduce_the_accepted_call_bounds(
+        self,
+    ) -> None:
+        """Local profiles may reduce, but not widen, runner limits."""
+        data = self.policy.model_dump(mode="json")
+        data["max_input_bytes"] = 32768
+        self.assertEqual(
+            ReviewPolicy.model_validate_json(json.dumps(data)).max_input_bytes,
+            32768,
+        )
+        data["max_output_bytes"] = 32769
+        with self.assertRaises(ValidationError):
+            ReviewPolicy.model_validate_json(json.dumps(data))
 
     def test_codex_version_is_not_a_policy_boundary(self) -> None:
         """Keep the explicit controls valid across Codex CLI upgrades."""

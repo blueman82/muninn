@@ -1,0 +1,36 @@
+{
+  "approved_at": "2026-10-24T00:00:00Z",
+  "approved_by": "Muninn project owner: repository default",
+  "default_revision": 2,
+  "limits": {
+    "allow_global": false,
+    "concurrency": 1,
+    "context_bytes": 12000,
+    "deadline_seconds": 120.0,
+    "hook_wait_seconds": 0.0,
+    "max_attempts": 1,
+    "max_output_bytes": 32768,
+    "max_rounds": 2,
+    "retry_backoff_seconds": []
+  },
+  "revisions": {
+    "1": {
+      "max_input_bytes": 65536,
+      "policy_id": "muninn-codex-ongoing-production"
+    },
+    "2": {
+      "max_input_bytes": 1048576,
+      "policy_id": "muninn-codex-ongoing-production-v2"
+    }
+  },
+  "runner": {
+    "model": "gpt-6.1-sol",
+    "reasoning": "low",
+    "runner": "codex_cli",
+    "version": "any"
+  },
+  "budget": {
+    "account_id": "muninn-codex-production",
+    "kind": "ongoing_production"
+  }
+}
