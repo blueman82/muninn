@@ -120,7 +120,7 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
 
     def test_legacy_baseline_cannot_authorize_device_remap(self) -> None:
-        """An old checkpoint cannot borrow today's volume UUID."""
+        """An old checkpoint cannot borrow a UUID or lose its evidence."""
         self.abandon()
         self.refuse(BOOT_A)
         self.remap_baseline()
@@ -128,16 +128,41 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         value = json.loads(path.read_text())
         del value["volume_uuid"]
         store.write_json_atomic(path, value)
+        retained = path.read_bytes()
         with (
             mock.patch.object(
                 quiescence.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            self.assertRaisesRegex(ValueError, "reboot_required"),
+            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
             quiescence.erase_connection(
                 self.home, wait_s=1, status=self.status
             ),
         ):
             self.fail("legacy baseline admitted")
+        self.assertEqual(path.read_bytes(), retained)
+
+    def test_legacy_baseline_preserves_changed_witness(self) -> None:
+        """A UUID-less checkpoint stays intact when its witness changes."""
+        self.abandon()
+        self.refuse(BOOT_A)
+        path = self.home / state.BASELINE
+        value = json.loads(path.read_text())
+        del value["volume_uuid"]
+        store.write_json_atomic(path, value)
+        retained = path.read_bytes()
+        witness = self.home / state.WITNESS
+        witness.write_bytes(witness.read_bytes() + b" ")
+        with (
+            mock.patch.object(
+                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+            ),
+            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            quiescence.erase_connection(
+                self.home, wait_s=1, status=self.status
+            ),
+        ):
+            self.fail("changed legacy witness admitted")
+        self.assertEqual(path.read_bytes(), retained)
 
     def test_missing_volume_uuid_refuses_new_baseline(self) -> None:
         """No native UUID must leave no false repair authority."""

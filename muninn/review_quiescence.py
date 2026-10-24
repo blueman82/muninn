@@ -347,6 +347,18 @@ def _verify(
     boot = review_boot_identity.observe()
     baseline = state.parse(baseline_raw, state.Baseline)
     if (
+        baseline is not None
+        and baseline.boot.startswith("darwin:")
+        and baseline.volume_uuid is None
+        and (
+            baseline.boot.split(":")[0] != boot.split(":")[0]
+            or baseline.lock_identity != identity
+            or baseline.predecessor != predecessor
+        )
+    ):
+        status.repair_phase = "baseline_recorded"
+        raise QuiescenceRefusedError("quiescence_unverified")
+    if (
         baseline is None
         or baseline.boot.split(":")[0] != boot.split(":")[0]
         or not same_repair_binding(home, baseline, identity, predecessor, boot)

@@ -89,9 +89,10 @@ On macOS, a new repair baseline records the data volume's persistent UUID.
 After a reboot, macOS may assign that volume a different temporary device
 number. Repair accepts that change only when the UUID, lock file, and witness
 file still match. If macOS cannot provide a UUID, Muninn refuses to record a
-new baseline. An older baseline without a UUID cannot prove a changed device
-number belongs to the same volume. Muninn must record a new baseline and wait
-for a later reboot; do not remove the old files to force progress.
+new baseline. An older baseline without a UUID cannot prove that a changed
+device number belongs to the same volume. Muninn preserves that baseline and
+refuses repair for manual recovery assessment. Do not remove the old files to
+force progress.
 
 Real erase may interrupt the whole service. Preserve its original failure and
 `erasure_status`: `restart: not_attempted` means check and manually restart if
