@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 
 from muninn import classify, knowledge_push, knowledge_read, scope, store
-from muninn.cli_learn import installed_policy
 from muninn.hook_context import as_payload, env_for_provider, project_cwd
 from muninn.hook_frame import (
     BLOCK_LIMIT,
@@ -316,18 +315,17 @@ def _start_block(
     with knowledge_read.read_snapshot(conn):
         ids = scope.scope_ids_for_read(conn, cwd)
         label = _label(conn, ids, cwd)
-        policy = installed_policy(conn)
         project = next(iter(knowledge_scopes(conn, ids, False)), None)
         if project is None:
             raise ValueError("scope_unavailable")
         context = knowledge_push.knowledge_context(
-            conn, project, policy.context_bytes, time.time()
+            conn, project, limit, time.time()
         )
     text = render_block(
         context,
         label,
         notes=index_notes(home),
-        limit=min(limit, policy.context_bytes),
+        limit=limit,
     )
     shown = [line for line in text.splitlines() if line.startswith("- K_")]
     trace["knowledge_ids"] = [line.split()[1] for line in shown]
@@ -347,8 +345,8 @@ def session_start(
 ) -> dict[str, object]:
     """Handle SessionStart: push the mapped project's eligible context.
 
-    The installed immutable policy bounds complete notes and the compact
-    guide index. The provider cap further bounds the rendered UTF-8 bytes.
+    The provider's fixed byte cap bounds complete notes, the compact guide
+    index and rendered UTF-8 output.
 
     Args:
         payload: The provider's hook payload; non-objects count as empty.

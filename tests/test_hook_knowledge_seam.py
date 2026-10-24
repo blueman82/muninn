@@ -217,22 +217,21 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
                 self.assertEqual(text.count("</muninn-memory>"), 1)
                 self.assertLessEqual(len(text.encode()), bound)
 
-    def test_installed_policy_budget_and_missing_policy_do_not_invent_guidance(
+    def test_installed_policy_budget_does_not_limit_session_start(
         self,
     ) -> None:
         ident = self.add()
-        self.policy = self.policy.model_copy(update={"context_bytes": 1000})
+        self.policy = self.policy.model_copy(update={"context_bytes": 1})
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",
             (canonical_json(self.policy), self.digest(self.policy)),
         )
         text = self.body(self.dispatch())
-        self.assertLessEqual(len(text.encode()), 1000)
-        self.assertNotIn(ident, text)
+        self.assertLessEqual(len(text.encode()), 4000)
+        self.assertIn(ident, text)
         self.conn.execute("UPDATE review_control SET policy_json=NULL")
         text = self.body(self.dispatch())
-        self.assertIn("unavailable", text)
-        self.assertNotIn(ident, text)
+        self.assertIn(ident, text)
 
     def test_context_composition_never_acquires_writer_lock(self) -> None:
         ident = self.add()
@@ -359,29 +358,17 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
                 self.assertTrue(text.endswith("</muninn-memory>"))
                 self.assertLessEqual(len(text.encode()), limit)
 
-    def test_small_policy_distinguishes_omitted_from_empty_context(
+    def test_small_policy_does_not_omit_session_start_knowledge(
         self,
     ) -> None:
-        empty_status = self.dispatch()["systemMessage"]
         ident = self.add()
-        # Fit the complete typed note while leaving no room for frame overhead.
-        limit = len(canonical_json(self.context_view()).encode())
-        self.policy = self.policy.model_copy(update={"context_bytes": limit})
+        self.policy = self.policy.model_copy(update={"context_bytes": 1})
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",
             (canonical_json(self.policy), self.digest(self.policy)),
         )
-        context = self.context_view(limit)
-        self.assertEqual([view.id for view in context.notes], [ident])
-        self.assertFalse(context.truncated)
         answer = self.dispatch()
         text = self.body(answer)
-        with self.subTest(field="frame"):
-            self.assertIn("omitted", text)
-            self.assertNotIn(ident, text)
-            self.assertLessEqual(len(text.encode()), limit)
-            self.assertTrue(text.endswith("</muninn-memory>"))
-        with self.subTest(field="status"):
-            self.assertNotEqual(answer["systemMessage"], empty_status)
-            self.assertIn("omitted", str(answer["systemMessage"]))
-            self.assertNotIn("no knowledge entries yet", str(answer))
+        self.assertIn(ident, text)
+        self.assertLessEqual(len(text.encode()), 4000)
+        self.assertTrue(text.endswith("</muninn-memory>"))

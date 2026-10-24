@@ -236,7 +236,6 @@ def prepare(
         or platform.machine() != "arm64"
         or terms.host_identity != host_identity()
         or context.scope.project_id is None
-        or not (home / "recall.off").is_file()
     ):
         raise ValueError("codex_experimental_boundary")
     binding, executable = _binding(home, capability)

@@ -290,7 +290,12 @@ while True: time.sleep(1)
             self.assertEqual(probe.learning_state(ctx)["requests"], 0)
             self.assertEqual(
                 {row["expectation"] for row in results},
-                {"disabled_notice", "empty", "suppressed", "archive_context"},
+                {
+                    "read_without_policy",
+                    "empty",
+                    "suppressed",
+                    "archive_context",
+                },
             )
             for path in ctx.home.rglob("*"):
                 if not path.is_symlink():
