@@ -24,8 +24,7 @@ Automatic recall keeps separate private review metadata. Everything it returns i
 - Uninstall: `bin/muninn-uninstall --dry-run` previews; `bin/muninn-uninstall` stops the poller and
   removes the hooks, the Codex plugin and the release. Your index and knowledge ledger are moved to
   `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
-- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, Cursor lifecycle hooks) and `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`,
-  `docs/TROUBLESHOOTING.md`, and the synthetic [Cursor preCompact benchmark](docs/CURSOR-PRECOMPACT-BENCHMARK.md) and [replay benchmark](docs/REPLAY-BENCHMARK.md).
+- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, Cursor lifecycle hooks) and `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`, and `docs/TROUBLESHOOTING.md`.
 
 ## What it stores
 
@@ -52,7 +51,8 @@ Automatic recall keeps separate private review metadata. Everything it returns i
 Apart from the hooks, output is one JSON object with a `notice` field, `index_age_s` and `poller:
 ok|stale`. Exit codes: 0 ok, 1 `doctor` found an error-level problem, 2 refused or bad usage, 3
 busy, 4 store unavailable, a crashed writer's hot journal, or a missing or damaged `tombstone.key`.
-`muninn --help` lists flags and env vars. Skills: `docs/SKILLS.md`.
+`muninn --help` lists flags and env vars. Repository skills guide Claude Code and
+Codex; they do not install hooks. `erase` and `rebuild` need an explicit request.
 
 - `muninn search QUERY`: ranked knowledge and events for the current repository scope (worktrees
   fold into their main repo). `--all-projects` widens it; the caller's own session is excluded

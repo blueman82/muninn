@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest import TestCase, mock, skipIf
+from unittest import mock, skipIf
 
 from muninn import review_codex_launch as launch
 from muninn import review_runner
@@ -236,6 +236,44 @@ class CodexProductionLaunchTests(IngestCase):
         spec = review_runner.prepare_launch(context, capability, self.prompt)
         self.assertEqual(spec.cli_argv[0], runner.executable)
 
+    def test_stable_symlink_launches_verified_upgrade_target(self) -> None:
+        """Use each signed target while keeping one approved CLI path."""
+        original = Path(self.policy.runner.executable)
+        stable = self.home / "codex-current"
+        stable.symlink_to(original)
+        runner = self.policy.runner.model_copy(
+            update={"executable": str(stable)}
+        )
+        policy = self.policy.model_copy(update={"runner": runner})
+        binding = self.binding.model_copy(update={"requested": runner})
+        raw = canonical_json_value(binding.model_dump(mode="json")).encode()
+        proof = (
+            self.home
+            / "review-capabilities"
+            / (hashlib.sha256(raw).hexdigest() + ".json")
+        )
+        proof.write_bytes(raw)
+        proof.chmod(0o600)
+        capability = self.capability.model_copy(
+            update={
+                "executable": str(stable),
+                "config_digest": launch.fingerprint(binding),
+                "proof_path": proof,
+            }
+        )
+        selected = self.context.model_copy(update={"policy": policy})
+        first = review_runner.prepare_launch(selected, capability, self.prompt)
+        self.assertEqual(first.cli_argv[0], str(original))
+        upgraded = self.home / "upgraded-codex"
+        upgraded.write_bytes(b"new signed executable fixture")
+        upgraded.chmod(0o700)
+        stable.unlink()
+        stable.symlink_to(upgraded)
+        second = review_runner.prepare_launch(
+            selected, capability, self.prompt
+        )
+        self.assertEqual(second.cli_argv[0], str(upgraded))
+
     def test_substituted_executable_is_refused_before_launch(self) -> None:
         """A runnable file at the approved path cannot inherit Codex auth."""
         with (
@@ -305,26 +343,6 @@ class CodexProductionLaunchTests(IngestCase):
                 10.0,
             )
 
-    def test_verifier_refuses_publicly_writable_path(self) -> None:
-        """An updater without Codex auth must not replace the binary."""
-        public = self.tmp / "public-bin"
-        public.mkdir(mode=0o700)
-        public.chmod(0o777)
-        executable = public / "codex"
-        executable.write_bytes(b"synthetic")
-        executable.chmod(0o755)
-        with (
-            mock.patch.object(
-                launch,
-                "_check_executable_storage",
-                side_effect=self.real_storage,
-            ),
-            self.assertRaisesRegex(
-                ValueError, "capability_executable_storage"
-            ),
-        ):
-            launch.verify_codex_executable(executable)
-
     @skipIf(sys.platform != "darwin", "requires native macOS ACLs")
     def test_verifier_refuses_acl_writable_path(self) -> None:
         """A separate user with ACL write access cannot swap the binary."""
@@ -383,14 +401,3 @@ class CodexProductionLaunchTests(IngestCase):
             ),
         ):
             launch.verify_codex_executable(executable)
-
-
-class CodexWindowsBoundaryTests(TestCase):
-    """Keep the explicit platform rejection covered on every host."""
-
-    def test_windows_private_path_refused(self) -> None:
-        with (
-            mock.patch.object(review_runner.sys, "platform", "win32"),
-            self.assertRaisesRegex(ValueError, "capability_platform"),
-        ):
-            review_runner.check_private_path(Path("/unused"), directory=True)

@@ -11,6 +11,7 @@ import platform
 import stat
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -99,11 +100,17 @@ def _check_executable_storage(executable: Path) -> None:
             raise ValueError("capability_executable_storage")
 
 
-def verify_codex_executable(executable: Path) -> str:
-    """Return the digest of an intact native Codex binary signed by OpenAI."""
-    before, _ = review_runner.file_digest(executable, 256 * 1024 * 1024)
-    _check_executable_storage(executable)
-    if not os.access(executable, os.X_OK):
+def verify_codex_executable(executable: Path) -> tuple[Path, str]:
+    """Return the signed canonical target and digest of a Codex CLI path."""
+    if not executable.is_absolute():
+        raise ValueError("capability_path")
+    try:
+        target = executable.resolve(strict=True)
+    except RuntimeError:
+        raise ValueError("capability_path") from None
+    before, _ = review_runner.file_digest(target, 256 * 1024 * 1024)
+    _check_executable_storage(target)
+    if not os.access(target, os.X_OK):
         raise ValueError("capability_changed")
     try:
         result = subprocess.run(
@@ -112,7 +119,7 @@ def verify_codex_executable(executable: Path) -> str:
                 "--verify",
                 "--strict",
                 "--test-requirement=" + _CODEX_REQUIREMENT,
-                str(executable),
+                str(target),
             ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -123,10 +130,10 @@ def verify_codex_executable(executable: Path) -> str:
         raise ValueError("capability_executable_provenance") from None
     if result.returncode != 0:
         raise ValueError("capability_executable_provenance")
-    after, _ = review_runner.file_digest(executable, 256 * 1024 * 1024)
+    after, _ = review_runner.file_digest(target, 256 * 1024 * 1024)
     if after != before:
         raise ValueError("capability_changed")
-    return after
+    return target, after
 
 
 class ExperimentalBinding(StrictModel):
@@ -176,7 +183,7 @@ def fingerprint(binding: ExperimentalBinding) -> str:
 
 def _binding(
     home: Path, capability: review_runner.RunnerCapability
-) -> ExperimentalBinding:
+) -> tuple[ExperimentalBinding, Path]:
     """Load a content-addressed private explicit experimental selection."""
     path = capability.proof_path
     if path.parent != home / "review-capabilities" or path.suffix != ".json":
@@ -207,8 +214,8 @@ def _binding(
     ):
         raise ValueError("capability_changed")
     executable = Path(binding.requested.executable)
-    verify_codex_executable(executable)
-    return binding
+    target, _ = verify_codex_executable(executable)
+    return binding, target
 
 
 def prepare(
@@ -232,7 +239,7 @@ def prepare(
         or not (home / "recall.off").is_file()
     ):
         raise ValueError("codex_experimental_boundary")
-    binding = _binding(home, capability)
+    binding, executable = _binding(home, capability)
     if (
         binding.requested != policy.runner
         or binding.host_identity != terms.host_identity
@@ -264,7 +271,7 @@ def prepare(
     native = canonical_json_value(data).encode()
     if len(native) > policy.max_input_bytes:
         raise ValueError("invalid_prompt_size")
-    return launch_spec(
+    spec = launch_spec(
         context,
         binding.cli_cwd,
         {
@@ -275,3 +282,4 @@ def prepare(
         native,
         schema_path=binding.schema_path,
     )
+    return replace(spec, cli_argv=(str(executable), *spec.cli_argv[1:]))

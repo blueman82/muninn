@@ -90,6 +90,6 @@ require an ADR. These rules override any skill that says to document less (for e
 - Tests must use a temp `MUNINN_HOME`, and `MUNINN_ROOTS` to point at synthetic fixtures
   in `tests/fixtures`; installer tests use the fakes in `tests/test_installer.py` to
   prevent changes to the real HOME, native services or provider config.
-- `.claude/skills/muninn-*` and `.codex/skills/muninn-*` mirror the CLI commands
-  (`docs/SKILLS.md`). Keep them aligned with `docs/REFERENCE.md`; the
+- `.claude/skills/muninn-*` and `.codex/skills/muninn-*` mirror the CLI commands.
+  Keep them aligned with `docs/REFERENCE.md`; the
   SessionStart/UserPromptSubmit frame text stays minimal and does not name them.
