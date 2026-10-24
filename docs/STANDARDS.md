@@ -60,8 +60,10 @@ The Stop command invokes `tools/codex_stop_gate.py` directly with Python 3.13 an
 provides JSON on stdin, including `cwd`, `session_id`, `hook_event_name`, `turn_id`,
 `stop_hook_active` and `last_assistant_message`. The wrapper ignores that payload: it
 derives the worktree from its own file and always runs one
-`python -m tools.check --full` subprocess using the same Python interpreter. The gate
-receives closed stdin, so it cannot consume the hook payload.
+`python -m tools.check --full` subprocess using that checkout's `.venv` Python.
+If the checkout has no `.venv`, the wrapper reports a launch failure instead of
+using packages from the system Python. The gate receives closed stdin, so it
+cannot consume the hook payload.
 
 A passing gate returns compact `{}` on stdout and exit 0. A failed gate, launch error or
 timeout returns exit 2 with the reason on stderr; Codex reports background-hook output
