@@ -96,9 +96,9 @@ live native qualification remain separate prerequisites. See [REFERENCE.md](REFE
 ### Default learning policy
 
 The repository carries a default learning policy in
-`tools/default_codex_policy.json`. A normal install applies it when the store has
-no learning policy and the host can run the native Codex runner. This works with
-`recall.off`, `recall.advisory` or `recall.on`; those switches select prompt
+`tools/default_codex_policy.json`. An install using the current default home
+applies it when the store has no learning policy and the host can run the native
+Codex runner. `recall.off`, `recall.advisory` and `recall.on` select prompt
 recall behavior and do not control learning.
 
 The default runner requires Apple silicon macOS, a signed Codex CLI on `PATH`,

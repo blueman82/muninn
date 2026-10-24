@@ -244,8 +244,9 @@ preparation-only `verify_legacy_resume` interface still stops at
 ### Default learning policy
 
 Every clone includes the default profile in
-`tools/default_codex_policy.json`. On a normal install, Muninn applies it when
-the store has no learning policy and the host can run the native Codex runner.
+`tools/default_codex_policy.json`. On an install using the current default
+home, Muninn applies it when the store has no learning policy and the host can
+run the native Codex runner.
 The default runner requires Apple silicon macOS, a signed Codex CLI on `PATH`,
 and an existing canonical Codex sign-in directory. Muninn binds the policy to
 that host, data directory and executable. If a requirement is missing, learning

@@ -16,9 +16,10 @@ so the repository cannot ship one ready-to-run local policy file.
 ## Decision
 
 The repository ships an editable default profile in
-`tools/default_codex_policy.json`. A normal first install, or an upgrade of an
-unconfigured store, selects that profile when the host meets the native Codex
-runner requirements. Muninn freezes the selected policy and local paths before
+`tools/default_codex_policy.json`. An install using the current default home,
+or an upgrade of its unconfigured store, selects that profile when the host
+meets the native Codex runner requirements. Muninn freezes the selected policy
+and local paths before
 installation changes. It creates private host-bound capability files only
 after the store and provider configuration are ready, then commits policy,
 admission and source boundaries together.
