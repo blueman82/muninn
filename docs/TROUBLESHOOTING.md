@@ -85,6 +85,14 @@ and retained archives. A repair baseline needs manual recovery assessment; never
 remove it to bypass `quiescence_unverified`/`reboot_required`. Journal presence is
 reported with consistency unverified, not as proof of a pending intent.
 
+On macOS, a new repair baseline records the data volume's persistent UUID.
+After a reboot, macOS may assign that volume a different temporary device
+number. Repair accepts that change only when the UUID, lock file, and witness
+file still match. If macOS cannot provide a UUID, Muninn refuses to record a
+new baseline. An older baseline without a UUID cannot prove a changed device
+number belongs to the same volume. Muninn must record a new baseline and wait
+for a later reboot; do not remove the old files to force progress.
+
 Real erase may interrupt the whole service. Preserve its original failure and
 `erasure_status`: `restart: not_attempted` means check and manually restart if
 needed, with no claim that it is currently stopped/restored. Retained archives keep

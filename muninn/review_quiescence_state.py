@@ -89,12 +89,24 @@ class Baseline(StrictModel):
         ),
     ]
     predecessor: Fingerprint | None
+    volume_uuid: (
+        Annotated[
+            str,
+            Field(pattern=(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")),
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def observed_boot(self) -> Self:
         """Reject the nil identifier that cannot establish a boot change."""
         if self.boot.split(":", 1)[1].replace("-", "") == "0" * 32:
             raise ValueError("boot_identity_unavailable")
+        if (
+            self.volume_uuid is not None
+            and self.volume_uuid.replace("-", "") == "0" * 32
+        ):
+            raise ValueError("quiescence_unverified")
         return self
 
 
@@ -114,6 +126,11 @@ def _private(path: Path, *, directory: bool = False) -> os.stat_result:
 def _identity(info: os.stat_result) -> Identity:
     """Project the native descriptor identity used by the lock protocol."""
     return info.st_dev, info.st_ino
+
+
+def directory_identity(home: Path) -> Identity:
+    """Read one verified private data directory identity."""
+    return _identity(_private(home, directory=True))
 
 
 def lock_identity(home: Path, fd: int) -> Identity:

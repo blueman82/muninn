@@ -227,6 +227,25 @@ class QuiescenceStateTests(unittest.TestCase):
             ).encode()
             self.assertIsNone(state.parse(raw, state.Baseline))
 
+    def test_baseline_rejects_malformed_or_nil_volume_uuid(self) -> None:
+        """A stored volume identifier must be canonical and nonzero."""
+        for volume_uuid in (
+            "F5A5FB75-3AF2-4F3F-A7B2-5744E5A0B339",
+            "00000000-0000-0000-0000-000000000000",
+            "not-a-uuid",
+        ):
+            raw = json.dumps(
+                {
+                    "version": 1,
+                    "lock_identity": [1, 2],
+                    "boot": "darwin:12345678-1234-4234-8234-123456789abc",
+                    "predecessor": None,
+                    "volume_uuid": volume_uuid,
+                }
+            ).encode()
+            with self.subTest(volume_uuid=volume_uuid):
+                self.assertIsNone(state.parse(raw, state.Baseline))
+
     def test_active_publication_failure_never_exposes_material(self) -> None:
         initialize(self.home)
         original = state.publish
