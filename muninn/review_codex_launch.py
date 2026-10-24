@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import os
 import platform
+import stat
+import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -27,6 +32,94 @@ WIRE_INSTRUCTION = (
     "string of the required outer object. "
     "Do not return the inner object directly."
 )
+_CODEX_REQUIREMENT = (
+    '=identifier "codex" and anchor apple generic '
+    'and certificate leaf[subject.OU] = "2DC432GLL2"'
+)
+
+
+def _has_acl(path: Path) -> bool:
+    """Refuse macOS ACL grants while allowing deny-only entries."""
+    if sys.platform != "darwin":
+        raise ValueError("capability_platform")
+    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+    get_acl = library.acl_get_file
+    get_acl.argtypes = (ctypes.c_char_p, ctypes.c_int)
+    get_acl.restype = ctypes.c_void_p
+    free_acl = library.acl_free
+    free_acl.argtypes = (ctypes.c_void_p,)
+    free_acl.restype = ctypes.c_int
+    get_entry = library.acl_get_entry
+    get_entry.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+    )
+    get_entry.restype = ctypes.c_int
+    get_tag = library.acl_get_tag_type
+    get_tag.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_int))
+    get_tag.restype = ctypes.c_int
+    acl = get_acl(os.fsencode(path), 0x100)
+    if acl is None:
+        if ctypes.get_errno() == errno.ENOENT and path.exists():
+            return False
+        raise ValueError("capability_executable_storage")
+    entry = ctypes.c_void_p()
+    granted = False
+    status = get_entry(acl, 0, ctypes.byref(entry))
+    while status == 0:
+        tag = ctypes.c_int()
+        if get_tag(entry, ctypes.byref(tag)) != 0:
+            granted = True
+            break
+        if tag.value != 2:
+            granted = True
+            break
+        status = get_entry(acl, -1, ctypes.byref(entry))
+    if not granted and (status != -1 or ctypes.get_errno() != errno.EINVAL):
+        granted = True
+    if free_acl(acl) != 0:
+        raise ValueError("capability_executable_storage")
+    return granted
+
+
+def verify_codex_executable(executable: Path) -> str:
+    """Return the digest of an intact native Codex binary signed by OpenAI."""
+    before, _ = review_runner.file_digest(executable, 256 * 1024 * 1024)
+    for path in (executable, *executable.parents):
+        info = path.lstat()
+        kind = stat.S_ISREG if path == executable else stat.S_ISDIR
+        if (
+            not kind(info.st_mode)
+            or info.st_uid not in (os.getuid(), 0)
+            or info.st_mode & 0o022
+            or _has_acl(path)
+        ):
+            raise ValueError("capability_executable_storage")
+    if not os.access(executable, os.X_OK):
+        raise ValueError("capability_changed")
+    try:
+        result = subprocess.run(
+            (
+                "/usr/bin/codesign",
+                "--verify",
+                "--strict",
+                "--test-requirement=" + _CODEX_REQUIREMENT,
+                str(executable),
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError("capability_executable_provenance") from None
+    if result.returncode != 0:
+        raise ValueError("capability_executable_provenance")
+    after, _ = review_runner.file_digest(executable, 256 * 1024 * 1024)
+    if after != before:
+        raise ValueError("capability_changed")
+    return after
 
 
 class ExperimentalBinding(StrictModel):
@@ -107,10 +200,7 @@ def _binding(
     ):
         raise ValueError("capability_changed")
     executable = Path(binding.requested.executable)
-    # Check the file safely without revoking admission on Codex upgrades.
-    review_runner.file_digest(executable, 256 * 1024 * 1024)
-    if not os.access(executable, os.X_OK):
-        raise ValueError("capability_changed")
+    verify_codex_executable(executable)
     return binding
 
 

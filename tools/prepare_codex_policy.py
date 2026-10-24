@@ -149,9 +149,7 @@ def prepare(
     assert value.experimental_codex is not None
     check_host(value.experimental_codex, home)
     review_runner.check_private_path(home, directory=True)
-    initial_digest, _ = review_runner.file_digest(
-        executable, 256 * 1024 * 1024
-    )
+    initial_digest = review_codex_launch.verify_codex_executable(executable)
     if (
         not auth_home.is_absolute()
         or auth_home.resolve() != auth_home

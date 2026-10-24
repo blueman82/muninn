@@ -267,8 +267,9 @@ An explicit `experimental_codex` policy may select
 [ongoing Mac Codex production](learning/ongoing-codex-production.md) with a
 separate `ongoing_production` budget kind. It has no aggregate quota or expiry;
 per-call controls, ordinary project scopes and durable failure halts remain.
-Codex CLI upgrades do not require a new policy or Muninn release; the fixed
-launch arguments and strict output checks still apply.
+An OpenAI-signed Codex CLI can be upgraded without a new policy or Muninn
+release. Muninn checks the binary's signature before launch. It still uses
+fixed launch arguments and checks the output.
 The finite pilot account remains separate. This does not grant verified runner
 status or full C6 acceptance.
 Windows legacy boot/termination proof and actual native/live qualification remain
