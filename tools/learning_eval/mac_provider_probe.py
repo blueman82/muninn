@@ -163,7 +163,7 @@ def direct_hooks(
     """Invoke rendered commands with bounded synthetic lifecycle input."""
     hooks = json.loads(rendered)["hooks"]
     cases = [
-        ("session_start", source, "user", "disabled_notice")
+        ("session_start", source, "user", "read_without_policy")
         for source in ("startup", "resume", "compact")
     ]
     cases += [
@@ -215,15 +215,13 @@ def direct_hooks(
             raise ValueError("hook_protocol_failed")
         if expectation in {"empty", "suppressed"} and body != {}:
             raise ValueError("hook_suppression_failed")
-        if expectation == "disabled_notice" and (
+        if expectation == "read_without_policy" and (
             body.get("hookSpecificOutput", {}).get("hookEventName")
             != EVENT_NAMES[event]
-            or "store unavailable"
-            not in body.get("hookSpecificOutput", {}).get(
-                "additionalContext", ""
-            )
+            or "review_policy_required"
+            in body.get("hookSpecificOutput", {}).get("additionalContext", "")
         ):
-            raise ValueError("disabled_context_not_observed")
+            raise ValueError("session_start_policy_coupling")
         if expectation == "archive_context" and WORDS not in body.get(
             "hookSpecificOutput", {}
         ).get("additionalContext", ""):

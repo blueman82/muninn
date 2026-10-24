@@ -686,7 +686,8 @@ does not search or count as an automatic recall delivery.
 
 Verified SessionStart refreshes (`startup|resume|clear|compact` for Claude/Codex)
 render complete applicable supported notes and a compact guide index as untrusted
-data, bounded by installed `context_bytes` and 4,000 bytes (Codex 2,800). No arbitrary
+data, bounded by 4,000 bytes for Claude and 2,800 bytes for Codex. This read-only
+startup context does not require an installed learning policy. No arbitrary
 eight-item limit or actor/quote heuristic remains. Unfitting items are omitted
 whole with a truthful notice. The usage text tells agents to verify current
 revisions and open cited originals; preview eligibility is not a truth guarantee.
@@ -694,7 +695,8 @@ Claude/Codex `systemMessage` lists exactly displayed items with control characte
 replaced and distinguishes omitted knowledge from no eligible knowledge. The
 status's content is never logged. Prompt recall adds a human-facing line only when a 50-delivery review is due.
 
-End/precompact capture admission is separate from startup refresh. Only a durable
+End/precompact capture admission is separate from startup refresh and still requires
+an installed learning policy. Only a durable
 request is internally acknowledged; SQLite busy yields the provider-safe empty
 response and content-free `review_enqueue_busy`. Later recovery can capture later
 indexed content, not prove the exact missed event/cutoff. Cursor waits for the next
@@ -720,8 +722,11 @@ that validation passes. See `docs/adr/0007-recall-off-by-default.md`.
 
 Mode files must be 0600, otherwise `muninn doctor` fails `file_modes`. Their
 contents are ignored. The change takes effect on the next prompt; no restart is
-needed. Experimental Codex learning activation still requires true off mode;
-advisory mode supplies prompt context and is refused by that boundary.
+needed. These mode files control prompt recall only. They do not block
+SessionEnd/PreCompact capture or the authorized learning runner. Experimental
+learning still requires its explicit policy, host, capability and admission checks.
+With neither file present, automatic prompt previews remain on and learning can
+still proceed under those checks.
 
 ## Files in the data directory
 

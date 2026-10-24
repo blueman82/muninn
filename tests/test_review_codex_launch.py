@@ -190,7 +190,7 @@ class CodexProductionLaunchTests(IngestCase):
             json.loads(revised.read_bytes())["max_input_bytes"], 1_048_576
         )
 
-    def test_other_project_allowed_and_codex_upgrade_keeps_review_controls(
+    def test_recall_mode_does_not_block_runner_launch_or_codex_upgrade(
         self,
     ) -> None:
         other = self.context.model_copy(
@@ -198,11 +198,18 @@ class CodexProductionLaunchTests(IngestCase):
         )
         review_runner.prepare_launch(other, self.capability, self.prompt)
         (self.home / "recall.off").unlink()
-        with self.assertRaisesRegex(ValueError, "codex_experimental_boundary"):
-            review_runner.prepare_launch(
-                self.context, self.capability, self.prompt
-            )
+        review_runner.prepare_launch(
+            self.context, self.capability, self.prompt
+        )
+        (self.home / "recall.advisory").touch(mode=0o600)
+        review_runner.prepare_launch(
+            self.context, self.capability, self.prompt
+        )
+        (self.home / "recall.advisory").unlink()
         (self.home / "recall.off").touch()
+        review_runner.prepare_launch(
+            self.context, self.capability, self.prompt
+        )
         Path(self.policy.runner.executable).write_text("new executable bytes")
         spec = review_runner.prepare_launch(
             self.context, self.capability, self.prompt

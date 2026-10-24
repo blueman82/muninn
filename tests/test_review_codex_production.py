@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import platform
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from pydantic import ValidationError
 
+from muninn import review_codex_policy
 from muninn.review_charge import Charge, aggregate, limits
 from muninn.review_models import (
     OngoingBudget,
@@ -116,3 +120,28 @@ class CodexProductionPolicyTests(unittest.TestCase):
             ValidationError, "finite_pilot_budget_required"
         ):
             Assessment.model_validate_json(json.dumps(data))
+
+    def test_recall_switches_do_not_block_learning_activation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            terms = self.policy.experimental_codex
+            assert terms is not None
+            terms = terms.model_copy(
+                update={"data_home": home, "host_identity": "1" * 64}
+            )
+            with (
+                mock.patch.object(
+                    review_codex_policy,
+                    "host_identity",
+                    return_value=terms.host_identity,
+                ),
+                mock.patch.object(platform, "system", return_value="Darwin"),
+                mock.patch.object(platform, "machine", return_value="arm64"),
+            ):
+                for files in ((), ("recall.off",), ("recall.advisory",)):
+                    for name in ("recall.off", "recall.advisory"):
+                        (home / name).unlink(missing_ok=True)
+                    for name in files:
+                        (home / name).touch()
+                    with self.subTest(files=files):
+                        review_codex_policy.check_activation(terms, home)

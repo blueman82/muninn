@@ -63,7 +63,5 @@ def check_host(terms: CodexExperiment, home: Path) -> None:
 
 
 def check_activation(terms: CodexExperiment, home: Path) -> None:
-    """Require the same bound host and disabled recall before activation."""
+    """Require the bound host before enabling experimental learning."""
     check_host(terms, home)
-    if not (home / "recall.off").is_file():
-        raise ValueError("review_policy_recall_enabled")
