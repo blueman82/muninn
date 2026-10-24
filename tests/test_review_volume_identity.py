@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,9 @@ from muninn import review_volume_identity as volume
 UUID_TEXT = "f5a5fb75-3af2-4f3f-a7b2-5744e5a0b339"
 
 
+@unittest.skipIf(
+    os.name == "nt", "macOS directory descriptors are unavailable"
+)
 class VolumeIdentityTests(unittest.TestCase):
     """Refuse missing or drifting native volume identifiers."""
 
