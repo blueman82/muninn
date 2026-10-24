@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import json
 import os
 import platform
+import stat
+import subprocess
+import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 from muninn import review_runner, store
 from muninn.knowledge_models import Digest, StrictModel
 from muninn.review_codex_output import output_contract_digest
-from muninn.review_codex_policy import (
-    PINNED_EXECUTABLE,
-    host_identity,
-)
+from muninn.review_codex_policy import host_identity
 from muninn.review_json import canonical_json_value, result_schema
 from muninn.review_launch_spec import LaunchSpec, codex_cli_argv, launch_spec
 from muninn.review_models import ReviewContext, RunnerConfig
@@ -30,6 +33,107 @@ WIRE_INSTRUCTION = (
     "string of the required outer object. "
     "Do not return the inner object directly."
 )
+_CODEX_REQUIREMENT = (
+    '=identifier "codex" and anchor apple generic '
+    'and certificate leaf[subject.OU] = "2DC432GLL2"'
+)
+
+
+def _has_acl(path: Path) -> bool:
+    """Refuse macOS ACL grants while allowing deny-only entries."""
+    if sys.platform != "darwin":
+        raise ValueError("capability_platform")
+    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+    get_acl = library.acl_get_file
+    get_acl.argtypes = (ctypes.c_char_p, ctypes.c_int)
+    get_acl.restype = ctypes.c_void_p
+    free_acl = library.acl_free
+    free_acl.argtypes = (ctypes.c_void_p,)
+    free_acl.restype = ctypes.c_int
+    get_entry = library.acl_get_entry
+    get_entry.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.POINTER(ctypes.c_void_p),
+    )
+    get_entry.restype = ctypes.c_int
+    get_tag = library.acl_get_tag_type
+    get_tag.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_int))
+    get_tag.restype = ctypes.c_int
+    acl = get_acl(os.fsencode(path), 0x100)
+    if acl is None:
+        if ctypes.get_errno() == errno.ENOENT and path.exists():
+            return False
+        raise ValueError("capability_executable_storage")
+    entry = ctypes.c_void_p()
+    granted = False
+    status = get_entry(acl, 0, ctypes.byref(entry))
+    while status == 0:
+        tag = ctypes.c_int()
+        if get_tag(entry, ctypes.byref(tag)) != 0:
+            granted = True
+            break
+        if tag.value != 2:
+            granted = True
+            break
+        status = get_entry(acl, -1, ctypes.byref(entry))
+    if not granted and (status != -1 or ctypes.get_errno() != errno.EINVAL):
+        granted = True
+    if free_acl(acl) != 0:
+        raise ValueError("capability_executable_storage")
+    return granted
+
+
+def _check_executable_storage(executable: Path) -> None:
+    """Require an executable path that a separate local user cannot replace."""
+    if sys.platform == "win32":
+        raise ValueError("capability_platform")
+    for path in (executable, *executable.parents):
+        info = path.lstat()
+        kind = stat.S_ISREG if path == executable else stat.S_ISDIR
+        if (
+            not kind(info.st_mode)
+            or info.st_uid not in (os.getuid(), 0)
+            or info.st_mode & 0o022
+            or _has_acl(path)
+        ):
+            raise ValueError("capability_executable_storage")
+
+
+def verify_codex_executable(executable: Path) -> tuple[Path, str]:
+    """Return the signed canonical target and digest of a Codex CLI path."""
+    if not executable.is_absolute():
+        raise ValueError("capability_path")
+    try:
+        target = executable.resolve(strict=True)
+    except RuntimeError:
+        raise ValueError("capability_path") from None
+    before, _ = review_runner.file_digest(target, 256 * 1024 * 1024)
+    _check_executable_storage(target)
+    if not os.access(target, os.X_OK):
+        raise ValueError("capability_changed")
+    try:
+        result = subprocess.run(
+            (
+                "/usr/bin/codesign",
+                "--verify",
+                "--strict",
+                "--test-requirement=" + _CODEX_REQUIREMENT,
+                str(target),
+            ),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise ValueError("capability_executable_provenance") from None
+    if result.returncode != 0:
+        raise ValueError("capability_executable_provenance")
+    after, _ = review_runner.file_digest(target, 256 * 1024 * 1024)
+    if after != before:
+        raise ValueError("capability_changed")
+    return target, after
 
 
 class ExperimentalBinding(StrictModel):
@@ -79,7 +183,7 @@ def fingerprint(binding: ExperimentalBinding) -> str:
 
 def _binding(
     home: Path, capability: review_runner.RunnerCapability
-) -> ExperimentalBinding:
+) -> tuple[ExperimentalBinding, Path]:
     """Load a content-addressed private explicit experimental selection."""
     path = capability.proof_path
     if path.parent != home / "review-capabilities" or path.suffix != ".json":
@@ -97,7 +201,6 @@ def _binding(
         or not binding.auth_home.is_dir()
         or binding.auth_home == home
         or home in binding.auth_home.parents
-        or binding.executable_sha256 != PINNED_EXECUTABLE
         or binding.output_contract_digest != output_contract_digest()
         or fingerprint(binding) != capability.config_digest
     ):
@@ -111,11 +214,8 @@ def _binding(
     ):
         raise ValueError("capability_changed")
     executable = Path(binding.requested.executable)
-    if review_runner.file_digest(executable, 256 * 1024 * 1024)[
-        0
-    ] != PINNED_EXECUTABLE or not os.access(executable, os.X_OK):
-        raise ValueError("capability_changed")
-    return binding
+    target, _ = verify_codex_executable(executable)
+    return binding, target
 
 
 def prepare(
@@ -139,7 +239,7 @@ def prepare(
         or not (home / "recall.off").is_file()
     ):
         raise ValueError("codex_experimental_boundary")
-    binding = _binding(home, capability)
+    binding, executable = _binding(home, capability)
     if (
         binding.requested != policy.runner
         or binding.host_identity != terms.host_identity
@@ -171,7 +271,7 @@ def prepare(
     native = canonical_json_value(data).encode()
     if len(native) > policy.max_input_bytes:
         raise ValueError("invalid_prompt_size")
-    return launch_spec(
+    spec = launch_spec(
         context,
         binding.cli_cwd,
         {
@@ -182,3 +282,4 @@ def prepare(
         native,
         schema_path=binding.schema_path,
     )
+    return replace(spec, cli_argv=(str(executable), *spec.cli_argv[1:]))

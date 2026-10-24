@@ -12,6 +12,7 @@ from pydantic import field_validator
 
 from muninn.knowledge_models import Digest, StrictModel
 
+# Historical assessment proof still uses this hash; ongoing admission does not.
 PINNED_EXECUTABLE = (
     "8813367285524ac798dd96d1b071aea30d58708c7226fd236cd275cf1cfdee31"
 )

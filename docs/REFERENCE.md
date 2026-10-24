@@ -97,9 +97,9 @@ it logs `n_terms` but no query hash or text. `miss_outside` depends on the worki
 directory: a search run from outside the repo's scope counts as outside even though
 `--all-projects` would find hits. A flag is set only when the call returned no hit
 and no knowledge; an errored call never sets one. A prompt the hook skips (fewer than
-3 query terms, or starting with `/`) logs no `stages` and so no flag. `MUNINN_NO_CALLLOG=1` stops the log. These are facts about a call,
-not proof that the answer was missing; only the labeled replay in
-`docs/REPLAY-BENCHMARK.md` shows true misses.
+3 query terms, or starting with `/`) logs no `stages` and so no flag.
+`MUNINN_NO_CALLLOG=1` stops the log. These flags describe one call; they do not
+prove a relevant answer was missing. Check actual misses with labeled questions.
 
 ## Current knowledge and learning
 
@@ -264,9 +264,19 @@ resetting those values; an already fenced admission remains zero and reports
 A valid policy grants no native capability, human production-policy approval or
 budget authority. Prompt, capability, host and admission checks still apply.
 An explicit `experimental_codex` policy may select
-[ongoing Mac Codex production](learning/ongoing-codex-production.md) with a
+ongoing Mac Codex production with a
 separate `ongoing_production` budget kind. It has no aggregate quota or expiry;
 per-call controls, ordinary project scopes and durable failure halts remain.
+The owner prepares this policy locally with `tools.prepare_codex_policy.prepare`.
+That function needs the Muninn data directory, a stable path to the native Codex
+CLI, the existing Codex sign-in directory, and the actual approver and approval
+time. It writes private policy and capability files; it does not approve or
+install them. Pass the resulting policy path to `--review-policy` after approval.
+Muninn resolves the stable CLI path before each launch, checks the target's
+macOS signature for OpenAI's `codex`, and launches that checked target. It
+rejects a target that another local user could replace. A signed Codex update
+can use the same policy without a version or file-hash pin. Muninn still uses
+fixed launch arguments and checks the output.
 The finite pilot account remains separate. This does not grant verified runner
 status or full C6 acceptance.
 Windows legacy boot/termination proof and actual native/live qualification remain

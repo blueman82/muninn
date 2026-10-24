@@ -7,4 +7,8 @@ __pycache__/
 .claude/worktrees/
 /docs/plans/windows-support.md
 .artifacts/knowledge-learning/
+/docs/learning/
+/docs/CURSOR-PRECOMPACT-BENCHMARK.md
+/docs/REPLAY-BENCHMARK.md
+/docs/SKILLS.md
 /docs/superpowers/

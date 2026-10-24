@@ -101,8 +101,8 @@ flowchart LR
   additional probe to detect oversize. Oversized
   conversations are skipped whole; full ingest remains the complete
   import path. The hook returns compact JSON, exits 0 on failure, and injects no
-  context. Its 90-second deadline is a measured host-specific setting; see the
-  [benchmark and limits](CURSOR-PRECOMPACT-BENCHMARK.md).
+  context. Its 90-second deadline was measured on one host. It is not a
+  completion guarantee on every machine.
 - **Trust.** Stored content is untrusted historical data. Secrets receive best-effort
   redaction at ingest and on output; automatic injection is framed so pasted copies are
   flagged on ingest. See the README for the full list.

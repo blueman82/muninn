@@ -24,13 +24,13 @@ Instructions for coding agents working in this repository. Any parent-directory
   `trust.py`, `rollback.py`, `snapshot.py` (pre-upgrade store copy), `record.py`,
   `probe.py`, `context.py`, `errors.py`, `constants.py`, `uninstall.py`,
   `configedit.py`, `tomledit.py`; the directory contains the complete module list.
-- `tools/`: the standards gate (`python3.13 -m tools.check`). Also the offline replay benchmark
-  (`tools.replay_retrieval`, `docs/REPLAY-BENCHMARK.md`).
+- `tools/`: the standards gate (`python3.13 -m tools.check`) and optional
+  offline replay tool (`tools.replay_retrieval`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`. Linux and Windows
   services are rendered in `install/lifecycle.py`.
 - `.claude/skills/muninn-*` and the mirrors `.codex/skills/muninn-*`: one skill per
   user-facing command. When a command, flag or answer field changes, update both skills
-  and `docs/REFERENCE.md` together (`docs/SKILLS.md`).
+  and `docs/REFERENCE.md` together.
 - `docs/`: reference, quick start, troubleshooting, architecture, `adr/` (decisions).
 
 ## Rules
