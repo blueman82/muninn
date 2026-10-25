@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -68,6 +69,7 @@ class CodexStopGateTest(unittest.TestCase):
             python = root / ".venv" / relative
             python.parent.mkdir(parents=True)
             python.touch()
+            (root / ".venv" / "pyvenv.cfg").write_text("home = python")
             with (
                 mock.patch.object(codex_stop_gate, "ROOT", root),
                 mock.patch.object(
@@ -89,6 +91,7 @@ class CodexStopGateTest(unittest.TestCase):
             python = main / ".venv" / relative
             python.parent.mkdir(parents=True)
             python.touch()
+            (main / ".venv" / "pyvenv.cfg").write_text("home = python")
             with (
                 mock.patch.object(codex_stop_gate, "ROOT", root),
                 mock.patch.object(
@@ -96,6 +99,103 @@ class CodexStopGateTest(unittest.TestCase):
                 ),
             ):
                 self.assertEqual(codex_stop_gate.gate_python(), str(python))
+
+    def test_gate_python_refuses_missing_project_venvs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                mock.patch.object(codex_stop_gate, "ROOT", root),
+                mock.patch.object(
+                    codex_stop_gate, "main_checkout", return_value=root
+                ),
+                self.assertRaisesRegex(
+                    FileNotFoundError, "pinned_validation_runtime_missing"
+                ),
+            ):
+                codex_stop_gate.gate_python()
+
+    def test_gate_python_skips_venv_without_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "worktree"
+            main = Path(tmp) / "main"
+            relative = (
+                "Scripts/python.exe"
+                if sys.platform == "win32"
+                else "bin/python3.13"
+            )
+            local_python = root / ".venv" / relative
+            main_python = main / ".venv" / relative
+            local_python.parent.mkdir(parents=True)
+            main_python.parent.mkdir(parents=True)
+            local_python.touch()
+            main_python.touch()
+            (main / ".venv" / "pyvenv.cfg").write_text("home = python")
+            with (
+                mock.patch.object(codex_stop_gate, "ROOT", root),
+                mock.patch.object(
+                    codex_stop_gate, "main_checkout", return_value=main
+                ),
+            ):
+                self.assertEqual(
+                    codex_stop_gate.gate_python(), str(main_python)
+                )
+
+    @unittest.skipIf(
+        os.name == "nt", "Windows symlink creation may need privilege"
+    )
+    def test_gate_python_rejects_linked_venv_bin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            foreign = root / "foreign" / "bin"
+            foreign.mkdir(parents=True)
+            (foreign / "python3.13").touch()
+            venv = root / ".venv"
+            venv.mkdir()
+            (venv / "bin").symlink_to(foreign, target_is_directory=True)
+            (venv / "pyvenv.cfg").write_text("home = python")
+            with (
+                mock.patch.object(codex_stop_gate, "ROOT", root),
+                mock.patch.object(
+                    codex_stop_gate, "main_checkout", return_value=root
+                ),
+                self.assertRaisesRegex(
+                    FileNotFoundError, "pinned_validation_runtime_missing"
+                ),
+            ):
+                codex_stop_gate.gate_python()
+
+    def test_gate_python_selects_windows_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python = root / ".venv" / "Scripts" / "python.exe"
+            python.parent.mkdir(parents=True)
+            python.touch()
+            (root / ".venv" / "pyvenv.cfg").write_text("home = Python313")
+            with (
+                mock.patch.object(codex_stop_gate, "ROOT", root),
+                mock.patch.object(
+                    codex_stop_gate, "main_checkout", return_value=root
+                ),
+                mock.patch.object(sys, "platform", "win32"),
+            ):
+                self.assertEqual(codex_stop_gate.gate_python(), str(python))
+
+    def test_missing_venv_does_not_launch_global_gate(self) -> None:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(codex_stop_gate, "ROOT", Path(directory)),
+            mock.patch.object(
+                codex_stop_gate, "main_checkout", return_value=Path(directory)
+            ),
+            mock.patch.object(codex_stop_gate.subprocess, "run") as run,
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            self.assertEqual(codex_stop_gate.main(), 2)
+            run.assert_not_called()
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("pinned_validation_runtime_missing", stderr.getvalue())
 
     def test_success_returns_only_compact_json(self) -> None:
         result = subprocess.CompletedProcess([], 0, "ok tests\n", "")

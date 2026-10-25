@@ -37,21 +37,47 @@ def main_checkout() -> Path:
 
 
 def gate_python() -> str:
-    """Prefer this checkout's development interpreter for the full gate.
+    """Select a verified project interpreter for the full gate.
 
     Returns:
-        The checkout's virtual-environment interpreter, or the current one.
+        The current or primary checkout's virtual-environment interpreter.
+
+    Raises:
+        FileNotFoundError: If neither checkout has a complete project venv.
     """
     relative = (
         "Scripts/python.exe" if sys.platform == "win32" else "bin/python3.13"
     )
-    python = ROOT / ".venv" / relative
-    if python.is_file():
-        return str(python)
-    python = main_checkout() / ".venv" / relative
-    if python.is_file():
-        return str(python)
-    return sys.executable
+    python = _venv_python(ROOT, relative)
+    if python is None:
+        python = _venv_python(main_checkout(), relative)
+    if python is None:
+        raise FileNotFoundError("pinned_validation_runtime_missing")
+    return str(python)
+
+
+def _venv_python(root: Path, relative: str) -> Path | None:
+    """Return a checkout interpreter only when its venv markers are present.
+
+    Args:
+        root: Checkout whose virtual environment is being checked.
+        relative: Platform-specific path to the Python executable.
+
+    Returns:
+        The verified interpreter path, or None when the venv is incomplete.
+    """
+    venv = root / ".venv"
+    candidate = venv / relative
+    config = venv / "pyvenv.cfg"
+    if (
+        venv.is_symlink()
+        or candidate.parent.is_symlink()
+        or config.is_symlink()
+        or not config.is_file()
+        or not candidate.is_file()
+    ):
+        return None
+    return candidate
 
 
 def main() -> int:
