@@ -31,11 +31,11 @@ type RefusalCode = Literal[
     "owner_changed",
     "reboot_required",
     "boot_identity_unavailable",
-    "quiescence_unverified",
+    "pause_unverified",
 ]
 
 
-class QuiescenceRefusedError(ValueError):
+class PauseRefusedError(ValueError):
     """Report a finite coordination refusal without exposing content."""
 
     def __init__(self, code: RefusalCode) -> None:
@@ -89,12 +89,24 @@ class Baseline(StrictModel):
         ),
     ]
     predecessor: Fingerprint | None
+    volume_uuid: (
+        Annotated[
+            str,
+            Field(pattern=(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")),
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def observed_boot(self) -> Self:
         """Reject the nil identifier that cannot establish a boot change."""
         if self.boot.split(":", 1)[1].replace("-", "") == "0" * 32:
             raise ValueError("boot_identity_unavailable")
+        if (
+            self.volume_uuid is not None
+            and self.volume_uuid.replace("-", "") == "0" * 32
+        ):
+            raise ValueError("pause_unverified")
         return self
 
 
@@ -105,9 +117,9 @@ def _private(path: Path, *, directory: bool = False) -> os.stat_result:
     if not expected(info.st_mode) or not platform_io.is_private(
         path, directory=directory
     ):
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     if os.name != "nt" and info.st_uid != os.getuid():
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     return info
 
 
@@ -116,13 +128,18 @@ def _identity(info: os.stat_result) -> Identity:
     return info.st_dev, info.st_ino
 
 
+def directory_identity(home: Path) -> Identity:
+    """Read one verified private data directory identity."""
+    return _identity(_private(home, directory=True))
+
+
 def lock_identity(home: Path, fd: int) -> Identity:
     """Require a private unchanged lock path matching the held descriptor."""
     _private(home, directory=True)
     path = _private(home / LOCK)
     held = os.fstat(fd)
     if not stat.S_ISREG(held.st_mode) or _identity(path) != _identity(held):
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     return _identity(held)
 
 
@@ -184,7 +201,7 @@ def inspect(home: Path, name: str) -> tuple[bytes, Fingerprint | None]:
         or before.st_ctime_ns != latest.st_ctime_ns
         or initial.st_ctime_ns != after.st_ctime_ns
     ):
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     return bytes(result), Fingerprint(
         identity=_identity(after), sha256=digest.hexdigest()
     )
@@ -211,7 +228,7 @@ def publish(home: Path, fd: int, name: str, value: StrictModel) -> None:
     inspect(home, name)
     raw = value.model_dump_json().encode()
     if len(raw) > LIMIT:
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     store.write_json_atomic(home / name, value.model_dump(mode="json"))
     if os.name != "nt":
         file_sync.sync_path(home)
@@ -225,7 +242,7 @@ def retire_baseline(home: Path, fd: int) -> None:
     if fingerprint is None:
         return
     if os.name == "nt":
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     (home / BASELINE).unlink()
     file_sync.sync_path(home)
 
@@ -238,14 +255,14 @@ def seed_new(home: Path, fd: int) -> None:
     The caller retains the non-reentrant writer context throughout the call.
 
     Raises:
-        QuiescenceRefusedError: If prior witness or repair authority exists.
+        PauseRefusedError: If prior witness or repair authority exists.
     """
     identity = lock_identity(home, fd)
     if (
         inspect(home, WITNESS)[1] is not None
         or inspect(home, BASELINE)[1] is not None
     ):
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     publish(
         home,
         fd,
@@ -285,7 +302,7 @@ def begin_owner(home: Path) -> tuple[int, str]:
             or previous.state != "complete"
             or (previous.lock_identity != identity)
         ):
-            raise QuiescenceRefusedError("quiescence_unverified")
+            raise PauseRefusedError("pause_unverified")
         _replay(home)
         retire_baseline(home, fd)
         token = uuid4().hex
@@ -318,7 +335,7 @@ def complete_owner(home: Path, fd: int, token: str) -> None:
     cannot infer those facts from a released lock or an absent process.
 
     Raises:
-        QuiescenceRefusedError: If the exact active owner cannot be verified.
+        PauseRefusedError: If the exact active owner cannot be verified.
     """
     identity = lock_identity(home, fd)
     previous = parse(inspect(home, WITNESS)[0], Witness)
@@ -328,7 +345,7 @@ def complete_owner(home: Path, fd: int, token: str) -> None:
         or previous.lock_identity != identity
         or (previous.state != "active" or previous.owner != owner)
     ):
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     publish(
         home, fd, WITNESS, previous.model_copy(update={"state": "complete"})
     )

@@ -13,11 +13,32 @@ Erasure is permanent. It secure-deletes rows and full-text entries and writes to
 
 ## Procedure
 
-1. Run the dry run first and show the user the targets it lists. Do not add `--yes` yet.
-2. Obtain explicit user approval for that exact target set. A broad `--match` may include unintended targets.
-3. Explain that real erasure can interrupt the whole Muninn service, including unrelated ingestion, then re-run with `--yes`. It waits for selected-owner completion and contained process material before mutation; a replacement owner is refused rather than stopped too.
-4. Report `not_covered` and `out_of_scope`: muninn does not erase provider transcript files, Time Machine backups or free disk blocks. Provide provider file paths if the user wants to remove those files. Do not delete provider transcripts yourself. If `aside_files` is not empty, those stores may still contain erased text. Show the user `aside_remove` (`rm --` on macOS/Linux, or PowerShell `Remove-Item -LiteralPath` with a literal path array on Windows) for manual execution; do not delete these stores yourself.
-5. Report `erasure_status` and, when present, `vocab`, `residue` and `review.retained_archives`. If `stop_may_have_been_published` is true, status includes `restart="not_attempted"` and `next_action="check_and_restart_if_needed"`: have the owner check the service and arrange manual restart if needed, even after failure. Do not claim it is currently stopped or restored. Do not restart or reboot automatically. Run `muninn doctor` afterwards.
+1. Run the dry run and show the listed targets.
+2. Ask the user to approve that exact target set.
+3. If `--match` is broad, warn that it may select unintended targets.
+4. Explain that real erasure can interrupt all Muninn work, including ingestion.
+5. After approval, rerun the exact command with `--yes`.
+6. Report `not_covered`, `out_of_scope`, and `erasure_status`.
+7. Also report `vocab`, `residue` and `review.retained_archives` when present.
+8. State that Muninn does not erase provider transcripts, Time Machine backups or free disk blocks.
+9. If the user wants provider transcript files removed, provide their paths.
+10. Do not delete provider transcripts yourself.
+11. If `aside_files` is not empty, warn that those stores may contain erased text.
+12. Show the `aside_remove` command for manual use.
+13. On macOS or Linux, use `rm --` with the listed paths.
+14. On Windows, use PowerShell `Remove-Item -LiteralPath` with a literal path array.
+15. Ask the user to remove aside stores.
+16. Do not remove aside stores yourself.
+17. If `stop_may_have_been_published` is true, report both `restart="not_attempted"` and `next_action="check_and_restart_if_needed"`.
+18. The system service manager may restart Muninn.
+19. Muninn does not restart the service itself.
+20. Do not claim that the service is stopped or restored.
+21. Run `muninn doctor --pretty` after erasure.
+22. On macOS or Linux, run `muninn recover` if doctor returns `recovery_guidance`.
+23. On Windows, preserve repair files.
+24. Save the report.
+25. Contact the maintainer.
+26. Never reboot the computer automatically.
 
 Real erasure owns the owner barrier before the writer barrier. Its unchanged Python
 `wait_s=15.0` is one coordination-acquisition budget, not a total command, repair or
@@ -34,7 +55,7 @@ Neither path seeds containment evidence from absence or an empty database.
 retained archives. Residue or any retained archive leaves `committed`; a completed
 command with residue still exits 0. These bounded checks do not prove universal
 forensic absence or erase provider/remote copies. Durable intent survives later
-failure and is replayed on quiescent startup/erase entry. Pending intent fences new
+failure and is replayed on paused startup/erase entry. Pending intent fences new
 foreground proposals/commits; existing receipts retain audit access until replay.
 The guard reads the whole journal without a fixed memory/time bound. Preserve the
 journal and `tombstone.key`.

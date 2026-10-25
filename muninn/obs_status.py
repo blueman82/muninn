@@ -274,7 +274,7 @@ def review_protocol(
     intent = _protocol_present(home / "tombstones.jsonl")
     results: tuple[tuple[str, bool | None, str, str], ...] = (
         (
-            "review_quiescence",
+            "review_pause",
             None,
             (
                 "witness_present_containment_unverified"

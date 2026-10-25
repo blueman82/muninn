@@ -13,7 +13,7 @@ from muninn.cli_core import Result
 from muninn.cli_maint import heartbeat
 from muninn.ingest import PassStats
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 STOPPED = "the last pass stopped with"
 

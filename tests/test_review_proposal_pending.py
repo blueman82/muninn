@@ -8,7 +8,7 @@ from unittest import mock
 from muninn import (
     review_budget,
     review_originals,
-    review_quiescence,
+    review_pause,
     review_requests,
     store,
     tombstones,
@@ -16,7 +16,7 @@ from muninn import (
 from muninn.review_models import AttemptView, ReviewContext
 from muninn.tombstone_key import TOMBSTONE_FILE
 from tests.ingest_support import TID
-from tests.review_quiescence_support import initialize, interrupt_erasure
+from tests.review_pause_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
 
@@ -169,7 +169,7 @@ class ProposalPendingTests(CommitCase):
                 self.conn.execute("ROLLBACK")
         self.assertEqual(self.state(), before)
 
-    def test_quiescent_replay_keeps_affected_request_fenced(self) -> None:
+    def test_paused_replay_keeps_affected_request_fenced(self) -> None:
         initialize(self.home)
         interrupt_erasure(self.home, TID)
         with (
@@ -177,8 +177,8 @@ class ProposalPendingTests(CommitCase):
             self.assertRaisesRegex(ValueError, "^erasure_pending$"),
         ):
             self.transaction(self.claim)
-        with review_quiescence.erase_connection(
-            self.home, wait_s=0, status=review_quiescence.EraseStatus()
+        with review_pause.erase_connection(
+            self.home, wait_s=0, status=review_pause.EraseStatus()
         ):
             self.assertEqual(self.row("SELECT count(*) FROM tombstone")[0], 1)
         self.assertEqual(

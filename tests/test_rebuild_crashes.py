@@ -12,7 +12,7 @@ from pathlib import Path
 from muninn import cli_rebuild, erase_residue, store
 from tests.cli_support import CliCase
 from tests.knowledge_retirement_support import native_note
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.test_ingest import TID
 
 _ROOT = Path(__file__).resolve().parent.parent

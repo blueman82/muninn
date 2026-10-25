@@ -1,4 +1,4 @@
-"""Per-user native services with graceful, verified writer quiescence."""
+"""Per-user native services with graceful, verified writer pause."""
 
 from __future__ import annotations
 
@@ -299,13 +299,13 @@ def _stop_windows(ctx: Ctx) -> None:
                 ctx,
                 lambda process=process: not _same_process(ctx, process),
                 30,
-                "writer chain did not quiesce; retained state unchanged",
+                "writer chain did not pause; retained state unchanged",
             )
     wait(
         ctx,
         lambda: not _task_running(ctx),
         30,
-        "task did not quiesce; retained state unchanged",
+        "task did not pause; retained state unchanged",
     )
 
 
@@ -326,12 +326,10 @@ def stop(ctx: Ctx) -> None:
                 ctx,
                 lambda: unit_stopped(ctx.run),
                 30,
-                "writer did not quiesce; retained state unchanged",
+                "writer did not pause; retained state unchanged",
             )
         except (OSError, ValueError) as exc:
-            raise StepFailedError(
-                "cannot establish writer quiescence"
-            ) from exc
+            raise StepFailedError("cannot establish writer pause") from exc
     elif ctx.platform != "linux":
         ctx.run(["launchctl", "bootout", ctx.target])
         wait(ctx, lambda: not job(ctx) and released(ctx.data), 30, "busy")
@@ -409,7 +407,7 @@ def task_action(ctx: Ctx, python: Path) -> list[str]:
 
 
 def remove(ctx: Ctx) -> None:
-    """Remove only the verified owned backend after graceful quiescence."""
+    """Remove only the verified owned backend after graceful pause."""
     stop(ctx)
     if ctx.platform == "win32" and ctx.plist.exists():
         _task_owned(ctx)

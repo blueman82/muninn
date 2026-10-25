@@ -18,7 +18,7 @@ from unittest import mock
 from muninn import cli_serve, ingest, obs, poller_stop, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 LONG_AGO = 900  # seconds since the last finished pass: stale on its own
 # Taken before any patching, for the stand-ins that must still write.

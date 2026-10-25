@@ -1,7 +1,7 @@
 """muninn erase: remove sessions, event lines or matching text for good.
 
 ``erase`` needs caller-held writer ownership and established producer
-quiescence for real erasure; ``run_erase`` establishes both. Targets are
+pause for real erasure; ``run_erase`` establishes both. Targets are
 collected first. One transaction then inserts the
 tombstones, deletes the events (their FTS rows go under secure-delete),
 scrubs revisioned knowledge and review content, and deletes source rows of
@@ -43,7 +43,7 @@ from muninn.knowledge_erase import (
     erase_attempt_material,
     erase_support_closure,
 )
-from muninn.review_quiescence import EraseStatus, erase_connection
+from muninn.review_pause import EraseStatus, erase_connection
 from muninn.tombstone_key import TOMBSTONE_FILE
 from muninn.tombstones import append_tombstones, reapply_tombstones
 
@@ -253,7 +253,7 @@ def erase(
 
     Exactly one of ``session``, ``event_ref`` and ``match`` is given. The
     caller holds ``store.writer_lock`` and, for real erasure, has established
-    producer quiescence through ``erase_connection``. This low-level function
+    producer pause through ``erase_connection``. This low-level function
     never acquires those barriers. A ``ValueError`` propagates when
     not exactly one selector is given, ``match`` is shorter than
     ``MIN_MATCH`` characters or ``event_ref`` is malformed; a
@@ -351,7 +351,7 @@ def run_erase_request(
     env: Mapping[str, str] = os.environ,
     status: EraseStatus | None = None,
 ) -> dict[str, object]:
-    """Establish producer quiescence and writer ownership, then erase.
+    """Establish producer pause and writer ownership, then erase.
 
     Real erasure refuses an absent store; dry runs keep their writer-only
     path and may initialize an empty store. Neither creates containment

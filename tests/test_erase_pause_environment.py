@@ -11,8 +11,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from muninn import store
-from tests import erase_quiescence_process as processes
-from tests import test_erase_quiescence as fixtures
+from tests import erase_pause_process as processes
+from tests import test_erase_pause as fixtures
 from tests.store_support import direct_python
 
 
@@ -26,7 +26,7 @@ class OwnerEnvironmentTests(unittest.TestCase):
     """Verify the owner subprocess environment in disposable storage."""
 
     def test_owner_child_environment_resolves_windows_home(self) -> None:
-        fixture = fixtures.EraseQuiescenceTests()
+        fixture = fixtures.ErasePauseTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
         child = mock.Mock(returncode=0)

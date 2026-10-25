@@ -1,4 +1,4 @@
-"""Verify Windows metadata without weakening quiescence drift checks."""
+"""Verify Windows metadata without weakening pause drift checks."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from muninn import review_quiescence_state as state
+from muninn import review_pause_state as state
 
 
 class WindowsMetadataTests(unittest.TestCase):
@@ -86,8 +86,6 @@ class WindowsMetadataTests(unittest.TestCase):
             ):
                 with (
                     self.subTest(changed=changed, field=field),
-                    self.assertRaisesRegex(
-                        ValueError, "quiescence_unverified"
-                    ),
+                    self.assertRaisesRegex(ValueError, "pause_unverified"),
                 ):
                     self.inspect(changed=changed, field=field)

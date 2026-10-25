@@ -22,10 +22,10 @@ from muninn import (
     tombstones,
 )
 from muninn import (
-    review_quiescence as q,
+    review_pause as q,
 )
 from muninn import (
-    review_quiescence_state as state,
+    review_pause_state as state,
 )
 from muninn.tombstone_intent import read_intent
 from muninn.tombstone_replay import plan_transcripts
@@ -112,7 +112,7 @@ def prepare(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
             state.inspect(ctx.data, name)[1] is not None
             for name in (state.WITNESS, state.BASELINE)
         ):
-            raise StepFailedError("quiescence_unverified")
+            raise StepFailedError("pause_unverified")
 
         candidate_fingerprint = dataclasses.asdict(
             store_fingerprint.capture_file(candidate)

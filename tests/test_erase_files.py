@@ -14,7 +14,7 @@ from pathlib import Path
 
 from muninn import erase, store
 from tests.erase_support import CANARY, EraseCase, digest
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import assert_private
 from tests.test_classify import codex_meta, user_msg
 from tests.test_ingest import HOLD_LOCK, ROOT, TID, primary, rollout

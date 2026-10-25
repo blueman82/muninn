@@ -21,8 +21,8 @@ from install.record import Record
 from install.steps_config import claude, codex, cursor
 from install.steps_release import pin, relink
 from muninn import file_sync, store, store_fingerprint
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 
 
 def configuration(ctx: Ctx) -> Record:
@@ -172,11 +172,11 @@ def prepare(
                 value.get("compatible_exposure_possible")
                 or actual.database.digest != bound["candidate"]["digest"]
             ):
-                raise state.QuiescenceRefusedError("quiescence_unverified")
+                raise state.PauseRefusedError("pause_unverified")
             exclusion.verify(ctx, rec)
             publication.witness(ctx, rec, owner, check)
         elif state.parse(raw, state.Witness) is None:
-            raise state.QuiescenceRefusedError("quiescence_unverified")
+            raise state.PauseRefusedError("pause_unverified")
         publication.verify_live(ctx, rec, owner)
         check()
         retained(ctx, rec)

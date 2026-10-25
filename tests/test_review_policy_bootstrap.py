@@ -7,7 +7,7 @@ import json
 import sqlite3
 from unittest import mock
 
-from muninn import review_progress, review_quiescence, store
+from muninn import review_pause, review_progress, store
 from muninn.review_models import ReviewPolicy
 from tests.store_support import (
     StoreCase,
@@ -69,7 +69,7 @@ class PolicyBootstrapTests(StoreCase):
                 store, "writer_lock", side_effect=AssertionError
             ),
             mock.patch.object(
-                review_quiescence,
+                review_pause,
                 "maintenance_owner",
                 side_effect=AssertionError,
             ),

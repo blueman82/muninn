@@ -19,11 +19,11 @@ from muninn import (
     review_requests,
     store,
 )
-from muninn import review_quiescence_state as state
-from muninn.review_quiescence import EraseStatus
-from tests.erase_quiescence_process import process_gone
+from muninn import review_pause_state as state
+from muninn.review_pause import EraseStatus
+from tests.erase_pause_process import process_gone
 from tests.ingest_support import TID, IngestCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import direct_python
 from tests.test_review_commit import CommitCase
 from tests.test_review_supervisor import SupervisorCase
@@ -115,7 +115,7 @@ def owner_fixture(control: Path, replacement: bool) -> None:
         fixture.doCleanups()
 
 
-class EraseQuiescenceTests(IngestCase):
+class ErasePauseTests(IngestCase):
     """Require containment before any requested erasure mutation."""
 
     def setUp(self) -> None:
@@ -224,7 +224,7 @@ class EraseQuiescenceTests(IngestCase):
         control = self.tmp / "control"
         control.mkdir()
         code = (
-            "from pathlib import Path; from tests.test_erase_quiescence "
+            "from pathlib import Path; from tests.test_erase_pause "
             "import owner_fixture; "
             f"owner_fixture(Path({str(control)!r}), {replacement!r})"
         )

@@ -12,7 +12,7 @@ from unittest import mock
 
 from muninn import cli_serve
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 ROOT = Path(__file__).resolve().parent.parent
 CHILD = (

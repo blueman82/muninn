@@ -61,7 +61,7 @@ def same_process(ctx: Ctx, process: dict[str, object]) -> bool:
     if result.returncode == 3:
         return False
     if result.returncode:
-        raise StepFailedError("cannot establish process quiescence")
+        raise StepFailedError("cannot establish process pause")
     current = parse_process(result.stdout)
     return (
         _positive_pid(current, "pid") == pid and _created(current) == created

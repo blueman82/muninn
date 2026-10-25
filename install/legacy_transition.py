@@ -17,7 +17,7 @@ from install.preflight import preflight, validate_resume_repo
 from install.record import Record
 from install.steps_release import prepare_release
 from muninn import file_sync
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from muninn.platform_paths import read_selection
 
 

@@ -15,11 +15,16 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from muninn import ingest, obs_service, platform_io, store, tombstone_key
 from muninn.knowledge_read import read_snapshot
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
+from muninn.obs_recovery import (
+    CheckResult,
+    RecoveryGuidance,
+    recovery_guidance,
+)
 from muninn.obs_stats import db_space, human_bytes, reread, review_stats, stats
 from muninn.obs_status import (
     DATA_FILES,
@@ -68,20 +73,12 @@ LABEL = "com.muninn"
 PRUNING = ".pruning-"
 
 
-class CheckResult(TypedDict):
-    """One doctor check as it appears in the JSON output."""
-
-    check: str
-    ok: bool | None
-    level: str
-    detail: str
-
-
 class DoctorReport(TypedDict):
     """The doctor output: overall verdict and every check."""
 
     ok: bool
     checks: list[CheckResult]
+    recovery_guidance: NotRequired[RecoveryGuidance]
 
 
 class JobInfo(TypedDict):
@@ -453,7 +450,11 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _roots_present(env),
     ]
     ok = all(c["ok"] is not False for c in checks if c["level"] == "error")
-    return {"ok": ok, "checks": checks}
+    report: DoctorReport = {"ok": ok, "checks": checks}
+    guidance = recovery_guidance(checks, sys.platform)
+    if guidance is not None:
+        report["recovery_guidance"] = guidance
+    return report
 
 
 def review_checks(

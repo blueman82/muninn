@@ -35,7 +35,7 @@ class AccountSpikeTests(unittest.TestCase):
         self.assertIn("$password=$null", script)
         self.assertIn("SetAccessRuleProtection($true,$false)", script)
         self.assertIn("$user.SID.Value", script)
-        self.assertIn("$created -and $quiescent", script)
+        self.assertIn("$created -and $paused", script)
 
     def test_child_first_parent_cmdlet_selects_its_builtin_module(
         self,
@@ -176,7 +176,7 @@ class AccountSpikeTests(unittest.TestCase):
         assert command is not None
         self.assertTrue(command.endswith("powershell.exe"))
 
-    def test_report_requires_actual_both_children_and_quiescence(self) -> None:
+    def test_report_requires_actual_both_children_and_pause(self) -> None:
         passed = {
             "ordinary_child_admin": 0,
             "scheduler_child_admin": 0,
@@ -212,16 +212,14 @@ class AccountSpikeTests(unittest.TestCase):
         child_exit = source.index("$child=Join-Path")
         owned_check = source.index("Test-Owned $owned $base")
         empty_check = source.index("$owned.GetInstances(0).Count -ne 0")
-        quiescence = source.index(
-            "$quiescent=$report.scheduler_instances -eq 0"
-        )
+        pause = source.index("$paused=$report.scheduler_instances -eq 0")
         remove = source.index("Remove-LocalUser -SID")
         self.assertLess(child_exit, owned_check)
         disabled = source.index("$owned.Enabled=$false")
         self.assertLess(owned_check, disabled)
         self.assertLess(disabled, empty_check)
-        self.assertLess(empty_check, quiescence)
-        self.assertLess(quiescence, remove)
+        self.assertLess(empty_check, pause)
+        self.assertLess(pause, remove)
         self.assertIn("catch {$report.account_retained=1", source)
         self.assertIn("Actions/Exec/Arguments", source)
         self.assertIn("Settings/AllowHardTerminate", source)
@@ -284,7 +282,7 @@ class AccountSpikeTests(unittest.TestCase):
         child_report = source.index("$child=Join-Path")
         self.assertLess(stages[3], child_report)
         self.assertLess(stages[4], source.index("Test-Owned $owned $base"))
-        self.assertIn("$quiescent=$false\n $report.child_stage=2", source)
+        self.assertIn("$paused=$false\n $report.child_stage=2", source)
         self.assertNotIn("TerminateProcess", source)
 
     def test_child_failure_diagnosis_preserves_exit_and_bounded_reports(
