@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import sys
 from argparse import Namespace
+from contextlib import closing
 from pathlib import Path
 
-from muninn import cli_core, review_pause, store
+from muninn import cli_core, review_pause, store, tombstones
 from muninn import review_pause_state as state
 from muninn.cli_core import Env, Record, Result
 
@@ -117,19 +118,20 @@ def recover(a: Namespace, env: Env, home: Path, record: Record) -> Result:
         return _no_recovery()
     try:
         needed, has_baseline = _needs_recovery(home)
-    except (OSError, ValueError):
+        pending_erasure = not needed and _pending_erasure(home)
+    except (OSError, ValueError, store.StoreUnavailableError):
         return _refusal(
             "pause_unverified",
             "Keep all files unchanged. Save `muninn --pretty doctor` and "
             "contact your Muninn maintainer.",
         )
-    if not needed:
+    if not needed and not pending_erasure:
         return _no_recovery()
     platform_name = _platform_name()
     refusal = _platform_refusal(home, platform_name, has_baseline)
     if refusal is not None:
         return refusal
-    return _repair(home, platform_name, record)
+    return _repair(home, platform_name, record, pending_erasure)
 
 
 def _no_recovery() -> Result:
@@ -179,13 +181,19 @@ def _platform_refusal(
     return None
 
 
-def _repair(home: Path, platform_name: str, record: Record) -> Result:
+def _repair(
+    home: Path,
+    platform_name: str,
+    record: Record,
+    pending_erasure: bool,
+) -> Result:
     """Repair through the existing checked maintenance barriers.
 
     Args:
         home: Muninn's private data directory.
         platform_name: Current operating-system identifier.
         record: Content-free call-log entry.
+        pending_erasure: Whether the read-only check found unapplied intent.
 
     Returns:
         A recovery result or a refusal with its next action.
@@ -215,6 +223,7 @@ def _repair(home: Path, platform_name: str, record: Record) -> Result:
     repaired = (
         status.repair_phase == "complete"
         or status.stop_may_have_been_published
+        or pending_erasure
     )
     if status.repair_phase == "complete":
         message = (
@@ -226,6 +235,8 @@ def _repair(home: Path, platform_name: str, record: Record) -> Result:
             "Muninn stopped its managed writer and completed the recovery "
             "check."
         )
+    elif pending_erasure:
+        message = "Muninn applied the saved erasure intent."
     else:
         message = "No interrupted maintenance pause needed repair."
     return 0, {
@@ -242,6 +253,25 @@ def _repair(home: Path, platform_name: str, record: Record) -> Result:
             "platform": platform_name,
         }
     }
+
+
+def _pending_erasure(home: Path) -> bool:
+    """Check current-format erasure intent without changing the store."""
+    path = store.db_path(home)
+    if not path.is_file():
+        return False
+    try:
+        with closing(store.connect_ro(path)) as conn:
+            tombstones.require_current_tombstones(conn, home)
+    except store.StoreUnavailableError as error:
+        if str(error) == "cutover_required":
+            return False
+        raise
+    except ValueError as error:
+        if str(error) == "erasure_pending":
+            return True
+        raise
+    return False
 
 
 def _baseline_matches_platform(home: Path, platform_name: str) -> bool:

@@ -8,10 +8,10 @@ import sys
 import unittest
 from unittest import mock
 
-from muninn import cli_recovery, review_pause
+from muninn import cli_recovery, review_pause, store, tombstones
 from muninn import review_pause_state as state
 from tests.cli_support import CliCase
-from tests.review_pause_support import initialize
+from tests.review_pause_support import initialize, interrupt_erasure
 from tests.store_support import Child
 
 BOOT_A = "linux:12345678-1234-4234-8234-123456789abc"
@@ -105,6 +105,42 @@ class CliRecoveryTests(CliCase):
         code, out, _ = self.muninn("recover")
         self.assertEqual(code, 0, out)
         self.assertEqual(out["recovery"]["status"], "no_recovery_needed")
+
+    def test_recover_applies_pending_erasure_with_complete_witness(
+        self,
+    ) -> None:
+        """Replay durable intent before claiming there is no recovery."""
+        interrupt_erasure(self.home, "fixture-thread")
+        with mock.patch.object(
+            cli_recovery, "_platform_name", return_value="linux"
+        ):
+            code, result, _ = self.muninn("recover")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["recovery"]["status"], "recovered")
+        with store.connect_ro(store.db_path(self.home)) as conn:
+            self.assertEqual(
+                conn.execute("SELECT count(*) FROM tombstone").fetchone()[0],
+                1,
+            )
+        with store.connect_ro(store.db_path(self.home)) as conn:
+            tombstones.require_current_tombstones(conn, self.home)
+
+    def test_windows_keeps_pending_erasure_unchanged(self) -> None:
+        """Refuse Windows replay before changing its saved intent."""
+        interrupt_erasure(self.home, "fixture-thread")
+        with mock.patch.object(
+            cli_recovery, "_platform_name", return_value="win32"
+        ):
+            code, result, _ = self.muninn("recover")
+        self.assertEqual(code, 2)
+        self.assertEqual(result["reason"], "windows_repair_unqualified")
+        with store.connect_ro(store.db_path(self.home)) as conn:
+            self.assertEqual(
+                conn.execute("SELECT count(*) FROM tombstone").fetchone()[0],
+                0,
+            )
+            with self.assertRaisesRegex(ValueError, "erasure_pending"):
+                tombstones.require_current_tombstones(conn, self.home)
 
     def test_empty_data_home_reports_no_recovery_needed(self) -> None:
         empty = self.tmp / "empty-home"
