@@ -20,11 +20,16 @@ from muninn import (
     store,
 )
 from muninn import review_pause_state as state
+from muninn.review_pause_replay import recover_paused_store
 from muninn.review_pause_state import (
     PauseRefusedError as PauseRefusedError,
 )
-from muninn.review_repair_binding import same_repair_binding
-from muninn.review_requests import recover_attempts
+from muninn.review_repair_binding import (
+    RepairSnapshot,
+    legacy_volume_change_requires_confirmation,
+    rebind_legacy_volume,
+    same_repair_binding,
+)
 from muninn.tombstones import reapply_tombstones
 
 _POLL_S = 0.1
@@ -298,23 +303,6 @@ def _writer(
             time.sleep(min(_POLL_S, remaining))
 
 
-def _recover(conn: sqlite3.Connection, home: Path) -> None:
-    """Commit fencing before caller-owned replay of current intent."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        conn.execute("UPDATE review_control SET generation=generation+1")
-        generation = conn.execute(
-            "SELECT generation FROM review_control"
-        ).fetchone()[0]
-        recover_attempts(conn, generation, time.time())
-        conn.execute("COMMIT")
-    except BaseException:
-        with contextlib.suppress(sqlite3.Error):
-            conn.execute("ROLLBACK")
-        raise
-    reapply_tombstones(conn, home)
-
-
 def _verify(
     home: Path,
     fd: int,
@@ -323,6 +311,7 @@ def _verify(
     repair: bool,
     selected: state.Witness | None,
     status: EraseStatus,
+    confirm_legacy_volume: bool = False,
 ) -> None:
     """Require completion or a later boot bound to an unchanged predecessor."""
     identity = state.lock_identity(home, fd)
@@ -346,18 +335,23 @@ def _verify(
         raise PauseRefusedError("pause_unverified")
     boot = review_boot_identity.observe()
     baseline = state.parse(baseline_raw, state.Baseline)
-    if (
-        baseline is not None
-        and baseline.boot.startswith("darwin:")
-        and baseline.volume_uuid is None
-        and (
-            baseline.boot.split(":")[0] != boot.split(":")[0]
-            or baseline.lock_identity != identity
-            or baseline.predecessor != predecessor
+    try:
+        baseline, baseline_file = rebind_legacy_volume(
+            home,
+            fd,
+            RepairSnapshot(
+                baseline,
+                baseline_file,
+                latest,
+                identity,
+                predecessor,
+                boot,
+            ),
+            confirm_legacy_volume,
         )
-    ):
+    except PauseRefusedError:
         status.repair_phase = "baseline_recorded"
-        raise PauseRefusedError("pause_unverified")
+        raise
     if (
         baseline is None
         or baseline.boot.split(":")[0] != boot.split(":")[0]
@@ -386,7 +380,7 @@ def _verify(
         status.repair_phase = "baseline_recorded"
         raise PauseRefusedError("reboot_required")
     status.repair_phase = "reconciling"
-    _recover(conn, home)
+    recover_paused_store(conn, home)
     if state.inspect(home, state.WITNESS)[1] != predecessor or (
         state.inspect(home, state.BASELINE)[1] != baseline_file
     ):
@@ -405,22 +399,33 @@ def _verify(
 
 @contextlib.contextmanager
 def erase_connection(
-    home: Path, *, wait_s: float, status: EraseStatus
+    home: Path,
+    *,
+    wait_s: float,
+    status: EraseStatus,
+    confirm_legacy_volume: bool = False,
 ) -> Generator[sqlite3.Connection]:
     """Yield an autocommit store while retaining owner then writer barriers.
 
     The budget covers programmed coordination waits, not repair, requested
     erasure work or the duration of already-entered filesystem operations.
     Caller status remains available even when the original operation raises.
+    Legacy Darwin volume changes require explicit owner confirmation.
 
     Raises:
         RuntimeError: If invoked outside the main thread.
         ValueError: If the coordination budget is invalid.
         store.StoreUnavailableError: If there is no current store.
+        PauseRefusedError: If saved pause evidence is not safe to repair.
     """
     _check_wait(wait_s)
     if not store.db_path(home).is_file():
         raise store.StoreUnavailableError("store is absent")
+    if (
+        not confirm_legacy_volume
+        and legacy_volume_change_requires_confirmation(home)
+    ):
+        raise PauseRefusedError("legacy_volume_confirmation_required")
     with (
         maintenance_owner(home, wait_s=wait_s, status=status) as owner,
         maintenance_writer(owner),
@@ -437,5 +442,6 @@ def erase_connection(
             repair=wait_s > 0,
             selected=owner.selected,
             status=status,
+            confirm_legacy_volume=confirm_legacy_volume,
         )
         yield conn

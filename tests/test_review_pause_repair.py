@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
-from muninn import cli_serve, store, tombstone_key, tombstones
+from muninn import (
+    cli_serve,
+    review_pause_replay,
+    store,
+    tombstone_key,
+    tombstones,
+)
 from muninn import review_pause as pause
 from muninn import review_pause_state as state
 from tests.review_pause_support import interrupt_erasure
@@ -139,7 +145,7 @@ class PauseRepairTests(PauseCase):
                 pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                pause,
+                review_pause_replay,
                 "recover_attempts",
                 side_effect=ValueError("recovery"),
             ),
@@ -162,7 +168,9 @@ class PauseRepairTests(PauseCase):
                 pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                pause, "reapply_tombstones", side_effect=OSError("replay")
+                review_pause_replay,
+                "reapply_tombstones",
+                side_effect=OSError("replay"),
             ),
             self.assertRaisesRegex(OSError, "replay"),
             pause.erase_connection(self.home, wait_s=1, status=self.status),
@@ -241,7 +249,9 @@ class PauseRepairTests(PauseCase):
             mock.patch.object(
                 pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            mock.patch.object(pause, "reapply_tombstones", side_effect=drift),
+            mock.patch.object(
+                review_pause_replay, "reapply_tombstones", side_effect=drift
+            ),
             self.assertRaisesRegex(ValueError, "pause_unverified"),
             pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):

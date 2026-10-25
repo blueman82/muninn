@@ -115,8 +115,8 @@ class PauseBootDeviceTests(PauseCase):
             self.fail("changed volume admitted with reused device number")
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
 
-    def test_legacy_baseline_cannot_authorize_device_remap(self) -> None:
-        """An old checkpoint cannot borrow a UUID or lose its evidence."""
+    def test_legacy_baseline_requires_approval_for_device_remap(self) -> None:
+        """An old checkpoint needs approval when it has no volume UUID."""
         self.abandon()
         self.refuse(BOOT_A)
         self.remap_baseline()
@@ -129,11 +129,39 @@ class PauseBootDeviceTests(PauseCase):
             mock.patch.object(
                 pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            self.assertRaisesRegex(
+                ValueError, "legacy_volume_confirmation_required"
+            ),
             pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("legacy baseline admitted")
         self.assertEqual(path.read_bytes(), retained)
+
+    def test_legacy_device_remap_requires_confirmation_without_changes(
+        self,
+    ) -> None:
+        """Require owner approval when an old record lacks a volume UUID."""
+        self.abandon()
+        self.refuse(BOOT_A)
+        path = self.home / state.BASELINE
+        value = json.loads(path.read_text())
+        del value["volume_uuid"]
+        store.write_json_atomic(path, value)
+        self.remap_baseline()
+        baseline = path.read_bytes()
+        witness = (self.home / state.WITNESS).read_bytes()
+        with (
+            mock.patch.object(
+                pause.review_boot_identity, "observe", return_value=BOOT_B
+            ),
+            self.assertRaisesRegex(
+                ValueError, "legacy_volume_confirmation_required"
+            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
+        ):
+            self.fail("legacy device remap admitted without approval")
+        self.assertEqual(path.read_bytes(), baseline)
+        self.assertEqual((self.home / state.WITNESS).read_bytes(), witness)
 
     def test_legacy_baseline_preserves_changed_witness(self) -> None:
         """A UUID-less checkpoint stays intact when its witness changes."""

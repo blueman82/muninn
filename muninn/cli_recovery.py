@@ -76,6 +76,10 @@ _WHY = {
         "Muninn cannot prove that the interrupted process is gone until "
         "the computer has rebooted."
     ),
+    "legacy_volume_confirmation_required": (
+        "The saved files match, but the older note has no disk ID. "
+        "Muninn cannot verify that this is the same disk."
+    ),
     "coordination_timeout": (
         "The managed Muninn writer did not release its lock before the "
         "wait limit."
@@ -113,7 +117,8 @@ def recover(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     Returns:
         A JSON-ready recovery result and exit code.
     """
-    del a, env
+    confirm_legacy_volume = bool(getattr(a, "confirm_legacy_volume", False))
+    del env
     if not home.exists():
         return _no_recovery()
     try:
@@ -131,7 +136,13 @@ def recover(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     refusal = _platform_refusal(home, platform_name, has_baseline)
     if refusal is not None:
         return refusal
-    return _repair(home, platform_name, record, pending_erasure)
+    return _repair(
+        home,
+        platform_name,
+        record,
+        pending_erasure,
+        confirm_legacy_volume,
+    )
 
 
 def _no_recovery() -> Result:
@@ -186,6 +197,7 @@ def _repair(
     platform_name: str,
     record: Record,
     pending_erasure: bool,
+    confirm_legacy_volume: bool,
 ) -> Result:
     """Repair through the existing checked maintenance barriers.
 
@@ -194,6 +206,7 @@ def _repair(
         platform_name: Current operating-system identifier.
         record: Content-free call-log entry.
         pending_erasure: Whether the read-only check found unapplied intent.
+        confirm_legacy_volume: Whether the owner approved the old disk binding.
 
     Returns:
         A recovery result or a refusal with its next action.
@@ -201,7 +214,10 @@ def _repair(
     status = review_pause.EraseStatus()
     try:
         with review_pause.erase_connection(
-            home, wait_s=cli_core.WRITER_WAIT_S, status=status
+            home,
+            wait_s=cli_core.WRITER_WAIT_S,
+            status=status,
+            confirm_legacy_volume=confirm_legacy_volume,
         ):
             pass
     except review_pause.PauseRefusedError as error:
@@ -212,6 +228,10 @@ def _repair(
             "coordination_timeout": (
                 "Wait for Muninn to become idle, then run `muninn recover` "
                 "again."
+            ),
+            "legacy_volume_confirmation_required": (
+                "Run `muninn recover --confirm-legacy-volume` only if this "
+                "is the Muninn data you intend to recover."
             ),
         }.get(
             error.code,

@@ -314,7 +314,7 @@ launcher or service is unsupported.
 | `muninn serve [--interval S]` | the managed poller loop (default 60 s); prints nothing |
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
-| `muninn recover` | Resume an interrupted maintenance pause on macOS or Linux. It starts no new erase request, but may apply intent saved in `tombstones.jsonl`. The result gives `recovery.status`, `message`, `repair_phase` and `platform`. A `recovered` result may mean Muninn stopped a managed writer. Follow `next_action`. Check service status with `muninn doctor --pretty`. If the command returns `reboot_required`, restart the computer and run it again. If doctor reports a stopped service, start it through the system service manager. Windows repair is not qualified. |
+| `muninn recover [--confirm-legacy-volume]` | Resume an interrupted maintenance pause on macOS or Linux. It starts no new erase request, but may apply intent saved in `tombstones.jsonl`. Use `--confirm-legacy-volume` only after Muninn reports a matching older macOS record without a disk ID. The command repeats its checks before repair. The result gives `recovery.status`, `message`, `repair_phase` and `platform`. Follow `next_action`. Check service status with `muninn doctor --pretty`. If the command returns `reboot_required`, restart the computer and run it again. If doctor reports a stopped service, start it through the system service manager. Windows repair is not qualified. |
 | `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
 | `muninn rebuild` | rebuild only a verified marked current store. Copy every governed family, retain DB-only Cursor and missing-source history, then fully re-ingest transcripts and replay current erasure intent. Fence admission/attempts and retain a private `muninn.sqlite.recovery-<id>` archive before candidate work. Unsupported, unreadable, changed or incomplete sources refuse; publication never restores an archive automatically. See the recovery contract below. |
 | `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service pause before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
@@ -578,6 +578,12 @@ It gives the platform, state, reason and next steps.
 On macOS or Linux, run `muninn recover`.
 It uses the owner and writer barriers.
 It repairs pause records only when the saved boot and file identities match.
+During an upgrade, the installer asks once about a matching older macOS record without a disk ID.
+Continue only if this is the Muninn data you intend to recover.
+The installer repeats its checks before repair.
+For direct recovery, run `muninn recover` first.
+If it reports `legacy_volume_confirmation_required`, run
+`muninn recover --confirm-legacy-volume` only for the correct Muninn data.
 If it returns `reboot_required`, restart the computer.
 Then run `muninn recover` again.
 After recovery, run `muninn doctor --pretty`.

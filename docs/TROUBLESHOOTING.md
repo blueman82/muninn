@@ -84,7 +84,11 @@ same install command. The installer then retries recovery.
 
 When you run doctor yourself, run `muninn recover`.
 Muninn waits for its managed writer and checks the saved boot, lock and witness
-identities before repair. If it returns `reboot_required`, restart the computer.
+identities before repair. For a matching older macOS record without a disk ID,
+the installer asks once before repair. The prompt says that Muninn cannot verify
+the disk identity. Continue only if this is the Muninn data you intend to recover.
+Muninn repeats all checks while it holds the maintenance lock.
+If it returns `reboot_required`, restart the computer.
 Run `muninn recover` again. After recovery, run `muninn doctor --pretty`.
 
 Windows recovery is not qualified. `muninn recover` refuses before it changes
@@ -110,9 +114,11 @@ On macOS, each new repair baseline records the data volume's persistent UUID.
 After reboot, macOS may assign that volume a different device number.
 Repair accepts this change only when the UUID, lock file and witness file match.
 If macOS cannot provide a UUID, Muninn refuses to record a new baseline.
-An older baseline has no UUID and cannot verify a changed device number.
-Muninn preserves that baseline and refuses repair.
-The doctor report gives the next safe steps.
+An older baseline has no UUID. The installer asks once when file numbers and
+witness content still match. After approval, Muninn records the current volume
+UUID and keeps the old boot ID. It then runs the existing reboot and repair checks.
+Changed file numbers or witness content stop this recovery path.
+The installer preserves all recovery files when a check fails.
 Do not remove old files to force progress.
 
 Real erase may interrupt the whole service. Preserve its original failure and

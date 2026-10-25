@@ -31,6 +31,7 @@ type RefusalCode = Literal[
     "owner_changed",
     "reboot_required",
     "boot_identity_unavailable",
+    "legacy_volume_confirmation_required",
     "pause_unverified",
 ]
 
