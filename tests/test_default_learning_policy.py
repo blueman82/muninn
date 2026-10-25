@@ -307,6 +307,63 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         sys.platform == "win32",
         "Default Codex capability files require POSIX private-file checks.",
     )
+    def test_default_refresh_keeps_installed_runner_when_path_changes(
+        self,
+    ) -> None:
+        """Refresh policy bounds without rebinding the installed runner."""
+        world = World(self)
+        ctx = world.ctx(fresh=True, default_home=True)
+        original = world.home / "codex-original"
+        newly_discovered = world.home / "codex-new"
+        for executable in (original, newly_discovered):
+            executable.write_text("signed Codex fixture")
+            executable.chmod(0o700)
+        module = importlib.import_module("tools.prepare_codex_policy")
+        profile = json.loads(module.DEFAULT_POLICY_FILE.read_text())
+        first_sha = self.commit_profile(world, profile, "select default")
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+            mock.patch("shutil.which", return_value=str(original)),
+            mock.patch(
+                "muninn.review_codex_launch.verify_codex_executable",
+                return_value=(original, "1" * 64),
+            ),
+        ):
+            installer.install(ctx, world.repo, first_sha)
+        profile["approved_at"] = "2026-10-24T00:01:00Z"
+        profile["limits"]["max_rounds"] = 1
+        second_sha = self.commit_profile(
+            world, profile, "reduce default policy rounds"
+        )
+        later = dataclasses.replace(ctx, fresh=False, upgrade=True, ts="later")
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+            mock.patch(
+                "shutil.which", return_value=str(newly_discovered)
+            ) as which,
+            mock.patch(
+                "muninn.review_codex_launch.verify_codex_executable",
+                return_value=(original, "1" * 64),
+            ) as verify,
+        ):
+            installer.install(later, world.repo, second_sha)
+        which.assert_not_called()
+        verify.assert_called_with(original)
+        with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
+            row = conn.execute(
+                "SELECT admission,policy_json FROM review_control"
+            ).fetchone()
+        selected = ReviewPolicy.model_validate_json(row["policy_json"])
+        self.assertEqual(row["admission"], 1)
+        self.assertEqual(selected.runner.executable, str(original))
+        self.assertEqual(selected.max_rounds, 1)
+
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Default Codex capability files require POSIX private-file checks.",
+    )
     def test_unused_default_refreshes_within_same_revision(self) -> None:
         """Refresh the profile without replacing the old evidence."""
         world = World(self)

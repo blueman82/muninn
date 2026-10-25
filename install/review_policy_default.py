@@ -30,10 +30,16 @@ def select(
         or ctx.platform != "darwin"
         or platform.system() != "Darwin"
         or platform.machine() != "arm64"
-        or _configured(ctx)
     ):
         return None
-    found = shutil.which("codex")
+    configured, installed = _configured(ctx)
+    if configured:
+        return None
+    found = (
+        installed.runner.executable
+        if installed is not None
+        else shutil.which("codex")
+    )
     if found is None or not ctx.codex_home.is_dir():
         return None
     stable_executable = Path(found)
@@ -131,13 +137,13 @@ def _directory_identity(path: Path) -> list[int]:
     return [info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode)]
 
 
-def _configured(ctx: Ctx) -> bool:
-    """Read whether an upgrade can select a default without writing state."""
+def _configured(ctx: Ctx) -> tuple[bool, ReviewPolicy | None]:
+    """Read upgrade state and retain an eligible default runner binding."""
     if not ctx.upgrade:
-        return False
+        return False, None
     path = store.db_path(ctx.data)
     if not path.is_file():
-        return False
+        return False, None
     try:
         with (
             snapshot_io.validated(path) as check,
@@ -148,7 +154,7 @@ def _configured(ctx: Ctx) -> bool:
             check()
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version == 3:
-                return False
+                return False, None
             store.assert_store_format(conn)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -160,9 +166,9 @@ def _configured(ctx: Ctx) -> bool:
             review_policy_transition.compatible(conn, None)
             check()
             if row["policy_json"] is None:
-                return False
+                return False, None
             installed = ReviewPolicy.model_validate_json(row["policy_json"])
-            return not (
+            eligible = (
                 installed.policy_source == "repository_default"
                 and row["admission"] == 1
                 and not any(
@@ -170,5 +176,6 @@ def _configured(ctx: Ctx) -> bool:
                     for table in ("review_request", "knowledge")
                 )
             )
+            return not eligible, installed if eligible else None
     except (OSError, sqlite3.Error, store.StoreUnavailableError):
         raise StepFailedError("review_policy_state_invalid") from None
