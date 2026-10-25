@@ -11,15 +11,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from muninn import store
-from tests.review_quiescence_support import interrupt_erasure
+from tests.review_pause_support import interrupt_erasure
 from tests.store_support import Child
-from tests.test_review_quiescence import QuiescenceCase
+from tests.test_review_pause import PauseCase
 
 
-class MaintenanceTests(QuiescenceCase):
+class MaintenanceTests(PauseCase):
     """Separate lifecycle exclusion from containment and source identity."""
 
     def owned(
@@ -159,7 +159,7 @@ class MaintenanceTests(QuiescenceCase):
             (self.home / state.LOCK).rename(self.home / "old-lock")
             os.close(state.acquire(self.home))
             with (
-                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+                self.assertRaisesRegex(ValueError, "pause_unverified"),
                 q.maintenance_writer(owner),
             ):
                 self.fail("replaced lock")
@@ -371,7 +371,7 @@ for name in ("review.supervisor.lock", "writer.lock"):
                     side_effect=AssertionError("repair"),
                 ),
                 self.connected(1) as (owner, conn),
-                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+                self.assertRaisesRegex(ValueError, "pause_unverified"),
             ):
                 q.verify_current(owner, conn)
             self.assertEqual(self.status.repair_phase, "none")

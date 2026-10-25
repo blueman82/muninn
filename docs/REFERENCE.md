@@ -15,7 +15,8 @@ also carries these fields:
 
 **Exit codes:** 0 ok; 1 `doctor` found an error-level problem; 2 refused or bad usage; 3
 busy (another writer holds the lock, retry); 4 store unavailable, a crashed writer's hot
-journal, or a missing or damaged `tombstone.key` (`error` `tombstone_key`).
+journal, or a missing or damaged `tombstone.key` (`error` `tombstone_key`). Recovery
+refusals include a stable `reason`, a plain-language `why`, and a `next_action`.
 `muninn --version` prints `muninn <version>`.
 
 **Environment:** `MUNINN_HOME` data dir (default `~/.local/share/muninn` on macOS/Linux
@@ -181,7 +182,7 @@ format or maintenance-authority certificate. The exact inventoried legacy
 release still uses the separate exclusion and restart route below.
 
 A current-format installer upgrade retains the live pathname. After proven
-quiescence it fences review attempts, preserves unknown charges and validates the
+pause it fences review attempts, preserves unknown charges and validates the
 permitted policy before activation. One actual maintenance owner spans pin/config;
 the writer is released during those steps and the owner before service start.
 Once live mutation may have happened, failure keeps current data and the selected
@@ -292,9 +293,10 @@ service is unsupported.
 | `muninn serve [--interval S]` | the managed poller loop (default 60 s); prints nothing |
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
+| `muninn recover` | resume an interrupted maintenance pause on supported macOS/Linux systems. It starts no new erase request, but may apply erasure intent already saved in `tombstones.jsonl`. Its answer gives `recovery.status`, `message`, `repair_phase` and `platform`; `recovered` also means it stopped a managed writer to finish its safety check. Follow `next_action` and check the service with doctor. If it returns `reboot_required`, restart the computer and run it again. Windows repair remains unsupported. |
 | `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
 | `muninn rebuild` | rebuild only a verified marked current store. Copy every governed family, retain DB-only Cursor and missing-source history, then fully re-ingest transcripts and replay current erasure intent. Fence admission/attempts and retain a private `muninn.sqlite.recovery-<id>` archive before candidate work. Unsupported, unreadable, changed or incomplete sources refuse; publication never restores an archive automatically. See the recovery contract below. |
-| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service quiescence before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
+| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service pause before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
 | `muninn hook session-start\|prompt --provider claude\|codex\|cursor` | session and prompt hooks: payload on stdin, JSON on stdout (see the README) |
 | `muninn hook session-end\|pre-compact --provider claude\|codex\|cursor` | Capture bounded learning windows; Cursor imports the exact conversation before capture, with preCompact bounded by `message_count` and sessionEnd independent of that field. All hooks return compact provider-compatible JSON and exit 0. |
 
@@ -369,6 +371,15 @@ activation; already committed erasure remains in effect. Recall starts off, and
 learning admission remains off until explicitly configured. Service-start
 verification requires a new heartbeat after the completed initial ingest.
 
+After pausing the managed service and before preparing the store, Muninn checks
+for an interrupted maintenance pause. On macOS or Linux, the installer tries
+the checked repair path and continues if it succeeds. If repair needs a reboot, the installer
+stops and tells the user to restart and rerun the same install command. If
+Muninn cannot prove repair is safe, it keeps the repair files, stops the
+service and prints the next step and health-report command. On Windows, it
+prints the support steps and leaves the service stopped; automatic repair is
+not qualified there. A final health check still runs after service startup.
+
 | Command | What it does |
 |---|---|
 | `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); it invokes the installed Python through its venv path rather than the outer symlink; if that runtime lacks pinned dependencies, it reuses a compatible checkout `.venv` or asks before creating one from the hashed runtime lock; on macOS/Linux, first install also offers to install developer requirements and set local `core.hooksPath` to `.githooks` unless another path is configured; `--check` previews and may perform accepted setup; `--status` compares the installed commit with `HEAD` |
@@ -398,7 +409,7 @@ no-stop path and may initialize an empty store; they create no `tombstone.key`.
 Neither an absent nor an empty store establishes process-containment evidence.
 
 The Python APIs retain `run_erase` and caller-owned `erase`; the latter requires
-established quiescence as well as writer ownership for real erasure. Callers needing
+established pause as well as writer ownership for real erasure. Callers needing
 observable status use `run_erase_request(home, EraseRequest(...), status=...)`.
 The existing `wait_s=15.0` default is unchanged. For real erasure it is one
 coordination-acquisition budget, including owner and writer waits, **not** a limit
@@ -435,7 +446,7 @@ is unavailable, no new macOS repair baseline is recorded. A baseline created
 before this field existed cannot authorize a changed-device repair.
 
 Write-ahead tombstones survive interrupted erasure and are replayed before ordinary
-quiescent startup/erase entry. Pending intent refuses new foreground proposals and
+paused startup/erase entry. Pending intent refuses new foreground proposals and
 commits; an existing receipt still has receipt-first audit access until replay
 scrubs its governed explanation. The journal guard reads the whole log, with no
 constant byte, memory or duration bound. Preserve the current journal and durable
@@ -540,6 +551,25 @@ four fields:
 - **`detail`**: a short string whose meaning depends on the check (below); empty when
   there is nothing to add.
 
+When a repair baseline is present, the answer also has `recovery_guidance`. It
+gives the platform, the recovery state, the reason code, and next steps. On
+macOS/Linux, run `muninn recover`; it uses the existing owner and writer barriers
+and repairs only when the saved boot and file identities still match. If it says
+`reboot_required`, restart the computer and run it again. Then run `muninn doctor
+--pretty`. Doctor itself does not stop a service or change recovery files. On
+Windows, `muninn recover` refuses without changing repair files because Windows
+boot identity and durable baseline retirement are not yet qualified. Keep the
+data folder and repair files, save the doctor report, and contact the maintainer.
+
+Three steps remain with the owner. A reboot needs a human because it interrupts
+the whole computer. Starting the managed service remains manual if `doctor`
+reports it is stopped; `recover` does not yet revalidate the installed service
+definition before asking its manager to start it. Starting a changed or unowned
+entry could run unexpected code. Windows repair remains manual because its boot identity and durable
+baseline retirement have not passed native qualification. If identity checks
+fail on macOS/Linux, Muninn keeps the files and asks for maintainer help instead
+of guessing which process or store they belong to.
+
 | check | level | passes when | `detail` |
 |---|---|---|---|
 | `data_dir_mode` | error | the data dir is mode 0700 | its mode, or `absent` |
@@ -583,10 +613,15 @@ Review diagnostics also use the same four-field check contract:
 | `review_abandoned` | warn | recorded abandoned attempts, or unfinished attempts from an older generation |
 | `review_coverage_gaps` | warn | the same eligible set as stats, including admitted historical replay, lacking success receipts with current matching provenance; untouched activation archive stays excluded |
 | `review_capture_gaps` | warn | indexed new records beyond the eligible cursor or eligible records whose prior admission provenance cannot be verified, even after refusal or log loss |
-| `review_quiescence` | info | witness presence only; always null because containment is unverified |
-| `review_repair` | warn | repair-baseline presence requires manual recovery assessment |
+| `review_pause` | info | witness presence only; always null because containment is unverified |
+| `review_repair` | warn | repair-baseline presence requires recovery guidance; do not remove its files |
 | `review_erasure_intent` | info | journal presence, with consistency unverified; presence does not prove an outstanding intent |
 | `review_windows_repair` | warn | Windows boot repair and durable repair-baseline retirement remain unqualified |
+
+If `recovery_guidance` is present, check the service status in this report. If
+Muninn is stopped, leave it stopped until recovery is complete. Keep the data
+folder and all repair files. Save the full report and contact your Muninn
+maintainer before restart.
 
 Doctor never initializes, resets or deletes supervisor/repair records. Missing
 DB, absent PID or free locks do not prove containment. Preserve

@@ -113,6 +113,6 @@ def status(ctx: Ctx, root: Path, sha: str) -> None:
 
 
 def maintenance_checks(ctx: Ctx, root: Path) -> None:
-    """Prove status and uninstall dry run after the managed writer quiesces."""
+    """Prove status and uninstall dry run after the managed writer pauses."""
     status(ctx, root, ctx.release.resolve(strict=True).name)
     readonly(ctx, root, "muninn-uninstall", "--dry-run")

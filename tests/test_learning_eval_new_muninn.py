@@ -367,7 +367,7 @@ pilot.run_pilot(manifest,initialize=True)
         original_witness = witness.read_bytes()
         with (
             pilot_sources.source_environment(home),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             Supervisor(home, manifest.assessment.policies[0]).start(
                 time.time()
@@ -380,14 +380,14 @@ pilot.run_pilot(manifest,initialize=True)
         self.assertEqual(launched.call_count, 0)
         self.assertEqual(result.model_calls, 0)
         self.assertEqual(len(result.trials), 4)
-        self.assertEqual(result.trials[2].outcome, "quiescence_unverified")
+        self.assertEqual(result.trials[2].outcome, "pause_unverified")
         self.assertEqual(result.trials[3].outcome, "account_recovery_required")
         self.assertEqual(witness.read_bytes(), original_witness)
         with (
             mock.patch.object(
                 execution, "create_wrapper", wraps=spawn
             ) as launched,
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             module.run_pilot(manifest)
         self.assertEqual(launched.call_count, 0)

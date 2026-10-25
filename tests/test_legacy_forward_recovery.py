@@ -20,8 +20,8 @@ from install import (
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import platform_lock, store, store_fingerprint
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from muninn.tombstone_key import TombstoneKeyError
 from tests.legacy_cutover_support import crash
 from tests.legacy_upgrade_support import BOOT_B, LegacyCase
@@ -224,7 +224,7 @@ class ForwardRecoveryTests(LegacyCase):
         self.assertEqual(done.returncode, 91, done.stderr.decode())
         witness = self.ctx.data / state.WITNESS
         witness.unlink()
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             self.resume()
         self.assertFalse(witness.exists())
         self.assertEqual(

@@ -234,7 +234,7 @@ def prepare(
 
     Returns:
         Decoded conversations and their read-time metadata. The provider may
-        change after the read; this proves neither identity nor quiescence.
+        change after the read; this proves neither identity nor pause.
 
     Raises:
         ValueError: If the file is unsupported or the selection is invalid.

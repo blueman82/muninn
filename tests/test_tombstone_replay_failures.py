@@ -9,10 +9,10 @@ from typing import cast
 from unittest import mock
 
 from muninn import knowledge_erase, store, tombstones
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from tests.test_review_commit import CommitCase
-from tests.test_review_quiescence import QuiescenceCase
+from tests.test_review_pause import PauseCase
 from tests.tombstone_replay_support import CANARY, TARGET, ReplayCase
 
 
@@ -319,7 +319,7 @@ class TombstoneCleanupTests(CommitCase):
             self.assertFalse(self.work.exists())
 
 
-class ReplayConnectionLifetimeTests(QuiescenceCase):
+class ReplayConnectionLifetimeTests(PauseCase):
     """Keep replay and caller connection inside both actual barriers."""
 
     def test_erase_opens_and_closes_connection_inside_both_barriers(

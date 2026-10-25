@@ -28,7 +28,7 @@ from muninn import (
     store_fingerprint,
     tombstones,
 )
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from muninn.tombstone_intent import read_intent
 from muninn.tombstone_replay import plan_transcripts
 

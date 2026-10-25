@@ -26,7 +26,7 @@ from tests.provider_native_routes import context_calls as _context_calls
 from tests.provider_native_security import probe
 from tests.provider_native_stages import launcher_stages
 from tests.provider_native_stderr import classify
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.test_classify import codex_meta, user_msg
 
 _SHA = "a" * 40

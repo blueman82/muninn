@@ -12,9 +12,9 @@ from unittest import mock
 
 from muninn import erase, query, store, tombstones
 from muninn.erase_collect import Target
-from muninn.review_quiescence import EraseStatus
+from muninn.review_pause import EraseStatus
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 TARGET = "replay-target"
 CONTROL = "replay-control"

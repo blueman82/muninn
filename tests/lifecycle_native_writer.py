@@ -19,7 +19,7 @@ from muninn import (
     obs_linux_service,
     obs_status,
     platform_io,
-    review_quiescence_state,
+    review_pause_state,
     store,
 )
 from muninn.obs_service import service_status
@@ -175,11 +175,9 @@ def crash_refusal(ctx: Ctx) -> None:
     assert healthy is True and isinstance(writer, int) and writer > 0
     identity = obs_linux_service.process_identity(writer)
     assert not journal_ready(ctx.data)
-    before = review_quiescence_state.parse(
-        review_quiescence_state.inspect(
-            ctx.data, review_quiescence_state.WITNESS
-        )[0],
-        review_quiescence_state.Witness,
+    before = review_pause_state.parse(
+        review_pause_state.inspect(ctx.data, review_pause_state.WITNESS)[0],
+        review_pause_state.Witness,
     )
     assert before is not None and before.state == "active"
     assert before.owner is not None and before.owner.pid == writer
@@ -215,14 +213,14 @@ def crash_refusal(ctx: Ctx) -> None:
         )
         status = obs_status.read_status(ctx.data)
         assert status.get("pid") == writer
-        assert status.get("last_error") == "QuiescenceRefusedError"
+        assert status.get("last_error") == "PauseRefusedError"
         error_at = status.get("last_error_at")
         assert isinstance(error_at, (int, float)) and error_at >= crashed_at
-        after = review_quiescence_state.parse(
-            review_quiescence_state.inspect(
-                ctx.data, review_quiescence_state.WITNESS
-            )[0],
-            review_quiescence_state.Witness,
+        after = review_pause_state.parse(
+            review_pause_state.inspect(ctx.data, review_pause_state.WITNESS)[
+                0
+            ],
+            review_pause_state.Witness,
         )
         assert after == before
     finally:

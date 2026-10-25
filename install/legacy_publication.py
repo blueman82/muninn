@@ -12,8 +12,8 @@ from install import legacy_exclusion, legacy_state, record, snapshot_io
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import platform_rebuild, store, store_fingerprint
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 
 
 def encoded(value: object) -> object:
@@ -63,7 +63,7 @@ def publish(
         state.inspect(ctx.data, name)[1] is not None
         for name in (state.WITNESS, state.BASELINE)
     ):
-        raise state.QuiescenceRefusedError("quiescence_unverified")
+        raise state.PauseRefusedError("pause_unverified")
     operation_identity = _authority(ctx, rec, check)
     legacy = rec["legacy"]
     check_archive(ctx, rec)
@@ -112,7 +112,7 @@ def witness(
         state.inspect(ctx.data, name)[1] is not None
         for name in (state.WITNESS, state.BASELINE)
     ):
-        raise state.QuiescenceRefusedError("quiescence_unverified")
+        raise state.PauseRefusedError("pause_unverified")
     _authority(ctx, rec, check)
     state.publish(
         ctx.data,

@@ -12,10 +12,10 @@ from typing import BinaryIO
 from unittest import mock
 
 from muninn import cli_rebuild, erase_residue, platform_rebuild, store
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from tests.cli_support import CliCase
 from tests.knowledge_retirement_support import native_note
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import assert_private, public_read
 from tests.test_ingest import TID
 

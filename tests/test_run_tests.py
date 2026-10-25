@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import run_tests
 
@@ -38,6 +39,10 @@ class DiscoveryTest(unittest.TestCase):
         jobs = run_tests.default_jobs()
         self.assertGreaterEqual(jobs, 1)
         self.assertLessEqual(jobs, run_tests.DEFAULT_JOBS_CAP)
+
+    def test_default_worker_limit_is_four(self) -> None:
+        with mock.patch.object(run_tests.os, "cpu_count", return_value=16):
+            self.assertEqual(run_tests.default_jobs(), 4)
 
 
 class CleanEnvironmentTest(unittest.TestCase):

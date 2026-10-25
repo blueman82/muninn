@@ -12,10 +12,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from install.context import Ctx, run_real
-from muninn import review_quiescence_state as state
+from muninn import review_pause_state as state
 from muninn import store
 from tests import lifecycle_native_writer
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 
 class NativeWriterProofTests(unittest.TestCase):

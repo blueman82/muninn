@@ -12,16 +12,16 @@ from types import SimpleNamespace
 from typing import cast
 from unittest import mock
 
-from muninn import review_quiescence as quiescence
-from muninn import review_quiescence_state as state
+from muninn import review_pause as pause
+from muninn import review_pause_state as state
 from muninn import store
-from tests.review_quiescence_support import initialize, interrupt_erasure
+from tests.review_pause_support import initialize, interrupt_erasure
 
 BOOT_A = "linux:12345678-1234-4234-8234-123456789abc"
 BOOT_B = "linux:87654321-1234-4234-8234-123456789abc"
 
 
-class QuiescenceCase(unittest.TestCase):
+class PauseCase(unittest.TestCase):
     """Keep owner and writer authority through caller-owned erasure work."""
 
     def setUp(self) -> None:
@@ -31,7 +31,7 @@ class QuiescenceCase(unittest.TestCase):
         initialize(self.home)
         with store.writer_lock(self.home, wait_s=0):
             store.connect_rw(store.db_path(self.home)).close()
-        self.status = quiescence.EraseStatus()
+        self.status = pause.EraseStatus()
 
     def abandon(self) -> bytes:
         """Leave an uncertain active predecessor without pretending cleanup."""
@@ -43,12 +43,10 @@ class QuiescenceCase(unittest.TestCase):
         """Record or reuse a baseline without consuming a fresh boot."""
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=boot
+                pause.review_boot_identity, "observe", return_value=boot
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("uncertain predecessor admitted")
 
@@ -56,12 +54,10 @@ class QuiescenceCase(unittest.TestCase):
         """Require failed retirement to block every material access path."""
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("repair admitted without retiring its baseline")
         complete = (self.home / state.WITNESS).read_bytes()
@@ -71,13 +67,13 @@ class QuiescenceCase(unittest.TestCase):
         )
         self.assertEqual(self.status.repair_phase, "reconciling")
         self.assertEqual((self.home / state.BASELINE).read_bytes(), baseline)
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             fd, _ = state.begin_owner(self.home)
             os.close(fd)
         with (
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=0, status=quiescence.EraseStatus()
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(
+                self.home, wait_s=0, status=pause.EraseStatus()
             ),
         ):
             self.fail("maintenance admitted with retained repair authority")
@@ -85,7 +81,7 @@ class QuiescenceCase(unittest.TestCase):
         self.assertEqual((self.home / state.BASELINE).read_bytes(), baseline)
 
 
-class QuiescenceTests(QuiescenceCase):
+class PauseTests(PauseCase):
     """Keep acquisition bounded and preserve original failure reporting."""
 
     def test_startup_close_failure_preserves_original_and_blocks_active(
@@ -131,7 +127,7 @@ class QuiescenceTests(QuiescenceCase):
     def test_complete_owner_yields_autocommit_under_both_barriers(
         self,
     ) -> None:
-        with quiescence.erase_connection(
+        with pause.erase_connection(
             self.home, wait_s=0, status=self.status
         ) as conn:
             self.assertFalse(conn.in_transaction)
@@ -145,19 +141,17 @@ class QuiescenceTests(QuiescenceCase):
             conn.execute("CREATE TABLE caller_work(value INTEGER)")
         fd = state.acquire(self.home)
         os.close(fd)
-        self.assertEqual(self.status, quiescence.EraseStatus())
+        self.assertEqual(self.status, pause.EraseStatus())
 
     def test_zero_wait_preserves_actual_writer_busy_without_side_effects(
         self,
     ) -> None:
         with (
             store.writer_lock(self.home, wait_s=0),
-            mock.patch.object(quiescence.poller_stop, "request") as request,
-            mock.patch.object(quiescence.time, "sleep") as sleep,
+            mock.patch.object(pause.poller_stop, "request") as request,
+            mock.patch.object(pause.time, "sleep") as sleep,
             self.assertRaises(store.BusyError),
-            quiescence.erase_connection(
-                self.home, wait_s=0, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=0, status=self.status),
         ):
             self.fail("writer acquired")
         request.assert_not_called()
@@ -168,12 +162,10 @@ class QuiescenceTests(QuiescenceCase):
         fd, _ = state.begin_owner(self.home)
         self.addCleanup(os.close, fd)
         with (
-            mock.patch.object(quiescence.poller_stop, "request") as request,
-            mock.patch.object(quiescence.time, "sleep") as sleep,
+            mock.patch.object(pause.poller_stop, "request") as request,
+            mock.patch.object(pause.time, "sleep") as sleep,
             self.assertRaisesRegex(ValueError, "coordination_timeout"),
-            quiescence.erase_connection(
-                self.home, wait_s=0, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=0, status=self.status),
         ):
             self.fail("owner acquired")
         request.assert_not_called()
@@ -183,13 +175,9 @@ class QuiescenceTests(QuiescenceCase):
     def test_zero_wait_uncertain_owner_never_records_baseline(self) -> None:
         self.abandon()
         with (
-            mock.patch.object(
-                quiescence.review_boot_identity, "observe"
-            ) as boot,
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=0, status=self.status
-            ),
+            mock.patch.object(pause.review_boot_identity, "observe") as boot,
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(self.home, wait_s=0, status=self.status),
         ):
             self.fail("uncertain owner admitted")
         boot.assert_not_called()
@@ -210,9 +198,9 @@ class QuiescenceTests(QuiescenceCase):
             return
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            quiescence.erase_connection(
+            pause.erase_connection(
                 self.home, wait_s=1, status=self.status
             ) as conn,
         ):
@@ -260,16 +248,14 @@ class QuiescenceTests(QuiescenceCase):
         original = self.abandon()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity,
+                pause.review_boot_identity,
                 "observe",
-                side_effect=state.QuiescenceRefusedError(
+                side_effect=state.PauseRefusedError(
                     "boot_identity_unavailable"
                 ),
             ),
             self.assertRaisesRegex(ValueError, "boot_identity_unavailable"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("unsupported repair admitted")
         self.assertFalse((self.home / state.BASELINE).exists())
@@ -280,9 +266,7 @@ class QuiescenceTests(QuiescenceCase):
         before = (self.home / state.WITNESS).read_bytes()
         with (
             self.assertRaises(store.StoreUnavailableError),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("missing store created")
         with self.assertRaises(store.StoreUnavailableError):
@@ -306,11 +290,9 @@ class QuiescenceTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.poller_stop, "request", side_effect=stop
+                pause.poller_stop, "request", side_effect=stop
             ) as request,
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.assertEqual(request.call_count, 1)
 
@@ -328,12 +310,10 @@ class QuiescenceTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.poller_stop, "request", side_effect=replace
+                pause.poller_stop, "request", side_effect=replace
             ) as request,
             self.assertRaisesRegex(ValueError, "owner_changed"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("replacement admitted")
         self.assertEqual(request.call_count, 1)
@@ -345,13 +325,9 @@ class QuiescenceTests(QuiescenceCase):
         self.addCleanup(os.close, fd)
         error = OSError("publisher failed after visibility")
         with (
-            mock.patch.object(
-                quiescence.poller_stop, "request", side_effect=error
-            ),
+            mock.patch.object(pause.poller_stop, "request", side_effect=error),
             self.assertRaises(OSError) as caught,
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("failed publication admitted")
         self.assertIs(caught.exception, error)
@@ -372,12 +348,10 @@ class QuiescenceTests(QuiescenceCase):
 
         clock = SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep)
         with (
-            mock.patch.object(quiescence, "time", clock),
-            mock.patch.object(quiescence.poller_stop, "request") as request,
+            mock.patch.object(pause, "time", clock),
+            mock.patch.object(pause.poller_stop, "request") as request,
             self.assertRaisesRegex(ValueError, "coordination_timeout"),
-            quiescence.erase_connection(
-                self.home, wait_s=0.25, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=0.25, status=self.status),
         ):
             self.fail("busy owner acquired")
         self.assertAlmostEqual(sum(sleeps), 0.25)
@@ -402,14 +376,10 @@ class QuiescenceTests(QuiescenceCase):
         clock = SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep)
         with (
             store.writer_lock(self.home, wait_s=0),
-            mock.patch.object(quiescence, "time", clock),
-            mock.patch.object(
-                quiescence.poller_stop, "request", side_effect=stop
-            ),
+            mock.patch.object(pause, "time", clock),
+            mock.patch.object(pause.poller_stop, "request", side_effect=stop),
             self.assertRaises(store.BusyError),
-            quiescence.erase_connection(
-                self.home, wait_s=0.25, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=0.25, status=self.status),
         ):
             self.fail("busy writer acquired")
         self.assertAlmostEqual(sum(sleeps), 0.1)
@@ -425,16 +395,14 @@ class QuiescenceTests(QuiescenceCase):
 
         clock = SimpleNamespace(monotonic=lambda: elapsed[0])
         with (
-            mock.patch.object(quiescence, "time", clock),
-            mock.patch.object(quiescence.poller_stop, "time", clock),
+            mock.patch.object(pause, "time", clock),
+            mock.patch.object(pause.poller_stop, "time", clock),
             mock.patch.object(
-                quiescence.poller_stop.file_sync, "sync_fd", side_effect=sync
+                pause.poller_stop.file_sync, "sync_fd", side_effect=sync
             ),
             self.assertRaisesRegex(ValueError, "coordination_timeout"),
-            quiescence.erase_connection(
-                self.home, wait_s=0.5, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=0.5, status=self.status),
         ):
             self.fail("expired stop publication admitted")
         self.assertTrue(self.status.stop_may_have_been_published)
-        self.assertFalse((self.home / quiescence.poller_stop.FILE).exists())
+        self.assertFalse((self.home / pause.poller_stop.FILE).exists())

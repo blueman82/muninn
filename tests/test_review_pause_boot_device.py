@@ -7,10 +7,10 @@ import os
 import unittest
 from unittest import mock
 
-from muninn import review_quiescence as quiescence
-from muninn import review_quiescence_state as state
+from muninn import review_pause as pause
+from muninn import review_pause_state as state
 from muninn import store
-from tests.test_review_quiescence import QuiescenceCase
+from tests.test_review_pause import PauseCase
 
 BOOT_A = "darwin:12345678-1234-4234-8234-123456789abc"
 BOOT_B = "darwin:87654321-1234-4234-8234-123456789abc"
@@ -19,7 +19,7 @@ VOLUME_B = "1c78c237-1f57-4ada-acac-c2e7630192c8"
 
 
 @unittest.skipIf(os.name == "nt", "Windows repair retirement is unsupported")
-class QuiescenceBootDeviceTests(QuiescenceCase):
+class PauseBootDeviceTests(PauseCase):
     """Keep recovery bound to unchanged private files across a new boot."""
 
     def setUp(self) -> None:
@@ -27,7 +27,7 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         super().setUp()
         self.volume_uuid = VOLUME_A
         patcher = mock.patch.object(
-            quiescence.review_volume_identity,
+            pause.review_volume_identity,
             "observe",
             side_effect=lambda home: self.volume_uuid,
         )
@@ -50,9 +50,9 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         """Attempt one guarded recovery with an observed boot identity."""
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=boot
+                pause.review_boot_identity, "observe", return_value=boot
             ),
-            quiescence.erase_connection(
+            pause.erase_connection(
                 self.home, wait_s=1, status=self.status
             ) as conn,
         ):
@@ -92,12 +92,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.volume_uuid = VOLUME_B
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("changed volume admitted")
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
@@ -109,12 +107,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.volume_uuid = VOLUME_B
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("changed volume admitted with reused device number")
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
@@ -131,12 +127,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         retained = path.read_bytes()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("legacy baseline admitted")
         self.assertEqual(path.read_bytes(), retained)
@@ -154,12 +148,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         witness.write_bytes(witness.read_bytes() + b" ")
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("changed legacy witness admitted")
         self.assertEqual(path.read_bytes(), retained)
@@ -169,19 +161,15 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.abandon()
         with (
             mock.patch.object(
-                quiescence.review_volume_identity,
+                pause.review_volume_identity,
                 "observe",
-                side_effect=state.QuiescenceRefusedError(
-                    "quiescence_unverified"
-                ),
+                side_effect=state.PauseRefusedError("pause_unverified"),
             ),
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_A
+                pause.review_boot_identity, "observe", return_value=BOOT_A
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("baseline recorded without volume UUID")
         self.assertFalse((self.home / state.BASELINE).exists())
@@ -193,12 +181,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.remap_baseline()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_A
+                pause.review_boot_identity, "observe", return_value=BOOT_A
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("same boot admitted")
         self.assertEqual(self.status.repair_phase, "baseline_recorded")
@@ -212,12 +198,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         path.write_bytes(path.read_bytes() + b" ")
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("changed witness admitted")
 
@@ -228,12 +212,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.remap_baseline(lock=False)
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("incoherent baseline admitted")
 
@@ -249,12 +231,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.assertNotEqual(path.stat().st_ino, previous_inode)
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("replaced lock admitted")
 
@@ -272,12 +252,10 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.assertNotEqual(path.stat().st_ino, previous_inode)
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("replaced witness admitted")
 
@@ -290,13 +268,11 @@ class QuiescenceBootDeviceTests(QuiescenceCase):
         self.remap_baseline()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity,
+                pause.review_boot_identity,
                 "observe",
                 return_value=linux_b,
             ),
             self.assertRaisesRegex(ValueError, "reboot_required"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("Linux device remap admitted")

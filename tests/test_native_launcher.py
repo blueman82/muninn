@@ -15,7 +15,7 @@ from pathlib import Path
 
 from muninn import platform_io, poller_stop, store
 from tests.ingest_support import ROOT
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import direct_python
 from tests.test_bootstrap_guards import compile_marker, diagnose_bootstrap
 

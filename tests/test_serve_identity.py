@@ -14,7 +14,7 @@ from muninn import cli_serve, ingest, obs, obs_linux_service
 from muninn.cli_maint import heartbeat
 from muninn.obs_service_commands import render_unit
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 
 class WriterIdentityTests(CliCase):

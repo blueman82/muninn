@@ -23,7 +23,7 @@ class PrivateDesktopTests(unittest.TestCase):
         self.assertNotIn("CreateProcessAsUserW", script)
         self.assertIn("CreateProcessWithTokenW", script)
 
-    def test_private_objects_restore_before_launch_and_hold_until_quiescence(
+    def test_private_objects_restore_before_launch_and_hold_until_pause(
         self,
     ) -> None:
         script = outer_script(Path("/synthetic"))
@@ -34,7 +34,7 @@ class PrivateDesktopTests(unittest.TestCase):
         restore = script.index("if(![MuninnCiDesktop]::Restored)")
         launch = script.index("[MuninnCiLogon]::CreateProcessWithTokenW")
         self.assertLess(restore, launch)
-        cleanup = script.index("$quiescent -and [MuninnCiDesktop]::Restored")
+        cleanup = script.index("$paused -and [MuninnCiDesktop]::Restored")
         empty = script.index("$owned.GetInstances(0).Count -ne 0")
         self.assertLess(empty, cleanup)
         self.assertNotIn("SetUserObjectSecurity", script)

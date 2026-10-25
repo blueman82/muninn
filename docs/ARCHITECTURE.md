@@ -74,7 +74,7 @@ flowchart LR
   provider preparation runs between writer regions with SQLite connections closed.
   Actual stored provider counts feed the checklist, and service start must advance
   the heartbeat beyond the completed ingest. Current-format upgrade verifies
-  quiescence, fences attempts, validates
+  pause, fences attempts, validates
   policy and retains the owner through pin/config, releasing it before service
   start. It keeps the live pathname and all governed archives. After possible live
   mutation, rollback retains current data/runtime/configuration, records recovery

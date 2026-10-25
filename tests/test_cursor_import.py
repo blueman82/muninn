@@ -10,7 +10,7 @@ from unittest import mock
 from muninn import cursor_import_read, store
 from muninn.cursor_import import default_database
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 
 class CursorImportTests(CliCase):

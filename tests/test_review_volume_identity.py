@@ -91,7 +91,7 @@ class VolumeIdentityTests(unittest.TestCase):
                     "CDLL",
                     return_value=SimpleNamespace(fgetattrlist=native),
                 ),
-                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+                self.assertRaisesRegex(ValueError, "pause_unverified"),
             ):
                 volume.observe(self.home)
 
@@ -127,7 +127,7 @@ class VolumeIdentityTests(unittest.TestCase):
                     fgetattrlist=mock.Mock(side_effect=query)
                 ),
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             volume.observe(self.home)
 
@@ -135,6 +135,6 @@ class VolumeIdentityTests(unittest.TestCase):
         """This adapter does not invent volume proof on other systems."""
         with (
             mock.patch.object(volume.sys, "platform", "linux"),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             volume.observe(self.home)

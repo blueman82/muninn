@@ -162,7 +162,7 @@ _OUTER = r"""
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $base=@BASE@;$name='mn-'+[Guid]::NewGuid().ToString('N').Substring(0,15)
 $report=@{phase='account_create';account_retained=0}
-$created=$false;$quiescent=$true;$token=[IntPtr]::Zero
+$created=$false;$paused=$true;$token=[IntPtr]::Zero
 $process=New-Object MuninnCiLogon+Process
 $environment=[IntPtr]::Zero
 try {
@@ -210,7 +210,7 @@ try {
  $password=$null;$secure.Dispose()
  $startup=New-Object MuninnCiLogon+Startup
  $startup.cb=[Runtime.InteropServices.Marshal]::SizeOf($startup)
- $quiescent=$false
+ $paused=$false
  try {$startup.desktop=[MuninnCiDesktop]::Prepare($user.SID.Value,$callerSid)}
  finally {
   $report.desktop_restored=[int][MuninnCiDesktop]::Restored
@@ -224,7 +224,7 @@ try {
   $report.desktop_restore_called=[int][MuninnCiDesktop]::DesktopRestoreCalled
  }
  if(![MuninnCiDesktop]::Restored){throw 'desktop_restore_unproven'}
- $quiescent=$true;$report.private_desktop_created=1
+ $paused=$true;$report.private_desktop_created=1
  $report.token_session=[MuninnCiDesktop]::Session($token)
  $relative='System32\WindowsPowerShell\v1.0\powershell.exe'
  $exe=Join-Path $env:SystemRoot $relative
@@ -254,7 +254,7 @@ try {
   throw [ComponentModel.Win32Exception]::new($code)
  }
  $report.child_launch_ok=[int]$launched
- $quiescent=$false
+ $paused=$false
  $report.child_stage=2
  $wait=[MuninnCiLogon]::WaitForSingleObject($process.process,60000)
  if($wait -eq -1){
@@ -308,7 +308,7 @@ try {
   $folder.DeleteTask((Split-Path -Leaf $base),0)
  }
  if($report.scheduler_instances -lt 0){throw 'scheduler_instances_unknown'}
- $quiescent=$report.scheduler_instances -eq 0
+ $paused=$report.scheduler_instances -eq 0
 } catch {
  $nativeFailure=$_.Exception.GetBaseException()
  $report.winerror=[int]$nativeFailure.HResult
@@ -326,11 +326,11 @@ try {
  if($environment -ne [IntPtr]::Zero){
   [Runtime.InteropServices.Marshal]::FreeHGlobal($environment)
  }
- if($quiescent -and [MuninnCiDesktop]::Restored){
+ if($paused -and [MuninnCiDesktop]::Restored){
   try {[MuninnCiDesktop]::CloseOwned()}
-  catch {$quiescent=$false;$report.winerror=$_.Exception.HResult}
+  catch {$paused=$false;$report.winerror=$_.Exception.HResult}
  }
- if($created -and $quiescent){
+ if($created -and $paused){
   try {
    $remaining=Get-LocalUser -Name $name
    if($remaining.SID.Value -ne $user.SID.Value){

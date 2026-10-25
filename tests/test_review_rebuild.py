@@ -14,11 +14,11 @@ from install import cutover
 from install.context import StepFailedError
 from install.record import Record
 from muninn import review_budget, store
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from muninn.review_models import ReviewContext
 from tests.installer_support import World
-from tests.review_quiescence_support import initialize, interrupt_erasure
+from tests.review_pause_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
 
@@ -101,9 +101,7 @@ class FreshStoreTests(unittest.TestCase):
                     mock.patch.object(
                         q, "maintenance_writer", side_effect=plant
                     ),
-                    self.assertRaisesRegex(
-                        ValueError, "quiescence_unverified"
-                    ),
+                    self.assertRaisesRegex(ValueError, "pause_unverified"),
                 ):
                     cutover.prepare_store(ctx, self.record)
                 self.assertFalse(store.db_path(ctx.data).exists())
@@ -260,7 +258,7 @@ class CurrentStoreTests(CommitCase):
 
     def test_unverified_home_never_seeds_itself(self) -> None:
         self.conn.close()
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             cutover.prepare_store(self.ctx, self.record)
         self.assertFalse((self.home / state.WITNESS).exists())
         self.reopen()

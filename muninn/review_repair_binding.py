@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from muninn import review_quiescence_state as state
+from muninn import review_pause_state as state
 from muninn import review_volume_identity
 
 
