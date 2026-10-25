@@ -13,11 +13,11 @@ from typing import Any
 from unittest import mock
 
 from muninn import cli_rebuild, ingest, ingest_plan, scope, store
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from tests.cli_support import CliCase
 from tests.installer_support import World
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.test_classify import codex_meta, user_msg
 from tests.test_ingest import rollout
 

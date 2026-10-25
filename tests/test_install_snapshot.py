@@ -15,8 +15,8 @@ from install import installer as co
 from install import snapshot as sn
 from install.constants import PRE_UPGRADE_PREFIX
 from muninn import erase_residue, obs, platform_io, platform_rebuild, store
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from tests.cli_support import fake_run
 from tests.installer_support import ROOT, World, git, make_store
 from tests.store_support import assert_private

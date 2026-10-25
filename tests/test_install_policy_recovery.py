@@ -18,7 +18,7 @@ from install import (
 )
 from install.context import Ctx, StepFailedError
 from install.record import Record
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from muninn import store
 from tests.legacy_upgrade_support import BOOT_B, LegacyCase
 from tests.test_install_activation_lifetime import ActivationLifetimeTests

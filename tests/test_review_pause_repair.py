@@ -12,14 +12,14 @@ from typing import cast
 from unittest import mock
 
 from muninn import cli_serve, store, tombstone_key, tombstones
-from muninn import review_quiescence as quiescence
-from muninn import review_quiescence_state as state
-from tests.review_quiescence_support import interrupt_erasure
+from muninn import review_pause as pause
+from muninn import review_pause_state as state
+from tests.review_pause_support import interrupt_erasure
 from tests.store_support import Child
-from tests.test_review_quiescence import BOOT_A, BOOT_B, QuiescenceCase
+from tests.test_review_pause import BOOT_A, BOOT_B, PauseCase
 
 
-class QuiescenceRepairTests(QuiescenceCase):
+class PauseRepairTests(PauseCase):
     """Only completed recovery and latest-intent replay permit completion."""
 
     def test_ordinary_entry_replays_interrupted_intent_before_yield(
@@ -28,11 +28,11 @@ class QuiescenceRepairTests(QuiescenceCase):
         before = interrupt_erasure(self.home, "fixture-thread")
         with (
             mock.patch.object(
-                quiescence.review_boot_identity,
+                pause.review_boot_identity,
                 "observe",
                 side_effect=AssertionError("no reboot needed"),
             ),
-            quiescence.erase_connection(
+            pause.erase_connection(
                 self.home, wait_s=0, status=self.status
             ) as conn,
         ):
@@ -58,7 +58,7 @@ class QuiescenceRepairTests(QuiescenceCase):
         baseline = self.home / state.BASELINE
         store.write_json_atomic(baseline, {"obsolete": True})
         retained = baseline.read_bytes()
-        replay = quiescence.reapply_tombstones
+        replay = pause.reapply_tombstones
         original = OSError("replay cleanup")
 
         def after_commit(conn: sqlite3.Connection, home: Path) -> int:
@@ -68,10 +68,10 @@ class QuiescenceRepairTests(QuiescenceCase):
         for failure in (original, after_commit):
             with (
                 mock.patch.object(
-                    quiescence, "reapply_tombstones", side_effect=failure
+                    pause, "reapply_tombstones", side_effect=failure
                 ),
                 self.assertRaises(OSError) as caught,
-                quiescence.erase_connection(
+                pause.erase_connection(
                     self.home, wait_s=1, status=self.status
                 ),
             ):
@@ -81,8 +81,8 @@ class QuiescenceRepairTests(QuiescenceCase):
             self.assertEqual(baseline.read_bytes(), retained)
         if os.name == "nt":
             with (
-                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-                quiescence.erase_connection(
+                self.assertRaisesRegex(ValueError, "pause_unverified"),
+                pause.erase_connection(
                     self.home, wait_s=1, status=self.status
                 ),
             ):
@@ -91,12 +91,8 @@ class QuiescenceRepairTests(QuiescenceCase):
             self.assertEqual(baseline.read_bytes(), retained)
             return
         with (
-            mock.patch.object(
-                quiescence.review_boot_identity, "observe"
-            ) as boot,
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            mock.patch.object(pause.review_boot_identity, "observe") as boot,
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.assertFalse(baseline.exists())
         boot.assert_not_called()
@@ -122,13 +118,11 @@ class QuiescenceRepairTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_A
+                pause.review_boot_identity, "observe", return_value=BOOT_A
             ),
             mock.patch.object(state, "publish", side_effect=visible),
             self.assertRaises(OSError),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("incomplete baseline admitted")
         self.assertEqual(self.status.repair_phase, "none")
@@ -142,17 +136,15 @@ class QuiescenceRepairTests(QuiescenceCase):
         self.refuse()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                quiescence,
+                pause,
                 "recover_attempts",
                 side_effect=ValueError("recovery"),
             ),
             self.assertRaisesRegex(ValueError, "recovery"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("failed recovery admitted")
         self.assertEqual(self.generation(), 0)
@@ -167,15 +159,13 @@ class QuiescenceRepairTests(QuiescenceCase):
         baseline = (self.home / state.BASELINE).read_bytes()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                quiescence, "reapply_tombstones", side_effect=OSError("replay")
+                pause, "reapply_tombstones", side_effect=OSError("replay")
             ),
             self.assertRaisesRegex(OSError, "replay"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("failed replay admitted")
         self.assertEqual(self.generation(), 1)
@@ -197,19 +187,17 @@ class QuiescenceRepairTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(state, "publish", side_effect=visible),
             self.assertRaises(OSError),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("publication failure admitted")
         self.assertEqual(self.status.repair_phase, "reconciling")
         self.assertTrue((self.home / state.BASELINE).exists())
         if os.name == "nt":
-            with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+            with self.assertRaisesRegex(ValueError, "pause_unverified"):
                 state.begin_owner(self.home)
             self.assertTrue((self.home / state.BASELINE).exists())
             return
@@ -223,15 +211,13 @@ class QuiescenceRepairTests(QuiescenceCase):
         self.refuse()
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
                 state, "retire_baseline", side_effect=OSError("retire")
             ),
             self.assertRaisesRegex(OSError, "retire"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("failed retirement admitted")
         self.assertEqual(self.status.repair_phase, "reconciling")
@@ -253,15 +239,11 @@ class QuiescenceRepairTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
-            mock.patch.object(
-                quiescence, "reapply_tombstones", side_effect=drift
-            ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            mock.patch.object(pause, "reapply_tombstones", side_effect=drift),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.fail("changed authority admitted")
         self.assertEqual(path.read_bytes(), changed)
@@ -307,7 +289,7 @@ class QuiescenceRepairTests(QuiescenceCase):
                 conn.execute("INSERT INTO wanted VALUES('keep current data')")
         intent = (self.home / tombstones.TOMBSTONE_FILE).read_bytes()
         inode = store.db_path(self.home).stat().st_ino
-        replay = quiescence.reapply_tombstones
+        replay = pause.reapply_tombstones
 
         def checked(conn: sqlite3.Connection, home: Path) -> int:
             self.assertFalse(conn.in_transaction)
@@ -326,12 +308,12 @@ class QuiescenceRepairTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                quiescence, "reapply_tombstones", side_effect=checked
+                pause, "reapply_tombstones", side_effect=checked
             ),
-            quiescence.erase_connection(
+            pause.erase_connection(
                 self.home, wait_s=1, status=self.status
             ) as conn,
         ):
@@ -373,13 +355,11 @@ class QuiescenceRepairTests(QuiescenceCase):
 
         with (
             mock.patch.object(
-                quiescence.review_boot_identity, "observe", return_value=BOOT_B
+                pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(store, "connect_rw", side_effect=failing_close),
             self.assertRaises(LookupError) as caught,
-            quiescence.erase_connection(
-                self.home, wait_s=1, status=self.status
-            ),
+            pause.erase_connection(self.home, wait_s=1, status=self.status),
         ):
             self.status.erasure_phase = "intent_durable"
             raise original
@@ -415,9 +395,7 @@ poller.close()
             self.home,
         )
         child.wait_ready(timeout=10)
-        with quiescence.erase_connection(
-            self.home, wait_s=5, status=self.status
-        ):
+        with pause.erase_connection(self.home, wait_s=5, status=self.status):
             witness = state.parse(
                 state.inspect(self.home, state.WITNESS)[0], state.Witness
             )

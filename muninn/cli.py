@@ -8,7 +8,8 @@ again just before printing, so a line stored before a redaction rule existed
 still never reaches the screen.
 
 The handlers live in ``cli_read``, ``cli_know``, ``cli_maint``,
-``cli_rebuild`` and ``cli_serve``; the parser in ``cli_parser``.  The
+``cli_recovery``, ``cli_rebuild`` and ``cli_serve``; the parser in
+``cli_parser``. The
 launcher and the launchd job call ``main``.
 """
 
@@ -34,6 +35,7 @@ from muninn import (
     cli_read,
     cli_rebuild,
     cli_recall_review,
+    cli_recovery,
     cli_serve,
     obs,
     store,
@@ -43,7 +45,7 @@ from muninn.cli_core import Env, Handler, Out, Record, Result
 from muninn.cli_hook_contract import PROVIDERS
 from muninn.cli_output import redacted
 from muninn.cli_parser import build_parser
-from muninn.review_quiescence import EraseStatus
+from muninn.review_pause import EraseStatus
 
 __all__ = [
     "HOOKS",
@@ -67,6 +69,7 @@ _HANDLERS: dict[str, Handler] = {
     "serve": cli_serve.serve,
     "stats": cli_read.stats,
     "doctor": cli_read.doctor,
+    "recover": cli_recovery.recover,
     "compact": cli_maint.compact,
     "rebuild": cli_rebuild.rebuild,
     "know": cli_know.know,

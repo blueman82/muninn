@@ -20,7 +20,7 @@ from muninn import (
     store,
     tombstones,
 )
-from muninn import review_quiescence_state as state
+from muninn import review_pause_state as state
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,

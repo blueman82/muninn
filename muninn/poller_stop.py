@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 
 from muninn import file_sync, platform_io, platform_windows, store
-from muninn.review_quiescence_state import QuiescenceRefusedError
+from muninn.review_pause_state import PauseRefusedError
 
 FILE = "stop.json"
 _GENERATION = re.compile(r"[0-9a-f]{32}")
@@ -44,7 +44,7 @@ def request(
     Raises:
         ValueError: If the target fields are invalid.
         PermissionError: If the data directory is unsafe.
-        QuiescenceRefusedError: If staging exhausts the publication deadline.
+        PauseRefusedError: If staging exhausts the publication deadline.
     """
     if not _valid(pid, generation):
         raise ValueError("invalid stop target")
@@ -62,7 +62,7 @@ def request(
             handle.flush()
             file_sync.sync_fd(handle.fileno())
         if time.monotonic() >= deadline:
-            raise QuiescenceRefusedError("coordination_timeout")
+            raise PauseRefusedError("coordination_timeout")
         if os.name == "nt":
             platform_windows.publish(
                 Path(temporary), home / FILE, replace=True, retry_move=False

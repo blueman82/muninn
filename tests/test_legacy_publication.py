@@ -19,7 +19,7 @@ from install import (
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import platform_lock, platform_rebuild, store
-from muninn import review_quiescence_state as state
+from muninn import review_pause_state as state
 from tests.legacy_upgrade_support import BOOT_B, LegacyCase
 
 

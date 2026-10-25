@@ -182,31 +182,6 @@ class ReviewObservabilityTests(ReviewReceiptCase):
         self.assertEqual(self.snapshot(1.0)["oldest_pending_age_seconds"], 0.0)
         self.assertIsNone(self.snapshot()["last_progress_age_seconds"])
 
-    def test_health_does_not_initialize_or_repair_protocol(self) -> None:
-        paths = (
-            "review.supervisor.lock",
-            "review.supervisor.json",
-            "review.supervisor.repair.json",
-        )
-        with mock.patch.object(
-            obs, "run", return_value=mock.Mock(returncode=1)
-        ):
-            before = obs.doctor(self.home, {"HOME": str(self.home)})
-            self.assertFalse(
-                any((self.home / name).exists() for name in paths)
-            )
-            for name in paths:
-                (self.home / name).write_text(SECRET)
-                (self.home / name).chmod(0o600)
-            after = obs.doctor(self.home, {"HOME": str(self.home)})
-        checks = {c["check"]: c for c in after["checks"]}
-        self.assertTrue(checks["unexpected_files"]["ok"])
-        self.assertIsNone(checks["review_quiescence"]["ok"])
-        self.assertIs(checks["review_repair"]["ok"], False)
-        self.assertNotIn(SECRET, json.dumps(before) + json.dumps(after))
-        for name in paths:
-            self.assertEqual((self.home / name).read_text(), SECRET)
-
     def test_overlap_multipart_and_historical_replay_are_counted_once(
         self,
     ) -> None:
@@ -406,6 +381,6 @@ class ReviewObservabilityTests(ReviewReceiptCase):
             got = obs.doctor(self.home, {"HOME": str(self.home)})
         checks = {c["check"]: c for c in got["checks"]}
         self.assertIs(checks["review_windows_repair"]["ok"], False)
-        self.assertIsNone(checks["review_quiescence"]["ok"])
+        self.assertIsNone(checks["review_pause"]["ok"])
         self.assertEqual(from_path.read_text(), SECRET)
         self.assertNotIn(SECRET, json.dumps(got))

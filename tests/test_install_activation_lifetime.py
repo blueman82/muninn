@@ -15,7 +15,7 @@ from install import cutover, installer, legacy_state, record, review_policy
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import platform_lock, store
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from tests.installer_support import World
 from tests.test_review_shared_models import policy_data
 

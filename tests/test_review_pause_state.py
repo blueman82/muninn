@@ -15,15 +15,15 @@ from typing import BinaryIO, cast
 from unittest import mock
 
 from muninn import cli_serve, poller_stop, review_supervisor, store
-from muninn import review_quiescence_state as state
+from muninn import review_pause_state as state
 from tests.ingest_support import TID
-from tests.review_quiescence_support import initialize, interrupt_erasure
+from tests.review_pause_support import initialize, interrupt_erasure
 from tests.store_support import public_read
 from tests.test_review_supervisor import SupervisorCase
 from tests.test_review_worker import policy
 
 
-class QuiescenceStateTests(unittest.TestCase):
+class PauseStateTests(unittest.TestCase):
     """Treat an uncertain predecessor as a refusal, never a fresh owner."""
 
     def setUp(self) -> None:
@@ -44,7 +44,7 @@ class QuiescenceStateTests(unittest.TestCase):
                 "load_capability",
                 side_effect=AssertionError("material exposed"),
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             supervisor.start(1.0)
         self.assertFalse((self.home / "review.supervisor.json").exists())
@@ -80,9 +80,7 @@ class QuiescenceStateTests(unittest.TestCase):
                 path = self.home / state.WITNESS
                 path.write_bytes(raw)
                 path.chmod(0o600)
-                with self.assertRaisesRegex(
-                    ValueError, "quiescence_unverified"
-                ):
+                with self.assertRaisesRegex(ValueError, "pause_unverified"):
                     state.begin_owner(self.home)
                 self.assertEqual(path.read_bytes(), raw)
 
@@ -92,9 +90,9 @@ class QuiescenceStateTests(unittest.TestCase):
         os.close(fd)
 
         before = (self.home / state.WITNESS).read_bytes()
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             state.begin_owner(self.home)
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             initialize(self.home)
         self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
 
@@ -131,26 +129,26 @@ class QuiescenceStateTests(unittest.TestCase):
             path = self.home / name
             with (
                 public_read(self, path),
-                self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+                self.assertRaisesRegex(ValueError, "pause_unverified"),
             ):
                 state.begin_owner(self.home)
         path = self.home / state.WITNESS
         target = self.home / "target"
         path.rename(target)
         path.symlink_to(target)
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             state.begin_owner(self.home)
 
     def test_completion_requires_same_token_and_lock_inode(self) -> None:
         initialize(self.home)
         fd, token = state.begin_owner(self.home)
         self.addCleanup(os.close, fd)
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             state.complete_owner(self.home, fd, "a" * 32)
         path = self.home / state.LOCK
         path.rename(self.home / "old-lock")
         path.touch(mode=0o600)
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             state.complete_owner(self.home, fd, token)
 
     @unittest.skipIf(os.name == "nt", "Windows refuses baseline retirement")
@@ -195,7 +193,7 @@ class QuiescenceStateTests(unittest.TestCase):
         windows = SimpleNamespace(**(vars(os) | {"name": "nt"}))
         with (
             mock.patch.object(state, "os", windows),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             state.begin_owner(self.home)
         self.assertEqual(
@@ -227,6 +225,25 @@ class QuiescenceStateTests(unittest.TestCase):
             ).encode()
             self.assertIsNone(state.parse(raw, state.Baseline))
 
+    def test_baseline_rejects_malformed_or_nil_volume_uuid(self) -> None:
+        """A stored volume identifier must be canonical and nonzero."""
+        for volume_uuid in (
+            "F5A5FB75-3AF2-4F3F-A7B2-5744E5A0B339",
+            "00000000-0000-0000-0000-000000000000",
+            "not-a-uuid",
+        ):
+            raw = json.dumps(
+                {
+                    "version": 1,
+                    "lock_identity": [1, 2],
+                    "boot": "darwin:12345678-1234-4234-8234-123456789abc",
+                    "predecessor": None,
+                    "volume_uuid": volume_uuid,
+                }
+            ).encode()
+            with self.subTest(volume_uuid=volume_uuid):
+                self.assertIsNone(state.parse(raw, state.Baseline))
+
     def test_active_publication_failure_never_exposes_material(self) -> None:
         initialize(self.home)
         original = state.publish
@@ -246,7 +263,7 @@ class QuiescenceStateTests(unittest.TestCase):
             json.loads((self.home / state.WITNESS).read_bytes())["state"],
             "active",
         )
-        with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+        with self.assertRaisesRegex(ValueError, "pause_unverified"):
             state.begin_owner(self.home)
 
     def test_inspection_rejects_mutation_during_streaming_hash(self) -> None:
@@ -276,7 +293,7 @@ class QuiescenceStateTests(unittest.TestCase):
             mock.patch.object(
                 state.platform_io, "open_regular", side_effect=changing
             ),
-            self.assertRaisesRegex(ValueError, "quiescence_unverified"),
+            self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             state.inspect(self.home, state.WITNESS)
 
@@ -344,7 +361,7 @@ class OwnerCompletionTests(SupervisorCase):
             self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
             self.assertEqual(baseline.read_bytes(), retained)
         if os.name == "nt":
-            with self.assertRaisesRegex(ValueError, "quiescence_unverified"):
+            with self.assertRaisesRegex(ValueError, "pause_unverified"):
                 other.start(15.0)
             self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
             self.assertEqual(baseline.read_bytes(), retained)

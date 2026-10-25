@@ -23,7 +23,8 @@ Instructions for coding agents working in this repository. Any parent-directory
   `steps_release.py`, `steps_config.py`, `verify.py`, `preflight.py`, `transforms.py`,
   `trust.py`, `rollback.py`, `snapshot.py` (pre-upgrade store copy), `record.py`,
   `probe.py`, `context.py`, `errors.py`, `constants.py`, `uninstall.py`,
-  `configedit.py`, `tomledit.py`; the directory contains the complete module list.
+  `configedit.py`, `tomledit.py`, `recovery_guidance.py`; the directory contains
+  the complete module list.
 - `tools/`: the standards gate (`python3.13 -m tools.check`) and optional
   offline replay tool (`tools.replay_retrieval`).
 - `integrations/`, `launchd/`: templates with a literal `@HOME@`. Linux and Windows
@@ -72,9 +73,9 @@ Instructions for coding agents working in this repository. Any parent-directory
     .venv/bin/python3.13 -m unittest discover -s tests -t .
 
 Use the checkout's virtual-environment interpreter for every command. The full
-gate and test suite use the pinned runtime packages. The test runner starts one
-process per module; `-j N` sets the maximum number of modules it runs at once.
-Run one module by name to narrow a failure.
+gate and test suite use the pinned runtime packages. The runner starts one
+process per module. It uses at most four workers by default. The `-j N` option
+sets the worker limit. Run one module by name to narrow a failure.
 
 Set up once, installing the hashed runtime separately from developer tools:
 

@@ -24,7 +24,7 @@ from muninn import (
     ingest,
     obs,
     poller_stop,
-    review_quiescence_state,
+    review_pause_state,
     scope,
     store,
 )
@@ -158,7 +158,7 @@ class _Poller:
         else:
             try:
                 self.owner, self.stop_generation = (
-                    review_quiescence_state.begin_owner(self.home)
+                    review_pause_state.begin_owner(self.home)
                 )
             except BlockingIOError:
                 raise ValueError("supervisor_busy") from None
@@ -172,7 +172,7 @@ class _Poller:
             self.supervisor.stop(time.time())
         if self.owner is not None:
             assert self.stop_generation is not None
-            review_quiescence_state.complete_owner(
+            review_pause_state.complete_owner(
                 self.home, self.owner, self.stop_generation
             )
             os.close(self.owner)

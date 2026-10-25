@@ -20,7 +20,7 @@ from muninn.review_launch_spec import worker_launch
 from muninn.review_models import ReviewContext
 from muninn.review_process_identity import identify
 from muninn.review_runner import LaunchSpec, RunnerCapability
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.test_review_requests import RequestCase
 from tests.test_review_worker import policy, start_worker
 
@@ -143,7 +143,7 @@ class ReviewSupervisorTests(SupervisorCase):
             self.assertTrue(poller.stop_requested)
             connection.assert_not_called()
 
-    def test_quiescence_requires_supervisor_and_writer_release(self) -> None:
+    def test_pause_requires_supervisor_and_writer_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             owner = platform_lock.acquire(home / "review.supervisor.lock")

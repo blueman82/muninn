@@ -17,7 +17,7 @@ Verify exact installed versions, a standalone strict `BaseModel`, rejection of
 coercion/extra fields and JSON schema generation before activation. Bootstrap
 must be independent of knowledge models that are implemented later.
 
-Prepare candidate source/runtime before quiescence, snapshots or activation.
+Prepare candidate source/runtime before pause, snapshots or activation.
 A failed candidate leaves active release, provider configuration and store
 unchanged. Retain partial candidates for diagnosis; an existing venv is verified
 and reused without mutation. Invalid cached runtimes fail closed. Never rename

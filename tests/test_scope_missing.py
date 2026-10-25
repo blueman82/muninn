@@ -12,8 +12,8 @@ from unittest import mock
 
 from muninn import (
     ingest,
-    review_quiescence,
-    review_quiescence_state,
+    review_pause,
+    review_pause_state,
     scope,
     store,
 )
@@ -214,17 +214,17 @@ class MissingCwdTests(ScopeCase):
         )
         facts: scope.CommitFacts = {}
         total = ingest.PassStats()
-        with review_quiescence.maintenance_owner(
-            self.home, wait_s=0, status=review_quiescence.EraseStatus()
+        with review_pause.maintenance_owner(
+            self.home, wait_s=0, status=review_pause.EraseStatus()
         ) as owner:
             deadline = owner.deadline
             self.assertFalse(os.get_inheritable(owner.fd))
-            with review_quiescence.maintenance_writer(owner):
+            with review_pause.maintenance_writer(owner):
                 conn = store.connect_rw(
                     store.db_path(self.home), fullfsync=False
                 )
                 with contextlib.closing(conn):
-                    review_quiescence_state.seed_new(self.home, owner.fd)
+                    review_pause_state.seed_new(self.home, owner.fd)
                     with self.assertRaises(
                         ingest.IngestPreparationRequiredError
                     ) as raised:
@@ -250,18 +250,18 @@ class MissingCwdTests(ScopeCase):
                 with self.assertRaises(sqlite3.ProgrammingError):
                     conn.execute("SELECT 1")
             with self.assertRaises(BlockingIOError):
-                review_quiescence_state.acquire(self.home)
+                review_pause_state.acquire(self.home)
             with store.writer_lock(self.home, wait_s=0):
                 pass
             scope.prepare_commit(pending.lookup, facts)
             self.assertEqual(owner.deadline, deadline)
             with (
-                review_quiescence.maintenance_writer(owner),
+                review_pause.maintenance_writer(owner),
                 contextlib.closing(
                     store.connect_rw(store.db_path(self.home), fullfsync=False)
                 ) as reopened,
             ):
-                review_quiescence.verify_current(owner, reopened)
+                review_pause.verify_current(owner, reopened)
                 stats = ingest.ingest(reopened, roots, commit_facts=facts)
                 total.accumulate(stats)
                 self.assertEqual(

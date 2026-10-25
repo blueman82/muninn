@@ -85,7 +85,7 @@ class DoctorFaultTests(CliCase):
         got = self.checks()
         self.assertIn("review_capture_gaps", got)
         self.assertIn("review_process_deadline", got)
-        self.assertIsNone(got["review_quiescence"]["ok"])
+        self.assertIsNone(got["review_pause"]["ok"])
         self.assertFalse((self.home / "review.supervisor.json").exists())
 
 

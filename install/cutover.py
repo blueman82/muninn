@@ -36,8 +36,8 @@ from muninn import (
     scope,
     store,
 )
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import checked_policy, digest
 from muninn.store_copy import copy_governed_state as copy_governed_state
@@ -75,7 +75,7 @@ def _fresh(
             state.inspect(ctx.data, name)[1] is not None
             for name in (state.WITNESS, state.BASELINE)
         ):
-            raise state.QuiescenceRefusedError("quiescence_unverified")
+            raise state.PauseRefusedError("pause_unverified")
         if os.path.lexists(path):
             raise StepFailedError("fresh_home_changed")
         with closing(store.connect_rw(path)) as conn:

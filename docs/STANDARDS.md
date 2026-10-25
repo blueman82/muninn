@@ -12,7 +12,7 @@ gate before an upgrade; the installer itself enforces only the stdlib rules S1 t
 |---|---|---|
 | Stdlib rules S1 to S8 | `python3.13 -m tools.check` (also run by `tests/test_standards.py`) | size, docstrings, comments, imports, annotations |
 | Everything | `python3.13 -m tools.check --full` | the above plus ruff, black, pyright strict, shellcheck, the git-hook switch and the whole test suite (run in parallel) |
-| Tests, fast | `python3.13 -m tools.run_tests` (`-j N` for N processes) | the whole suite with each test module in its own process, about 5x faster than `unittest discover` (roughly 9 s against 42 s on 15 cores) |
+| Tests | `python3.13 -m tools.run_tests` (`-j N` for N workers) | The runner uses one process per test module. It uses at most four workers by default. |
 | Set up the tools | Separate hashed runtime and developer installs below | pins in `requirements-runtime.lock` and `requirements-dev.txt` |
 
 A missing tool, failing test or disabled Git-hook configuration fails the gate. No

@@ -264,14 +264,14 @@ def history_upgrade(ctx: Ctx, _rec: Record) -> None:
     )
 
 
-def restart(ctx: Ctx, rec: Record) -> None:
+def restart(ctx: Ctx, rec: Record, *, registered: bool = False) -> None:
     """Kickstart the running job so it runs the re-pinned release."""
     if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
     started = ctx.now()
     if ctx.platform != "darwin":
         lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
-    elif rec.get("quiesced"):
+    elif rec.get("paused") and not registered:
         must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     else:
         must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
@@ -436,12 +436,12 @@ def command(ctx: Ctx, *args: str) -> Sequence[str | Path]:
     return [ctx.muninn, *args]
 
 
-def quiesce(ctx: Ctx, rec: Record) -> None:
+def pause(ctx: Ctx, rec: Record) -> None:
     """Stop the managed native writer before any upgrade mutation."""
-    if dry(ctx, "would quiesce the owned writer before upgrade"):
+    if dry(ctx, "would pause the owned writer before upgrade"):
         return
     lifecycle.stop(ctx)
-    rec["quiesced"] = True
+    rec["paused"] = True
 
 
 def installed_env(ctx: Ctx, **extra: str) -> dict[str, str]:

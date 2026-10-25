@@ -15,7 +15,7 @@ from unittest import mock
 from install import snapshot
 from muninn import cli_rebuild, platform_io, platform_rebuild, store
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 
 class SnapshotSafetyTests(unittest.TestCase):

@@ -17,8 +17,8 @@ from install import cutover, steps_release
 from install.context import StepFailedError
 from install.record import Record
 from muninn import cursor_import, ingest, ingest_plan, scope, store
-from muninn import review_quiescence as q
-from muninn import review_quiescence_state as state
+from muninn import review_pause as q
+from muninn import review_pause_state as state
 from tests import test_cursor_precompact
 from tests.ingest_support import line
 from tests.installer_support import World

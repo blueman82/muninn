@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-from muninn.review_quiescence_state import QuiescenceRefusedError
+from muninn.review_pause_state import PauseRefusedError
 
 _UUID = re.compile(rb"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 
@@ -43,7 +43,7 @@ def observe() -> str:
     unavailable until an appropriate boot-lifecycle primitive is established.
 
     Raises:
-        QuiescenceRefusedError: If the boot observation cannot be established.
+        PauseRefusedError: If the boot observation cannot be established.
     """
     try:
         if sys.platform == "linux":
@@ -53,9 +53,9 @@ def observe() -> str:
         elif sys.platform == "darwin":
             raw = _darwin()
         else:
-            raise QuiescenceRefusedError("boot_identity_unavailable")
+            raise PauseRefusedError("boot_identity_unavailable")
         if _UUID.fullmatch(raw) is None or raw.replace(b"-", b"") == b"0" * 32:
-            raise QuiescenceRefusedError("boot_identity_unavailable")
+            raise PauseRefusedError("boot_identity_unavailable")
         return sys.platform + ":" + raw.decode("ascii").lower()
     except (OSError, ValueError):
-        raise QuiescenceRefusedError("boot_identity_unavailable") from None
+        raise PauseRefusedError("boot_identity_unavailable") from None

@@ -10,7 +10,7 @@ from collections.abc import Generator
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from muninn import ingest, review_quiescence_state, store
+from muninn import ingest, review_pause_state, store
 from muninn.hook_learn import capture_boundary
 from muninn.review_activation import bootstrap_policy
 from muninn.review_json import canonical_json
@@ -152,13 +152,13 @@ def create_home(
     home.parent.mkdir(mode=0o700, exist_ok=True)
     check_private_path(home.parent, directory=True)
     home.mkdir(mode=0o700)
-    fd = review_quiescence_state.acquire(home)
+    fd = review_pause_state.acquire(home)
     try:
         with (
             store.writer_lock(home, wait_s=0),
             closing(store.connect_rw(store.db_path(home))) as conn,
         ):
-            review_quiescence_state.seed_new(home, fd)
+            review_pause_state.seed_new(home, fd)
             conn.execute("BEGIN IMMEDIATE")
             bootstrap_policy(
                 conn, manifest.assessment.policies[0], time.time()

@@ -26,7 +26,7 @@ from muninn import (
     store_fingerprint,
     tombstones,
 )
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from muninn.review_codex_policy import check_activation, check_host
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
