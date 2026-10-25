@@ -58,12 +58,13 @@ run ruff, pyright or the tests).
 The Stop command invokes `tools/codex_stop_gate.py` directly with Python 3.13 and
 `async: true`. Codex continues the turn while the hook runs in the background. Codex
 provides JSON on stdin, including `cwd`, `session_id`, `hook_event_name`, `turn_id`,
-`stop_hook_active` and `last_assistant_message`. The wrapper ignores that payload: it
-derives the worktree from its own file and always runs one
-`python -m tools.check --full` subprocess using that checkout's `.venv` Python.
-If the checkout has no `.venv`, the wrapper reports a launch failure instead of
-using packages from the system Python. The gate receives closed stdin, so it
-cannot consume the hook payload.
+`stop_hook_active` and `last_assistant_message`. The wrapper ignores that payload.
+It finds the worktree from its own file. It checks that worktree's `.venv` first.
+If that `.venv` is incomplete, it checks the main checkout's `.venv`.
+If neither checkout has a complete `.venv`, the wrapper reports a launch failure.
+It never uses packages from system Python. The wrapper runs
+`python -m tools.check --full` with the selected interpreter. The gate receives
+closed stdin, so it cannot consume the hook payload.
 
 A passing gate returns compact `{}` on stdout and exit 0. A failed gate, launch error or
 timeout returns exit 2 with the reason on stderr; Codex reports background-hook output
