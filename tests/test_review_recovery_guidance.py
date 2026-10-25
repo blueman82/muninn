@@ -41,8 +41,8 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
         guidance = after.get("recovery_guidance")
         self.assertIsNotNone(guidance)
         assert guidance is not None
-        self.assertEqual(guidance["status"], "manual_recovery_required")
-        self.assertIn("Save this report", " ".join(guidance["steps"]))
+        self.assertEqual(guidance["status"], "automatic_recovery_available")
+        self.assertIn("muninn recover", " ".join(guidance["steps"]))
         self.assertNotIn(SECRET, json.dumps(before) + json.dumps(after))
         for name in paths:
             self.assertEqual((self.home / name).read_text(), SECRET)
@@ -59,4 +59,8 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
         ]
         guidance = recovery_guidance(checks, "win32")
         assert guidance is not None
+        self.assertEqual(guidance["status"], "manual_recovery_required")
         self.assertEqual(guidance["reason"], "windows_repair_not_qualified")
+        self.assertIn(
+            "contact your Muninn maintainer", " ".join(guidance["steps"])
+        )

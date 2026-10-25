@@ -42,21 +42,44 @@ def recovery_guidance(
     )
     if repair is None or repair["ok"] is not False:
         return None
-    reason = {
-        "linux": "repair_baseline_present",
-        "win32": "windows_repair_not_qualified",
-    }.get(platform_name, "repair_baseline_present")
+    if platform_name == "win32":
+        return {
+            "status": "manual_recovery_required",
+            "platform": platform_name,
+            "reason": "windows_repair_not_qualified",
+            "steps": [
+                "Keep the Muninn data folder and repair files. Do not delete "
+                "or rename them.",
+                "Windows recovery is not qualified because Muninn cannot "
+                "yet verify reboot and repair-file safety on Windows.",
+                "Save this report and contact your Muninn maintainer. Do "
+                "not restart Muninn until recovery is resolved.",
+            ],
+        }
+    if platform_name not in ("darwin", "linux"):
+        return {
+            "status": "manual_recovery_required",
+            "platform": platform_name,
+            "reason": "recovery_platform_unqualified",
+            "steps": [
+                "Keep the Muninn data folder and repair files. Do not delete "
+                "or rename them.",
+                "Muninn has no verified repair path for this operating "
+                "system.",
+                "Save this report and contact your Muninn maintainer.",
+            ],
+        }
     return {
-        "status": "manual_recovery_required",
+        "status": "automatic_recovery_available",
         "platform": platform_name,
-        "reason": reason,
+        "reason": "repair_baseline_present",
         "steps": [
-            "Check the service status in this report.",
-            "If Muninn is stopped, leave it stopped until recovery is "
-            "complete.",
-            "Keep the data folder and all repair files. Do not delete or "
-            "rename them.",
-            "Save this report and contact your Muninn maintainer before "
-            "restart.",
+            "Run `muninn recover`. Muninn will stop its managed writer and "
+            "repair the pause only when its safety checks pass.",
+            "If it returns `reboot_required`, restart the computer and run "
+            "`muninn recover` again.",
+            "Run `muninn doctor --pretty` after recovery. If recovery is "
+            "refused for another reason, keep all files and send this report "
+            "to your Muninn maintainer.",
         ],
     }

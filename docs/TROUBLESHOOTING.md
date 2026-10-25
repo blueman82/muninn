@@ -35,7 +35,7 @@ code 1; `warn` and `info` do not) and a `detail`. When asking for help, share `d
 | Codex shows no memory | plugin hooks not trusted | start Codex, run `/hooks`, trust the two hooks |
 | Cursor history is missing after compaction | optional native hook absent or disabled, database path unavailable, invalid `message_count`, missing/mismatched conversation identity, invalid/ambiguous workspace roots, oversized conversation, or refresh failure | check `~/.cursor/hooks.json` against [Cursor setup](QUICKSTART.md#cursor-history); outside macOS set `MUNINN_CURSOR_DB` in the Cursor environment. Successful refresh and a missing database return `{}`; invalid payload identity/count/workspace or import failure reports a `user_message`. Confirm Cursor supplies `conversation_id` and native absolute `workspace_roots`; no latest-row fallback is used. Use `muninn ingest --full` for the complete import; `recall.off` controls later prompt recall, not the refresh. The hook's 90-second deadline does not guarantee completion on every host |
 | `app not installed: setup skipped`; no Cursor prompt | desktop app absent; leftover configs/transcripts insufficient | [Supported app detection](QUICKSTART.md#install-on-a-new-machine); installed Claude/Codex without config: manual setup; history import independent |
-| installer failed | inspect `install.log` and `install-record.json` (`outcome`, `failed`, `store.phase`) | `recovery_required` after possible current mutation keeps current data and runtime/configuration and leaves the service stopped. Preserve all archives and latest key/intent; do not assume rollback or restart succeeded |
+| installer failed | read the recovery steps printed by `bin/muninn-install`; before store preparation, it tries the qualified repair path automatically | if it asks for a reboot, reboot and rerun the same install command. If it asks for a report, run the exact health-report command it prints. `recovery_required` keeps current data and runtime/configuration and leaves the service stopped; preserve all archives and latest key/intent |
 | uninstall requested | removal operation | `bin/muninn-uninstall --dry-run`, then `bin/muninn-uninstall`; the data moves to `~/.local/share/muninn-removed-<ts>` (`--purge-data` deletes it) |
 | `bin/muninn-install` says half-installed after an uninstall | an uninstall that was interrupted left the data dir or the release link | run `bin/muninn-uninstall` again; it removes whatever is left |
 
@@ -78,12 +78,31 @@ can remain delayed after the process deadline (`review_commit_delay`,
 total I/O or command duration.
 
 `review_pause` is always unverified: witness presence, missing DB/PID and free
-locks do not prove containment. If `doctor` returns `recovery_guidance`, follow
-its steps. Check the service status in the report. If Muninn is stopped, leave
-it stopped until recovery is complete. Keep the data folder, supervisor files,
-repair baseline, `tombstones.jsonl`, tombstone keys and retained archives. Never
-remove or rename these files to bypass `pause_unverified` or `reboot_required`.
-Save the full doctor report and contact your Muninn maintainer before restart.
+locks do not prove containment. Before an upgrade prepares the store, the
+installer checks for `recovery_guidance` and tries the checked repair path on
+macOS/Linux. If it needs a reboot, restart the computer and rerun the same
+install command; the installer will retry recovery. When running doctor
+yourself, run `muninn recover`. Muninn waits for its managed writer and checks
+the saved boot, lock and witness identities before repair. If it returns
+`reboot_required`, restart the computer and run `muninn recover` again. Run
+`muninn doctor --pretty` after it reports success.
+
+Windows recovery is not qualified. `muninn recover` refuses before changing
+recovery files because Muninn cannot yet verify Windows boot identity and safe
+baseline retirement. Keep the data folder, supervisor files, repair baseline,
+`tombstones.jsonl`, tombstone keys and retained archives. Save the full doctor
+report and contact your Muninn maintainer. On every platform, never remove or
+rename these files to bypass `pause_unverified` or `reboot_required`.
+
+The human steps are limited to rebooting when the command says it is required,
+starting the managed service if `doctor` reports it is stopped, and asking the
+maintainer to handle Windows or identity-mismatch refusals. Muninn does not
+reboot the computer because that interrupts other work. `recover` does not yet
+revalidate the installed service definition before asking its manager to start
+it; starting a changed or unowned entry could run unexpected code. Windows boot
+identity and baseline retirement have not passed native qualification. An
+identity mismatch means Muninn cannot prove that the files belong to the
+interrupted operation, so it preserves them instead of overwriting them.
 Journal presence is reported with consistency unverified, not as proof of a
 pending intent.
 

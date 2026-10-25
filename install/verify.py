@@ -6,11 +6,11 @@ run records ``ok: null`` and never fails the install.
 
 from __future__ import annotations
 
-import contextlib
 import json
+import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from install import configedit as ce
 from install import runtime
@@ -24,7 +24,13 @@ from install.context import Ctx, StepFailedError, dry, is_new, job
 from install.provider_apps import installed
 from install.provider_paths import hook_invocations
 from install.record import Record
-from install.steps_release import command, fresh, installed_env
+from install.recovery_guidance import health_report_command
+from install.steps_release import (
+    command,
+    fresh,
+    installed_env,
+    restart,
+)
 from install.transforms import ours
 from install.trust import TrustedHook, codex_hooks
 
@@ -96,6 +102,132 @@ def _no_probe(ctx: Ctx) -> list[dict[str, Any]]:
         TypeError: Always.
     """
     raise TypeError(f"no probe configured for {ctx.target}")
+
+
+def _health(stdout: bytes) -> dict[str, Any]:
+    """Read the structured doctor report when it is valid JSON.
+
+    Args:
+        stdout: Bytes returned by the doctor command.
+
+    Returns:
+        The parsed object, or an empty mapping when the output is invalid.
+    """
+    try:
+        value = json.loads(stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
+def _recovery_steps(ctx: Ctx, report: Mapping[str, Any]) -> None:
+    """Show only the fixed recovery steps returned by doctor.
+
+    Args:
+        ctx: Installer output context.
+        report: Parsed doctor report.
+    """
+    guidance_value = report.get("recovery_guidance")
+    if not isinstance(guidance_value, dict):
+        return
+    guidance = cast(dict[str, Any], guidance_value)
+    steps = guidance.get("steps")
+    if isinstance(steps, list):
+        for step in cast(list[object], steps):
+            if isinstance(step, str):
+                ctx.say(f"  {step}")
+
+
+def _show_health_help(ctx: Ctx, report: Mapping[str, Any]) -> None:
+    """Give the user the next command when health checks still fail.
+
+    Args:
+        ctx: Installer output context.
+        report: Parsed doctor report.
+    """
+    guidance = report.get("recovery_guidance")
+    if isinstance(guidance, dict):
+        _recovery_steps(ctx, report)
+    else:
+        checks_value = report.get("checks")
+        failed: list[str] = []
+        if isinstance(checks_value, list):
+            for raw_item in cast(list[object], checks_value):
+                if not isinstance(raw_item, dict):
+                    continue
+                item = cast(dict[str, object], raw_item)
+                name = item.get("check")
+                if item.get("ok") is False and isinstance(name, str):
+                    failed.append(name)
+        if failed:
+            ctx.say("  Failed checks: " + ", ".join(failed))
+    ctx.say(f"  Health report: {health_report_command(ctx)}")
+
+
+def _doctor(ctx: Ctx, rec: Record) -> subprocess.CompletedProcess[bytes]:
+    """Run doctor and attempt only its qualified automatic repair path.
+
+    Args:
+        ctx: Installer paths and command runner.
+        rec: Current install record used to restart the service.
+
+    Returns:
+        The final doctor result, before or after recovery.
+    """
+    env = installed_env(ctx)
+    result = ctx.run(command(ctx, "doctor"), env=env)
+    if result.returncode == 0:
+        return result
+    report = _health(result.stdout)
+    guidance_value = report.get("recovery_guidance")
+    if not isinstance(guidance_value, dict):
+        ctx.say("Install health check failed.")
+        _show_health_help(ctx, report)
+        return result
+    guidance = cast(dict[str, Any], guidance_value)
+    if guidance.get(
+        "status"
+    ) != "automatic_recovery_available" or ctx.platform not in (
+        "darwin",
+        "linux",
+    ):
+        ctx.say("Install health check failed. Recovery steps:")
+        _show_health_help(ctx, report)
+        return result
+    ctx.say("Install health check failed. Trying Muninn's safe recovery now.")
+    repaired = ctx.run(command(ctx, "recover"), env=env)
+    outcome_value = _health(repaired.stdout).get("recovery")
+    outcome = (
+        cast(dict[str, object], outcome_value)
+        if isinstance(outcome_value, dict)
+        else {}
+    )
+    if repaired.returncode == 0 and outcome.get("status") == "recovered":
+        ctx.say("Muninn recovered the interrupted pause automatically.")
+        try:
+            restart(ctx, rec)
+        except Exception:
+            ctx.say("Recovery finished, but the service did not restart.")
+            ctx.say(f"  Health report: {health_report_command(ctx)}")
+            raise
+        result = ctx.run(command(ctx, "doctor"), env=env)
+        if result.returncode != 0:
+            ctx.say("The health check still fails after recovery.")
+            _show_health_help(ctx, _health(result.stdout))
+        return result
+    ctx.say("Muninn could not finish recovery automatically.")
+    recovery = _health(repaired.stdout)
+    why, action = recovery.get("why"), recovery.get("next_action")
+    if isinstance(why, str):
+        ctx.say(f"  {why}")
+    if isinstance(action, str):
+        ctx.say(f"  Next: {action}")
+    else:
+        _show_health_help(ctx, report)
+    if isinstance(action, str):
+        ctx.say(f"  Health report: {health_report_command(ctx)}")
+        ctx.say("  After recovery, rerun the same install command.")
+    return result
 
 
 def codex_checks(ctx: Ctx, rec: Record, check: Check) -> None:
@@ -196,12 +328,10 @@ def verify(ctx: Ctx, rec: Record) -> None:
         )
     if ctx.probe and rec["has_codex"]:
         codex_checks(ctx, rec, check)
-    r = ctx.run(command(ctx, "doctor"), env=installed_env(ctx))
+    r = _doctor(ctx, rec)
     check("doctor", r.returncode == 0)
     if ctx.platform != "darwin":
-        health: dict[str, Any] = {}
-        with contextlib.suppress(ValueError):
-            health = json.loads(r.stdout)
+        health = _health(r.stdout)
         check(
             "managed_service_verified",
             any(

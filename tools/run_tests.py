@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_JOBS_CAP = 12
+DEFAULT_JOBS_CAP = 4
 # unittest exits 5 for a module that defines no tests (a re-export shim).
 NO_TESTS_EXIT = 5
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.M)

@@ -286,9 +286,13 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
         actions that should be survivable.
     """
     problems: list[str] = []
-    if rec.get("policy_activation") or (
-        rec.get("upgrade")
-        and (rec.get("paused") or rec.get("store") or rec.get("snapshot"))
+    if (
+        rec.get("recovery_required")
+        or rec.get("policy_activation")
+        or (
+            rec.get("upgrade")
+            and (rec.get("paused") or rec.get("store") or rec.get("snapshot"))
+        )
     ):
         _act(
             ctx,
