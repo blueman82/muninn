@@ -9,13 +9,13 @@ from typing import Any, cast
 from unittest import mock
 
 from muninn import cli, erase, poller_stop, store, tombstone_key, tombstones
-from muninn import review_quiescence_state as state
-from muninn.review_quiescence import EraseStatus
+from muninn import review_pause_state as state
+from muninn.review_pause import EraseStatus
 from tests.cli_support import CliCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 
-class CliEraseQuiescenceTests(CliCase):
+class CliErasePauseTests(CliCase):
     """Expose truthful status without changing other commands."""
 
     def setUp(self) -> None:

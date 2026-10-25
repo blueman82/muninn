@@ -22,7 +22,7 @@ from muninn.review_evidence_models import EvidenceWindow, SourceRef
 from tests import test_platform_windows
 from tests.cli_support import CliCase, fake_run
 from tests.knowledge_retirement_support import window_note
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.test_ingest import ROOT, TID
 
 if sys.platform == "win32":

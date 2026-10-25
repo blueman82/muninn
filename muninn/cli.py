@@ -43,7 +43,7 @@ from muninn.cli_core import Env, Handler, Out, Record, Result
 from muninn.cli_hook_contract import PROVIDERS
 from muninn.cli_output import redacted
 from muninn.cli_parser import build_parser
-from muninn.review_quiescence import EraseStatus
+from muninn.review_pause import EraseStatus
 
 __all__ = [
     "HOOKS",

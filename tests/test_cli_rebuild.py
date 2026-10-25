@@ -15,7 +15,7 @@ from tests.knowledge_cutover_support import (
     legacy_schema,
 )
 from tests.knowledge_retirement_support import native_note
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import assert_private
 from tests.test_ingest import TID
 from tests.test_review_commit import CommitCase

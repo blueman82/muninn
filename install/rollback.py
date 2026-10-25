@@ -288,7 +288,7 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     problems: list[str] = []
     if rec.get("policy_activation") or (
         rec.get("upgrade")
-        and (rec.get("quiesced") or rec.get("store") or rec.get("snapshot"))
+        and (rec.get("paused") or rec.get("store") or rec.get("snapshot"))
     ):
         _act(
             ctx,
@@ -303,7 +303,7 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
         ]
     # The copy of the store comes before anything is changed, so a failure
     # there has nothing to undo and must not restart the running job.
-    if rec.get("failed", {}).get("step") in {"quiesce", "snapshot_store"}:
+    if rec.get("failed", {}).get("step") in {"pause", "snapshot_store"}:
         return problems
     j = job(ctx)
     if ctx.platform != "darwin" and rec.get("upgrade"):

@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from muninn import (
+    review_pause_state,
     review_prompt,
-    review_quiescence_state,
     store,
 )
 from muninn.review_budget import reserve_call
@@ -100,8 +100,8 @@ class Supervisor:
         if self._owner is not None:
             raise ValueError("supervisor_started")
         try:
-            self._owner, self.stop_generation = (
-                review_quiescence_state.begin_owner(self.home)
+            self._owner, self.stop_generation = review_pause_state.begin_owner(
+                self.home
             )
         except BlockingIOError:
             raise ValueError("supervisor_busy") from None
@@ -364,7 +364,7 @@ class Supervisor:
         self.artifact = b""
         self.capability = None
         assert self.stop_generation is not None
-        review_quiescence_state.complete_owner(
+        review_pause_state.complete_owner(
             self.home, self._owner, self.stop_generation
         )
         os.close(self._owner)

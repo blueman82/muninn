@@ -12,7 +12,7 @@ from unittest import mock
 from muninn import cursor_import, hook_cursor
 from tests.cli_support import CliCase
 from tests.hook_support import launcher_args
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 
 
 class CursorPrecompactTests(CliCase):

@@ -11,7 +11,7 @@ from typing import Any
 
 from muninn import classify, cli_core, cursor_import, erase, ingest, obs, store
 from muninn.cli_core import Env, Out, Record, Result, counts
-from muninn.review_quiescence import EraseStatus
+from muninn.review_pause import EraseStatus
 
 __all__ = ["compact", "erase_command", "heartbeat", "ingest_command"]
 

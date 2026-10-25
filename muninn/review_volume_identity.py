@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-from muninn import review_quiescence_state as state
-from muninn.review_quiescence_state import QuiescenceRefusedError
+from muninn import review_pause_state as state
+from muninn.review_pause_state import PauseRefusedError
 
 _VOL_UUID = 0x80040000  # ATTR_VOL_INFO | ATTR_VOL_UUID
 _RESULT_SIZE = 20
@@ -36,10 +36,10 @@ def observe(home: Path) -> str:
         The canonical lowercase UUID of the containing volume.
 
     Raises:
-        QuiescenceRefusedError: If the volume has no usable native UUID.
+        PauseRefusedError: If the volume has no usable native UUID.
     """
     if sys.platform != "darwin":
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     try:
         before = state.directory_identity(home)
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -47,7 +47,7 @@ def observe(home: Path) -> str:
         try:
             held = os.fstat(fd)
             if (held.st_dev, held.st_ino) != before:
-                raise QuiescenceRefusedError("quiescence_unverified")
+                raise PauseRefusedError("pause_unverified")
             native = ctypes.CDLL(None, use_errno=True).fgetattrlist
             native.argtypes = [
                 ctypes.c_int,
@@ -65,7 +65,7 @@ def observe(home: Path) -> str:
                 or int.from_bytes(buffer.raw[:4], sys.byteorder)
                 != _RESULT_SIZE
             ):
-                raise QuiescenceRefusedError("quiescence_unverified")
+                raise PauseRefusedError("pause_unverified")
             identifier = UUID(bytes=buffer.raw[4:_RESULT_SIZE])
             current = os.fstat(fd)
             if (
@@ -73,9 +73,9 @@ def observe(home: Path) -> str:
                 or (current.st_dev, current.st_ino) != before
                 or state.directory_identity(home) != before
             ):
-                raise QuiescenceRefusedError("quiescence_unverified")
+                raise PauseRefusedError("pause_unverified")
             return str(identifier)
         finally:
             os.close(fd)
     except (OSError, ValueError, AttributeError):
-        raise QuiescenceRefusedError("quiescence_unverified") from None
+        raise PauseRefusedError("pause_unverified") from None

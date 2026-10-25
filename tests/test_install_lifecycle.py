@@ -164,10 +164,8 @@ class LifecycleDefinitionTests(unittest.TestCase):
     def test_successful_install_finishes_with_service_running(self) -> None:
         fresh = [step.__name__ for step in installer.FRESH_STEPS]
         upgrade = [step.__name__ for step in installer.UPGRADE_STEPS]
-        self.assertNotIn("quiesce", fresh)
-        self.assertEqual(upgrade.count("quiesce"), 1)
-        self.assertLess(
-            upgrade.index("quiesce"), upgrade.index("prepare_store")
-        )
+        self.assertNotIn("pause", fresh)
+        self.assertEqual(upgrade.count("pause"), 1)
+        self.assertLess(upgrade.index("pause"), upgrade.index("prepare_store"))
         self.assertEqual(fresh[-1], "prune")
         self.assertEqual(upgrade[-1], "prune")

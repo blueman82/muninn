@@ -19,9 +19,9 @@ from muninn import (
     review_volume_identity,
     store,
 )
-from muninn import review_quiescence_state as state
-from muninn.review_quiescence_state import (
-    QuiescenceRefusedError as QuiescenceRefusedError,
+from muninn import review_pause_state as state
+from muninn.review_pause_state import (
+    PauseRefusedError as PauseRefusedError,
 )
 from muninn.review_repair_binding import same_repair_binding
 from muninn.review_requests import recover_attempts
@@ -98,7 +98,7 @@ def _require_owner(owner: MaintenanceOwner) -> None:
         raise RuntimeError("maintenance_owner_closed")
     home = owner.home.stat()
     if (home.st_dev, home.st_ino) != owner.home_identity:
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     state.lock_identity(owner.home, owner.fd)
 
 
@@ -245,7 +245,7 @@ def _same_owner(
         or latest.owner != selected.owner
         or latest.lock_identity != selected.lock_identity
     ):
-        raise QuiescenceRefusedError("owner_changed")
+        raise PauseRefusedError("owner_changed")
 
 
 def _owner(
@@ -261,7 +261,7 @@ def _owner(
             _same_owner(selected, latest)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise QuiescenceRefusedError("coordination_timeout") from None
+                raise PauseRefusedError("coordination_timeout") from None
             if (
                 selected is None
                 and latest is not None
@@ -270,9 +270,7 @@ def _owner(
                 assert latest.owner is not None
                 lock = (home / state.LOCK).stat()
                 if latest.lock_identity != (lock.st_dev, lock.st_ino):
-                    raise QuiescenceRefusedError(
-                        "quiescence_unverified"
-                    ) from None
+                    raise PauseRefusedError("pause_unverified") from None
                 selected = latest
                 status.stop_may_have_been_published = True
                 poller_stop.request(
@@ -338,12 +336,12 @@ def _verify(
         and latest.state == "complete"
     ):
         if baseline_file is not None and not repair:
-            raise QuiescenceRefusedError("quiescence_unverified")
+            raise PauseRefusedError("pause_unverified")
         reapply_tombstones(conn, home)
         state.retire_baseline(home, fd)
         return
     if not repair:
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     boot = review_boot_identity.observe()
     baseline = state.parse(baseline_raw, state.Baseline)
     if (
@@ -357,7 +355,7 @@ def _verify(
         )
     ):
         status.repair_phase = "baseline_recorded"
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     if (
         baseline is None
         or baseline.boot.split(":")[0] != boot.split(":")[0]
@@ -381,16 +379,16 @@ def _verify(
             ),
         )
         status.repair_phase = "baseline_recorded"
-        raise QuiescenceRefusedError("reboot_required")
+        raise PauseRefusedError("reboot_required")
     if baseline.boot == boot:
         status.repair_phase = "baseline_recorded"
-        raise QuiescenceRefusedError("reboot_required")
+        raise PauseRefusedError("reboot_required")
     status.repair_phase = "reconciling"
     _recover(conn, home)
     if state.inspect(home, state.WITNESS)[1] != predecessor or (
         state.inspect(home, state.BASELINE)[1] != baseline_file
     ):
-        raise QuiescenceRefusedError("quiescence_unverified")
+        raise PauseRefusedError("pause_unverified")
     state.publish(
         home,
         fd,

@@ -29,7 +29,7 @@ from muninn.file_sync import sync_fd
 from muninn.tombstone_key import KEY_FILE, TombstoneKeyError
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import assert_private, public_read
 from tests.test_erase_hardening import (
     FORK,

@@ -77,13 +77,15 @@ can remain delayed after the process deadline (`review_commit_delay`,
 `review_cancel_delay`). Original-source read budgets do not bound journal replay,
 total I/O or command duration.
 
-`review_quiescence` is always unverified: witness presence, missing DB/PID and free
-locks do not prove containment. Doctor never creates, resets or deletes
-`review.supervisor.lock`, `review.supervisor.json` or
-`review.supervisor.repair.json`. Preserve these, `tombstones.jsonl`, tombstone keys
-and retained archives. A repair baseline needs manual recovery assessment; never
-remove it to bypass `quiescence_unverified`/`reboot_required`. Journal presence is
-reported with consistency unverified, not as proof of a pending intent.
+`review_pause` is always unverified: witness presence, missing DB/PID and free
+locks do not prove containment. If `doctor` returns `recovery_guidance`, follow
+its steps. Check the service status in the report. If Muninn is stopped, leave
+it stopped until recovery is complete. Keep the data folder, supervisor files,
+repair baseline, `tombstones.jsonl`, tombstone keys and retained archives. Never
+remove or rename these files to bypass `pause_unverified` or `reboot_required`.
+Save the full doctor report and contact your Muninn maintainer before restart.
+Journal presence is reported with consistency unverified, not as proof of a
+pending intent.
 
 On macOS, a new repair baseline records the data volume's persistent UUID.
 After a reboot, macOS may assign that volume a different temporary device
@@ -91,15 +93,15 @@ number. Repair accepts that change only when the UUID, lock file, and witness
 file still match. If macOS cannot provide a UUID, Muninn refuses to record a
 new baseline. An older baseline without a UUID cannot prove that a changed
 device number belongs to the same volume. Muninn preserves that baseline and
-refuses repair for manual recovery assessment. Do not remove the old files to
-force progress.
+refuses repair. The doctor report gives the next safe steps. Do not remove the
+old files to force progress.
 
 Real erase may interrupt the whole service. Preserve its original failure and
 `erasure_status`: `restart: not_attempted` means check and manually restart if
 needed, with no claim that it is currently stopped/restored. Retained archives keep
-erasure unverified even if selected-needle scans find no residue. Windows boot repair
-and durable baseline retirement remain required-platform release blockers; ordinary
-absent-baseline behavior and fake tests are not native qualification.
+erasure unverified even if selected-needle scans find no residue. Windows boot
+repair and durable baseline retirement remain unqualified. The doctor report
+explains what to preserve and when to request help.
 
 ## Logs
 

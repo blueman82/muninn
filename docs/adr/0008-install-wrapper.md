@@ -71,7 +71,7 @@ resolved identity); both processes and all task instances must exit. Linux uses
 unbounded systemd stop with no SIGKILL fallback. A bounded installer wait that expires
 refuses restoration/config undo/pruning and retains private state.
 
-Native upgrades quiesce before snapshot/publication. SQLite snapshots and selection
+Native upgrades pause before snapshot/publication. SQLite snapshots and selection
 publication use atomic replacement without deleting the live file first; uncertain
 copies remain private. The durable HMAC tombstone key is never recreated over existing
 private history and is unchanged by snapshot restore.

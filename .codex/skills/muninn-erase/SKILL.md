@@ -34,7 +34,7 @@ Neither path seeds containment evidence from absence or an empty database.
 retained archives. Residue or any retained archive leaves `committed`; a completed
 command with residue still exits 0. These bounded checks do not prove universal
 forensic absence or erase provider/remote copies. Durable intent survives later
-failure and is replayed on quiescent startup/erase entry. Pending intent fences new
+failure and is replayed on paused startup/erase entry. Pending intent fences new
 foreground proposals/commits; existing receipts retain audit access until replay.
 The guard reads the whole journal without a fixed memory/time bound. Preserve the
 journal and `tombstone.key`.

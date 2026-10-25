@@ -59,7 +59,7 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
         generation = self.conn.execute(
             "SELECT generation FROM review_control"
         ).fetchone()[0]
-        for code in ("process_identity_unverified", "quiescence_unverified"):
+        for code in ("process_identity_unverified", "pause_unverified"):
             other = supervision.Supervisor(self.home, self.policy)
             with (
                 mock.patch.object(

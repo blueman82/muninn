@@ -181,7 +181,7 @@ format or maintenance-authority certificate. The exact inventoried legacy
 release still uses the separate exclusion and restart route below.
 
 A current-format installer upgrade retains the live pathname. After proven
-quiescence it fences review attempts, preserves unknown charges and validates the
+pause it fences review attempts, preserves unknown charges and validates the
 permitted policy before activation. One actual maintenance owner spans pin/config;
 the writer is released during those steps and the owner before service start.
 Once live mutation may have happened, failure keeps current data and the selected
@@ -294,7 +294,7 @@ service is unsupported.
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
 | `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
 | `muninn rebuild` | rebuild only a verified marked current store. Copy every governed family, retain DB-only Cursor and missing-source history, then fully re-ingest transcripts and replay current erasure intent. Fence admission/attempts and retain a private `muninn.sqlite.recovery-<id>` archive before candidate work. Unsupported, unreadable, changed or incomplete sources refuse; publication never restores an archive automatically. See the recovery contract below. |
-| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service quiescence before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
+| `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service pause before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
 | `muninn hook session-start\|prompt --provider claude\|codex\|cursor` | session and prompt hooks: payload on stdin, JSON on stdout (see the README) |
 | `muninn hook session-end\|pre-compact --provider claude\|codex\|cursor` | Capture bounded learning windows; Cursor imports the exact conversation before capture, with preCompact bounded by `message_count` and sessionEnd independent of that field. All hooks return compact provider-compatible JSON and exit 0. |
 
@@ -398,7 +398,7 @@ no-stop path and may initialize an empty store; they create no `tombstone.key`.
 Neither an absent nor an empty store establishes process-containment evidence.
 
 The Python APIs retain `run_erase` and caller-owned `erase`; the latter requires
-established quiescence as well as writer ownership for real erasure. Callers needing
+established pause as well as writer ownership for real erasure. Callers needing
 observable status use `run_erase_request(home, EraseRequest(...), status=...)`.
 The existing `wait_s=15.0` default is unchanged. For real erasure it is one
 coordination-acquisition budget, including owner and writer waits, **not** a limit
@@ -435,7 +435,7 @@ is unavailable, no new macOS repair baseline is recorded. A baseline created
 before this field existed cannot authorize a changed-device repair.
 
 Write-ahead tombstones survive interrupted erasure and are replayed before ordinary
-quiescent startup/erase entry. Pending intent refuses new foreground proposals and
+paused startup/erase entry. Pending intent refuses new foreground proposals and
 commits; an existing receipt still has receipt-first audit access until replay
 scrubs its governed explanation. The journal guard reads the whole log, with no
 constant byte, memory or duration bound. Preserve the current journal and durable
@@ -540,6 +540,10 @@ four fields:
 - **`detail`**: a short string whose meaning depends on the check (below); empty when
   there is nothing to add.
 
+When a repair baseline is present, the answer also has `recovery_guidance`. It
+gives the platform, the recovery state, the reason code, and safe next steps.
+Doctor does not stop a service or change recovery files.
+
 | check | level | passes when | `detail` |
 |---|---|---|---|
 | `data_dir_mode` | error | the data dir is mode 0700 | its mode, or `absent` |
@@ -583,10 +587,15 @@ Review diagnostics also use the same four-field check contract:
 | `review_abandoned` | warn | recorded abandoned attempts, or unfinished attempts from an older generation |
 | `review_coverage_gaps` | warn | the same eligible set as stats, including admitted historical replay, lacking success receipts with current matching provenance; untouched activation archive stays excluded |
 | `review_capture_gaps` | warn | indexed new records beyond the eligible cursor or eligible records whose prior admission provenance cannot be verified, even after refusal or log loss |
-| `review_quiescence` | info | witness presence only; always null because containment is unverified |
-| `review_repair` | warn | repair-baseline presence requires manual recovery assessment |
+| `review_pause` | info | witness presence only; always null because containment is unverified |
+| `review_repair` | warn | repair-baseline presence requires recovery guidance; do not remove its files |
 | `review_erasure_intent` | info | journal presence, with consistency unverified; presence does not prove an outstanding intent |
 | `review_windows_repair` | warn | Windows boot repair and durable repair-baseline retirement remain unqualified |
+
+If `recovery_guidance` is present, check the service status in this report. If
+Muninn is stopped, leave it stopped until recovery is complete. Keep the data
+folder and all repair files. Save the full report and contact your Muninn
+maintainer before restart.
 
 Doctor never initializes, resets or deletes supervisor/repair records. Missing
 DB, absent PID or free locks do not prove containment. Preserve

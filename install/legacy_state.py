@@ -16,7 +16,7 @@ from install import legacy_baseline as baseline
 from install.context import Ctx, StepFailedError
 from install.record import Record, install_record, save
 from muninn import file_sync, platform_io, platform_lock, review_boot_identity
-from muninn.review_quiescence_state import QuiescenceRefusedError
+from muninn.review_pause_state import PauseRefusedError
 
 OperationCheck = Callable[[], tuple[int, int]]
 
@@ -221,7 +221,7 @@ def boot(ctx: Ctx) -> str:
         raise StepFailedError("legacy_boot_unsupported")
     try:
         value = review_boot_identity.observe()
-    except QuiescenceRefusedError as exc:
+    except PauseRefusedError as exc:
         raise StepFailedError("legacy_boot_unavailable") from exc
     validate_boot(ctx, value)
     return value

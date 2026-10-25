@@ -16,7 +16,7 @@ from unittest import mock
 
 from muninn import cli, obs, store
 from tests.cli_support import ALWAYS, CliCase, fake_run
-from tests.review_quiescence_support import initialize
+from tests.review_pause_support import initialize
 from tests.store_support import public_read
 from tests.test_classify import codex_meta, function_call
 from tests.test_ingest import TID, fc_output, rollout

@@ -24,7 +24,7 @@ from muninn import (
     tombstone_key,
     tombstones,
 )
-from muninn import review_quiescence as q
+from muninn import review_pause as q
 from muninn import store_fingerprint as fingerprint
 from muninn.cli_core import Env, Out, Record, Result
 from muninn.review_models import ReviewPolicy
@@ -331,7 +331,7 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             "rebuild_foreign_keys",
             "quick_check_failed",
             "review_policy_required",
-            "quiescence_unverified",
+            "pause_unverified",
             "coordination_timeout",
             "owner_changed",
             "cutover_source_mismatch",

@@ -59,7 +59,7 @@ class InstallLearningHookTests(unittest.TestCase):
         rec = co.preflight(ctx, self.w.repo, sha)
         co.record(ctx, rec)
         self.assertNotIn("store", rec)
-        self.assertFalse(rec.get("quiesced", False))
+        self.assertFalse(rec.get("paused", False))
         return ctx, rec
 
     def assert_hooks(self) -> None:
