@@ -48,7 +48,13 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
             else "automatic_recovery_available"
         )
         self.assertEqual(guidance["status"], expected_status)
-        self.assertIn("muninn recover", " ".join(guidance["steps"]))
+        if sys.platform == "win32":
+            self.assertIn(
+                "contact your Muninn maintainer",
+                " ".join(guidance["steps"]),
+            )
+        else:
+            self.assertIn("muninn recover", " ".join(guidance["steps"]))
         self.assertNotIn(SECRET, json.dumps(before) + json.dumps(after))
         for name in paths:
             self.assertEqual((self.home / name).read_text(), SECRET)
