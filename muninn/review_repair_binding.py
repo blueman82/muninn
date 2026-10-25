@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,12 +24,16 @@ class RepairSnapshot:
 
 def legacy_volume_change_requires_confirmation(home: Path) -> bool:
     """Check whether an old Darwin record needs owner confirmation."""
+    if sys.platform != "darwin":
+        return False
     baseline_raw, _ = state.inspect(home, state.BASELINE)
+    baseline = state.parse(baseline_raw, state.Baseline)
+    if baseline is None or not baseline.boot.startswith("darwin:"):
+        return False
     witness_raw, witness_file = state.inspect(home, state.WITNESS)
     _, lock_file = state.inspect(home, state.LOCK)
-    baseline = state.parse(baseline_raw, state.Baseline)
     witness = state.parse(witness_raw, state.Witness)
-    if baseline is None or witness_file is None or lock_file is None:
+    if witness_file is None or lock_file is None:
         return False
     if not legacy_device_change_matches(
         baseline,
