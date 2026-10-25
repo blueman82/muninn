@@ -245,13 +245,14 @@ preparation-only `verify_legacy_resume` interface still stops at
 
 Every clone includes the default profile at
 `tools/default_codex_policy.json`. During an install that uses the current
-default home, Muninn applies this profile if the store has no learning policy
-and the host can run the Codex runner.
+default home, Muninn applies the profile when the store has no learning policy.
+It does this only when the host can run the Codex runner.
 
-The runner requires Apple silicon macOS. A signed Codex CLI must be on `PATH`.
-The canonical Codex sign-in directory must already exist. Muninn binds the
-policy to the host, data directory and executable. If a requirement is missing,
-learning stays pending. Hook trust is a separate provider step.
+The runner requires Apple silicon macOS. Keep a signed Codex CLI on `PATH`.
+Keep the canonical Codex sign-in directory in place before installation.
+Muninn binds the policy to the host, data directory and executable.
+If a requirement is missing, learning stays pending.
+Trust Codex hooks as a separate provider step.
 
 The default uses Codex CLI, model `gpt-6.1-sol` and low reasoning. Each request
 can use at most two rounds, 1 MiB of input, 32 KiB of output, 12,000 bytes of
@@ -703,21 +704,23 @@ using past claims. `K_` IDs go through `muninn know show`; `E_` IDs are not open
 refs. Missing relevant evidence must be reported as unknown. This instruction
 does not search or count as an automatic recall delivery.
 
-Verified SessionStart refreshes (`startup|resume|clear|compact` for Claude/Codex)
-render complete applicable supported notes and a compact guide index as untrusted
-data, bounded by 4,000 bytes for Claude and 2,800 bytes for Codex. This read-only
-startup context does not require an installed learning policy. No arbitrary
-eight-item limit or actor/quote heuristic remains. Unfitting items are omitted
-whole with a truthful notice. The usage text tells agents to verify current
+Verified SessionStart refreshes use `startup`, `resume`, `clear` and `compact`
+events in Claude and Codex. They render supported notes and a compact guide
+index as untrusted data. Claude receives up to 4,000 bytes. Codex receives up
+to 2,800 bytes. This read-only startup context does not require a learning
+policy. No arbitrary eight-item limit or actor/quote heuristic remains.
+Muninn omits items that do not fit and reports that omission.
+The usage text tells agents to verify current
 revisions and open cited originals; preview eligibility is not a truth guarantee.
 Claude/Codex `systemMessage` lists exactly displayed items with control characters
 replaced and distinguishes omitted knowledge from no eligible knowledge. The
 status's content is never logged. Prompt recall adds a human-facing line only when a 50-delivery review is due.
 
-End/precompact capture admission is separate from startup refresh and still requires
-an installed learning policy. Only a durable
-request is internally acknowledged; SQLite busy yields the provider-safe empty
-response and content-free `review_enqueue_busy`. Later recovery can capture later
+End/PreCompact capture admission is separate from startup refresh.
+It still requires an installed learning policy.
+Muninn acknowledges only a durable request.
+If SQLite is busy, the hook returns an empty response and logs
+`review_enqueue_busy` without content. Later recovery can capture later
 indexed content, not prove the exact missed event/cutoff. Cursor waits for the next
 native import or explicit full ingest. A recovery gap is not proof of coverage.
 Cursor startup uses its native `sessionStart` envelope (`additional_context`);
@@ -741,11 +744,11 @@ that validation passes. See `docs/adr/0007-recall-off-by-default.md`.
 
 Mode files must be 0600, otherwise `muninn doctor` fails `file_modes`. Their
 contents are ignored. The change takes effect on the next prompt; no restart is
-needed. These mode files control prompt recall only. They do not block
-SessionEnd/PreCompact capture or the authorized learning runner. Experimental
-learning still requires its explicit policy, host, capability and admission checks.
-With neither file present, automatic prompt previews remain on and learning can
-still proceed under those checks.
+needed. These mode files control prompt recall only. They do not block SessionEnd
+or PreCompact capture. They do not block an authorized learning runner.
+Experimental learning still requires its policy, host, capability and
+admission checks. If neither mode file exists, automatic prompt previews remain
+on. Learning can still proceed when its checks pass.
 
 ## Files in the data directory
 

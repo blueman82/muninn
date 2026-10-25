@@ -99,13 +99,13 @@ A learning policy tells Muninn when it may send captured conversation text to
 the learning runner. It also sets limits for each request. Every clone includes
 the default profile at `tools/default_codex_policy.json`.
 
-Muninn applies the profile during an install that uses the current default
-home, if the store has no learning policy. The host must meet the Codex runner
+Muninn applies the profile during an install that uses the current default home
+when the store has no learning policy. The host must meet the Codex runner
 requirements. It must use Apple silicon macOS. A signed Codex CLI must be on
-`PATH`. The Codex sign-in directory must already exist. Muninn records the
-host, data directory and executable in a private capability file. If a check
-fails, installation can finish, but learning stays pending. Trust Codex hooks
-separately when Codex prompts you at `/hooks`.
+`PATH`. The Codex sign-in directory must exist. Muninn records the host, data
+directory and executable in a private capability file. If a check fails,
+installation can finish, but learning stays pending. Trust Codex hooks when
+Codex prompts you at `/hooks`.
 
 The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt
 recall. They do not control learning from completed sessions.
@@ -123,17 +123,18 @@ enforced bounds. Set `approved_by` to the approver's name and `approved_at` to
 the approval time in UTC. Keep the runner, model, reasoning, attempt,
 concurrency and project-scope settings unchanged.
 
-On upgrade, Muninn applies the profile if the store has no learning policy. It
-can refresh a repository-default policy only if learning admission is enabled
-and the store has no learning requests or knowledge entries. Learning
-admission means permission to accept learning requests. The new profile must
-have a later approval time. Muninn keeps the host and runner bindings, prompt,
-budget identity and admission state. The new profile can lower the input,
-round, output, context and deadline limits. It can raise the input limit only
-for the approved v1 to v2 change, up to 1 MiB. Custom policies, used defaults
-and disabled admission stay unchanged. A changed `--review-policy PATH`
-cannot replace a configured policy, except for the documented v1 to v2 change
-when its conditions hold. Do not edit the store by hand. See the
+On upgrade, Muninn applies the profile if the store has no learning policy.
+It refreshes a repository default only when learning admission is enabled.
+The store must have no learning requests or knowledge entries.
+Learning admission means permission to accept learning requests.
+The new profile must have a later approval time.
+Muninn keeps the host and runner bindings, prompt, budget identity and
+admission state. It can lower input, round, output, context and deadline limits.
+It can raise the input limit only during the approved v1-to-v2 change, up to
+1 MiB. Custom policies, used defaults and disabled admission stay unchanged.
+A changed `--review-policy PATH` cannot replace a configured policy.
+The exception is the approved v1-to-v2 change when its conditions hold.
+Do not edit the store by hand. See the
 [policy reference](REFERENCE.md#default-learning-policy).
 
 ## Uninstall
