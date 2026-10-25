@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import unittest
+from contextlib import closing
 from unittest import mock
 
 from muninn import cli_recovery, review_pause, store, tombstones
@@ -117,12 +118,12 @@ class CliRecoveryTests(CliCase):
             code, result, _ = self.muninn("recover")
         self.assertEqual(code, 0, result)
         self.assertEqual(result["recovery"]["status"], "recovered")
-        with store.connect_ro(store.db_path(self.home)) as conn:
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
             self.assertEqual(
                 conn.execute("SELECT count(*) FROM tombstone").fetchone()[0],
                 1,
             )
-        with store.connect_ro(store.db_path(self.home)) as conn:
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
             tombstones.require_current_tombstones(conn, self.home)
 
     def test_windows_keeps_pending_erasure_unchanged(self) -> None:
@@ -134,7 +135,7 @@ class CliRecoveryTests(CliCase):
             code, result, _ = self.muninn("recover")
         self.assertEqual(code, 2)
         self.assertEqual(result["reason"], "windows_repair_unqualified")
-        with store.connect_ro(store.db_path(self.home)) as conn:
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
             self.assertEqual(
                 conn.execute("SELECT count(*) FROM tombstone").fetchone()[0],
                 0,
