@@ -116,7 +116,7 @@ def prepare_release(ctx: Ctx, rec: Record) -> None:
     python = prepare_runtime(ctx, dest)
     rec["python"]["path"] = str(python)
     rec["runtime_prepared"] = True
-    if ctx.review_policy is not None:
+    if ctx.review_policy or rec.get("policy_input", {}).get("raw"):
         rec["prepared_runtime"] = baseline.tree_state(dest, links=True)
 
 

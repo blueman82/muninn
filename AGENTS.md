@@ -66,10 +66,20 @@ Instructions for coding agents working in this repository. Any parent-directory
 
 ## Check
 
-    python3.13 -m tools.check --full       # the whole gate: standards, ruff, black,
-                                           # pyright strict, shellcheck, hooks, tests
-    python3.13 -m tools.run_tests          # the suite alone, at most 4 workers
-    python3.13 -m unittest discover -s tests -t .   # the suite, serial
+    .venv/bin/python3.13 -m tools.check --full
+    .venv/bin/python3.13 -m tools.run_tests
+    .venv/bin/python3.13 -m tools.run_tests -j 4
+    .venv/bin/python3.13 -m unittest tests.test_module
+    .venv/bin/python3.13 -m unittest discover -s tests -t .
+
+Use this checkout's `.venv` Python for the commands above. Codex's Stop hook
+checks the current checkout's `.venv` first. If a linked worktree has no
+complete `.venv`, the hook checks the main checkout's `.venv`.
+If neither checkout has a complete `.venv`, it reports a launch failure.
+
+The full gate and test suite use the pinned runtime packages. The runner starts
+one process per module. It uses at most four workers by default. The `-j N`
+option sets the worker limit. Run one module by name to narrow a failure.
 
 Set up once, installing the hashed runtime separately from developer tools:
 

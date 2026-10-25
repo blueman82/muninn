@@ -18,3 +18,4 @@ identify acceptance; exceptions and deferred decisions are marked explicitly.
 | [0011](0011-one-way-schema-migration-with-snapshot.md) | Snapshot the store before a one-way schema upgrade |
 | [0012](0012-keyed-content-tombstones.md) | Use keyed HMAC content tombstones with a durable secret; separate design approval not recorded |
 | [0013](0013-cursor-imports.md) | Import Cursor history during full ingest |
+| [0015](0015-default-learning-policy.md) | Install the repository learning policy by default |
