@@ -57,7 +57,13 @@ class InstallerRecoveryTest(unittest.TestCase):
         runner = DoctorRunner()
         messages: list[str] = []
         with tempfile.TemporaryDirectory() as root:
-            ctx = Ctx(Path(root), runner, "test", say=messages.append)
+            ctx = Ctx(
+                Path(root),
+                runner,
+                "test",
+                platform="linux",
+                say=messages.append,
+            )
             rec = Record()
             with mock.patch("install.verify.restart") as restart:
                 result = _doctor(ctx, rec)

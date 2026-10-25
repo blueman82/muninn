@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import unittest
 from unittest import mock
 
 from muninn import cli_recovery, review_pause
@@ -28,6 +30,10 @@ class CliRecoveryTests(CliCase):
         fd, _ = state.begin_owner(self.home)
         os.close(fd)
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Linux boot and file-identity repair cannot be emulated on Windows.",
+    )
     def test_recover_waits_for_reboot_then_repairs_verified_linux_state(
         self,
     ) -> None:
@@ -107,6 +113,10 @@ class CliRecoveryTests(CliCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(out["recovery"]["status"], "no_recovery_needed")
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Linux lock identity cannot be emulated on Windows.",
+    )
     def test_complete_witness_retires_saved_baseline_as_recovery(self) -> None:
         """Report recovery when retry only needs to retire its baseline."""
         identity = state.inspect(self.home, state.LOCK)[1]
@@ -139,6 +149,10 @@ class CliRecoveryTests(CliCase):
         self.assertEqual(result["recovery"]["repair_phase"], "complete")
         self.assertFalse((self.home / state.BASELINE).exists())
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Linux managed-writer signaling cannot be emulated on Windows.",
+    )
     def test_recover_reports_when_it_stops_a_managed_writer(self) -> None:
         """Tell the caller when recovery stopped a live managed writer."""
         child = Child(

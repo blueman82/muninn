@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from unittest import mock
 
 from muninn import obs
@@ -41,7 +42,12 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
         guidance = after.get("recovery_guidance")
         self.assertIsNotNone(guidance)
         assert guidance is not None
-        self.assertEqual(guidance["status"], "automatic_recovery_available")
+        expected_status = (
+            "manual_recovery_required"
+            if sys.platform == "win32"
+            else "automatic_recovery_available"
+        )
+        self.assertEqual(guidance["status"], expected_status)
         self.assertIn("muninn recover", " ".join(guidance["steps"]))
         self.assertNotIn(SECRET, json.dumps(before) + json.dumps(after))
         for name in paths:
