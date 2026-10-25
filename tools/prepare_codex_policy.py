@@ -27,11 +27,12 @@ from muninn.review_rounds import round_schema
 DEFAULT_POLICY_FILE = Path(__file__).with_name("default_codex_policy.json")
 
 
-def _profile() -> dict[str, object]:
+def _profile(raw: bytes | None = None) -> dict[str, object]:
     """Read the strict repository policy profile used for first installs."""
     try:
+        source = DEFAULT_POLICY_FILE.read_bytes() if raw is None else raw
         value = json.loads(
-            DEFAULT_POLICY_FILE.read_bytes().decode("utf-8"),
+            source.decode("utf-8"),
             object_pairs_hook=unique_object,
             parse_constant=reject_constant,
         )
@@ -53,13 +54,13 @@ def _profile() -> dict[str, object]:
     return profile
 
 
-def profile_digest() -> str:
+def profile_digest(raw: bytes | None = None) -> str:
     """Return the content digest frozen into a default install record."""
     try:
-        raw = DEFAULT_POLICY_FILE.read_bytes()
+        source = DEFAULT_POLICY_FILE.read_bytes() if raw is None else raw
     except OSError:
         raise ValueError("default_review_policy_invalid") from None
-    return hashlib.sha256(raw).hexdigest()
+    return hashlib.sha256(source).hexdigest()
 
 
 def _revision_profile(profile: dict[str, object], revision: int) -> tuple[
@@ -127,9 +128,13 @@ def _approval(profile: dict[str, object]) -> tuple[str, float]:
     return approver, stamp.timestamp()
 
 
-def default_policy(home: Path, executable: Path) -> tuple[ReviewPolicy, bytes]:
+def default_policy(
+    home: Path,
+    executable: Path,
+    profile_raw: bytes | None = None,
+) -> tuple[ReviewPolicy, bytes]:
     """Build the host-bound policy selected for an ordinary first install."""
-    profile = _profile()
+    profile = _profile(profile_raw)
     revision = profile.get("default_revision")
     if type(revision) is not int or revision not in (1, 2):
         raise ValueError("default_review_policy_invalid")
@@ -143,6 +148,7 @@ def default_policy(home: Path, executable: Path) -> tuple[ReviewPolicy, bytes]:
         approved_at,
         revision=revision,
         repository_default=True,
+        profile_raw=profile_raw,
     )
 
 
@@ -171,12 +177,13 @@ def policy(
     *,
     revision: int = 1,
     repository_default: bool = False,
+    profile_raw: bytes | None = None,
 ) -> tuple[ReviewPolicy, bytes]:
     """Construct recorded ongoing production approval and a bounded prompt."""
     if revision not in (1, 2):
         raise ValueError("policy_revision")
     revision_data, runner, limits, budget = _revision_profile(
-        _profile(), revision
+        _profile(profile_raw), revision
     )
     prompt = PromptArtifact(
         schema_version=1,
@@ -265,7 +272,7 @@ def prepare(
     approved_at: float,
     *,
     revision: int = 1,
-    repository_default: bool = False,
+    default_profile: bytes | None = None,
 ) -> Path:
     """Write approved artifacts without activating production.
 
@@ -276,7 +283,7 @@ def prepare(
         approved_by: Actual recorded approver identity.
         approved_at: UTC timestamp of the recorded approval.
         revision: Exact ongoing policy revision to prepare.
-        repository_default: Mark provenance when Muninn selected its profile.
+        default_profile: Frozen repository profile, when Muninn selected it.
 
     Returns:
         The private policy file to supply to the installer.
@@ -285,6 +292,7 @@ def prepare(
         ValueError: If the selection or recorded approval is invalid.
         OSError: If private artifacts cannot be durably published.
     """
+    repository_default = default_profile is not None
     value, prompt = policy(
         home,
         executable,
@@ -292,6 +300,7 @@ def prepare(
         approved_at,
         revision=revision,
         repository_default=repository_default,
+        profile_raw=default_profile,
     )
     if approved_at > time.time():
         raise ValueError("approval_time_invalid")

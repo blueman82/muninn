@@ -10,18 +10,99 @@ import unittest
 from contextlib import closing
 from unittest import mock
 
-from install import installer
+from install import installer, preflight
 from install.context import StepFailedError
 from muninn import store
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
-from tests.installer_support import World
+from tests.installer_support import World, git
 from tests.test_review_shared_models import policy_data
 from tools.prepare_codex_policy import policy
 
 
 class DefaultLearningPolicyTests(unittest.TestCase):
     """Keep repository-default selection and refresh within their bounds."""
+
+    def commit_profile(
+        self, world: World, profile: dict[str, object], message: str
+    ) -> str:
+        """Commit a default profile and return its release SHA.
+
+        Args:
+            world: Temporary installer repository.
+            profile: JSON policy profile to commit.
+            message: Commit message for the profile revision.
+
+        Returns:
+            The selected repository commit SHA.
+        """
+        path = world.repo / "tools/default_codex_policy.json"
+        path.write_text(json.dumps(profile))
+        git(world.repo, "add", "tools/default_codex_policy.json")
+        git(world.repo, "commit", "-qm", message)
+        return git(world.repo, "rev-parse", "HEAD").decode().strip()
+
+    def test_default_policy_keeps_stable_codex_path(self) -> None:
+        """Store PATH's stable link and freeze its verified target."""
+        world = World(self)
+        ctx = world.ctx(fresh=True, default_home=True)
+        target = world.home / "codex-versioned"
+        target.write_text("signed Codex fixture")
+        target.chmod(0o700)
+        stable = world.home / "codex"
+        stable.symlink_to(target)
+        module = importlib.import_module("install.review_policy_default")
+        policy_module = importlib.import_module("tools.prepare_codex_policy")
+        profile_raw = policy_module.DEFAULT_POLICY_FILE.read_bytes()
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+            mock.patch("shutil.which", return_value=str(stable)),
+            mock.patch(
+                "muninn.review_codex_launch.verify_codex_executable",
+                return_value=(target, "1" * 64),
+            ),
+        ):
+            result = module.select(ctx, profile_raw)
+        assert result is not None
+        selected, source = result
+        self.assertEqual(selected.runner.executable, str(stable))
+        self.assertEqual(source["default_executable"], str(stable))
+        self.assertEqual(
+            source["default_executable_target"], str(target.resolve())
+        )
+
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Default Codex capability files require POSIX private-file checks.",
+    )
+    def test_preflight_uses_profile_from_selected_release(self) -> None:
+        """Freeze the profile committed at the selected release SHA."""
+        world = World(self)
+        ctx = world.ctx(fresh=True, default_home=True)
+        executable = world.home / "codex"
+        executable.write_text("signed Codex fixture")
+        executable.chmod(0o700)
+        policy_module = importlib.import_module("tools.prepare_codex_policy")
+        profile = json.loads(policy_module.DEFAULT_POLICY_FILE.read_text())
+        profile["limits"]["max_rounds"] = 1
+        selected_sha = self.commit_profile(
+            world, profile, "selected policy profile"
+        )
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+            mock.patch("shutil.which", return_value=str(executable)),
+            mock.patch(
+                "muninn.review_codex_launch.verify_codex_executable",
+                return_value=(executable, "1" * 64),
+            ),
+        ):
+            record = preflight.preflight(ctx, world.repo, selected_sha)
+        source = record["policy_input"]
+        self.assertEqual(source["default_profile"], json.dumps(profile))
+        selected = ReviewPolicy.model_validate_json(source["raw"])
+        self.assertEqual(selected.max_rounds, 1)
 
     @unittest.skipIf(
         sys.platform == "win32",
@@ -63,7 +144,14 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             mock.patch("platform.machine", return_value="x86_64"),
         ):
             module = importlib.import_module("install.review_policy")
-            captured = module.capture(ctx, world.sha)
+            policy_module = importlib.import_module(
+                "tools.prepare_codex_policy"
+            )
+            captured = module.capture(
+                ctx,
+                world.sha,
+                policy_module.DEFAULT_POLICY_FILE.read_bytes(),
+            )
         self.assertEqual(captured["status"], "activation_pending")
         self.assertNotIn("raw", captured)
 
@@ -166,10 +254,8 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         module = importlib.import_module("tools.prepare_codex_policy")
         profile = json.loads(module.DEFAULT_POLICY_FILE.read_text())
         profile["default_revision"] = 1
-        path = world.home / "default-policy.json"
-        path.write_text(json.dumps(profile))
+        first_sha = self.commit_profile(world, profile, "select revision one")
         with (
-            mock.patch.object(module, "DEFAULT_POLICY_FILE", path),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),
             mock.patch("shutil.which", return_value=str(executable)),
@@ -178,14 +264,16 @@ class DefaultLearningPolicyTests(unittest.TestCase):
                 return_value=(executable, "1" * 64),
             ),
         ):
-            installer.install(ctx, world.repo, world.sha)
+            installer.install(ctx, world.repo, first_sha)
             profile["approved_at"] = "2026-10-24T00:01:00Z"
             profile["default_revision"] = 2
-            path.write_text(json.dumps(profile))
+            second_sha = self.commit_profile(
+                world, profile, "select revision two"
+            )
             later = dataclasses.replace(
                 ctx, fresh=False, upgrade=True, ts="later"
             )
-            installer.install(later, world.repo, world.sha)
+            installer.install(later, world.repo, second_sha)
         with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
             row = conn.execute(
                 "SELECT admission,policy_json FROM review_control"
@@ -209,10 +297,7 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         executable.chmod(0o700)
         module = importlib.import_module("tools.prepare_codex_policy")
         profile = json.loads(module.DEFAULT_POLICY_FILE.read_text())
-        path = world.home / "default-policy.json"
-        path.write_text(json.dumps(profile))
         with (
-            mock.patch.object(module, "DEFAULT_POLICY_FILE", path),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),
             mock.patch("shutil.which", return_value=str(executable)),
@@ -230,11 +315,13 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             old_policy = old_policy_file.read_bytes()
             profile["approved_at"] = "2026-10-24T00:01:00Z"
             profile["limits"]["max_rounds"] = 1
-            path.write_text(json.dumps(profile))
+            second_sha = self.commit_profile(
+                world, profile, "lower policy round limit"
+            )
             later = dataclasses.replace(
                 ctx, fresh=False, upgrade=True, ts="later"
             )
-            installer.install(later, world.repo, world.sha)
+            installer.install(later, world.repo, second_sha)
         with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
             row = conn.execute(
                 "SELECT admission,policy_json FROM review_control"

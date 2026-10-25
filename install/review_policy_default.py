@@ -20,10 +20,13 @@ from muninn.review_models import ReviewPolicy
 from tools import prepare_codex_policy
 
 
-def select(ctx: Ctx) -> tuple[ReviewPolicy, Record] | None:
+def select(
+    ctx: Ctx, profile_raw: bytes | None
+) -> tuple[ReviewPolicy, Record] | None:
     """Freeze a default policy only for a supported, unconfigured install."""
     if (
-        not ctx.default_home
+        profile_raw is None
+        or not ctx.default_home
         or ctx.platform != "darwin"
         or platform.system() != "Darwin"
         or platform.machine() != "arm64"
@@ -33,16 +36,19 @@ def select(ctx: Ctx) -> tuple[ReviewPolicy, Record] | None:
     found = shutil.which("codex")
     if found is None or not ctx.codex_home.is_dir():
         return None
+    stable_executable = Path(found)
     auth_home = ctx.codex_home
     if auth_home.is_symlink() or auth_home.resolve() != auth_home:
         return None
     try:
-        executable, executable_digest = (
-            review_codex_launch.verify_codex_executable(Path(found))
+        executable_target, executable_digest = (
+            review_codex_launch.verify_codex_executable(stable_executable)
         )
-        selected, _ = prepare_codex_policy.default_policy(ctx.data, executable)
+        selected, _ = prepare_codex_policy.default_policy(
+            ctx.data, stable_executable, profile_raw
+        )
         auth_identity = _directory_identity(auth_home)
-        profile_digest = prepare_codex_policy.profile_digest()
+        profile_digest = prepare_codex_policy.profile_digest(profile_raw)
     except (OSError, ValueError):
         return None
     raw = canonical_json(selected)
@@ -52,10 +58,12 @@ def select(ctx: Ctx) -> tuple[ReviewPolicy, Record] | None:
         "raw_digest": hashlib.sha256(raw.encode()).hexdigest(),
         "canonical": raw,
         "digest": hashlib.sha256(raw.encode()).hexdigest(),
-        "default_executable": str(executable),
+        "default_executable": str(stable_executable),
+        "default_executable_target": str(executable_target),
         "default_executable_digest": executable_digest,
         "default_auth_home": str(auth_home),
         "default_auth_identity": auth_identity,
+        "default_profile": profile_raw.decode("utf-8"),
         "default_profile_digest": profile_digest,
     }
     return selected, frozen
@@ -69,18 +77,27 @@ def prepare(ctx: Ctx, rec: Record, policy: ReviewPolicy) -> None:
     source = cast(dict[str, object], raw_source)
     if source.get("policy_origin") != "repository_default":
         return
+    profile_value = source.get("default_profile")
+    if not isinstance(profile_value, str):
+        raise StepFailedError("review_policy_default_changed")
+    profile_raw = profile_value.encode("utf-8")
     if source.get("default_profile_digest") != (
-        prepare_codex_policy.profile_digest()
+        prepare_codex_policy.profile_digest(profile_raw)
     ):
         raise StepFailedError("review_policy_default_changed")
     executable = Path(policy.runner.executable)
+    stable_executable = Path(cast(str, source.get("default_executable")))
+    executable_target = Path(
+        cast(str, source.get("default_executable_target"))
+    )
     auth_home = Path(cast(str, source.get("default_auth_home")))
     try:
         current, digest = review_codex_launch.verify_codex_executable(
             executable
         )
         if (
-            current != executable
+            executable != stable_executable
+            or current != executable_target
             or digest != source.get("default_executable_digest")
             or _directory_identity(auth_home)
             != source.get("default_auth_identity")
@@ -98,7 +115,7 @@ def prepare(ctx: Ctx, rec: Record, policy: ReviewPolicy) -> None:
                 if policy.policy_id == "muninn-codex-ongoing-production-v2"
                 else 1
             ),
-            repository_default=True,
+            default_profile=profile_raw,
         )
         if path.read_text(encoding="utf-8") != source.get("raw"):
             raise ValueError("review_policy_default_changed")

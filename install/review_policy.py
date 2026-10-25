@@ -62,7 +62,7 @@ def _home(path: Path) -> list[int]:
     return [info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode)]
 
 
-def capture(ctx: Ctx, sha: str) -> Record:
+def capture(ctx: Ctx, sha: str, profile_raw: bytes | None = None) -> Record:
     """Capture raw and canonical input before any installation disruption."""
     result: Record = {
         "status": "activation_pending",
@@ -86,7 +86,7 @@ def capture(ctx: Ctx, sha: str) -> Record:
             except ValueError:
                 raise StepFailedError("review_policy_unsupported") from None
     else:
-        default = default_policy.select(ctx)
+        default = default_policy.select(ctx, profile_raw)
         if default is not None:
             selected, source = default
             result.update(source)

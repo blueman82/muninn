@@ -33,6 +33,7 @@ PINNED = (
     "launchd/com.muninn.plist",
     "muninn/store_schema.py",
     "requirements-runtime.lock",
+    "tools/default_codex_policy.json",
 )
 # Real Codex 0.160.0 `hooks/list` currentHash values for the shipped
 # hooks.json (literal @HOME@ commands), from an isolated CODEX_HOME probe
