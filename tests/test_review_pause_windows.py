@@ -12,6 +12,7 @@ from typing import cast
 from unittest import mock
 
 from muninn import review_pause_state as state
+from muninn import review_repair_binding as repair_binding
 
 
 class WindowsMetadataTests(unittest.TestCase):
@@ -89,3 +90,85 @@ class WindowsMetadataTests(unittest.TestCase):
                     self.assertRaisesRegex(ValueError, "pause_unverified"),
                 ):
                     self.inspect(changed=changed, field=field)
+
+    def test_legacy_confirmation_skips_non_darwin_pause_records(self) -> None:
+        """Do not read protected lock records for a Darwin-only check."""
+        baseline = state.Baseline(
+            version=1,
+            lock_identity=(1, 2),
+            boot="linux:12345678-1234-4234-8234-123456789abc",
+            predecessor=None,
+        )
+        for platform, raw, calls in (
+            ("win32", b"", 0),
+            ("darwin", b"", 1),
+            ("darwin", baseline.model_dump_json().encode("utf-8"), 1),
+        ):
+            with (
+                self.subTest(platform=platform, raw=raw),
+                tempfile.TemporaryDirectory() as tmp,
+                mock.patch.object(repair_binding.sys, "platform", platform),
+                mock.patch.object(
+                    state,
+                    "inspect",
+                    return_value=(raw, None),
+                ) as inspect,
+                mock.patch(
+                    "muninn.review_repair_binding.review_boot_identity.observe",
+                    side_effect=AssertionError("boot identity was read"),
+                ),
+            ):
+                self.assertFalse(
+                    repair_binding.legacy_volume_change_requires_confirmation(
+                        Path(tmp)
+                    )
+                )
+            self.assertEqual(inspect.call_count, calls)
+            if calls:
+                inspect.assert_called_with(Path(tmp), state.BASELINE)
+
+    def test_matching_darwin_baseline_requires_confirmation(self) -> None:
+        """Keep legacy confirmation active when Darwin evidence matches."""
+        predecessor = state.Fingerprint(identity=(1, 3), sha256="a" * 64)
+        baseline = state.Baseline(
+            version=1,
+            lock_identity=(1, 2),
+            boot="darwin:12345678-1234-4234-8234-123456789abc",
+            predecessor=predecessor,
+        )
+        witness = state.Witness(
+            version=1,
+            lock_identity=(3, 2),
+            owner=state.Owner(pid=1, generation="b" * 32),
+            state="active",
+        )
+        witness_file = state.Fingerprint(identity=(3, 3), sha256="a" * 64)
+        lock_file = state.Fingerprint(identity=(3, 2), sha256="d" * 64)
+        with (
+            mock.patch.object(repair_binding.sys, "platform", "darwin"),
+            mock.patch.object(
+                state,
+                "inspect",
+                side_effect=[
+                    (baseline.model_dump_json().encode("utf-8"), None),
+                    (witness.model_dump_json().encode("utf-8"), witness_file),
+                    (b"", lock_file),
+                ],
+            ),
+            mock.patch.object(
+                repair_binding.review_boot_identity,
+                "observe",
+                return_value="darwin:87654321-1234-4234-8234-123456789abc",
+            ),
+            mock.patch.object(
+                repair_binding.review_volume_identity,
+                "observe",
+                return_value="87654321-1234-4234-8234-123456789abc",
+            ) as observe_volume,
+        ):
+            self.assertTrue(
+                repair_binding.legacy_volume_change_requires_confirmation(
+                    Path()
+                )
+            )
+        observe_volume.assert_called_once_with(Path())
