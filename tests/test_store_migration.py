@@ -8,7 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from install import cutover
+from install import cutover, recovery_guidance
 from install.context import StepFailedError
 from install.record import Record
 from muninn import store, store_fingerprint
@@ -72,6 +72,19 @@ class StoreMigrationTests(unittest.TestCase):
                 old.execute("SELECT text FROM knowledge").fetchone()[0],
                 "old ledger",
             )
+
+    def test_installer_pause_check_keeps_historical_migration_route(
+        self,
+    ) -> None:
+        """Let v3 stores reach their dedicated migration before recovery."""
+        with mock.patch.object(
+            recovery_guidance.cli_recovery,
+            "recover",
+            side_effect=AssertionError("current-format recovery called"),
+        ):
+            recovery_guidance.recover_pause(self.ctx, self.record)
+        with cutover.prepared_store(self.ctx, self.record) as path:
+            self.assertEqual(path, self.path)
 
     def test_unknown_legacy_table_leaves_original_untouched(self) -> None:
         with closing(sqlite3.connect(self.path)) as conn:

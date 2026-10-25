@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import shlex
+import sqlite3
 from argparse import Namespace
+from contextlib import closing
 from typing import NoReturn, cast
 
+from install import snapshot_io
 from install.context import Ctx, StepFailedError, dry
 from install.record import Record
 from install.steps_release import installed_env
-from muninn import cli_recovery
+from muninn import cli_recovery, store
 
 
 def health_report_command(ctx: Ctx) -> str:
@@ -53,6 +56,8 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
         StepFailedError: If repair fails or needs a person.
     """
     try:
+        if _historical_store(ctx):
+            return
         code, result = cli_recovery.recover(
             Namespace(), installed_env(ctx), ctx.data, {}
         )
@@ -89,6 +94,20 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
         action if isinstance(action, str) else "",
         why if isinstance(why, str) else "",
     )
+
+
+def _historical_store(ctx: Ctx) -> bool:
+    """Leave schema-v3 stores for the installer's migration step."""
+    path = store.db_path(ctx.data)
+    if not path.is_file():
+        return False
+    with (
+        snapshot_io.validated(path) as check,
+        closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn,
+    ):
+        check()
+        # Current-format recovery cannot open v3 before its cutover.
+        return conn.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def _fail_pause_recovery(
