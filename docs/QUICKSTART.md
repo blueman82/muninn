@@ -95,43 +95,46 @@ live native qualification remain separate prerequisites. See [REFERENCE.md](REFE
 
 ### Default learning policy
 
-The repository carries a default learning policy in
-`tools/default_codex_policy.json`. An install using the current default home
-applies it when the store has no learning policy and the host can run the native
-Codex runner. `recall.off`, `recall.advisory` and `recall.on` select prompt
-recall behavior and do not control learning.
+A learning policy tells Muninn when it may send captured conversation text to
+the learning runner. It also sets limits for each request. Every clone includes
+the default profile at `tools/default_codex_policy.json`.
 
-The default runner requires Apple silicon macOS, a signed Codex CLI on `PATH`,
-and an existing canonical Codex sign-in directory. Muninn binds its private
-capability to that host, data directory and executable. If a requirement is
-missing, the install finishes with learning pending. Trust Codex hooks in
-`/hooks` when prompted; hook trust and the local learning policy are separate.
+Muninn applies the profile during an install that uses the current default
+home, if the store has no learning policy. The host must meet the Codex runner
+requirements. It must use Apple silicon macOS. A signed Codex CLI must be on
+`PATH`. The Codex sign-in directory must already exist. Muninn records the
+host, data directory and executable in a private capability file. If a check
+fails, installation can finish, but learning stays pending. Trust Codex hooks
+separately when Codex prompts you at `/hooks`.
 
-The default allows up to two rounds per request, 1 MiB of input, 32 KiB of
-output, 12,000 bytes of context and 120 seconds. It allows one attempt at a time
-and project scope only. It has no aggregate call limit, cost limit or expiry.
-See the [policy flow](learning-policy-flow.html) for the install and upgrade
-paths.
+The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt
+recall. They do not control learning from completed sessions.
 
-To customize a new install, edit and commit `tools/default_codex_policy.json`
-in your private clone before you activate the policy. The installer requires a
-clean checkout. You can lower the byte, context, round and deadline limits
-within the enforced safety bounds. Record the actual approver and UTC approval
-time in `approved_by` and `approved_at`. Keep the Codex runner, model,
-reasoning, single-attempt and project-scope limits.
+Each request can use at most two rounds, 1 MiB of input, 32 KiB of output,
+12,000 bytes of context and 120 seconds. The policy allows one attempt and one
+concurrent request. It allows project scope only. These limits apply to each
+request. There is no total call or cost limit. The policy does not expire. See the
+[policy flow](learning-policy-flow.html).
 
-Upgrades fill an unconfigured store. They also refresh a repository-default
-policy only when learning admission is enabled and there are no learning
-requests or knowledge entries. Refresh preserves the host and runner bindings,
-prompt, budget identity and admission; it requires a newer profile approval.
-Input may decrease, or increase only during the v1 to v2 transition up to 1 MiB;
-round, output, context and deadline limits may only decrease. Custom policies,
-used defaults and disabled admission remain unchanged. A changed
-`--review-policy PATH` is refused for an already configured store, except for
-the separately documented v1 to v2 input-size transition when its preconditions
-hold. Never edit the store by hand. See
-[the policy reference](REFERENCE.md#default-learning-policy) for the exact
-bounds and limitations.
+To customize the profile, edit and commit `tools/default_codex_policy.json` in
+your private clone before you install. The installer requires a clean checkout.
+You can lower the input, output, context, round and deadline limits within the
+enforced bounds. Set `approved_by` to the approver's name and `approved_at` to
+the approval time in UTC. Keep the runner, model, reasoning, attempt,
+concurrency and project-scope settings unchanged.
+
+On upgrade, Muninn applies the profile if the store has no learning policy. It
+can refresh a repository-default policy only if learning admission is enabled
+and the store has no learning requests or knowledge entries. Learning
+admission means permission to accept learning requests. The new profile must
+have a later approval time. Muninn keeps the host and runner bindings, prompt,
+budget identity and admission state. The new profile can lower the input,
+round, output, context and deadline limits. It can raise the input limit only
+for the approved v1 to v2 change, up to 1 MiB. Custom policies, used defaults
+and disabled admission stay unchanged. A changed `--review-policy PATH`
+cannot replace a configured policy, except for the documented v1 to v2 change
+when its conditions hold. Do not edit the store by hand. See the
+[policy reference](REFERENCE.md#default-learning-policy).
 
 ## Uninstall
 

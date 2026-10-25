@@ -8,38 +8,43 @@ Date: 2026-10-25
 
 ## Context
 
-The installer previously completed without a review policy unless the owner
-passed `--review-policy PATH`. SessionEnd and PreCompact then could not admit a
-learning request. The policy also contains host-specific Codex capability data,
-so the repository cannot ship one ready-to-run local policy file.
+Before this change, the installer needed `--review-policy PATH` to set a
+learning policy. Without one, SessionEnd and PreCompact could not accept
+learning requests. The policy also needs host-specific Codex capability data.
+For that reason, the repository cannot ship one ready-to-run local policy.
 
 ## Decision
 
-The repository ships an editable default profile in
-`tools/default_codex_policy.json`. An install using the current default home,
-or an upgrade of its unconfigured store, selects that profile when the host
-meets the native Codex runner requirements. Muninn freezes the selected policy
-and local paths before
-installation changes. It creates private host-bound capability files only
-after the store and provider configuration are ready, then commits policy,
+The repository ships an editable default profile at
+`tools/default_codex_policy.json`. An install that uses the current default
+home selects this profile when the store has no policy and the host meets the
+Codex runner requirements. An upgrade also selects it for a store with no
+policy.
+
+Before installation changes begin, Muninn freezes the selected policy and
+local paths. It creates private capability files for the host after it has
+prepared the store and provider configuration. It then commits the policy,
 admission and source boundaries together.
 
-The default runner is limited to Apple silicon macOS, a signed Codex CLI on
-`PATH`, and an existing canonical Codex sign-in directory. If those checks fail,
-the store remains unconfigured. The default uses project scope, one attempt,
-one concurrent request, two rounds, bounded input/output/context and a deadline.
-The ongoing budget has no aggregate call limit, cost limit or expiry.
+The default runner requires Apple silicon macOS, a signed Codex CLI on `PATH`,
+and an existing canonical Codex sign-in directory. If a check fails, the store
+stays unconfigured. The default allows project scope, one attempt, one
+concurrent request and at most two rounds. It also sets input, output, context
+and time limits for each request. It has no total call limit, cost limit or
+expiry.
 
-Upgrades preserve custom policies and disabled admission. A policy tagged as
-the repository default can refresh only while admission is enabled and both
-learning-request and knowledge tables are empty. The new profile must record a
-later approval time. Refresh preserves host and runner bindings, prompt,
-budget identity, admission and activation time. It can reduce input, rounds,
-output, context and deadline; input may increase only from v1 to v2, up to
-1 MiB. It cannot change attempts, concurrency, hook wait, scope, model,
-reasoning or budget identity. Default provenance is stored with the policy so
-custom policies are never treated as refreshable defaults. Recovery uses the
-exact profile frozen before installation changes begin.
+Upgrades keep custom policies and disabled admission unchanged. Muninn can
+refresh a policy marked as the repository default only when admission is
+enabled and the learning-request and knowledge tables are empty. The new
+profile must have a later approval time.
+
+Refresh keeps the host and runner bindings, prompt, budget identity, admission
+and activation time. It can lower input, round, output, context and deadline
+limits. Input can increase only from v1 to v2, and cannot exceed 1 MiB. Refresh
+cannot change attempts, concurrency, hook wait, scope, model, reasoning or
+budget identity. Muninn stores the policy's source so it does not refresh a
+custom policy as a repository default. Recovery uses the exact profile frozen
+before installation changes begin.
 
 ## Consequences
 
@@ -49,10 +54,11 @@ exact profile frozen before installation changes begin.
   They do not gate SessionEnd or PreCompact learning.
 - Hook trust remains a separate provider permission.
 - Users can change the repository profile before first activation, within the
-  model's fixed safety bounds. The reference docs describe supported fields and
-  when an unused repository default can refresh.
+  fixed safety bounds. The reference docs list the allowed fields and explain
+  when Muninn can refresh an unused repository default.
 - Existing custom settings and disabled admission survive upgrades unchanged.
-- An unused enabled repository default follows approved profile updates within
-  its fixed safety bounds; any learning request or knowledge entry freezes it.
+- An unused enabled repository default can follow approved profile updates
+  within its fixed safety bounds. A learning request or knowledge entry stops
+  that refresh.
 - The default is ongoing and has no aggregate quota or expiry. The per-request
   byte, round, deadline, attempt, concurrency and scope limits still apply.
