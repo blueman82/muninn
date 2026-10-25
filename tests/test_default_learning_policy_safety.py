@@ -5,15 +5,18 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
+import os
 import sys
 import unittest
 from contextlib import closing
+from pathlib import Path
 from unittest import mock
 
 from install import installer
 from install.context import StepFailedError
 from muninn import store
 from muninn.review_models import ReviewPolicy
+from muninn.review_progress import digest
 from tests.installer_provider_env import fixture_provider_env
 from tests.installer_support import World, git
 
@@ -101,6 +104,8 @@ class DefaultPolicySafetyTests(unittest.TestCase):
             ctx = world.ctx(fresh=True, default_home=True)
         original = world.home / "codex-original"
         newly_discovered = world.home / "codex-new"
+        new_auth_home = world.home / "codex-new-account"
+        new_auth_home.mkdir(mode=0o700)
         for executable in (original, newly_discovered):
             executable.write_text("signed Codex fixture")
             executable.chmod(0o700)
@@ -122,9 +127,19 @@ class DefaultPolicySafetyTests(unittest.TestCase):
         second_sha = self.commit_profile(
             world, profile, "reduce default policy rounds"
         )
-        with fixture_provider_env(world.home):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CLAUDE_CONFIG_DIR": str(world.home / ".claude"),
+                "CODEX_HOME": str(new_auth_home),
+            },
+        ):
             later = dataclasses.replace(
-                ctx, fresh=False, upgrade=True, ts="later"
+                ctx,
+                fresh=False,
+                upgrade=True,
+                default_home=True,
+                ts="later",
             )
         with (
             mock.patch("platform.system", return_value="Darwin"),
@@ -148,6 +163,15 @@ class DefaultPolicySafetyTests(unittest.TestCase):
         self.assertEqual(row["admission"], 1)
         self.assertEqual(selected.runner.executable, str(original))
         self.assertEqual(selected.max_rounds, 1)
+        capability_path = (
+            ctx.data
+            / "review-capabilities"
+            / "selected"
+            / (digest(selected) + ".json")
+        )
+        capability = json.loads(capability_path.read_text())
+        binding = json.loads(Path(capability["proof_path"]).read_text())
+        self.assertEqual(binding["auth_home"], str(ctx.codex_home))
 
 
 if __name__ == "__main__":

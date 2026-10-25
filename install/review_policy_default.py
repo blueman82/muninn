@@ -40,12 +40,13 @@ def select(
         if installed is not None
         else shutil.which("codex")
     )
-    if found is None or not ctx.codex_home.is_dir():
+    if found is None:
         return None
     stable_executable = Path(found)
-    auth_home = ctx.codex_home
-    if auth_home.is_symlink() or auth_home.resolve() != auth_home:
+    auth_binding = _auth_binding(ctx, installed)
+    if auth_binding is None:
         return None
+    auth_home, auth_identity = auth_binding
     try:
         selected, _ = prepare_codex_policy.default_policy(
             ctx.data, stable_executable, profile_raw
@@ -56,7 +57,6 @@ def select(
         executable_target, executable_digest = (
             review_codex_launch.verify_codex_executable(stable_executable)
         )
-        auth_identity = _directory_identity(auth_home)
         profile_digest = prepare_codex_policy.profile_digest(profile_raw)
     except (OSError, ValueError):
         return None
@@ -76,6 +76,35 @@ def select(
         "default_profile_digest": profile_digest,
     }
     return selected, frozen
+
+
+def _auth_binding(
+    ctx: Ctx, installed: ReviewPolicy | None
+) -> tuple[Path, list[int]] | None:
+    """Keep a supported upgrade on the installed authentication directory.
+
+    Args:
+        ctx: Current installation paths.
+        installed: Existing eligible default policy, if this is an upgrade.
+
+    Returns:
+        The auth directory and its identity, or None when it is unavailable.
+    """
+    try:
+        auth_home = (
+            review_codex_launch.selected_auth_home(ctx.data, installed)
+            if installed is not None
+            else ctx.codex_home
+        )
+        if (
+            not auth_home.is_dir()
+            or auth_home.is_symlink()
+            or auth_home.resolve() != auth_home
+        ):
+            return None
+        return auth_home, _directory_identity(auth_home)
+    except (OSError, ValueError):
+        return None
 
 
 def prepare(ctx: Ctx, rec: Record, policy: ReviewPolicy) -> None:
