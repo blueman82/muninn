@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import sqlite3
+import sys
 from argparse import Namespace
 from contextlib import closing
 from typing import NoReturn, cast
@@ -61,6 +62,32 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
         code, result = cli_recovery.recover(
             Namespace(), installed_env(ctx), ctx.data, {}
         )
+        if _reason(result) == "legacy_volume_confirmation_required":
+            approved = _confirm_legacy_volume(ctx)
+            if approved:
+                code, result = cli_recovery.recover(
+                    Namespace(confirm_legacy_volume=True),
+                    installed_env(ctx),
+                    ctx.data,
+                    {},
+                )
+            elif approved is None:
+                result = {
+                    "reason": "legacy_volume_confirmation_required",
+                    "why": (
+                        "The saved file matches, but the older note has no "
+                        "disk ID."
+                    ),
+                    "next_action": (
+                        "Run this same install command in a terminal to "
+                        "confirm recovery."
+                    ),
+                }
+            else:
+                result = {
+                    "reason": "legacy_volume_confirmation_declined",
+                    "why": "You declined. No files were changed.",
+                }
     except Exception as exc:
         rec["recovery_required"] = True
         ctx.say("Muninn could not check whether this pause is safe to repair.")
@@ -94,6 +121,36 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
         action if isinstance(action, str) else "",
         why if isinstance(why, str) else "",
     )
+
+
+def _reason(result: object) -> str:
+    """Return one fixed recovery reason from a CLI result."""
+    if not isinstance(result, dict):
+        return ""
+    reason = cast(dict[str, object], result).get("reason")
+    return reason if isinstance(reason, str) else ""
+
+
+def _confirm_legacy_volume(ctx: Ctx) -> bool | None:
+    """Ask once after the read-only checks match an older macOS record.
+
+    Returns:
+        True when the owner approves, False when they decline, or None when
+        the installer has no terminal.
+    """
+    if not sys.stdin.isatty():
+        return None
+    ctx.say("Muninn found an older recovery note without a disk ID.")
+    ctx.say("The saved file matches, but Muninn cannot verify the same disk.")
+    ctx.say(
+        "Continuing applies saved deletion requests, then continues "
+        "the upgrade."
+    )
+    try:
+        answer = input("Continue with this Muninn data? [y/N] ")
+    except EOFError:
+        return False
+    return answer.strip().casefold() in ("y", "yes")
 
 
 def _historical_store(ctx: Ctx) -> bool:
@@ -134,6 +191,12 @@ def _fail_pause_recovery(
             "  Restart the computer, then rerun this same install command. "
             "Muninn will retry recovery automatically."
         )
+    elif reason == "legacy_volume_confirmation_required":
+        ctx.say(f"  Next: {action}")
+        ctx.say("  No recovery or upgrade changes were made.")
+    elif reason == "legacy_volume_confirmation_declined":
+        ctx.say("  No recovery or upgrade changes were made.")
+        ctx.say("  Run this install command again when you want to continue.")
     elif action:
         ctx.say(f"  Next: {action}")
         ctx.say("  After recovery, rerun this same install command.")

@@ -170,7 +170,15 @@ def _add_maintenance(cmd: _Commands) -> None:
     p.add_argument("--usage", action="store_true")
     cmd.add("compact", "VACUUM the store to return free space")
     cmd.add("doctor", "health checks (exit 1 when unhealthy)")
-    cmd.add("recover", "resume a verified interrupted maintenance pause")
+    p = cmd.add("recover", "resume a verified interrupted maintenance pause")
+    p.add_argument(
+        "--confirm-legacy-volume",
+        action="store_true",
+        help=(
+            "approve recovery of a matching old macOS "
+            "record without a disk ID"
+        ),
+    )
     cmd.add("rebuild", "rebuild the store from the transcripts")
     p = cmd.add("recall-review", "review a batch of 50 recall deliveries")
     p.add_argument("--batch", type=int, help="one-based delivery batch")

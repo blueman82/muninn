@@ -99,6 +99,153 @@ class InstallerRecoveryTest(unittest.TestCase):
             any("upgrade will continue" in line for line in messages)
         )
 
+    def test_upgrade_confirms_matching_legacy_recovery_once(self) -> None:
+        """Continue only after the owner approves a matching old record."""
+        messages: list[str] = []
+        record = Record()
+        needs_confirmation = (
+            2,
+            {
+                "reason": "legacy_volume_confirmation_required",
+                "why": "The saved file matches, but the note has no disk ID.",
+                "next_action": "Confirm this Muninn data folder.",
+            },
+        )
+        with tempfile.TemporaryDirectory() as root:
+            ctx = Ctx(
+                Path(root),
+                DoctorRunner(),
+                "test",
+                platform="darwin",
+                say=messages.append,
+            )
+            with (
+                mock.patch(
+                    "install.recovery_guidance.cli_recovery.recover",
+                    side_effect=[
+                        needs_confirmation,
+                        (0, {"recovery": {"status": "recovered"}}),
+                    ],
+                ) as recover,
+                mock.patch(
+                    "install.recovery_guidance.sys", create=True
+                ) as system,
+                mock.patch("builtins.input", return_value="yes") as prompt,
+            ):
+                system.stdin.isatty.return_value = True
+                recover_pause(ctx, record)
+
+        self.assertEqual(recover.call_count, 2)
+        self.assertFalse(
+            getattr(
+                recover.call_args_list[0].args[0],
+                "confirm_legacy_volume",
+                False,
+            )
+        )
+        self.assertTrue(
+            recover.call_args_list[1].args[0].confirm_legacy_volume
+        )
+        prompt.assert_called_once()
+        self.assertFalse(record.get("recovery_required"))
+        self.assertTrue(
+            any("upgrade will continue" in line for line in messages)
+        )
+
+    def test_declined_legacy_recovery_keeps_upgrade_stopped(self) -> None:
+        """Leave recovery unchanged when the owner declines the prompt."""
+        messages: list[str] = []
+        record = Record()
+        with tempfile.TemporaryDirectory() as root:
+            ctx = Ctx(
+                Path(root),
+                DoctorRunner(),
+                "test",
+                platform="darwin",
+                say=messages.append,
+            )
+            with (
+                mock.patch(
+                    "install.recovery_guidance.cli_recovery.recover",
+                    return_value=(
+                        2,
+                        {
+                            "reason": "legacy_volume_confirmation_required",
+                            "why": (
+                                "The saved file matches, but the note has "
+                                "no disk ID."
+                            ),
+                            "next_action": "Confirm this Muninn data folder.",
+                        },
+                    ),
+                ) as recover,
+                mock.patch(
+                    "install.recovery_guidance.sys", create=True
+                ) as system,
+                mock.patch("builtins.input", return_value="no") as prompt,
+                self.assertRaises(StepFailedError),
+            ):
+                system.stdin.isatty.return_value = True
+                recover_pause(ctx, record)
+
+        recover.assert_called_once()
+        prompt.assert_called_once()
+        self.assertTrue(record["recovery_required"])
+        self.assertTrue(
+            any(
+                "No recovery or upgrade changes were made" in line
+                for line in messages
+            )
+        )
+
+    def test_non_interactive_legacy_recovery_gives_direct_next_step(
+        self,
+    ) -> None:
+        """Do not guess when the installer cannot ask for approval."""
+        messages: list[str] = []
+        record = Record()
+        with tempfile.TemporaryDirectory() as root:
+            ctx = Ctx(
+                Path(root),
+                DoctorRunner(),
+                "test",
+                platform="darwin",
+                say=messages.append,
+            )
+            with (
+                mock.patch(
+                    "install.recovery_guidance.cli_recovery.recover",
+                    return_value=(
+                        2,
+                        {
+                            "reason": "legacy_volume_confirmation_required",
+                            "why": (
+                                "The saved file matches, but the note has "
+                                "no disk ID."
+                            ),
+                            "next_action": "Confirm this Muninn data folder.",
+                        },
+                    ),
+                ) as recover,
+                mock.patch(
+                    "install.recovery_guidance.sys", create=True
+                ) as system,
+                mock.patch("builtins.input") as prompt,
+                self.assertRaises(StepFailedError),
+            ):
+                system.stdin.isatty.return_value = False
+                recover_pause(ctx, record)
+
+        recover.assert_called_once()
+        prompt.assert_not_called()
+        self.assertTrue(any("in a terminal" in line for line in messages))
+        self.assertTrue(
+            any(
+                "No recovery or upgrade changes were made" in line
+                for line in messages
+            )
+        )
+
     def test_windows_pause_refusal_keeps_service_and_data_safe(self) -> None:
         """Explain the manual boundary before the installer pauses service."""
         messages: list[str] = []
