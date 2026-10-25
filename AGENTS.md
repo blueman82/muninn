@@ -66,7 +66,8 @@ Instructions for coding agents working in this repository. Any parent-directory
 ## Check
 
     .venv/bin/python3.13 -m tools.check --full
-    .venv/bin/python3.13 -m tools.run_tests [-j N]
+    .venv/bin/python3.13 -m tools.run_tests
+    .venv/bin/python3.13 -m tools.run_tests -j 4
     .venv/bin/python3.13 -m unittest tests.test_module
     .venv/bin/python3.13 -m unittest discover -s tests -t .
 
