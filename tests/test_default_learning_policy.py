@@ -200,6 +200,25 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             result = installer.install(later, world.repo, world.sha)
         self.assertEqual(result["policy_status"], "active")
 
+    def test_default_selection_does_not_create_a_writer_lock(self) -> None:
+        """Keep default-policy discovery read-only for an existing store."""
+        world = World(self)
+        ctx = world.ctx(fresh=True)
+        installer.install(ctx, world.repo, world.sha)
+        lock_path = ctx.data / "writer.lock"
+        lock_path.unlink()
+        later = dataclasses.replace(
+            ctx, fresh=False, upgrade=True, default_home=True
+        )
+        module = importlib.import_module("install.review_policy_default")
+        with (
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+            mock.patch("shutil.which", return_value=None),
+        ):
+            self.assertIsNone(module.select(later, b"{}"))
+        self.assertFalse(lock_path.exists())
+
     def test_disabled_custom_policy_survives_default_upgrade(self) -> None:
         """Keep custom content and disabled admission unchanged."""
         world = World(self)

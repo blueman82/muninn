@@ -132,7 +132,7 @@ def _directory_identity(path: Path) -> list[int]:
 
 
 def _configured(ctx: Ctx) -> bool:
-    """Select only unconfigured stores or unused enabled project defaults."""
+    """Read whether an upgrade can select a default without writing state."""
     if not ctx.upgrade:
         return False
     path = store.db_path(ctx.data)
@@ -140,7 +140,6 @@ def _configured(ctx: Ctx) -> bool:
         return False
     try:
         with (
-            store.writer_lock(ctx.data, wait_s=0),
             snapshot_io.validated(path) as check,
             closing(
                 sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
