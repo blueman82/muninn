@@ -47,11 +47,14 @@ def select(
     if auth_home.is_symlink() or auth_home.resolve() != auth_home:
         return None
     try:
-        executable_target, executable_digest = (
-            review_codex_launch.verify_codex_executable(stable_executable)
-        )
         selected, _ = prepare_codex_policy.default_policy(
             ctx.data, stable_executable, profile_raw
+        )
+    except ValueError:
+        raise StepFailedError("default_review_policy_invalid") from None
+    try:
+        executable_target, executable_digest = (
+            review_codex_launch.verify_codex_executable(stable_executable)
         )
         auth_identity = _directory_identity(auth_home)
         profile_digest = prepare_codex_policy.profile_digest(profile_raw)
