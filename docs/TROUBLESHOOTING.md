@@ -35,7 +35,7 @@ code 1; `warn` and `info` do not) and a `detail`. When asking for help, share `d
 | Codex shows no memory | plugin hooks not trusted | start Codex, run `/hooks`, trust the two hooks |
 | Cursor history is missing after compaction | optional native hook absent or disabled, database path unavailable, invalid `message_count`, missing/mismatched conversation identity, invalid/ambiguous workspace roots, oversized conversation, or refresh failure | check `~/.cursor/hooks.json` against [Cursor setup](QUICKSTART.md#cursor-history); outside macOS set `MUNINN_CURSOR_DB` in the Cursor environment. Successful refresh and a missing database return `{}`; invalid payload identity/count/workspace or import failure reports a `user_message`. Confirm Cursor supplies `conversation_id` and native absolute `workspace_roots`; no latest-row fallback is used. Use `muninn ingest --full` for the complete import; `recall.off` controls later prompt recall, not the refresh. The hook's 90-second deadline does not guarantee completion on every host |
 | `app not installed: setup skipped`; no Cursor prompt | desktop app absent; leftover configs/transcripts insufficient | [Supported app detection](QUICKSTART.md#install-on-a-new-machine); installed Claude/Codex without config: manual setup; history import independent |
-| installer failed | read the recovery steps printed by `bin/muninn-install`; before store preparation, it tries the qualified repair path automatically | if it asks for a reboot, reboot and rerun the same install command. If it asks for a report, run the exact health-report command it prints. `recovery_required` keeps current data and runtime/configuration and leaves the service stopped; preserve all archives and latest key/intent |
+| installer failed | read the steps printed by `bin/muninn-install`. Before store preparation, it tries the qualified repair path. | If it requests a reboot, restart the computer and rerun the same command. If it requests a report, run the exact health-report command it prints. `recovery_required` keeps current data, runtime and configuration. It leaves the service stopped. Preserve all archives, the latest key and intent. |
 | uninstall requested | removal operation | `bin/muninn-uninstall --dry-run`, then `bin/muninn-uninstall`; the data moves to `~/.local/share/muninn-removed-<ts>` (`--purge-data` deletes it) |
 | `bin/muninn-install` says half-installed after an uninstall | an uninstall that was interrupted left the data dir or the release link | run `bin/muninn-uninstall` again; it removes whatever is left |
 
@@ -77,48 +77,49 @@ can remain delayed after the process deadline (`review_commit_delay`,
 `review_cancel_delay`). Original-source read budgets do not bound journal replay,
 total I/O or command duration.
 
-`review_pause` is always unverified: witness presence, missing DB/PID and free
+`review_pause` is always unverified. Witness presence, missing DB/PID or free
 locks do not prove containment. Before an upgrade prepares the store, the
-installer checks for `recovery_guidance` and tries the checked repair path on
-macOS/Linux. If it needs a reboot, restart the computer and rerun the same
-install command; the installer will retry recovery. When running doctor
-yourself, run `muninn recover`. Muninn waits for its managed writer and checks
-the saved boot, lock and witness identities before repair. If it returns
-`reboot_required`, restart the computer and run `muninn recover` again. Run
-`muninn doctor --pretty` after it reports success.
+installer checks for `recovery_guidance`. It tries the qualified repair path on
+macOS or Linux. If repair needs a reboot, restart the computer and rerun the
+same install command. The installer then retries recovery.
 
-Windows recovery is not qualified. `muninn recover` refuses before changing
-recovery files because Muninn cannot yet verify Windows boot identity and safe
-baseline retirement. Keep the data folder, supervisor files, repair baseline,
-`tombstones.jsonl`, tombstone keys and retained archives. Save the full doctor
-report and contact your Muninn maintainer. On every platform, never remove or
-rename these files to bypass `pause_unverified` or `reboot_required`.
+When you run doctor yourself, run `muninn recover`.
+Muninn waits for its managed writer and checks the saved boot, lock and witness
+identities before repair. If it returns `reboot_required`, restart the computer.
+Run `muninn recover` again. After recovery, run `muninn doctor --pretty`.
 
-The human steps are limited to rebooting when the command says it is required,
-starting the managed service if `doctor` reports it is stopped, and asking the
-maintainer to handle Windows or identity-mismatch refusals. Muninn does not
-reboot the computer because that interrupts other work. `recover` does not yet
-revalidate the installed service definition before asking its manager to start
-it; starting a changed or unowned entry could run unexpected code. Windows boot
-identity and baseline retirement have not passed native qualification. An
-identity mismatch means Muninn cannot prove that the files belong to the
-interrupted operation, so it preserves them instead of overwriting them.
-Journal presence is reported with consistency unverified, not as proof of a
-pending intent.
+Windows recovery is not qualified. `muninn recover` refuses before it changes
+recovery files. Muninn cannot yet verify Windows boot identity or safe baseline
+retirement. Keep the data folder and supervisor files.
+Keep the repair baseline, `tombstones.jsonl`, tombstone keys and retained archives.
+Save the full doctor report. Contact your Muninn maintainer.
+On every platform, never remove or rename files to bypass
+`pause_unverified` or `reboot_required`.
 
-On macOS, a new repair baseline records the data volume's persistent UUID.
-After a reboot, macOS may assign that volume a different temporary device
-number. Repair accepts that change only when the UUID, lock file, and witness
-file still match. If macOS cannot provide a UUID, Muninn refuses to record a
-new baseline. An older baseline without a UUID cannot prove that a changed
-device number belongs to the same volume. Muninn preserves that baseline and
-refuses repair. The doctor report gives the next safe steps. Do not remove the
-old files to force progress.
+Three actions remain manual. Restart the computer if Muninn requests it.
+Start the managed service if doctor reports it is stopped.
+Contact the maintainer for Windows or identity-mismatch refusals.
+Muninn does not reboot the computer because reboot interrupts other work.
+`recover` does not revalidate the installed service definition before it
+recommends a service start. A changed or unowned entry could run unexpected code.
+Windows boot checks and baseline retirement have not passed native qualification.
+If identity checks fail, Muninn preserves the files.
+It cannot prove which process or store owns them.
+Journal presence does not prove pending intent; consistency remains unverified.
+
+On macOS, each new repair baseline records the data volume's persistent UUID.
+After reboot, macOS may assign that volume a different device number.
+Repair accepts this change only when the UUID, lock file and witness file match.
+If macOS cannot provide a UUID, Muninn refuses to record a new baseline.
+An older baseline has no UUID and cannot verify a changed device number.
+Muninn preserves that baseline and refuses repair.
+The doctor report gives the next safe steps.
+Do not remove old files to force progress.
 
 Real erase may interrupt the whole service. Preserve its original failure and
 `erasure_status`: `restart: not_attempted` means check and manually restart if
-needed, with no claim that it is currently stopped/restored. Retained archives keep
-erasure unverified even if selected-needle scans find no residue. Windows boot
+needed. This field does not prove that the service is stopped or restored.
+Retained archives keep erasure unverified, even if selected-needle scans find no residue. Windows boot
 repair and durable baseline retirement remain unqualified. The doctor report
 explains what to preserve and when to request help.
 
