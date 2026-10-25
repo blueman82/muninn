@@ -195,3 +195,61 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         self.assertEqual(
             selected.policy_id, "muninn-codex-ongoing-production-v2"
         )
+
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Default Codex capability files require POSIX private-file checks.",
+    )
+    def test_unused_default_refreshes_within_same_revision(self) -> None:
+        """Refresh the profile without replacing the old evidence."""
+        world = World(self)
+        ctx = world.ctx(fresh=True, default_home=True)
+        executable = world.home / "codex"
+        executable.write_text("signed Codex fixture")
+        executable.chmod(0o700)
+        module = importlib.import_module("tools.prepare_codex_policy")
+        profile = json.loads(module.DEFAULT_POLICY_FILE.read_text())
+        path = world.home / "default-policy.json"
+        path.write_text(json.dumps(profile))
+        with (
+            mock.patch.object(module, "DEFAULT_POLICY_FILE", path),
+            mock.patch("platform.system", return_value="Darwin"),
+            mock.patch("platform.machine", return_value="arm64"),
+            mock.patch("shutil.which", return_value=str(executable)),
+            mock.patch(
+                "muninn.review_codex_launch.verify_codex_executable",
+                return_value=(executable, "1" * 64),
+            ),
+        ):
+            installer.install(ctx, world.repo, world.sha)
+            old_policy_file = next(
+                (ctx.data / "review-capabilities").glob(
+                    "default-policy-*.json"
+                )
+            )
+            old_policy = old_policy_file.read_bytes()
+            profile["approved_at"] = "2026-10-24T00:01:00Z"
+            profile["limits"]["max_rounds"] = 1
+            path.write_text(json.dumps(profile))
+            later = dataclasses.replace(
+                ctx, fresh=False, upgrade=True, ts="later"
+            )
+            installer.install(later, world.repo, world.sha)
+        with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
+            row = conn.execute(
+                "SELECT admission,policy_json FROM review_control"
+            ).fetchone()
+        selected = ReviewPolicy.model_validate_json(row["policy_json"])
+        self.assertEqual(row["admission"], 1)
+        self.assertEqual(selected.max_rounds, 1)
+        self.assertEqual(old_policy_file.read_bytes(), old_policy)
+        self.assertEqual(
+            len(
+                list(
+                    (ctx.data / "review-capabilities").glob(
+                        "default-policy-*.json"
+                    )
+                )
+            ),
+            2,
+        )

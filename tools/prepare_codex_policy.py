@@ -229,6 +229,34 @@ def policy(
     return value, raw
 
 
+def _policy_path(
+    home: Path,
+    revision: int,
+    repository_default: bool,
+    policy_raw: bytes,
+) -> Path:
+    """Choose an immutable path for installed or user-supplied policy.
+
+    Args:
+        home: Canonical Muninn data directory.
+        revision: Selected policy revision.
+        repository_default: Whether Muninn selected its bundled profile.
+        policy_raw: Exact serialized policy content.
+
+    Returns:
+        The policy artifact path.
+    """
+    if repository_default:
+        digest = hashlib.sha256(policy_raw).hexdigest()
+        return home / "review-capabilities" / f"default-policy-{digest}.json"
+    filename = (
+        "review-policy-codex-ongoing-v2.json"
+        if revision == 2
+        else "review-policy-codex-ongoing.json"
+    )
+    return home / filename
+
+
 def prepare(
     home: Path,
     executable: Path,
@@ -318,10 +346,6 @@ def prepare(
         / (hashlib.sha256(policy_raw).hexdigest() + ".json")
     )
     _write(selected, canonical_json(capability).encode())
-    path = home / (
-        "review-policy-codex-ongoing-v2.json"
-        if revision == 2
-        else "review-policy-codex-ongoing.json"
-    )
+    path = _policy_path(home, revision, repository_default, policy_raw)
     _write(path, policy_raw)
     return path
