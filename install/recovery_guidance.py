@@ -9,8 +9,7 @@ from typing import NoReturn, cast
 from install.context import Ctx, StepFailedError, dry
 from install.record import Record
 from install.steps_release import installed_env
-from muninn import cli_recovery, obs_recovery, obs_status
-from muninn.obs_recovery import RecoveryGuidance
+from muninn import cli_recovery
 
 
 def health_report_command(ctx: Ctx) -> str:
@@ -40,65 +39,7 @@ def recover_pause(ctx: Ctx, rec: Record) -> None:
     """
     if dry(ctx, "would check for and repair an interrupted maintenance pause"):
         return
-    guidance = _pause_recovery_guidance(ctx)
-    if guidance is None:
-        return
-    if guidance["status"] != "automatic_recovery_available":
-        _refuse_pause_recovery(ctx, rec, guidance)
     _run_pause_recovery(ctx, rec)
-
-
-def _pause_recovery_guidance(ctx: Ctx) -> RecoveryGuidance | None:
-    """Read repair guidance without running the rest of doctor.
-
-    Args:
-        ctx: Installer paths and target platform.
-
-    Returns:
-        Guidance for a saved repair baseline, or None when none is present.
-    """
-    repair = next(
-        (
-            check
-            for check in obs_status.review_protocol(ctx.data)
-            if check[0] == "review_repair"
-        ),
-        None,
-    )
-    if repair is None or repair[1] is not False:
-        return None
-    return obs_recovery.recovery_guidance(
-        [
-            {
-                "check": repair[0],
-                "ok": repair[1],
-                "detail": repair[2],
-                "level": repair[3],
-            }
-        ],
-        ctx.platform,
-    )
-
-
-def _refuse_pause_recovery(
-    ctx: Ctx, rec: Record, guidance: RecoveryGuidance
-) -> NoReturn:
-    """Stop before store preparation when a person must handle recovery.
-
-    Args:
-        ctx: Installer paths and output context.
-        rec: Install record marked as requiring recovery.
-        guidance: Safe next steps for the current platform.
-
-    Raises:
-        StepFailedError: Always, because automatic recovery is unavailable.
-    """
-    ctx.say("Muninn cannot repair this pause automatically.")
-    for step in guidance["steps"]:
-        ctx.say(f"  {step}")
-    ctx.say(f"  Health report: {health_report_command(ctx)}")
-    rec["recovery_required"] = True
-    raise StepFailedError("maintenance_recovery_required")
 
 
 def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:

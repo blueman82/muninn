@@ -205,7 +205,7 @@ def _doctor(ctx: Ctx, rec: Record) -> subprocess.CompletedProcess[bytes]:
     if repaired.returncode == 0 and outcome.get("status") == "recovered":
         ctx.say("Muninn recovered the interrupted pause automatically.")
         try:
-            restart(ctx, rec)
+            restart(ctx, rec, registered=True)
         except Exception:
             ctx.say("Recovery finished, but the service did not restart.")
             ctx.say(f"  Health report: {health_report_command(ctx)}")
@@ -313,9 +313,6 @@ def verify(ctx: Ctx, rec: Record) -> None:
 
     runtime.verify_runtime(Path(rec["python"]["path"]), ctx.lib / rec["sha"])
     check("runtime_bootstrap", True)
-    j = job(ctx)
-    check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
-    check("heartbeat_fresh", fresh(ctx, 0))
     # MUNINN_HOOK_DISABLE makes the hook echo ``{}`` without recording
     # anything, so running it here cannot pollute the new store.
     env = installed_env(ctx, MUNINN_HOOK_DISABLE="1")
@@ -330,6 +327,9 @@ def verify(ctx: Ctx, rec: Record) -> None:
         codex_checks(ctx, rec, check)
     r = _doctor(ctx, rec)
     check("doctor", r.returncode == 0)
+    j = job(ctx)
+    check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
+    check("heartbeat_fresh", fresh(ctx, 0))
     if ctx.platform != "darwin":
         health = _health(r.stdout)
         check(

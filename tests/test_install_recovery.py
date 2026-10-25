@@ -13,7 +13,7 @@ from install import rollback
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from install.recovery_guidance import recover_pause
-from install.verify import _doctor
+from install.verify import _doctor, verify
 
 
 class DoctorRunner:
@@ -58,15 +58,16 @@ class InstallerRecoveryTest(unittest.TestCase):
         messages: list[str] = []
         with tempfile.TemporaryDirectory() as root:
             ctx = Ctx(Path(root), runner, "test", say=messages.append)
+            rec = Record()
             with mock.patch("install.verify.restart") as restart:
-                result = _doctor(ctx, Record())
+                result = _doctor(ctx, rec)
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(
             [call[-1] for call in runner.calls],
             ["doctor", "recover", "doctor"],
         )
-        restart.assert_called_once()
+        restart.assert_called_once_with(ctx, rec, registered=True)
         self.assertTrue(
             any(
                 "recovered the interrupted pause automatically" in line
@@ -77,14 +78,9 @@ class InstallerRecoveryTest(unittest.TestCase):
     def test_upgrade_repairs_pause_before_preparing_store(self) -> None:
         """Continue the upgrade when checked recovery succeeds."""
         messages: list[str] = []
-        protocol = (("review_repair", False, "baseline present", "warn"),)
         with tempfile.TemporaryDirectory() as root:
             ctx = Ctx(Path(root), DoctorRunner(), "test", say=messages.append)
             with (
-                mock.patch(
-                    "install.recovery_guidance.obs_status.review_protocol",
-                    return_value=protocol,
-                ),
                 mock.patch(
                     "install.recovery_guidance.cli_recovery.recover",
                     return_value=(0, {"recovery": {"status": "recovered"}}),
@@ -100,7 +96,6 @@ class InstallerRecoveryTest(unittest.TestCase):
     def test_windows_pause_refusal_keeps_service_and_data_safe(self) -> None:
         """Explain the manual boundary before the installer pauses service."""
         messages: list[str] = []
-        protocol = (("review_repair", False, "baseline present", "warn"),)
         record = Record()
         with tempfile.TemporaryDirectory() as root:
             ctx = Ctx(
@@ -112,17 +107,22 @@ class InstallerRecoveryTest(unittest.TestCase):
             )
             with (
                 mock.patch(
-                    "install.recovery_guidance.obs_status.review_protocol",
-                    return_value=protocol,
-                ),
-                mock.patch(
-                    "install.recovery_guidance.cli_recovery.recover"
+                    "install.recovery_guidance.cli_recovery.recover",
+                    return_value=(
+                        2,
+                        {
+                            "reason": "windows_repair_unqualified",
+                            "why": "Windows repair is not qualified.",
+                            "next_action": "Keep the Muninn data folder "
+                            "unchanged.",
+                        },
+                    ),
                 ) as recover,
                 self.assertRaises(StepFailedError),
             ):
                 recover_pause(ctx, record)
 
-        recover.assert_not_called()
+        recover.assert_called_once()
         self.assertTrue(record["recovery_required"])
         self.assertTrue(
             any("Keep the Muninn data folder" in line for line in messages)
@@ -132,15 +132,10 @@ class InstallerRecoveryTest(unittest.TestCase):
     def test_reboot_refusal_says_retry_the_installer(self) -> None:
         """Avoid making the user discover and run recovery by hand."""
         messages: list[str] = []
-        protocol = (("review_repair", False, "baseline present", "warn"),)
         record = Record()
         with tempfile.TemporaryDirectory() as root:
             ctx = Ctx(Path(root), DoctorRunner(), "test", say=messages.append)
             with (
-                mock.patch(
-                    "install.recovery_guidance.obs_status.review_protocol",
-                    return_value=protocol,
-                ),
                 mock.patch(
                     "install.recovery_guidance.cli_recovery.recover",
                     return_value=(
@@ -163,6 +158,65 @@ class InstallerRecoveryTest(unittest.TestCase):
         self.assertTrue(
             any("retry recovery automatically" in line for line in messages)
         )
+
+    def test_upgrade_checks_incomplete_owner_without_repair_baseline(
+        self,
+    ) -> None:
+        """Start recovery when an interrupted owner has no baseline yet."""
+        messages: list[str] = []
+        record = Record()
+        with tempfile.TemporaryDirectory() as root:
+            ctx = Ctx(Path(root), DoctorRunner(), "test", say=messages.append)
+            with (
+                mock.patch(
+                    "install.recovery_guidance.cli_recovery.recover",
+                    return_value=(
+                        2,
+                        {
+                            "reason": "reboot_required",
+                            "next_action": "Restart, then retry.",
+                        },
+                    ),
+                ) as recover,
+                self.assertRaises(StepFailedError),
+            ):
+                recover_pause(ctx, record)
+
+        recover.assert_called_once()
+        self.assertTrue(record["recovery_required"])
+
+    def test_verification_checks_service_after_automatic_recovery(
+        self,
+    ) -> None:
+        """Use fresh service state after the recovery restart completes."""
+        recovered = False
+
+        def recover_service(
+            *_args: object,
+        ) -> subprocess.CompletedProcess[bytes]:
+            nonlocal recovered
+            recovered = True
+            return subprocess.CompletedProcess([], 0, b'{"checks":[]}', b"")
+
+        with tempfile.TemporaryDirectory() as root:
+            ctx = Ctx(Path(root), DoctorRunner(), "test", platform="darwin")
+            rec = Record(python={"path": "/fixture/python"}, sha="fixture")
+            with (
+                mock.patch("install.verify.runtime.verify_runtime"),
+                mock.patch("install.verify.job", return_value={"pid": 123}),
+                mock.patch(
+                    "install.verify.is_new", side_effect=lambda *_: recovered
+                ),
+                mock.patch(
+                    "install.verify.fresh", side_effect=lambda *_: recovered
+                ),
+                mock.patch("install.verify.hook_invocations", return_value=[]),
+                mock.patch("install.verify.ce.atomic_write"),
+                mock.patch(
+                    "install.verify._doctor", side_effect=recover_service
+                ),
+            ):
+                verify(ctx, rec)
 
     def test_unresolved_pause_rollback_leaves_service_stopped(self) -> None:
         """Do not restart a service while pause recovery remains unresolved."""

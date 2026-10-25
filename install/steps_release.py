@@ -264,14 +264,14 @@ def history_upgrade(ctx: Ctx, _rec: Record) -> None:
     )
 
 
-def restart(ctx: Ctx, rec: Record) -> None:
+def restart(ctx: Ctx, rec: Record, *, registered: bool = False) -> None:
     """Kickstart the running job so it runs the re-pinned release."""
     if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
     started = ctx.now()
     if ctx.platform != "darwin":
         lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
-    elif rec.get("paused"):
+    elif rec.get("paused") and not registered:
         must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     else:
         must(ctx, ["launchctl", "kickstart", "-k", ctx.target])

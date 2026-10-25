@@ -203,8 +203,8 @@ FRESH_STEPS: tuple[Step, ...] = (
 UPGRADE_STEPS: tuple[Step, ...] = (
     prepare_release,
     history_upgrade,
-    recover_pause,
     pause,
+    recover_pause,
     prepare_store,
     pin,
     claude,

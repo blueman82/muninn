@@ -10,6 +10,7 @@ from muninn import cli_recovery, review_pause
 from muninn import review_pause_state as state
 from tests.cli_support import CliCase
 from tests.review_pause_support import initialize
+from tests.store_support import Child
 
 BOOT_A = "linux:12345678-1234-4234-8234-123456789abc"
 BOOT_B = "linux:87654321-1234-4234-8234-123456789abc"
@@ -105,3 +106,68 @@ class CliRecoveryTests(CliCase):
         code, out, _ = self.muninn("recover", env={"MUNINN_HOME": str(empty)})
         self.assertEqual(code, 0, out)
         self.assertEqual(out["recovery"]["status"], "no_recovery_needed")
+
+    def test_complete_witness_retires_saved_baseline_as_recovery(self) -> None:
+        """Report recovery when retry only needs to retire its baseline."""
+        identity = state.inspect(self.home, state.LOCK)[1]
+        assert identity is not None
+        predecessor = state.inspect(self.home, state.WITNESS)[1]
+        fd = state.acquire(self.home)
+        try:
+            state.publish(
+                self.home,
+                fd,
+                state.BASELINE,
+                state.Baseline(
+                    version=1,
+                    lock_identity=identity.identity,
+                    boot=BOOT_A,
+                    predecessor=predecessor,
+                    volume_uuid=None,
+                ),
+            )
+        finally:
+            os.close(fd)
+
+        with mock.patch.object(
+            cli_recovery, "_platform_name", return_value="linux"
+        ):
+            code, result, _ = self.muninn("recover")
+
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["recovery"]["status"], "recovered")
+        self.assertEqual(result["recovery"]["repair_phase"], "complete")
+        self.assertFalse((self.home / state.BASELINE).exists())
+
+    def test_recover_reports_when_it_stops_a_managed_writer(self) -> None:
+        """Tell the caller when recovery stopped a live managed writer."""
+        child = Child(
+            self,
+            """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from muninn import poller_stop
+from muninn import review_pause_state as state
+home = Path(sys.argv[2])
+fd, token = state.begin_owner(home)
+print("ready", flush=True)
+if not poller_stop.wait(home, os.getpid(), token, 10):
+    raise RuntimeError("stop request was not received")
+state.complete_owner(home, fd, token)
+os.close(fd)
+""",
+            self.home,
+        )
+        child.wait_ready()
+
+        with mock.patch.object(
+            cli_recovery, "_platform_name", return_value="linux"
+        ):
+            code, result, _ = self.muninn("recover")
+        stdout, stderr = child.proc.communicate(timeout=5)
+
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+        self.assertEqual(result["recovery"]["status"], "recovered")
+        self.assertIn("stopped", result["recovery"]["message"])
+        self.assertIn("doctor", result["recovery"]["next_action"])

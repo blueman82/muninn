@@ -212,23 +212,30 @@ def _repair(home: Path, platform_name: str, record: Record) -> Result:
         )
         return _refusal(error.code, next_action)
     del record
+    repaired = (
+        status.repair_phase == "complete"
+        or status.stop_may_have_been_published
+    )
+    if status.repair_phase == "complete":
+        message = (
+            "Muninn repaired the interrupted pause using saved identity "
+            "checks and applied any recorded erasure intent."
+        )
+    elif status.stop_may_have_been_published:
+        message = (
+            "Muninn stopped its managed writer and completed the recovery "
+            "check."
+        )
+    else:
+        message = "No interrupted maintenance pause needed repair."
     return 0, {
         "recovery": {
-            "status": (
-                "recovered"
-                if status.repair_phase == "complete"
-                else "no_recovery_needed"
-            ),
-            "message": (
-                "Muninn repaired the interrupted pause using saved identity "
-                "checks and applied any recorded erasure intent."
-                if status.repair_phase == "complete"
-                else "No interrupted maintenance pause needed repair."
-            ),
+            "status": "recovered" if repaired else "no_recovery_needed",
+            "message": message,
             "next_action": (
                 "Run `muninn --pretty doctor` to check the service. If it is "
                 "stopped, start it through your system service manager."
-                if status.repair_phase == "complete"
+                if repaired
                 else "No further recovery action is needed."
             ),
             "repair_phase": status.repair_phase,

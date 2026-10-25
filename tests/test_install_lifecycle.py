@@ -166,7 +166,10 @@ class LifecycleDefinitionTests(unittest.TestCase):
         upgrade = [step.__name__ for step in installer.UPGRADE_STEPS]
         self.assertNotIn("pause", fresh)
         self.assertEqual(upgrade.count("pause"), 1)
-        self.assertLess(upgrade.index("recover_pause"), upgrade.index("pause"))
+        self.assertLess(upgrade.index("pause"), upgrade.index("recover_pause"))
         self.assertLess(upgrade.index("pause"), upgrade.index("prepare_store"))
+        self.assertLess(
+            upgrade.index("recover_pause"), upgrade.index("prepare_store")
+        )
         self.assertEqual(fresh[-1], "prune")
         self.assertEqual(upgrade[-1], "prune")

@@ -293,7 +293,7 @@ service is unsupported.
 | `muninn serve [--interval S]` | the managed poller loop (default 60 s); prints nothing |
 | `muninn stats [--usage]` | counts, see below |
 | `muninn doctor` | health checks, see below; exit 1 if any error-level check is `false` |
-| `muninn recover` | resume an interrupted maintenance pause on supported macOS/Linux systems. It starts no new erase request, but may apply erasure intent already saved in `tombstones.jsonl`. Its answer gives `recovery.status`, `message`, `repair_phase` and `platform`. If it returns `reboot_required`, restart the computer and run it again. Windows repair remains unsupported. |
+| `muninn recover` | resume an interrupted maintenance pause on supported macOS/Linux systems. It starts no new erase request, but may apply erasure intent already saved in `tombstones.jsonl`. Its answer gives `recovery.status`, `message`, `repair_phase` and `platform`; `recovered` also means it stopped a managed writer to finish its safety check. Follow `next_action` and check the service with doctor. If it returns `reboot_required`, restart the computer and run it again. Windows repair remains unsupported. |
 | `muninn compact` | VACUUM the database under the writer lock; answer `compact.bytes_before`/`bytes_after`, `db_space`; refuses without about one database of free disk |
 | `muninn rebuild` | rebuild only a verified marked current store. Copy every governed family, retain DB-only Cursor and missing-source history, then fully re-ingest transcripts and replay current erasure intent. Fence admission/attempts and retain a private `muninn.sqlite.recovery-<id>` archive before candidate work. Unsupported, unreadable, changed or incomplete sources refuse; publication never restores an archive automatically. See the recovery contract below. |
 | `muninn erase --session S \| --event REF \| --match TEXT [--dry-run] [--yes]` | forget selected events and associated revisioned knowledge, evidence, requests and unresolved material; without `--yes` it is a dry run. Real erasure coordinates whole-service pause before writing durable tombstones and scrubbing content. Reports cleanup limits and nested `erasure_status`; see the erasure section below. |
@@ -371,9 +371,9 @@ activation; already committed erasure remains in effect. Recall starts off, and
 learning admission remains off until explicitly configured. Service-start
 verification requires a new heartbeat after the completed initial ingest.
 
-Before an upgrade prepares the store, Muninn checks for an interrupted
-maintenance pause. On macOS or Linux, the installer tries the checked repair
-path and continues if it succeeds. If repair needs a reboot, the installer
+After pausing the managed service and before preparing the store, Muninn checks
+for an interrupted maintenance pause. On macOS or Linux, the installer tries
+the checked repair path and continues if it succeeds. If repair needs a reboot, the installer
 stops and tells the user to restart and rerun the same install command. If
 Muninn cannot prove repair is safe, it keeps the repair files, stops the
 service and prints the next step and health-report command. On Windows, it

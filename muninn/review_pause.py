@@ -339,6 +339,8 @@ def _verify(
             raise PauseRefusedError("pause_unverified")
         reapply_tombstones(conn, home)
         state.retire_baseline(home, fd)
+        if baseline_file is not None:
+            status.repair_phase = "complete"
         return
     if not repair:
         raise PauseRefusedError("pause_unverified")

@@ -19,8 +19,9 @@ managed writer and uses the existing checks before it repairs pause records.
 3. If the result says `reboot_required`, restart the computer and run
    `muninn recover` again. Muninn cannot reboot a computer for its owner.
 4. If the result says `recovered`, run `muninn doctor --pretty` to check the
-   service and store. `recover` does not restart the service; the system
-   service manager owns that step.
+   service and store. The command may have stopped a managed writer while it
+   checked recovery. If doctor says the service is stopped, start it through
+   the system service manager; `recover` does not restart it.
 5. If it refuses, read its `why` and `next_action`. Keep the data folder and
    every recovery file unchanged when it asks you to contact the maintainer.
 6. On Windows, recovery is not qualified. The command refuses before changing
