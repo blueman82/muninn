@@ -60,7 +60,12 @@ class CodexStopGateTest(unittest.TestCase):
     def test_gate_python_prefers_checkout_venv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            python = root / ".venv" / "bin" / "python3.13"
+            relative = (
+                "Scripts/python.exe"
+                if sys.platform == "win32"
+                else "bin/python3.13"
+            )
+            python = root / ".venv" / relative
             python.parent.mkdir(parents=True)
             python.touch()
             with (
@@ -76,7 +81,12 @@ class CodexStopGateTest(unittest.TestCase):
             root = Path(tmp) / "worktree"
             main = Path(tmp) / "main"
             root.mkdir()
-            python = main / ".venv" / "bin" / "python3.13"
+            relative = (
+                "Scripts/python.exe"
+                if sys.platform == "win32"
+                else "bin/python3.13"
+            )
+            python = main / ".venv" / relative
             python.parent.mkdir(parents=True)
             python.touch()
             with (

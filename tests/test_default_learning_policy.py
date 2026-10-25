@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
+import sys
 import unittest
 from contextlib import closing
 from unittest import mock
@@ -22,6 +23,10 @@ from tools.prepare_codex_policy import policy
 class DefaultLearningPolicyTests(unittest.TestCase):
     """Keep repository-default selection and refresh within their bounds."""
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Default Codex capability files require POSIX private-file checks.",
+    )
     def test_fresh_install_activates_the_bound_repository_policy(self) -> None:
         """Create the packaged capability after setup on a supported host."""
         world = World(self)
@@ -80,6 +85,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(StepFailedError, "review_policy_invalid"):
             module.capture(ctx, world.sha)
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Default Codex capability files require POSIX private-file checks.",
+    )
     def test_unconfigured_upgrade_installs_the_current_default(self) -> None:
         """Apply the bundled policy to a store that has no policy yet."""
         world = World(self)
@@ -143,6 +152,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             )
         self.assertEqual(actual, expected)
 
+    @unittest.skipIf(
+        sys.platform == "win32",
+        "Default Codex capability files require POSIX private-file checks.",
+    )
     def test_unused_default_refreshes_to_newer_profile(self) -> None:
         """Refresh an unused enabled default profile."""
         world = World(self)
