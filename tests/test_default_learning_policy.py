@@ -15,6 +15,7 @@ from install.context import StepFailedError
 from muninn import store
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
+from tests.installer_provider_env import fixture_provider_env
 from tests.installer_support import World, git
 from tests.test_review_shared_models import policy_data
 from tools.prepare_codex_policy import policy
@@ -45,7 +46,8 @@ class DefaultLearningPolicyTests(unittest.TestCase):
     def test_default_policy_keeps_stable_codex_path(self) -> None:
         """Store PATH's stable link and freeze its verified target."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         target = world.home / "codex-versioned"
         target.write_text("signed Codex fixture")
         target.chmod(0o700)
@@ -79,7 +81,8 @@ class DefaultLearningPolicyTests(unittest.TestCase):
     def test_preflight_uses_profile_from_selected_release(self) -> None:
         """Freeze the profile committed at the selected release SHA."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         executable = world.home / "codex"
         executable.write_text("signed Codex fixture")
         executable.chmod(0o700)
@@ -111,7 +114,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
     def test_fresh_install_activates_the_bound_repository_policy(self) -> None:
         """Create the packaged capability after setup on a supported host."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
+        policy_module = importlib.import_module("tools.prepare_codex_policy")
+        profile = json.loads(policy_module.DEFAULT_POLICY_FILE.read_text())
         executable = world.home / "codex"
         executable.write_text("signed Codex fixture")
         executable.chmod(0o700)
@@ -133,12 +139,18 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         self.assertEqual(result["policy_status"], "active")
         self.assertEqual(row["admission"], 1)
         self.assertEqual(selected.policy_source, "repository_default")
-        self.assertEqual(selected.max_input_bytes, 1_048_576)
+        self.assertEqual(
+            selected.max_input_bytes,
+            profile["revisions"][str(profile["default_revision"])][
+                "max_input_bytes"
+            ],
+        )
 
     def test_unsupported_host_keeps_policy_pending(self) -> None:
         """Leave admission unconfigured when native host checks fail."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         with (
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="x86_64"),
@@ -185,9 +197,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
         executable = world.home / "codex"
         executable.write_text("signed Codex fixture")
         executable.chmod(0o700)
-        later = dataclasses.replace(
-            ctx, fresh=False, upgrade=True, default_home=True, ts="later"
-        )
+        with fixture_provider_env(world.home):
+            later = dataclasses.replace(
+                ctx, fresh=False, upgrade=True, default_home=True, ts="later"
+            )
         with (
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),
@@ -223,9 +236,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
                     "FROM review_control"
                 ).fetchone()
             )
-        later = dataclasses.replace(
-            ctx, fresh=False, upgrade=True, default_home=True, ts="later"
-        )
+        with fixture_provider_env(world.home):
+            later = dataclasses.replace(
+                ctx, fresh=False, upgrade=True, default_home=True, ts="later"
+            )
         with (
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),
@@ -247,7 +261,8 @@ class DefaultLearningPolicyTests(unittest.TestCase):
     def test_unused_default_refreshes_to_newer_profile(self) -> None:
         """Refresh an unused enabled default profile."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         executable = world.home / "codex"
         executable.write_text("signed Codex fixture")
         executable.chmod(0o700)
@@ -270,9 +285,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             second_sha = self.commit_profile(
                 world, profile, "select revision two"
             )
-            later = dataclasses.replace(
-                ctx, fresh=False, upgrade=True, ts="later"
-            )
+            with fixture_provider_env(world.home):
+                later = dataclasses.replace(
+                    ctx, fresh=False, upgrade=True, ts="later"
+                )
             installer.install(later, world.repo, second_sha)
         with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
             row = conn.execute(
@@ -291,7 +307,8 @@ class DefaultLearningPolicyTests(unittest.TestCase):
     def test_unused_default_refreshes_within_same_revision(self) -> None:
         """Refresh the profile without replacing the old evidence."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         executable = world.home / "codex"
         executable.write_text("signed Codex fixture")
         executable.chmod(0o700)
@@ -318,9 +335,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             second_sha = self.commit_profile(
                 world, profile, "lower policy round limit"
             )
-            later = dataclasses.replace(
-                ctx, fresh=False, upgrade=True, ts="later"
-            )
+            with fixture_provider_env(world.home):
+                later = dataclasses.replace(
+                    ctx, fresh=False, upgrade=True, ts="later"
+                )
             installer.install(later, world.repo, second_sha)
         with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
             row = conn.execute(

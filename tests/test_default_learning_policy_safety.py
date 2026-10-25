@@ -14,6 +14,7 @@ from install import installer
 from install.context import StepFailedError
 from muninn import store
 from muninn.review_models import ReviewPolicy
+from tests.installer_provider_env import fixture_provider_env
 from tests.installer_support import World, git
 
 
@@ -46,9 +47,10 @@ class DefaultPolicySafetyTests(unittest.TestCase):
         installer.install(ctx, world.repo, world.sha)
         lock_path = ctx.data / "writer.lock"
         lock_path.unlink()
-        later = dataclasses.replace(
-            ctx, fresh=False, upgrade=True, default_home=True
-        )
+        with fixture_provider_env(world.home):
+            later = dataclasses.replace(
+                ctx, fresh=False, upgrade=True, default_home=True
+            )
         module = importlib.import_module("install.review_policy_default")
         with (
             mock.patch("platform.system", return_value="Darwin"),
@@ -61,7 +63,8 @@ class DefaultPolicySafetyTests(unittest.TestCase):
     def test_invalid_profile_refuses_before_executable_checks(self) -> None:
         """Reject malformed or out-of-bounds profiles during preflight."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         executable = world.home / "codex"
         executable.write_text("signed Codex fixture")
         executable.chmod(0o700)
@@ -94,7 +97,8 @@ class DefaultPolicySafetyTests(unittest.TestCase):
     def test_refresh_keeps_installed_runner_when_path_changes(self) -> None:
         """Refresh policy bounds without rebinding the installed runner."""
         world = World(self)
-        ctx = world.ctx(fresh=True, default_home=True)
+        with fixture_provider_env(world.home):
+            ctx = world.ctx(fresh=True, default_home=True)
         original = world.home / "codex-original"
         newly_discovered = world.home / "codex-new"
         for executable in (original, newly_discovered):
@@ -118,7 +122,10 @@ class DefaultPolicySafetyTests(unittest.TestCase):
         second_sha = self.commit_profile(
             world, profile, "reduce default policy rounds"
         )
-        later = dataclasses.replace(ctx, fresh=False, upgrade=True, ts="later")
+        with fixture_provider_env(world.home):
+            later = dataclasses.replace(
+                ctx, fresh=False, upgrade=True, ts="later"
+            )
         with (
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),

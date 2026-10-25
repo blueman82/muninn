@@ -23,6 +23,10 @@ from tests.test_review_shared_models import policy_data
 from tools.learning_eval.models import Assessment
 from tools.prepare_codex_policy import default_policy, policy
 
+DEFAULT_PROFILE_FIXTURE = (
+    Path(__file__).parent / "fixtures/default_codex_policy.json"
+)
+
 
 def experimental_policy(home: Path) -> ReviewPolicy:
     """Construct explicitly acknowledged synthetic ongoing production terms."""
@@ -57,9 +61,13 @@ class CodexProductionPolicyTests(unittest.TestCase):
         self.assertNotIn("expires_at", data["experimental_codex"])
         self.assertEqual(self.policy.deadline_seconds, 120.0)
 
-    def test_repository_default_uses_the_editable_v2_profile(self) -> None:
-        """Read the source-controlled profile with its documented bounds."""
-        selected, _ = default_policy(Path("/synthetic/home"), Path("/codex"))
+    def test_shipped_v2_profile_uses_approved_bounds(self) -> None:
+        """Use fixed shipped bounds despite profile customization."""
+        selected, _ = default_policy(
+            Path("/synthetic/home"),
+            Path("/codex"),
+            DEFAULT_PROFILE_FIXTURE.read_bytes(),
+        )
         self.assertEqual(
             selected.policy_id, "muninn-codex-ongoing-production-v2"
         )
@@ -67,6 +75,17 @@ class CodexProductionPolicyTests(unittest.TestCase):
         self.assertEqual(selected.max_output_bytes, 32768)
         self.assertEqual(selected.context_bytes, 12000)
         self.assertEqual(selected.max_rounds, 2)
+
+    def test_custom_default_profile_values_are_used(self) -> None:
+        """Allow documented reductions in the repository policy profile."""
+        profile = json.loads(DEFAULT_PROFILE_FIXTURE.read_text())
+        profile["limits"]["context_bytes"] = 8000
+        selected, _ = default_policy(
+            Path("/synthetic/home"),
+            Path("/codex"),
+            json.dumps(profile).encode(),
+        )
+        self.assertEqual(selected.context_bytes, 8000)
 
     def test_default_profile_can_only_reduce_the_accepted_call_bounds(
         self,
