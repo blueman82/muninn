@@ -124,6 +124,9 @@ class ReviewPolicy(StrictModel):
 
     schema_version: SchemaVersion
     policy_id: Text
+    policy_source: Literal["repository_default"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     prompt_digest: Digest
     projection_version: Text
     result_schema_digest: Digest
@@ -153,28 +156,28 @@ class ReviewPolicy(StrictModel):
 
     def experimental_bounds(self) -> None:
         """Refuse widened or incompletely recorded experimental bounds."""
+        if self.policy_source is not None and self.experimental_codex is None:
+            raise ValueError("review_policy_source")
         if self.experimental_codex is None:
             if isinstance(self.budget, OngoingBudget):
                 raise ValueError("ongoing_policy_required")
             return
-        expected = {
-            "max_rounds": 2,
-            "max_input_bytes": (
-                1_048_576
-                if self.policy_id == "muninn-codex-ongoing-production-v2"
-                else 65536
-            ),
-            "max_output_bytes": 32768,
-            "context_bytes": 12000,
-            "deadline_seconds": 120.0,
-            "max_attempts": 1,
-            "concurrency": 1,
-            "hook_wait_seconds": 0.0,
-            "allow_global": False,
-        }
+        input_ceiling = {
+            "muninn-codex-ongoing-production": 65536,
+            "muninn-codex-ongoing-production-v2": 1_048_576,
+        }.get(self.policy_id)
         runner, budget = self.runner, self.budget
         if (
-            any(getattr(self, key) != value for key, value in expected.items())
+            input_ceiling is None
+            or self.max_rounds > 2
+            or self.max_input_bytes > input_ceiling
+            or self.max_output_bytes > 32768
+            or self.context_bytes > 12000
+            or self.deadline_seconds > 120.0
+            or self.max_attempts != 1
+            or self.concurrency != 1
+            or self.hook_wait_seconds
+            or self.allow_global
             or (runner.runner, runner.model, runner.reasoning)
             != ("codex_cli", "gpt-6.1-sol", "low")
             or not isinstance(budget, OngoingBudget)

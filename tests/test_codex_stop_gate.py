@@ -5,8 +5,10 @@ from __future__ import annotations
 import io
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 from tools import codex_stop_gate
@@ -32,6 +34,9 @@ class CodexStopGateTest(unittest.TestCase):
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
             mock.patch.object(codex_stop_gate.subprocess, "run") as run,
+            mock.patch.object(
+                codex_stop_gate, "gate_python", return_value=sys.executable
+            ),
             mock.patch.object(sys, "stdin", io.StringIO(payload)),
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -51,6 +56,46 @@ class CodexStopGateTest(unittest.TestCase):
                 check=False,
             )
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_gate_python_prefers_checkout_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            relative = (
+                "Scripts/python.exe"
+                if sys.platform == "win32"
+                else "bin/python3.13"
+            )
+            python = root / ".venv" / relative
+            python.parent.mkdir(parents=True)
+            python.touch()
+            with (
+                mock.patch.object(codex_stop_gate, "ROOT", root),
+                mock.patch.object(
+                    codex_stop_gate, "main_checkout", return_value=root
+                ),
+            ):
+                self.assertEqual(codex_stop_gate.gate_python(), str(python))
+
+    def test_gate_python_uses_main_checkout_venv_in_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "worktree"
+            main = Path(tmp) / "main"
+            root.mkdir()
+            relative = (
+                "Scripts/python.exe"
+                if sys.platform == "win32"
+                else "bin/python3.13"
+            )
+            python = main / ".venv" / relative
+            python.parent.mkdir(parents=True)
+            python.touch()
+            with (
+                mock.patch.object(codex_stop_gate, "ROOT", root),
+                mock.patch.object(
+                    codex_stop_gate, "main_checkout", return_value=main
+                ),
+            ):
+                self.assertEqual(codex_stop_gate.gate_python(), str(python))
 
     def test_success_returns_only_compact_json(self) -> None:
         result = subprocess.CompletedProcess([], 0, "ok tests\n", "")

@@ -241,48 +241,67 @@ operations retain their private recovery record and archive metadata. The
 preparation-only `verify_legacy_resume` interface still stops at
 `legacy_cutover_pending`; it does not perform publication.
 
-### Installer first-policy modifier
+### Default learning policy
 
-`--review-policy PATH` is an optional modifier to the full existing installer
-invocation: `bin/muninn-install --repo DIR --sha SHA --fresh|--upgrade
---review-policy PATH`. It is currently supported for macOS/Linux. The wrapper
-continues forwarding advanced arguments unchanged. Input is bounded UTF8 strict
-JSON: duplicate keys, nonfinite values, linked input, malformed policies and
-changed frozen snapshots refuse before disruption. The private record contains
-raw bytes/digest and canonical policy/digest, bound to the operation, home and
-prepared release. Install summaries contain `policy_status`, never policy values.
+Every clone includes the default profile at
+`tools/default_codex_policy.json`. During an install that uses the current
+default home, Muninn applies this profile if the store has no learning policy
+and the host can run the Codex runner.
 
-Absent input yields `activation_pending` for a never-activated store. Existing
-policy and source baselines are immutable: identical input is a no-op preserving
-admission, including zero; different input requires a separately authorized
-policy transition. First activation records fixed time, store identity,
-generation and sorted source-boundary digest before committing policy and
-admission together. Recovery recognizes an exact committed activation without
-resetting those values; an already fenced admission remains zero and reports
-`activation_incomplete`. Records survive uncertain commit/completion failures.
+The runner requires Apple silicon macOS. A signed Codex CLI must be on `PATH`.
+The canonical Codex sign-in directory must already exist. Muninn binds the
+policy to the host, data directory and executable. If a requirement is missing,
+learning stays pending. Hook trust is a separate provider step.
 
-A valid policy grants no native capability, human production-policy approval or
-budget authority. Prompt, capability, host and admission checks still apply.
-An explicit `experimental_codex` policy may select
-ongoing Mac Codex production with a
-separate `ongoing_production` budget kind. It has no aggregate quota or expiry;
-per-call controls, ordinary project scopes and durable failure halts remain.
-The owner prepares this policy locally with `tools.prepare_codex_policy.prepare`.
-That function needs the Muninn data directory, a stable path to the native Codex
-CLI, the existing Codex sign-in directory, and the actual approver and approval
-time. It writes private policy and capability files; it does not approve or
-install them. Pass the resulting policy path to `--review-policy` after approval.
-Muninn resolves the stable CLI path before each launch, checks the target's
-macOS signature for OpenAI's `codex`, and launches that checked target. It
-rejects a target that another local user could replace. A signed Codex update
-can use the same policy without a version or file-hash pin. Muninn still uses
-fixed launch arguments and checks the output.
-The finite pilot account remains separate. This does not grant verified runner
-status or full C6 acceptance.
-Windows legacy boot/termination proof and actual native/live qualification remain
-separate requirements. Preserve the private operation record, source/archive,
-key and journal during recovery; manual restoration of the old launcher or
-service is unsupported.
+The default uses Codex CLI, model `gpt-6.1-sol` and low reasoning. Each request
+can use at most two rounds, 1 MiB of input, 32 KiB of output, 12,000 bytes of
+context and 120 seconds. The policy allows one attempt and one concurrent
+request. It allows project scope only. These byte limits apply to each request.
+They do not limit total calls or total cost. The policy has no aggregate quota
+or expiry. It also stops after a durable failure.
+
+Before first activation, Muninn records a fixed activation time, store identity,
+policy generation and sorted source-boundary digest. It then commits the policy
+and admission together. The private install record freezes the selected
+profile and local inputs before installation changes begin. Recovery uses those
+same values. It does not find or apply a newer profile.
+
+An upgrade applies the profile if the store has no learning policy. It keeps
+every custom policy and its admission state, including admission set to zero.
+A repository-default policy can refresh only when admission is enabled and the
+store has no learning requests or knowledge entries. The new profile must have
+a later `approved_at` value.
+
+Refresh keeps the host and runner bindings, prompt, budget identity, attempt,
+concurrency and scope settings. It also keeps admission and activation time.
+It can lower the input, round, output, context and deadline limits. It can
+raise the input limit only during the v1 to v2 transition, up to 1 MiB. The
+transition changes the policy generation. Custom policies, disabled defaults
+and defaults with learning activity stay unchanged. A changed
+`--review-policy PATH` is refused for a configured store, except for the
+approved v1 to v2 input-size transition when its conditions hold.
+
+To customize the default, edit and commit the profile in your private clone.
+The installer requires a clean checkout. You can lower input, output, context,
+round and deadline limits within the built-in safety bounds. Keep the Codex
+runner, model, reasoning, single-attempt, concurrency and project-scope settings.
+Set `approved_by` and `approved_at` to record who approved the profile and when.
+The installer rejects values outside the built-in bounds.
+
+You can also pass a custom `--review-policy PATH` for first activation of an
+unconfigured store. The file must be bounded, strict UTF-8 JSON. Muninn freezes
+the exact input. A different policy cannot replace a configured policy. Do not
+edit the database by hand.
+
+Before each launch, Muninn resolves the selected Codex path and checks its
+macOS signature. It binds the executable to a private capability and uses fixed
+launch arguments. This capability does not fully isolate Codex tools or
+actions. The default profile records this limit. The finite pilot account is a
+separate control. It does not prove runner status or full C6 acceptance.
+Windows legacy boot and termination proof, and native live qualification, are
+still separate requirements. During recovery, preserve the private operation
+record, source and archive, key, and journal. Manual restoration of the old
+launcher or service is unsupported.
 
 ## Running and maintaining
 

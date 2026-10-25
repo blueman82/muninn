@@ -13,6 +13,7 @@ from pathlib import Path
 
 from install import legacy_baseline as baseline
 from install import legacy_state, record, snapshot_io
+from install import review_policy_default as default_policy
 from install.context import Ctx, StepFailedError, link_text
 from install.record import Record
 from install.review_policy_parse import policy as _policy
@@ -61,7 +62,7 @@ def _home(path: Path) -> list[int]:
     return [info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode)]
 
 
-def capture(ctx: Ctx, sha: str) -> Record:
+def capture(ctx: Ctx, sha: str, profile_raw: bytes | None = None) -> Record:
     """Capture raw and canonical input before any installation disruption."""
     result: Record = {
         "status": "activation_pending",
@@ -70,21 +71,33 @@ def capture(ctx: Ctx, sha: str) -> Record:
         "home_identity": _home(ctx.home),
         "sha": sha,
     }
+    selected: ReviewPolicy | None = None
+    raw: str | None = None
     if ctx.review_policy is not None:
         if ctx.platform not in {"darwin", "linux"}:
             raise StepFailedError("review_policy_unsupported")
         raw = _read(ctx.review_policy)
-        policy = _policy(raw)
-        if policy.experimental_codex is not None:
+        selected = _policy(raw)
+        if selected.policy_source is not None:
+            raise StepFailedError("review_policy_invalid")
+        if selected.experimental_codex is not None:
             try:
-                check_host(policy.experimental_codex, ctx.data)
+                check_host(selected.experimental_codex, ctx.data)
             except ValueError:
                 raise StepFailedError("review_policy_unsupported") from None
+    else:
+        default = default_policy.select(ctx, profile_raw)
+        if default is not None:
+            selected, source = default
+            result.update(source)
+    if selected is not None:
+        if raw is None:
+            raw = canonical_json(selected)
         result.update(
             raw=raw,
             raw_digest=hashlib.sha256(raw.encode()).hexdigest(),
-            canonical=canonical_json(policy),
-            digest=digest(policy),
+            canonical=canonical_json(selected),
+            digest=digest(selected),
         )
     return result
 
@@ -224,6 +237,16 @@ def activate(
             authority()
             tombstones.reapply_tombstones(conn, ctx.data)
             compatible(conn, policy)
+            if (
+                policy is not None
+                and policy.policy_source == "repository_default"
+                and conn.execute(
+                    "SELECT policy_digest FROM review_control "
+                    "WHERE singleton=1"
+                ).fetchone()[0]
+                != digest(policy)
+            ):
+                default_policy.prepare(ctx, rec, policy)
             apply_transition(conn, policy)
             control = conn.execute("SELECT * FROM review_control").fetchone()
             previous = rec.get("policy_activation")
@@ -278,6 +301,7 @@ def _bootstrap(
     )
     conn.execute("BEGIN IMMEDIATE")
     try:
+        default_policy.prepare(ctx, rec, policy)
         if policy.experimental_codex is not None:
             check_activation(policy.experimental_codex, ctx.data)
         bootstrap_policy(conn, policy, now)

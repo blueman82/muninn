@@ -10,6 +10,50 @@ ROOT = Path(__file__).resolve().parent.parent
 GATE_TIMEOUT = 540
 
 
+def main_checkout() -> Path:
+    """Find the primary checkout that owns this worktree's Git directory.
+
+    Returns:
+        The primary checkout, or this checkout if Git cannot locate it.
+    """
+    try:
+        done = subprocess.run(
+            [
+                "git",
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ROOT
+    if done.returncode:
+        return ROOT
+    return Path(done.stdout.strip()).parent
+
+
+def gate_python() -> str:
+    """Prefer this checkout's development interpreter for the full gate.
+
+    Returns:
+        The checkout's virtual-environment interpreter, or the current one.
+    """
+    relative = (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python3.13"
+    )
+    python = ROOT / ".venv" / relative
+    if python.is_file():
+        return str(python)
+    python = main_checkout() / ".venv" / relative
+    if python.is_file():
+        return str(python)
+    return sys.executable
+
+
 def main() -> int:
     """Run the gate on every Stop, including repeated turns.
 
@@ -20,7 +64,7 @@ def main() -> int:
     # Hook input never selects a checkout or bypasses a previous failure.
     try:
         done = subprocess.run(
-            [sys.executable, "-m", "tools.check", "--full"],
+            [gate_python(), "-m", "tools.check", "--full"],
             cwd=ROOT,
             stdin=subprocess.DEVNULL,
             capture_output=True,

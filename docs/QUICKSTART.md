@@ -93,28 +93,48 @@ Preserve its private operation directory and launch exclusion if interrupted;
 recovery proceeds forward from verified actual state. Windows legacy closure and
 live native qualification remain separate prerequisites. See [REFERENCE.md](REFERENCE.md).
 
-### Explicit first review policy
+### Default learning policy
 
-On macOS/Linux, an explicitly supplied validated policy can enable first review
-admission after store preparation and provider configuration:
+A learning policy tells Muninn when it may send captured conversation text to
+the learning runner. It also sets limits for each request. Every clone includes
+the default profile at `tools/default_codex_policy.json`.
 
-    bin/muninn-install --repo /path/to/muninn --sha FULL_40_HEX_SHA --fresh --review-policy /path/to/policy.json
+Muninn applies the profile during an install that uses the current default
+home, if the store has no learning policy. The host must meet the Codex runner
+requirements. It must use Apple silicon macOS. A signed Codex CLI must be on
+`PATH`. The Codex sign-in directory must already exist. Muninn records the
+host, data directory and executable in a private capability file. If a check
+fails, installation can finish, but learning stays pending. Trust Codex hooks
+separately when Codex prompts you at `/hooks`.
 
-Use `--upgrade` for a supported schema v3 store, the exact legacy route, or a marked
-store that has never been activated. These are the existing two install modes. There
-is no policy discovery
-or default policy. Without this modifier, a never-activated store completes with
-`policy_status: activation_pending` and review admission remains disabled.
-A configured current store preserves its existing admission and reports
-`policy_status: configured`.
-An identical installed policy preserves its admission and source boundaries;
-a different policy is refused. Disabled configured admission is never reenabled.
+The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt
+recall. They do not control learning from completed sessions.
 
-The private operation record freezes input bytes and canonical policy. On a
-restart use the same checkout and operation; omitting the policy path uses the
-frozen snapshot, while supplying changed input refuses. Actual production policy,
-budget approval and native runner capability still require separate evidence;
-a synthetic policy or successful installation does not establish them.
+Each request can use at most two rounds, 1 MiB of input, 32 KiB of output,
+12,000 bytes of context and 120 seconds. The policy allows one attempt and one
+concurrent request. It allows project scope only. These limits apply to each
+request. There is no total call or cost limit. The policy does not expire. See the
+[policy flow](learning-policy-flow.html).
+
+To customize the profile, edit and commit `tools/default_codex_policy.json` in
+your private clone before you install. The installer requires a clean checkout.
+You can lower the input, output, context, round and deadline limits within the
+enforced bounds. Set `approved_by` to the approver's name and `approved_at` to
+the approval time in UTC. Keep the runner, model, reasoning, attempt,
+concurrency and project-scope settings unchanged.
+
+On upgrade, Muninn applies the profile if the store has no learning policy. It
+can refresh a repository-default policy only if learning admission is enabled
+and the store has no learning requests or knowledge entries. Learning
+admission means permission to accept learning requests. The new profile must
+have a later approval time. Muninn keeps the host and runner bindings, prompt,
+budget identity and admission state. The new profile can lower the input,
+round, output, context and deadline limits. It can raise the input limit only
+for the approved v1 to v2 change, up to 1 MiB. Custom policies, used defaults
+and disabled admission stay unchanged. A changed `--review-policy PATH`
+cannot replace a configured policy, except for the documented v1 to v2 change
+when its conditions hold. Do not edit the store by hand. See the
+[policy reference](REFERENCE.md#default-learning-policy).
 
 ## Uninstall
 

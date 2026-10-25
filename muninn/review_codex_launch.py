@@ -19,9 +19,13 @@ from muninn import review_runner, store
 from muninn.knowledge_models import Digest, StrictModel
 from muninn.review_codex_output import output_contract_digest
 from muninn.review_codex_policy import host_identity
-from muninn.review_json import canonical_json_value, result_schema
+from muninn.review_json import (
+    canonical_json,
+    canonical_json_value,
+    result_schema,
+)
 from muninn.review_launch_spec import LaunchSpec, codex_cli_argv, launch_spec
-from muninn.review_models import ReviewContext, RunnerConfig
+from muninn.review_models import ReviewContext, ReviewPolicy, RunnerConfig
 from muninn.review_rounds import round_schema
 
 JSON_ONLY_INSTRUCTION = (
@@ -216,6 +220,43 @@ def _binding(
     executable = Path(binding.requested.executable)
     target, _ = verify_codex_executable(executable)
     return binding, target
+
+
+def selected_auth_home(home: Path, policy: ReviewPolicy) -> Path:
+    """Read the auth directory from the exact installed policy capability.
+
+    Args:
+        home: Muninn's private data directory.
+        policy: Exact stored review policy.
+
+    Returns:
+        The authentication directory already bound to this policy.
+
+    Raises:
+        OSError: If private capability files cannot be read.
+        ValueError: If the selected capability or binding is invalid.
+    """
+    policy = ReviewPolicy.model_validate_json(policy.model_dump_json())
+    selected_dir = home / "review-capabilities" / "selected"
+    selected_digest = hashlib.sha256(
+        canonical_json(policy).encode()
+    ).hexdigest()
+    selected_path = selected_dir / (selected_digest + ".json")
+    for directory in (home, home / "review-capabilities", selected_dir):
+        review_runner.check_private_path(directory, directory=True)
+    capability_raw = review_runner.read_private_file(
+        selected_path, 1024 * 1024
+    )
+    capability = review_runner.RunnerCapability.model_validate_json(
+        capability_raw
+    )
+    if any(
+        getattr(capability, key) != value
+        for key, value in policy.runner.model_dump().items()
+    ):
+        raise ValueError("capability_changed")
+    binding, _ = _binding(home, capability)
+    return binding.auth_home
 
 
 def prepare(

@@ -65,10 +65,16 @@ Instructions for coding agents working in this repository. Any parent-directory
 
 ## Check
 
-    python3.13 -m tools.check --full       # the whole gate: standards, ruff, black,
-                                           # pyright strict, shellcheck, hooks, tests
-    python3.13 -m tools.run_tests          # the suite alone, in parallel (roughly 9 s)
-    python3.13 -m unittest discover -s tests -t .   # the suite, serial (roughly 42 s)
+    .venv/bin/python3.13 -m tools.check --full
+    .venv/bin/python3.13 -m tools.run_tests
+    .venv/bin/python3.13 -m tools.run_tests -j 4
+    .venv/bin/python3.13 -m unittest tests.test_module
+    .venv/bin/python3.13 -m unittest discover -s tests -t .
+
+Use the checkout's virtual-environment interpreter for every command. The full
+gate and test suite use the pinned runtime packages. The test runner starts one
+process per module; `-j N` sets the maximum number of modules it runs at once.
+Run one module by name to narrow a failure.
 
 Set up once, installing the hashed runtime separately from developer tools:
 

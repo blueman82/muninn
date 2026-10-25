@@ -24,6 +24,21 @@ class OngoingReadTransitionTests(StoreCase):
         self.new, _ = policy(
             self.home, Path("/fake-codex"), "owner", 11.0, revision=2
         )
+        self.default_old, _ = policy(
+            self.home,
+            Path("/fake-codex"),
+            "owner",
+            10.0,
+            repository_default=True,
+        )
+        self.default_new, _ = policy(
+            self.home,
+            Path("/fake-codex"),
+            "owner",
+            11.0,
+            revision=2,
+            repository_default=True,
+        )
         self.conn.execute("BEGIN IMMEDIATE")
         review_progress.bootstrap_policy(self.conn, self.old, 20.0)
         self.conn.execute("COMMIT")
@@ -82,3 +97,50 @@ class OngoingReadTransitionTests(StoreCase):
         )
         with self.assertRaisesRegex(StepFailedError, "review_policy_invalid"):
             review_policy_transition.compatible(self.conn, self.new)
+
+    def test_repository_default_refresh_preserves_admission_and_changes_bounds(
+        self,
+    ) -> None:
+        """Allow a bounded default refresh before learning has been used."""
+        self.conn.execute(
+            "UPDATE review_control SET policy_json=?,policy_digest=? "
+            "WHERE singleton=1",
+            (canonical_json(self.default_old), digest(self.default_old)),
+        )
+        generation = self.conn.execute(
+            "SELECT generation FROM review_control"
+        ).fetchone()[0]
+        review_policy_transition.check(
+            self.conn, self.default_old, self.default_new
+        )
+        review_policy_transition.apply(self.conn, self.default_new)
+        row = self.conn.execute(
+            "SELECT admission,generation,policy_digest FROM review_control"
+        ).fetchone()
+        self.assertEqual(row[0], 1)
+        self.assertEqual(row[1], generation + 1)
+        self.assertEqual(row[2], digest(self.default_new))
+
+    def test_repository_default_refresh_refuses_custom_or_disabled_policy(
+        self,
+    ) -> None:
+        """Do not refresh custom or opted-out policies."""
+        with self.assertRaisesRegex(
+            StepFailedError, "review_policy_transition_required"
+        ):
+            review_policy_transition.check(
+                self.conn,
+                self.default_old,
+                self.default_new.model_copy(update={"policy_source": None}),
+            )
+        self.conn.execute(
+            "UPDATE review_control SET policy_json=?,policy_digest=?,"
+            "admission=0 WHERE singleton=1",
+            (canonical_json(self.default_old), digest(self.default_old)),
+        )
+        with self.assertRaisesRegex(
+            StepFailedError, "review_policy_transition_required"
+        ):
+            review_policy_transition.check(
+                self.conn, self.default_old, self.default_new
+            )
