@@ -1,0 +1,49 @@
+name: Worker group quiescence proof
+
+on:
+  pull_request:
+    paths:
+      - 'muninn/review_process*.py'
+      - 'tests/test_review_group_quiescence.py'
+      - 'tools/worker_quiescence_proof.py'
+      - '.github/workflows/worker-quiescence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-quiescence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out immutable source history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install the hashed runtime closure
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --require-hashes -r requirements-runtime.lock
+      - name: Prove the precise old failure and current success
+        env:
+          MUNINN_PROOF_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: .venv/bin/python -m tools.worker_quiescence_proof --output "$RUNNER_TEMP/worker-quiescence"
+      - name: Retain raw native source-bound evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: worker-quiescence-${{ github.sha }}
+          path: ${{ runner.temp }}/worker-quiescence
+          if-no-files-found: error
+          retention-days: 30
