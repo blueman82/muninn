@@ -77,8 +77,12 @@ can remain delayed after the process deadline (`review_commit_delay`,
 total I/O or command duration.
 
 `review_pause` is always unverified. Witness presence, missing DB/PID or free
-locks do not prove containment. Before an upgrade prepares the store, the
-installer checks for `recovery_guidance`. It tries the qualified repair path on
+locks do not prove containment. A present repair-baseline path gives
+`review_repair.detail: baseline_present_recovery_unverified`.
+On macOS or Linux, `recovery_guidance.status: recovery_check_required` asks for
+checked recovery. Doctor has not validated the record or its identity. A malformed
+or unsafe record can still cause recovery to refuse.
+Before an upgrade prepares the store, the installer tries the checked repair path on
 macOS or Linux. If repair needs a reboot, restart the computer and rerun the
 same install command. The installer then retries recovery.
 

@@ -6,7 +6,7 @@ import json
 import sys
 from unittest import mock
 
-from muninn import obs
+from muninn import obs, obs_status
 from muninn.obs_recovery import recovery_guidance
 from tests.test_obs import ReviewReceiptCase
 
@@ -45,7 +45,7 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
         expected_status = (
             "manual_recovery_required"
             if sys.platform == "win32"
-            else "automatic_recovery_available"
+            else "recovery_check_required"
         )
         self.assertEqual(guidance["status"], expected_status)
         if sys.platform == "win32":
@@ -66,7 +66,7 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
                 "check": "review_repair",
                 "ok": False,
                 "level": "warn",
-                "detail": "baseline_present_manual_recovery_required",
+                "detail": "baseline_present_recovery_unverified",
             }
         ]
         guidance = recovery_guidance(checks, "win32")
@@ -76,3 +76,76 @@ class ReviewRecoveryGuidanceTests(ReviewReceiptCase):
         self.assertIn(
             "contact your Muninn maintainer", " ".join(guidance["steps"])
         )
+
+
+class RecoveryObservationTests(ReviewReceiptCase):
+    """Never infer safe automatic recovery from a protocol path."""
+
+    def test_missing_baseline_has_no_repair_guidance(self) -> None:
+        checks = [
+            obs.CheckResult(check=name, ok=ok, detail=detail, level=level)
+            for name, ok, detail, level in obs_status.review_protocol(
+                self.home
+            )
+        ]
+        self.assertIsNone(recovery_guidance(checks, "darwin"))
+
+    def test_unverified_paths_only_request_checked_recovery(self) -> None:
+        for kind in ("malformed", "directory", "symlink", "public"):
+            home = self.home / kind
+            home.mkdir()
+            path = home / "review.supervisor.repair.json"
+            with self.subTest(kind=kind):
+                if kind == "directory":
+                    path.mkdir()
+                elif kind == "symlink":
+                    path.symlink_to(home / "missing-target")
+                else:
+                    path.write_text(SECRET)
+                    path.chmod(0o644 if kind == "public" else 0o600)
+                before = path.lstat()
+                checks = [
+                    obs.CheckResult(
+                        check=name, ok=ok, detail=detail, level=level
+                    )
+                    for name, ok, detail, level in obs_status.review_protocol(
+                        home
+                    )
+                ]
+                repair = next(
+                    c for c in checks if c["check"] == "review_repair"
+                )
+                self.assertEqual(
+                    repair["detail"], "baseline_present_recovery_unverified"
+                )
+                for platform in ("darwin", "linux"):
+                    guidance = recovery_guidance(checks, platform)
+                    assert guidance is not None
+                    self.assertEqual(
+                        guidance["status"], "recovery_check_required"
+                    )
+                    self.assertIn("not verified", " ".join(guidance["steps"]))
+                    self.assertIn(
+                        "legacy_volume_confirmation_required",
+                        " ".join(guidance["steps"]),
+                    )
+                    self.assertNotIn(SECRET, json.dumps(guidance))
+                self.assertEqual(path.lstat(), before)
+                if kind == "directory":
+                    path.rmdir()
+                else:
+                    path.unlink()
+
+    def test_unsupported_platform_requires_maintainer(self) -> None:
+        checks = [
+            obs.CheckResult(
+                check="review_repair",
+                ok=False,
+                level="warn",
+                detail="baseline_present_recovery_unverified",
+            )
+        ]
+        guidance = recovery_guidance(checks, "freebsd")
+        assert guidance is not None
+        self.assertEqual(guidance["status"], "manual_recovery_required")
+        self.assertEqual(guidance["reason"], "recovery_platform_unqualified")
