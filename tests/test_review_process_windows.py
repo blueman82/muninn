@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import io
 import unittest
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,37 @@ from muninn import review_process_windows as windows
 
 class ReviewProcessWindowsTests(unittest.TestCase):
     """Never create an uncontained process and assign it afterward."""
+
+    def test_job_can_close_before_output_pipes_without_double_close(
+        self,
+    ) -> None:
+        kernel = mock.Mock()
+        pipes = (io.BytesIO(), io.BytesIO(b"out"), io.BytesIO(b"err"))
+        child = windows.NativeChild(kernel, 123, 456, 2, pipes)
+        try:
+            child.close_job()
+            child.close_job()
+            self.assertEqual(child.job, 0)
+            self.assertEqual(child.stdout.read(), b"out")
+            self.assertEqual(child.stderr.read(), b"err")
+            kernel.CloseHandle.assert_called_once_with(123)
+        finally:
+            child.close()
+        self.assertTrue(all(pipe.closed for pipe in pipes))
+
+    def test_failed_job_close_retains_handle_for_cleanup_retry(self) -> None:
+        kernel = mock.Mock()
+        kernel.CloseHandle.return_value = False
+        pipes = (io.BytesIO(), io.BytesIO(), io.BytesIO())
+        child = windows.NativeChild(kernel, 123, 456, 2, pipes)
+        try:
+            with self.assertRaisesRegex(OSError, "native_job_close_failed"):
+                child.close_job()
+            self.assertEqual(child.job, 123)
+            self.assertTrue(all(not pipe.closed for pipe in pipes))
+        finally:
+            kernel.CloseHandle.return_value = True
+            child.close()
 
     def test_atomic_job_assignment_has_no_orphan_window(self) -> None:
         kernel = mock.Mock()
