@@ -80,6 +80,10 @@ If neither checkout has a complete `.venv`, it reports a launch failure.
 The full gate and test suite use the pinned runtime packages. The runner starts
 one process per module. It uses at most four workers by default. The `-j N`
 option sets the worker limit. Run one module by name to narrow a failure.
+Each module has a 600-second deadline. Direct runner invocations can set
+`--timeout SECONDS` to a finite positive value. A timeout reports the module,
+retains partial output and fails the run; cleanup can take up to five more
+seconds. Ctrl-C cancels queued work and contains active module processes.
 
 Set up once, installing the hashed runtime separately from developer tools:
 
