@@ -53,6 +53,41 @@ class PolicyRecordValidationTests(unittest.TestCase):
         self.path.write_text(json.dumps(value))
         self.path.chmod(0o600)
 
+    def test_consent_survives_capture_and_legacy_absence(self) -> None:
+        self.ctx.enable_learning = True
+        selected = review_policy.capture(self.ctx, self.sha)
+        self.assertIs(selected.get("enable_learning"), True)
+        self.assertTrue(
+            policy_records.learning_consent({"policy_input": selected})
+        )
+        self.assertIsNotNone(
+            review_policy.frozen(
+                self.ctx, {"sha": self.sha, "policy_input": selected}
+            )
+        )
+        legacy = dict(selected)
+        legacy.pop("enable_learning")
+        self.assertNotIn(
+            "enable_learning", policy_records.policy_input(legacy)
+        )
+        self.assertIsNotNone(
+            review_policy.frozen(
+                self.ctx, {"sha": self.sha, "policy_input": legacy}
+            )
+        )
+
+    def test_consent_refuses_coercion_and_null(self) -> None:
+        for value in (None, 0, 1, "true", "false", [], {}):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(
+                    StepFailedError, "review_policy_snapshot_changed"
+                ),
+            ):
+                policy_records.policy_input(
+                    dict(self.snapshot) | {"enable_learning": value}
+                )
+
     def test_wrong_snapshot_container_refuses_with_stable_error(self) -> None:
         for value in (None, [], "policy", 7, False):
             with self.subTest(value=value):

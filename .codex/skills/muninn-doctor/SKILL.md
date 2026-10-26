@@ -1,38 +1,102 @@
 ---
 name: muninn-doctor
-description: Run muninn health checks with `muninn doctor`. Use when muninn seems stale or broken, search returns nothing unexpectedly, hooks are not injecting, after an install or upgrade, or whenever the user asks if muninn is healthy.
+description: Run Muninn health checks after installation, upgrade, or a reported failure.
 ---
 
 # muninn doctor
 
-    muninn doctor --pretty
+```sh
+muninn doctor --pretty
+```
 
-Exit 0 and `ok: true` mean no error-level check failed; exit 1 means at least one did.
+Exit 0 means no error-level check failed.
+Exit 1 means an error-level check failed.
+Warnings do not change the exit code.
+Each check has `ok`, `level`, and `detail`.
+A null `ok` means Muninn could not verify the condition.
+Read `detail` before taking action.
 
-Each check has `ok` (true, false, or null = could not verify) and a `level`: `error` fails the run, `warn` is shown only, `info` is informational. Read `detail` for the cause.
+## Service and storage checks
 
-## Check responses
+- `heartbeat`, `launchd_job`, or `managed_service`: check the owned per-user service.
+  A null service result means ownership or status remains unverified.
+- `file_modes` or `data_dir_mode`: POSIX directories require mode 0700 and files require mode 0600.
+  Windows requires private ACLs.
+  `chmod` does not establish those ACLs.
+- `unexpected_files`: inspect the named files.
+  Keep supervisor locks, witnesses, repair records, stop records, journals, keys, and retained archives.
+  Never delete these files to bypass a refusal.
+- `unowned_journal`: a crashed writer left a journal.
+  The next writer rolls it back.
+- `db_free_space`: run `muninn compact` when space recovery is needed.
+- `tombstone_key`: a missing or damaged key blocks ingest, rebuild, and erase.
+  Restore `tombstone.key` from a backup.
+  Do not recreate the key by hand.
+- `aside_files`: an unreadable retained store can still contain erased text.
+  Salvage required data before deleting that retained store.
+- `upgrade_snapshot`: an undeleted pre-upgrade store copy can contain transcript text.
+  `erase` cannot scrub this copy.
+  Delete the named leftover copy.
+- `release_leftovers`: the next installer run removes leftover `.pruning-*` release directories.
 
-- `heartbeat` or `launchd_job` (macOS) / `managed_service` (Linux/Windows) failing: check the owned per-user service. A null service result means ownership or status could not be verified.
-- `file_modes` or `data_dir_mode`: POSIX data directories require mode 0700 and files 0600; Windows requires private ACLs, which chmod does not establish.
-- `unexpected_files`: inspect unexpected files. The supervisor lock/witness/repair baseline, stop record, erasure journal, keys and retained archives are governed state; never delete them to bypass a refusal.
-- `unowned_journal`: a crashed writer's journal; the next writer rolls it back.
-- `db_free_space` warn: run `muninn compact`.
-- `tombstone_key` (error): `tombstone.key` is `missing` or `damaged` while erased content is tracked by it; ingest, rebuild and erase stop until it is restored from a backup. Do not recreate it by hand.
-- `aside_files` (warn): `rebuild` set aside an unreadable store (`muninn.sqlite.unreadable-*`); `erase` cannot scrub it, so it may still hold erased text. Salvage required data, then delete the store manually.
-- `upgrade_snapshot` (warn): a pre-upgrade copy of the store (`muninn.sqlite.pre-upgrade-*`) was left because the installer could not delete it; it holds transcript text and `erase` cannot scrub it. Delete it.
-- `release_leftovers` (warn): an old release has a remaining `.pruning-*` directory in `~/.local/lib/muninn`; the next `bin/muninn-install` removes it, or remove it manually.
-- `poller_error` (warn): the last pass stopped with an exception; `detail` is its class name. The next successful poller pass clears it; a manual `ingest` does not. A persistent warning indicates recurring poller failures.
-- `failed_sources` (warn): ordinary failed source read attempts during the last completed invocation, possibly including subsequently recovered sources. Repeated attempts count separately; preparation misses are excluded.
-- `unreadable_files` (warn): the last completed invocation recorded that many failed transcript open attempts, possibly including subsequently recovered sources; check file permissions (macOS may need Full Disk Access for the poller).
-- `reread` (info): `N of M` active sources are still to be re-read after an upgrade changed the classifier. The count normally reaches `0 of M`. If it remains above 0, inspect `failed_sources` and `stats` `last_pass.unreadable_files` (attempt totals, not distinct or unresolved source counts). It never fails the run.
-- `review_backlog` (info), `review_policy`, `review_auth`, `review_config`, `review_abandoned` (warn): durable queue, policy and attempt-history counts/codes; no stored explanations.
-- `recovery_guidance`: `review_repair.detail: baseline_present_recovery_unverified` reports presence only. On macOS or Linux, `status: recovery_check_required` means run `muninn recover` to perform safety checks; it does not mean repair is verified or will succeed. If it returns `reboot_required`, restart the computer and run it again. Run `muninn doctor --pretty` after recovery. `recover` does not restart the service. On Windows, preserve all repair files. Save the report and contact the maintainer. Windows repair is not qualified.
-- `review_process_deadline` (warn): recorded deadline failures or an unfinished attempt past its explicit policy deadline with an unended call; does not prove a live process or completed kill. `review_commit_delay` and `review_cancel_delay` report durable finalization separately.
-- `review_coverage_gaps` and `review_capture_gaps` (warn): the same eligible set as stats (including admitted historical replay, excluding untouched activation archive) lacking receipts/current matching provenance, and new or uncertain previously admitted indexed records. Endpoint equality alone cannot prove interior content; missing/changed/erased same-request evidence stays a gap. Health reads no originals and preserves immutable receipts. Refusals/log loss never count as success; later explicit receipts do not fill preceding gaps.
-- `review_pause` (info, null): only witness presence is known. Containment is unverified. `review_repair` (warn): a repair baseline is present. `review_erasure_intent` (info): a journal is present, but its consistency is unverified. Doctor never creates, resets or deletes these files. An absent database, PID or lock does not prove containment.
-- `review_windows_repair` (warn, Windows): boot repair and durable baseline retirement are unqualified required-platform release blockers; fakes are not native qualification. Preserve all protocol evidence.
+## Ingest checks
 
-Real erase may interrupt the whole service. Read its `erasure_status`; `restart: not_attempted` requires checking and manually restarting if needed, never assuming it is stopped/restored. Retained archives prevent verified erasure. Original-source read budgets do not cap journal work, total I/O or command time; process deadlines do not cap DB commit/cancel delay.
+- `poller_error`: the last pass raised an exception.
+  `detail` gives its class name.
+  A successful poller pass clears it.
+  Manual ingest does not clear it.
+- `failed_sources`: this counts failed read attempts during the last completed invocation.
+  It can include sources that later recovered.
+  Repeated attempts count separately.
+  Preparation misses are excluded.
+- `unreadable_files`: inspect permissions for the reported failed open attempts.
+  The macOS poller can require Full Disk Access.
+- `reread`: `N of M` counts active sources awaiting another read after a classifier change.
+  If source reads succeed, the remaining count reaches zero.
+  If the count remains positive, inspect `failed_sources` and `stats.last_pass.unreadable_files`.
+  These fields count attempts, not distinct unresolved sources.
 
-Report failing checks. Claim a fix only after `doctor` is re-run and passes.
+## Learning checks
+
+- `review_backlog` reports queued requests.
+- `review_policy`, `review_auth`, `review_config`, and `review_abandoned` report policy or attempt history.
+- `review_attention` gives a fixed stage, cause, and action.
+  The next Codex session also shows required action.
+  These diagnostics contain no transcript text.
+- `review_process_deadline` reports a recorded deadline failure or an overdue unfinished call.
+  It does not prove a live process or a completed stop.
+- `review_commit_delay` and `review_cancel_delay` report delayed finalisation.
+- `review_coverage_gaps` and `review_capture_gaps` report eligible records without matching completion evidence.
+  They include admitted historical replay and exclude untouched activation history.
+  Endpoint equality cannot prove unchanged interior content.
+  Missing, changed, or erased evidence remains a gap.
+  Refusals and lost logs do not count as success.
+- `review_pause` reports witness presence.
+  It does not verify process containment.
+- `review_repair` reports a saved repair record.
+- `review_erasure_intent` reports journal presence without proving consistency.
+- `review_windows_repair` reports an unqualified Windows repair boundary.
+  Keep all protocol evidence.
+
+Doctor does not create, reset, or delete repair files.
+An absent database, PID, or lock does not prove that related processes stopped.
+
+## Recovery
+
+If macOS or Linux reports `recovery_guidance`, run `muninn recover`.
+If recovery returns `reboot_required`, restart the computer.
+After restarting, run `muninn recover` again.
+Run `muninn doctor --pretty` after recovery.
+`recover` does not restart the service.
+On Windows, keep all repair files.
+Windows repair requires native qualification before release.
+
+An erase operation can interrupt the service.
+Read `erasure_status` before claiming that the service restarted.
+If `restart` is `not_attempted`, check the service and restart it when required.
+Retained archives prevent verified erasure.
+Original-read limits do not limit journal work, total I/O, or command time.
+Process deadlines do not limit database commit or cancellation delays.
+
+Report failed checks.
+Claim a repair only after a new doctor run passes.

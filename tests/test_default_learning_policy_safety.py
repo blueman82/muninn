@@ -9,6 +9,7 @@ import os
 import sys
 import unittest
 from contextlib import closing
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -122,7 +123,10 @@ class DefaultPolicySafetyTests(unittest.TestCase):
             ),
         ):
             installer.install(ctx, world.repo, first_sha)
-        profile["approved_at"] = "2026-10-24T00:01:00Z"
+        profile["approved_at"] = (
+            datetime.fromisoformat(profile["approved_at"])
+            + timedelta(minutes=1)
+        ).isoformat()
         profile["limits"]["max_rounds"] = 1
         second_sha = self.commit_profile(
             world, profile, "reduce default policy rounds"

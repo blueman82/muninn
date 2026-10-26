@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 from typing import cast
 
-from muninn import classify, hook_learn, ingest
+from muninn import classify, hook_learn, ingest, review_state
 from muninn.cli_learn import installed_policy
 from muninn.hook_context import as_payload
 from muninn.knowledge_models import Provider
@@ -50,7 +50,12 @@ def _native(
     activated = conn.execute(
         "SELECT activated_at FROM review_control"
     ).fetchone()[0]
-    if known or source["first_seen"] <= activated:
+    saved = review_state.selection(conn)
+    if (
+        known
+        or source["first_seen"] <= activated
+        or (saved is not None and saved.mode == "all")
+    ):
         return True
     raw = originals(conn, source, 1, 1, budget=budget)[0][1]
     if classify.record_hash(raw) != source["first_line_sha256"]:

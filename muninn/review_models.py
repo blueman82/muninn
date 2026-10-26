@@ -165,6 +165,7 @@ class ReviewPolicy(StrictModel):
         input_ceiling = {
             "muninn-codex-ongoing-production": 65536,
             "muninn-codex-ongoing-production-v2": 1_048_576,
+            "muninn-codex-ongoing-production-v3": 1_048_576,
         }.get(self.policy_id)
         runner, budget = self.runner, self.budget
         if (
@@ -174,8 +175,16 @@ class ReviewPolicy(StrictModel):
             or self.max_output_bytes > 32768
             or self.context_bytes > 12000
             or self.deadline_seconds > 120.0
-            or self.max_attempts != 1
-            or self.concurrency != 1
+            or not (
+                self.max_attempts <= 3
+                if self.policy_id.endswith("-v3")
+                else self.max_attempts == 1
+            )
+            or not (
+                self.concurrency <= 4
+                if self.policy_id.endswith("-v3")
+                else self.concurrency == 1
+            )
             or self.hook_wait_seconds
             or self.allow_global
             or (runner.runner, runner.model, runner.reasoning)
@@ -288,6 +297,7 @@ class ReviewContext(StrictModel):
     evidence_ids: tuple[EvidenceId, ...]
     round_index: PositiveInt
     deadline: PositiveSeconds
+    knowledge_digest: Digest | None = None
 
 
 class ReviewDetail(StrictModel):
@@ -298,6 +308,9 @@ class ReviewDetail(StrictModel):
     calls: list[CallView]
     evidence: list[EvidenceRecord]
     receipt: Receipt | None
+    diagnostics: list[dict[str, str]] = Field(
+        default_factory=list[dict[str, str]]
+    )
 
 
 class ReviewStats(StrictModel):

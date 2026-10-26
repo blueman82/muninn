@@ -11,8 +11,10 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from muninn import query, review_requests
+from muninn import query, review_recovery, review_requests
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
+from muninn.cli_learning_setup import failure as setup_failure
+from muninn.cli_learning_setup import setup
 from muninn.knowledge_models import RequestId, Scope
 from muninn.query.answers import BadArgumentError
 from muninn.query.filters import resolve_session
@@ -236,6 +238,7 @@ def _detail(conn: sqlite3.Connection, ident: RequestId) -> Out:
             )
         ],
         receipt=_receipt(conn, ident),
+        diagnostics=review_recovery.details(conn, ident),
     ).model_dump(mode="json")
 
 
@@ -260,7 +263,9 @@ def _write(conn: sqlite3.Connection, a: Namespace) -> Out:
     now = time.time()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        if a.learn_cmd in {"request", "replay"}:
+        if a.learn_cmd == "setup":
+            out = setup(conn, a, installed_policy(conn), now)
+        elif a.learn_cmd in {"request", "replay"}:
             out = _request(conn, a, now)
         elif a.learn_cmd == "resume":
             out = _resume(conn, a, now)
@@ -335,12 +340,21 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Dispatch explicit learning controls with content-free refusal codes."""
     record["cmd"] = f"learn {a.learn_cmd}"
     try:
-        if a.learn_cmd in {"list", "show"}:
+        if a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
+            out = read_store(
+                home,
+                lambda conn: setup(
+                    conn, a, installed_policy(conn), time.time()
+                ),
+            )
+        elif a.learn_cmd in {"list", "show"}:
             out = read_store(home, lambda conn: _read(conn, a))
         else:
             out = write_store(home, lambda conn: _write(conn, a))
     except ValidationError:
         return 2, {"error": "rejected_validation"}
     except (ValueError, BadArgumentError) as exc:
+        if a.learn_cmd == "setup":
+            return 2, setup_failure(str(exc))
         return 2, {"error": str(exc)}
     return 0, out

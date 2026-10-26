@@ -230,6 +230,10 @@ def _add_learning(cmd: _Commands) -> None:
         p.add_argument("--policy", required=name == "replay")
         if name == "request":
             p.add_argument("--task")
+    p = learn.add("setup", "choose future records or verified history")
+    p.add_argument("--mode", choices=("now", "all"), required=True)
+    p.add_argument("--project")
+    p.add_argument("--confirm")
     p = learn.add("list")
     p.add_argument(
         "--state",

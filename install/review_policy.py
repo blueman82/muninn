@@ -11,8 +11,14 @@ import stat
 from contextlib import closing, suppress
 from pathlib import Path
 
+from install import (
+    learning_scope,
+    legacy_state,
+    policy_records,
+    record,
+    snapshot_io,
+)
 from install import legacy_baseline as baseline
-from install import legacy_state, policy_records, record, snapshot_io
 from install import review_policy_default as default_policy
 from install.context import Ctx, StepFailedError
 from install.policy_record_models import (
@@ -80,6 +86,7 @@ def capture(
         "home": str(ctx.home),
         "home_identity": _home(ctx.home),
         "sha": sha,
+        "enable_learning": ctx.enable_learning,
     }
     selected: ReviewPolicy | None = None
     raw: str | None = None
@@ -134,6 +141,8 @@ def frozen(
             ("sha", rec["sha"]),
         )
     ):
+        raise StepFailedError("review_policy_snapshot_changed")
+    if type(value.get("enable_learning", False)) is not bool:
         raise StepFailedError("review_policy_snapshot_changed")
     raw = value.get("raw")
     if raw is None:
@@ -264,7 +273,11 @@ def activate(
                 != digest(policy)
             ):
                 default_policy.prepare(ctx, rec, policy)
-            apply_transition(conn, policy)
+            apply_transition(
+                conn,
+                policy,
+                enable_admission=policy_records.learning_consent(rec),
+            )
             control = conn.execute("SELECT * FROM review_control").fetchone()
             previous = (
                 policy_records.activation(rec["policy_activation"])
@@ -300,6 +313,7 @@ def activate(
                 rec["policy_status"] = "activation_pending"
             else:
                 _bootstrap(ctx, rec, conn, path, policy, authority)
+            learning_scope.apply(ctx, rec, conn)
             check()
         file_sync.sync_path(path)
         check()

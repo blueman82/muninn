@@ -8,6 +8,7 @@ import json
 import sys
 import unittest
 from contextlib import closing
+from datetime import datetime, timedelta
 from unittest import mock
 
 from install import installer, preflight
@@ -280,7 +281,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
             ),
         ):
             installer.install(ctx, world.repo, first_sha)
-            profile["approved_at"] = "2026-10-24T00:01:00Z"
+            profile["approved_at"] = (
+                datetime.fromisoformat(profile["approved_at"])
+                + timedelta(minutes=1)
+            ).isoformat()
             profile["default_revision"] = 2
             second_sha = self.commit_profile(
                 world, profile, "select revision two"
@@ -330,7 +334,10 @@ class DefaultLearningPolicyTests(unittest.TestCase):
                 )
             )
             old_policy = old_policy_file.read_bytes()
-            profile["approved_at"] = "2026-10-24T00:01:00Z"
+            profile["approved_at"] = (
+                datetime.fromisoformat(profile["approved_at"])
+                + timedelta(minutes=1)
+            ).isoformat()
             profile["limits"]["max_rounds"] = 1
             second_sha = self.commit_profile(
                 world, profile, "lower policy round limit"

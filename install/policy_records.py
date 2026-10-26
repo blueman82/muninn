@@ -137,7 +137,14 @@ def default_source(value: Mapping[str, object]) -> DefaultSelection:
             key: item
             for key, item in value.items()
             if key
-            not in {"status", "operation", "home", "home_identity", "sha"}
+            not in {
+                "status",
+                "operation",
+                "home",
+                "home_identity",
+                "sha",
+                "enable_learning",
+            }
         }
     )
 
@@ -157,3 +164,10 @@ def input_raw(rec: Mapping[str, object]) -> str | None:
         return None
     raw = policy_input(rec["policy_input"]).get("raw")
     return raw if isinstance(raw, str) else None
+
+
+def learning_consent(rec: Mapping[str, object]) -> bool:
+    """Read explicit restart approval through the strict input contract."""
+    if "policy_input" not in rec:
+        return False
+    return policy_input(rec["policy_input"]).get("enable_learning", False)

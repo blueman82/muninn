@@ -156,6 +156,7 @@ class DefaultSelection(LegacyDefaultSelection):
 class InputBinding(TypedDict):
     """Operation and home identity retained before installation disruption."""
 
+    enable_learning: NotRequired[bool]
     status: Literal["activation_pending"]
     operation: str
     home: str

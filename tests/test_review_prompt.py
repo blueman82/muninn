@@ -8,7 +8,7 @@ import time
 from unittest import mock
 
 from muninn import review_prompt, review_requests
-from muninn import review_supervisor as supervision
+from muninn import review_supervisor_result as completion
 from muninn.review_models import ReviewContext
 from tests.ingest_support import line
 from tests.test_review_requests import RequestCase
@@ -157,9 +157,9 @@ class ReviewPromptRoundTests(SupervisorCase):
             "print(json.dumps({'type':'result','subtype':'success',"
             "'is_error':False,'structured_output':op}))"
         )
-        real = supervision.commit_review
+        real = completion.commit_review
         with mock.patch.object(
-            supervision, "commit_review", wraps=real
+            completion, "commit_review", wraps=real
         ) as commit:
             self.finish()
         first = json.loads((self.home / "1").read_text())["data"]

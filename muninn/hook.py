@@ -34,6 +34,7 @@ from muninn.hook_retrieval import RECALL_ADVISORY, advisory_output
 from muninn.hook_status import printable, status_line
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
+from muninn.review_recovery import notice as learning_notice
 
 __all__ = [
     "BLOCK_LIMIT",
@@ -289,6 +290,10 @@ def _respond(
             "additionalContext": text,
         }
     }
+    issue = trace.pop("learning_notice", None)
+    if isinstance(issue, str):
+        out["systemMessage"] = issue
+        return out
     line = status_line(event, trace, shown)
     if line:
         out["systemMessage"] = line
@@ -311,6 +316,16 @@ def _start_block(
     limit: int,
 ) -> str:
     """Build the SessionStart block for the payload's repository."""
+    issue = learning_notice(conn)
+    if issue is not None:
+        trace["learning_notice"] = (
+            "Muninn learning ("
+            + issue["stage"]
+            + "): "
+            + issue["cause"]
+            + " "
+            + issue["action"]
+        )
     cwd = project_cwd(payload, env)
     with knowledge_read.read_snapshot(conn):
         ids = scope.scope_ids_for_read(conn, cwd)

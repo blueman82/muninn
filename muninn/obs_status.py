@@ -19,6 +19,7 @@ from muninn import platform_io, query, store
 from muninn.platform_paths import read_selection, windows_base
 from muninn.query.index_age import ALIVE_AT, seconds_since
 from muninn.review_models import ReviewPolicy
+from muninn.review_recovery import health_checks as learning_checks
 
 DATA_FILES = frozenset(
     {
@@ -43,6 +44,7 @@ DATA_FILES = frozenset(
         "review-codex-schema.json",
         "review-policy-codex-ongoing.json",
         "review-policy-codex-ongoing-v2.json",
+        "review-policy-codex-ongoing-v3.json",
         "review-prompts",
         "review-runner-cwd",
     }
@@ -255,6 +257,7 @@ def review_health(
     )
     output.extend(_review_gap_checks(conn))
     output.append(_review_policy(conn))
+    output.extend(learning_checks(conn))
     return tuple(output)
 
 

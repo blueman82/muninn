@@ -4,14 +4,20 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from muninn import store
+from muninn import review_recovery, store
+from muninn.review_catchup import catch_up
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
-from muninn.review_process import ProcessEvent, WorkerLaunched, WorkerReady
+from muninn.review_process import (
+    ProcessEvent,
+    ProcessOutcome,
+    WorkerLaunched,
+    WorkerReady,
+)
 from muninn.review_progress import digest
 
 
@@ -29,8 +35,7 @@ def database(
     home: Path, *, transaction: bool = True
 ) -> Generator[sqlite3.Connection]:
     """Close SQLite before releasing the non-reentrant writer descriptor."""
-    if threading.current_thread() is not threading.main_thread():
-        raise RuntimeError("main_thread_required")
+    require_main()
     with (
         store.writer_lock(home, wait_s=0),
         closing(store.connect_rw(store.db_path(home))) as conn,
@@ -75,11 +80,19 @@ def halt_interrupted(conn: sqlite3.Connection, policy: ReviewPolicy) -> None:
     if (
         policy.experimental_codex is not None
         and conn.execute(
-            "SELECT 1 FROM review_attempt WHERE ended_at IS NULL UNION ALL "
-            "SELECT 1 FROM review_call WHERE state IN "
+            (
+                "SELECT 1 FROM review_attempt "
+                "WHERE ended_at IS NULL UNION ALL "
+                if not review_recovery.enabled(policy)
+                else ""
+            )
+            + "SELECT 1 FROM review_call WHERE state IN "
             "('reserved','launched','unknown') LIMIT 1"
         ).fetchone()
     ):
+        review_recovery.record(
+            conn, "setup", "process_identity_unverified", "recovery", 0.0
+        )
         conn.execute("UPDATE review_control SET admission=0")
 
 
@@ -114,7 +127,12 @@ def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
                 "usage_json=?,outcome=? WHERE attempt_id=? AND round_index=? "
                 "AND state IN ('reserved','launched','completed')",
                 (
-                    "completed" if event.error_code is None else "unknown",
+                    (
+                        "completed"
+                        if event.error_code is None
+                        or review_recovery.enabled(policy)
+                        else "unknown"
+                    ),
                     now,
                     canonical_json(event.observed),
                     canonical_json(event.usage) if event.usage else None,
@@ -123,10 +141,49 @@ def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
                     event.round_index,
                 ),
             )
-        if policy.experimental_codex is not None:
-            failed = (
-                not isinstance(event, (WorkerReady, WorkerLaunched))
-                and event.error_code is not None
+        if (
+            policy.experimental_codex is not None
+            and isinstance(event, ProcessOutcome)
+            and event.error_code is not None
+        ) and (
+            not review_recovery.enabled(policy)
+            or event.error_code == "native_tool_event"
+        ):
+            review_recovery.record(
+                conn, "setup", event.error_code or "config", "runner", now
             )
-            if failed:
-                conn.execute("UPDATE review_control SET admission=0")
+            conn.execute("UPDATE review_control SET admission=0")
+
+
+def retire_unlaunched(
+    conn: sqlite3.Connection, keys: Iterable[tuple[str, int]], now: float
+) -> None:
+    """Close reservations proven unlaunched by the current owner."""
+    conn.executemany(
+        "UPDATE review_call SET state='completed',ended_at=?,"
+        "outcome='not_launched' WHERE attempt_id=? AND round_index=? "
+        "AND state='reserved' AND process_identity_json IS NULL "
+        "AND launched_at IS NULL",
+        ((now, attempt, index) for attempt, index in keys),
+    )
+
+
+def require_main() -> None:
+    """Refuse SQLite ownership and creation outside the main thread."""
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError("main_thread_required")
+
+
+def catch_up_due(
+    home: Path,
+    policy: ReviewPolicy,
+    now: float,
+    state: tuple[int, float],
+) -> tuple[int, float]:
+    """Give one source a turn between closed writer transactions."""
+    after, due = state
+    if now < due:
+        return state
+    with database(home) as conn:
+        after = catch_up(conn, policy, now, after)
+    return after, now + 5.0

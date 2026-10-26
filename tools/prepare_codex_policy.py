@@ -85,7 +85,7 @@ def _revision_profile(profile: dict[str, object], revision: int) -> tuple[
     budget_map = cast(dict[str, object], budget)
     selected = revision_map.get(str(revision))
     if (
-        set(revision_map) != {"1", "2"}
+        not {"1", "2"} <= set(revision_map) <= {"1", "2", "3"}
         or set(runner_map) != {"runner", "version", "model", "reasoning"}
         or set(limits_map)
         != {
@@ -104,7 +104,10 @@ def _revision_profile(profile: dict[str, object], revision: int) -> tuple[
     ):
         raise ValueError("default_review_policy_invalid")
     selected_map = cast(dict[str, object], selected)
-    if set(selected_map) != {"policy_id", "max_input_bytes"}:
+    keys = {"policy_id", "max_input_bytes"}
+    if revision == 3:
+        keys |= {"concurrency", "max_attempts", "retry_backoff_seconds"}
+    if set(selected_map) != keys:
         raise ValueError("default_review_policy_invalid")
     return (
         selected_map,
@@ -136,7 +139,7 @@ def default_policy(
     """Build the host-bound policy selected for an ordinary first install."""
     profile = _profile(profile_raw)
     revision = profile.get("default_revision")
-    if type(revision) is not int or revision not in (1, 2):
+    if type(revision) is not int or revision not in (1, 2, 3):
         raise ValueError("default_review_policy_invalid")
     approved_by, approved_at = _approval(profile)
     if approved_at > time.time():
@@ -180,11 +183,16 @@ def policy(
     profile_raw: bytes | None = None,
 ) -> tuple[ReviewPolicy, bytes]:
     """Construct recorded ongoing production approval and a bounded prompt."""
-    if revision not in (1, 2):
+    if revision not in (1, 2, 3):
         raise ValueError("policy_revision")
     revision_data, runner, limits, budget = _revision_profile(
         _profile(profile_raw), revision
     )
+    if revision == 3:
+        limits = limits | {
+            key: revision_data[key]
+            for key in ("concurrency", "max_attempts", "retry_backoff_seconds")
+        }
     prompt = PromptArtifact(
         schema_version=1,
         assembly="muninn-review-prompt-v1",
@@ -257,8 +265,8 @@ def _policy_path(
         digest = hashlib.sha256(policy_raw).hexdigest()
         return home / "review-capabilities" / f"default-policy-{digest}.json"
     filename = (
-        "review-policy-codex-ongoing-v2.json"
-        if revision == 2
+        f"review-policy-codex-ongoing-v{revision}.json"
+        if revision in (2, 3)
         else "review-policy-codex-ongoing.json"
     )
     return home / filename
