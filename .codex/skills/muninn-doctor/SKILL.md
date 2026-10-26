@@ -59,7 +59,22 @@ Read `detail` before taking action.
 ## Learning checks
 
 - `review_backlog` reports queued requests.
-- `review_policy`, `review_auth`, `review_config`, and `review_abandoned` report policy or attempt history.
+- `review_policy` reports configured-policy presence and model validity.
+  It does not establish that admission is open or the policy digest matches.
+- `review_admission` reports stored admission prerequisites.
+  `open` means the switch is on and the checked policy has a matching canonical digest.
+  `closed` means the switch is off; this is informational, with `ok: false`.
+  `closed_policy_absent`, `closed_policy_invalid`, or `closed_policy_digest_mismatch`
+  also report policy integrity while admission is off.
+  An open switch with `policy_absent`, `policy_invalid`, or `policy_digest_mismatch`
+  is a warning.
+  `control_absent` or `control_invalid` is a warning with `ok: null`.
+  An open, valid control does not prove provider access, scanning, or learning success.
+- `review_auth`, `review_config`, and `review_abandoned` report attempt history.
+  Historical configuration errors do not establish a current admission failure.
+  With no control row, `review_abandoned` is unknown with `generation_unavailable`;
+  `review_capture_gaps` is unknown with `control_absent`.
+  Independent history, backlog, coverage, and attention checks remain available.
 - `review_attention` gives a fixed stage, cause, and action.
   The next Codex session also shows required action.
   These diagnostics contain no transcript text.

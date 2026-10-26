@@ -364,6 +364,7 @@ class ReviewSharedModelTests(unittest.TestCase):
         }
         stats = {
             "schema_version": 1,
+            "admission": {"enabled": False, "policy_status": "policy_absent"},
             "requests_by_state": {"pending": 1},
             "calls_by_state": {"unknown": 1},
             "oldest_pending_age_seconds": None,
