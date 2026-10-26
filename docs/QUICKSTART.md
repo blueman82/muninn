@@ -21,7 +21,11 @@ From the repository root, with a clean worktree at the required commit:
 `bin/muninn-install` installs this checkout's `HEAD`. It runs a fresh install when
 neither the data directory nor release exists, and an upgrade when both exist. An
 incomplete installation (only one exists) is refused. `--status` compares the installed
-commit with `HEAD`. Other arguments are forwarded to `install.installer` (`--repo`,
+commit with `HEAD` using local Git history. It reports whether the checkout or
+installed version is newer. If the installed version is newer, update the checkout
+before installing. Unknown or divergent history reports `versions differ`; inspect
+the revisions before installing. Status does not fetch from the network or change
+the installation. Other arguments are forwarded to `install.installer` (`--repo`,
 `--sha`, `--fresh`, `--upgrade`, `--dry-run`, `--home`, `--review-policy`), which needs a full 40-hex
 `--sha` equal to `HEAD`. A fresh install refuses if the data directory or the launchd
 plist already exists. It pins the release, indexes your existing transcripts, configures the managed provider hooks, starts the

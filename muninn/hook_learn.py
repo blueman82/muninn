@@ -228,7 +228,7 @@ def _cursor_source(
     return source, database
 
 
-def _metadata(
+def validated_source(
     conn: sqlite3.Connection,
     provider: Provider,
     data: Mapping[str, object],
@@ -297,7 +297,7 @@ def _persist(
     if installed_policy(conn) != policy:
         raise ValueError("review_policy_required")
     budget = ReadBudget(policy.max_input_bytes)
-    source = _metadata(conn, provider, data, budget)
+    source = validated_source(conn, provider, data, budget)
     now = time.time()
     ids: list[RequestId] = []
     for window, scope in reconciliation_windows(

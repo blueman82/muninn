@@ -10,7 +10,8 @@ import os
 import re
 import sqlite3
 import stat
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, NamedTuple, TypedDict, cast
@@ -164,8 +165,8 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _journal(home: Path) -> tuple[IntentRow, ...]:
-    """Read a whole private journal, refusing torn or malformed records."""
+def _journal(home: Path) -> Generator[IntentRow]:
+    """Read every private journal record, refusing torn or malformed lines."""
     path = home / TOMBSTONE_FILE
     try:
         discovered = path.lstat()
@@ -173,7 +174,7 @@ def _journal(home: Path) -> tuple[IntentRow, ...]:
         # Windows also reports a missing child when its parent is a file.
         if not stat.S_ISDIR(home.stat().st_mode):
             raise NotADirectoryError("erasure_journal_parent") from None
-        return ()
+        return
     if stat.S_ISDIR(discovered.st_mode):
         raise IsADirectoryError("erasure_journal_directory")
     with platform_io.open_regular(
@@ -182,20 +183,18 @@ def _journal(home: Path) -> tuple[IntentRow, ...]:
         platform_io.assert_private_fd(handle.fileno())
         if os.name != "nt" and os.fstat(handle.fileno()).st_mode & 0o077:
             raise PermissionError("erasure_journal_permissions")
-        data = handle.read()
-    if data and not data.endswith(b"\n"):
-        raise ValueError("erasure_intent_invalid")
-    records: list[IntentRow] = []
-    try:
-        for raw in data[:-1].split(b"\n") if data else ():
-            raw = raw.decode("utf-8")
-            row: object = json.loads(raw, object_pairs_hook=_object)
-            if not isinstance(row, dict):
-                raise ValueError("erasure_intent_invalid")
-            records.append(canonical_record(cast("dict[str, object]", row)))
-    except (ValueError, RecursionError):
-        raise ValueError("erasure_intent_invalid") from None
-    return tuple(records)
+        try:
+            for raw in handle:
+                if not raw.endswith(b"\n"):
+                    raise ValueError("erasure_intent_invalid")
+                row: object = json.loads(
+                    raw.decode("utf-8"), object_pairs_hook=_object
+                )
+                if not isinstance(row, dict):
+                    raise ValueError("erasure_intent_invalid")
+                yield canonical_record(cast("dict[str, object]", row))
+        except (ValueError, RecursionError):
+            raise ValueError("erasure_intent_invalid") from None
 
 
 def read_intent(conn: sqlite3.Connection, home: Path) -> TombstoneIntent:
@@ -211,7 +210,6 @@ def read_intent(conn: sqlite3.Connection, home: Path) -> TombstoneIntent:
     Returns:
         Deduplicated immutable intent and its not-yet-inserted records.
     """
-    journal = _journal(home)
     fields = (*KEY_FIELDS, "created_at")
     rows = {
         record.key: record
@@ -222,9 +220,13 @@ def read_intent(conn: sqlite3.Connection, home: Path) -> TombstoneIntent:
             canonical_record(dict(zip(fields, values, strict=True))),
         )
     }
-    have = set(rows)
-    for record in journal:
-        rows.setdefault(record.key, record)
+    missing: list[IntentRow] = []
+    # Keep only distinct intent; a repeated journal entry still needs parsing.
+    with closing(_journal(home)) as journal:
+        for record in journal:
+            if record.key not in rows:
+                rows[record.key] = record
+                missing.append(record)
     key = (
         load_key(home, create=False)
         if any(
@@ -235,6 +237,6 @@ def read_intent(conn: sqlite3.Connection, home: Path) -> TombstoneIntent:
     )
     return TombstoneIntent(
         tuple(rows.values()),
-        tuple(r for k, r in rows.items() if k not in have),
+        tuple(missing),
         key,
     )

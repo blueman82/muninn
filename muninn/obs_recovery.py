@@ -70,14 +70,19 @@ def recovery_guidance(
             ],
         }
     return {
-        "status": "automatic_recovery_available",
+        "status": "recovery_check_required",
         "platform": platform_name,
         "reason": "repair_baseline_present",
         "steps": [
+            "Repair safety is not verified. Doctor only observed a repair "
+            "path. Malformed or unsafe records can cause recovery to refuse.",
             "Run `muninn recover`. Muninn will stop its managed writer and "
             "repair the pause only when its safety checks pass.",
             "If it returns `reboot_required`, restart the computer and run "
             "`muninn recover` again.",
+            "If it returns `legacy_volume_confirmation_required`, run "
+            "`muninn recover --confirm-legacy-volume` only after confirming "
+            "that this is the Muninn data you intend to recover.",
             "Run `muninn doctor --pretty` after recovery. If recovery is "
             "refused for another reason, keep all files and send this report "
             "to your Muninn maintainer.",

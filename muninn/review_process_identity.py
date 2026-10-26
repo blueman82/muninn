@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from muninn.review_models import ProcessIdentity
+from muninn.review_process_posix import sole_zombie as sole_zombie
 
 
 class _BsdInfo(ctypes.Structure):
@@ -107,27 +108,6 @@ def identify(pid: int) -> ProcessIdentity:
         pgid=None if os.name == "nt" else os.getpgid(pid),
         job_marker=None,
     )
-
-
-def sole_zombie(pid: int) -> bool:
-    """Prove a Darwin group contains only our unreaped exited child."""
-    if sys.platform != "darwin":
-        return False
-    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-    query = library.proc_listpids
-    query.argtypes = [
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_int,
-    ]
-    query.restype = ctypes.c_int
-    members = (ctypes.c_int * 2)()
-    size = query(2, pid, members, ctypes.sizeof(members))
-    if size != ctypes.sizeof(ctypes.c_int) or members[0] != pid:
-        return False
-    exited = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-    return exited is not None and exited.si_pid == pid
 
 
 def recover_group(previous: ProcessIdentity) -> None:
