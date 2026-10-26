@@ -22,6 +22,7 @@ from muninn import (
 from muninn import review_pause_state as state
 from muninn.review_pause import EraseStatus
 from tests.erase_pause_process import process_gone
+from tests.erase_pause_ready import finish_owner, read_ready_text
 from tests.ingest_support import TID, IngestCase
 from tests.review_pause_support import initialize
 from tests.store_support import direct_python
@@ -249,18 +250,15 @@ class ErasePauseTests(IngestCase):
             stderr=subprocess.PIPE,
         )
 
+        started = False
+
         def close() -> None:
-            (control / "release").touch()
-            try:
-                _, errors = proc.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                _, errors = proc.communicate(timeout=5)
-            self.assertEqual(proc.returncode, 0, errors.decode())
+            finish_owner(proc, control / "release", started=started)
 
         self.addCleanup(close)
-        wait_file(control / "ready.json")
-        return proc, json.loads((control / "ready.json").read_text())
+        ready = json.loads(read_ready_text(control / "ready.json"))
+        started = True
+        return proc, ready
 
     def test_selected_owner_discards_buffers_and_children_before_erase(
         self,

@@ -228,13 +228,31 @@ class RuntimeWorkflowTests(unittest.TestCase):
 
         with mock.patch.object(subprocess, "run", record):
             exec(step_script("Run mandatory native full gate"), {})
-        self.assertEqual(len(calls), 1)
-        argv, kwargs = calls[0]
+        self.assertEqual(len(calls), 2)
         python = Path(".venv/Scripts/python.exe").resolve()
+        argv, kwargs = calls[0]
+        self.assertEqual(
+            argv,
+            [
+                str(python),
+                "-m",
+                "unittest",
+                "tests.test_review_pause_polling",
+                "tests.test_review_pause_snapshot",
+                "tests.test_erase_pause_ready",
+                "tests.test_erase_pause_environment",
+                "tests.test_erase_pause",
+            ],
+        )
+        self.assertEqual(kwargs.get("timeout"), 120)
+        argv, kwargs = calls[1]
         self.assertEqual(argv, [str(python), "-m", "tools.check", "--full"])
-        env = kwargs.get("env")
-        assert isinstance(env, dict)
-        self.assertEqual(env["PATH"].split(os.pathsep)[0], str(python.parent))
+        for _, options in calls:
+            env = options.get("env")
+            assert isinstance(env, dict)
+            self.assertEqual(
+                env["PATH"].split(os.pathsep)[0], str(python.parent)
+            )
 
     def test_windows_typing_uses_the_dependency_environment(self) -> None:
         calls: list[list[str]] = []
