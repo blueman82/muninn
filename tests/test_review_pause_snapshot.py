@@ -28,6 +28,11 @@ class SnapshotTests(unittest.TestCase):
         self.addCleanup(case.doCleanups)
         return case
 
+    def publication_phases(self) -> tuple[str, ...]:
+        """Use publication windows supported by the native rename operation."""
+        # MoveFileEx cannot replace the target while its old handle is open.
+        return ("stat",) if os.name == "nt" else ("open", "read", "stat")
+
     @contextlib.contextmanager
     def changed(
         self,
@@ -98,7 +103,7 @@ class SnapshotTests(unittest.TestCase):
     def test_actual_late_completion_is_discarded_without_returning_evidence(
         self,
     ) -> None:
-        for phase in ("open", "read", "stat"):
+        for phase in self.publication_phases():
             case = self.fixture()
             with (
                 self.subTest(phase=phase),
@@ -117,7 +122,7 @@ class SnapshotTests(unittest.TestCase):
     def test_fresh_polling_preserves_selection_across_all_late_windows(
         self,
     ) -> None:
-        for phase in ("open", "read", "stat"):
+        for phase in self.publication_phases():
             for select_first in (False, True):
                 self.check_polling(phase, select_first)
 
@@ -161,7 +166,7 @@ class SnapshotTests(unittest.TestCase):
 
         with (
             self.changed(
-                case, "read", lambda: case.complete(True), lambda: selected[0]
+                case, "stat", lambda: case.complete(True), lambda: selected[0]
             ),
             mock.patch.object(
                 pause.poller_stop, "request", side_effect=stop
@@ -177,7 +182,7 @@ class SnapshotTests(unittest.TestCase):
     def test_same_inode_and_replaced_old_descriptor_mutations_stay_generic(
         self,
     ) -> None:
-        for replace in (False, True):
+        for replace in ((False,) if os.name == "nt" else (False, True)):
             self.check_mutation(replace)
 
     def check_mutation(self, replace: bool) -> None:
@@ -207,7 +212,7 @@ class SnapshotTests(unittest.TestCase):
             self.enterContext(public_read(self, case.home / state.WITNESS))
 
         with (
-            self.changed(case, "read", unsafe),
+            self.changed(case, "stat", unsafe),
             self.assertRaises(state.PauseRefusedError) as caught,
         ):
             state.inspect(case.home, state.WITNESS)
@@ -317,7 +322,7 @@ class SnapshotTests(unittest.TestCase):
             path.symlink_to(target)
 
         with (
-            self.changed(case, "read", link),
+            self.changed(case, "stat", link),
             self.assertRaises(state.PauseRefusedError) as caught,
         ):
             state.inspect(case.home, state.WITNESS)
@@ -340,7 +345,7 @@ class SnapshotTests(unittest.TestCase):
             (case.home / state.LOCK).touch(mode=0o600)
 
         with (
-            self.changed(case, "read", replace_lock, lambda: selected[0]),
+            self.changed(case, "stat", replace_lock, lambda: selected[0]),
             mock.patch.object(
                 pause.poller_stop, "request", side_effect=stop
             ) as request,
@@ -352,6 +357,50 @@ class SnapshotTests(unittest.TestCase):
             self.fail("changed lock admitted")
         self.assertIs(type(caught.exception), state.PauseRefusedError)
         request.assert_called_once()
+
+    @unittest.skipUnless(
+        os.name == "nt", "requires native Windows publication"
+    )
+    def test_windows_open_target_publication_keeps_active_owner(self) -> None:
+        for phase in ("open", "read"):
+            for select_first in (False, True):
+                self.check_blocked_publication(phase, select_first)
+
+    def check_blocked_publication(
+        self, phase: str, select_first: bool
+    ) -> None:
+        """Retain the active witness and lock after native sharing refusal."""
+        case = self.fixture()
+        before = (case.home / state.WITNESS).read_bytes()
+        selected = [False]
+        status = pause.EraseStatus()
+
+        def stop(
+            home: Path, pid: int, generation: str, *, deadline: float
+        ) -> None:
+            selected[0] = True
+
+        with (
+            self.subTest(phase=phase, selected=select_first),
+            self.changed(
+                case,
+                phase,
+                case.complete,
+                lambda: selected[0] or not select_first,
+            ),
+            mock.patch.object(
+                pause.poller_stop, "request", side_effect=stop
+            ) as request,
+            self.assertRaises(PermissionError) as caught,
+            pause.maintenance_owner(case.home, wait_s=3, status=status),
+        ):
+            self.fail("failed publication granted ownership")
+        self.assertIn(getattr(caught.exception, "winerror", None), (5, 32))
+        self.assertEqual((case.home / state.WITNESS).read_bytes(), before)
+        self.assertEqual(status.stop_may_have_been_published, select_first)
+        self.assertEqual(request.call_count, int(select_first))
+        with self.assertRaises(BlockingIOError):
+            state.acquire(case.home)
 
 
 if __name__ == "__main__":

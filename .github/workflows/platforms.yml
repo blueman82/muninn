@@ -340,4 +340,10 @@ jobs:
 
           python = Path('.venv/Scripts/python.exe').resolve()
           env = os.environ | {'PATH': str(python.parent) + os.pathsep + os.environ['PATH']}
+          subprocess.run([str(python), '-m', 'unittest',
+                          'tests.test_review_pause_polling',
+                          'tests.test_review_pause_snapshot',
+                          'tests.test_erase_pause_ready',
+                          'tests.test_erase_pause_environment',
+                          'tests.test_erase_pause'], check=True, env=env, timeout=120)
           subprocess.run([str(python), '-m', 'tools.check', '--full'], check=True, env=env)
