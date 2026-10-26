@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from pathlib import Path
 from unittest import mock
 
-from muninn import review_requests, review_supervisor
+from muninn import (
+    platform_lock,
+    review_requests,
+    review_supervisor,
+    review_supervisor_result,
+)
 from muninn.review_json import canonical_json
+from muninn.review_models import ReviewContext
+from muninn.review_process import ProcessOutcome
+from muninn.review_round_state import Round
 from tests.test_review_requests import RequestCase
 from tests.test_review_supervisor import SupervisorCase
 
@@ -51,6 +61,7 @@ class ParallelReviewTests(SupervisorCase):
         )
         self.supervisor = review_supervisor.Supervisor(self.home, self.policy)
         self.supervisor.start(12.0)
+        self.addCleanup(self.supervisor.stop, 20.0)
         history = []
         for first, last in ((1, 2), (1, 3), (2, 2), (2, 3)):
             history.append(
@@ -81,9 +92,10 @@ class ParallelReviewTests(SupervisorCase):
             live.id,
             {r.context.request_id for r in self.supervisor._rounds.values()},
         )
-        until = time.monotonic() + 12.0
+        began = time.monotonic()
+        until = began + 12.0
         while time.monotonic() < until:
-            self.supervisor.tick(16.0)
+            self.supervisor.tick(16.0 + time.monotonic() - began)
             if (
                 self.conn.execute(
                     "SELECT count(*) FROM review_receipt"
@@ -104,6 +116,129 @@ class ParallelReviewTests(SupervisorCase):
             ).fetchone()[0],
             0,
         )
+
+    def test_parallel_retry_reaches_five_receipts(self) -> None:
+        real_execute = review_supervisor.execute_result
+        real_refresh = review_supervisor_result.review_prompt.refresh
+        selected: list[tuple[str, str, float]] = []
+        raised: list[str] = []
+        self.addCleanup(lambda: self.supervisor.stop(20.0))
+
+        def execute(
+            home: Path,
+            pending: Round,
+            outcome: ProcessOutcome,
+            now: float,
+            fail: Callable[[ReviewContext, str, float], None],
+        ) -> bool:
+            if selected:
+                return real_execute(home, pending, outcome, now, fail)
+            context = pending.context
+            self.assertEqual(home, self.home)
+            self.assertEqual(outcome.attempt_id, context.attempt_id)
+            self.assertEqual(outcome.round_index, context.round_index)
+            self.assertEqual(
+                (outcome.error_code, outcome.exit_code), (None, 0)
+            )
+            assert pending.handle is not None
+            self.assertIsNotNone(pending.handle.wrapper.returncode)
+            self.assertFalse(self.conn.in_transaction)
+            states = self.conn.execute(
+                "SELECT c.state,r.state FROM review_call c "
+                "JOIN review_attempt a ON a.id=c.attempt_id "
+                "JOIN review_request r ON r.id=a.request_id "
+                "JOIN review_control k ON k.policy_digest=r.policy_digest "
+                "WHERE c.attempt_id=? AND c.round_index=? AND r.id=?",
+                (context.attempt_id, context.round_index, context.request_id),
+            ).fetchone()
+            self.assertEqual(tuple(states or ()), ("completed", "running"))
+            selected.append((context.request_id, context.attempt_id, now))
+
+            def refresh(path: Path, bound: ReviewContext) -> ReviewContext:
+                if path == home and bound is context:
+                    self.assertFalse(raised)
+                    raised.append(context.attempt_id)
+                    raise ValueError("rejected_revision")
+                return real_refresh(path, bound)
+
+            with mock.patch.object(
+                review_supervisor_result.review_prompt,
+                "refresh",
+                side_effect=refresh,
+            ):
+                return real_execute(home, pending, outcome, now, fail)
+
+        with mock.patch.object(
+            review_supervisor, "execute_result", side_effect=execute
+        ):
+            self.test_four_workers_claim_live_work_before_older_history()
+        self.assertEqual(len(selected), 1)
+        request_id, attempt_id, failed_at = selected[0]
+        self.assertEqual(raised, [attempt_id])
+        attempts = self.conn.execute(
+            "SELECT id,error_code,ended_at,started_at FROM review_attempt "
+            "WHERE request_id=? ORDER BY started_at,id",
+            (request_id,),
+        ).fetchall()
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(
+            tuple(attempts[0])[:3],
+            (attempt_id, "rejected_revision", failed_at),
+        )
+        self.assertGreaterEqual(attempts[1][3], failed_at + 1.0)
+        requests = self.conn.execute(
+            "SELECT r.id,r.state,r.from_line,r.through_line,q.request_id "
+            "FROM review_request r LEFT JOIN review_receipt q "
+            "ON q.request_id=r.id JOIN review_control k "
+            "ON k.policy_digest=r.policy_digest "
+            "ORDER BY r.from_line,r.through_line"
+        ).fetchall()
+        self.assertEqual(
+            [(r[2], r[3]) for r in requests],
+            [(1, 2), (1, 3), (2, 2), (2, 3), (3, 3)],
+        )
+        self.assertTrue(
+            all(r[1] == "completed" and r[0] == r[4] for r in requests)
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT count(*) FROM review_call c "
+                "JOIN review_attempt a ON a.id=c.attempt_id "
+                "JOIN review_request r ON r.id=a.request_id "
+                "JOIN review_control k ON k.policy_digest=r.policy_digest "
+                "WHERE c.state='completed'"
+            ).fetchone()[0],
+            6,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT count(*) FROM review_request r JOIN review_control k "
+                "ON r.policy_digest!=k.policy_digest WHERE r.state='pending'"
+            ).fetchone()[0],
+            1,
+        )
+
+    def test_replacement_owner_stops_before_fixture_cleanup(self) -> None:
+        owner = self.supervisor
+        thread = owner.monitor._thread
+
+        def check_released() -> None:
+            try:
+                self.assertIs(owner, self.supervisor)
+                self.assertEqual(owner.home, self.home)
+                self.assertTrue(owner.home.exists())
+                self.assertFalse(thread.is_alive())
+                self.assertIsNone(owner._owner)
+                self.assertTrue(platform_lock.released(owner.home))
+            finally:
+                owner.stop(20.0)
+
+        self.addCleanup(check_released)
+        try:
+            self.test_four_workers_claim_live_work_before_older_history()
+        finally:
+            owner = self.supervisor
+            thread = owner.monitor._thread
 
 
 class BoundedRetryTests(RequestCase):
