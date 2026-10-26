@@ -125,7 +125,13 @@ Node wheel. Cache reuse does not bypass artifact verification.
 Lifecycle diagnostics include bounded integer phase durations in milliseconds, retained
 across phase transitions and failures. These durations are inclusive; nested timings
 must not be added together. Diagnostic artifacts retain codes and numeric measurements,
-not transcript content, for one day.
+not transcript content. Native proof uploads request 30-day retention, matching the
+worker-quiescence proof workflow. Verify each artifact's actual `expires_at` through
+the GitHub API because repository policies can limit the requested period. This
+change applies only to new uploads; existing artifacts keep their assigned expiry.
+For evidence needed longer, preserve the original ZIP and its SHA256/API digest,
+run and job IDs, and source commit before expiry. These archives do not include raw
+job logs; retaining them does not establish native qualification.
 
 The **75-minute limit is a per-job failure ceiling**, not an expected run duration. The
 Windows lifecycle child has a separate **1,800-second ceiling**. CI overlaps the Windows

@@ -137,7 +137,9 @@ class PlatformWorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: true", source)
         self.assertIn("name: native-proof-codes-${{ matrix.runner }}", source)
         self.assertIn("if-no-files-found: error", source)
-        self.assertIn("retention-days: 1", source)
+        self.assertIn(
+            "retention-days: 30", proof["Upload early native proof codes"]
+        )
 
     def test_unix_rows_keep_their_existing_checks(self) -> None:
         source = WORKFLOW.read_text()
