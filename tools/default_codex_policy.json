@@ -1,7 +1,11 @@
 {
-  "approved_at": "2026-10-24T00:00:00Z",
+  "approved_at": "2026-10-26T00:00:00Z",
   "approved_by": "Muninn project owner: repository default",
-  "default_revision": 2,
+  "budget": {
+    "account_id": "muninn-codex-production",
+    "kind": "ongoing_production"
+  },
+  "default_revision": 3,
   "limits": {
     "allow_global": false,
     "concurrency": 1,
@@ -21,6 +25,16 @@
     "2": {
       "max_input_bytes": 1048576,
       "policy_id": "muninn-codex-ongoing-production-v2"
+    },
+    "3": {
+      "concurrency": 4,
+      "max_attempts": 3,
+      "max_input_bytes": 1048576,
+      "policy_id": "muninn-codex-ongoing-production-v3",
+      "retry_backoff_seconds": [
+        5.0,
+        30.0
+      ]
     }
   },
   "runner": {
@@ -28,9 +42,5 @@
     "reasoning": "low",
     "runner": "codex_cli",
     "version": "any"
-  },
-  "budget": {
-    "account_id": "muninn-codex-production",
-    "kind": "ongoing_production"
   }
 }

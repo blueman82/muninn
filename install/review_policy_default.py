@@ -148,11 +148,11 @@ def prepare(ctx: Ctx, rec: Record, policy: ReviewPolicy) -> None:
             auth_home,
             budget.approved_by,
             budget.approved_at,
-            revision=(
-                2
-                if policy.policy_id == "muninn-codex-ongoing-production-v2"
-                else 1
-            ),
+            revision={
+                "muninn-codex-ongoing-production": 1,
+                "muninn-codex-ongoing-production-v2": 2,
+                "muninn-codex-ongoing-production-v3": 3,
+            }[policy.policy_id],
             default_profile=profile_raw,
         )
         if path.read_text(encoding="utf-8") != source.get("raw"):
@@ -203,9 +203,14 @@ def _configured(ctx: Ctx) -> tuple[bool, ReviewPolicy | None]:
             eligible = (
                 installed.policy_source == "repository_default"
                 and row["admission"] == 1
-                and not any(
-                    conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-                    for table in ("review_request", "knowledge")
+                and (
+                    installed.policy_id != "muninn-codex-ongoing-production-v3"
+                    or not any(
+                        conn.execute(
+                            f"SELECT 1 FROM {table} LIMIT 1"
+                        ).fetchone()
+                        for table in ("review_request", "knowledge")
+                    )
                 )
             )
             return not eligible, installed if eligible else None

@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 import subprocess as subprocess
 import threading
 import time
-from dataclasses import dataclass, field
+from contextlib import closing
 from pathlib import Path
 
 from muninn import (
     review_pause_state,
     review_prompt,
+    review_recovery,
+    review_snapshot,
     store,
 )
 from muninn.review_budget import reserve_call
-from muninn.review_commit import CommitContext, commit_review
 from muninn.review_launch_inputs import load_capability, load_prompt
 from muninn.review_models import (
     ProcessIdentity,
@@ -29,7 +29,6 @@ from muninn.review_process import (
     ProcessEvent,
     ProcessMonitor,
     ProcessOutcome,
-    RunningProcess,
     WorkerLaunched,
     WorkerReady,
     cancel_registered,
@@ -43,9 +42,10 @@ from muninn.review_requests import (
     fail_attempt,
     recover_attempts,
 )
-from muninn.review_rounds import FinalRequest, execute_read, parse_round
-from muninn.review_runner import LaunchSpec, RunnerCapability, prepare_launch
+from muninn.review_round_state import Round as _Round
+from muninn.review_runner import RunnerCapability, prepare_launch
 from muninn.review_spawn import create_wrapper
+from muninn.review_supervisor_result import execute as execute_result
 from muninn.review_supervisor_store import (
     database,
     halt_interrupted,
@@ -59,23 +59,6 @@ def _main() -> None:
     """Refuse SQLite ownership and creation outside the process main thread."""
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("main_thread_required")
-
-
-@dataclass
-class _Round:
-    """Hold one outstanding permit through durable terminal reconciliation."""
-
-    context: ReviewContext
-    initial: object
-    knowledge: object
-    history: list[tuple[object, object]] = field(
-        default_factory=list[tuple[object, object]]
-    )
-    prompt: bytes = b""
-    launch: LaunchSpec | None = None
-    initialized: bool = False
-    spawned: bool = False
-    handle: RunningProcess | None = None
 
 
 class Supervisor:
@@ -92,6 +75,7 @@ class Supervisor:
         self._next: list[_Round] = []
         self.capability: RunnerCapability | None = None
         self.artifact = b""
+        self._recheck_at = 0.0
         self.monitor: ProcessMonitor
 
     def start(self, now: float) -> None:
@@ -106,8 +90,7 @@ class Supervisor:
         except BlockingIOError:
             raise ValueError("supervisor_busy") from None
         try:
-            self.capability = load_capability(self.home, self.policy)
-            self.artifact = load_prompt(self.home, self.policy)
+            self._inputs(now)
             with database(self.home) as conn:
                 snapshot = startup_snapshot(conn, self.policy)
             for _, _, _, raw in snapshot[1]:
@@ -140,23 +123,70 @@ class Supervisor:
             while self._pending:
                 self._event(self._pending[0], now)
                 del self._pending[0]
+            if not self._ready_to_spawn(now):
+                return
             for pending in tuple(self._rounds.values()):
                 if not pending.spawned:
                     self._spawn(pending, now)
-            while len(self._rounds) < self.policy.concurrency:
-                pending = self._next.pop(0) if self._next else self._claim(now)
-                if pending is None:
-                    break
-                key = (pending.context.attempt_id, pending.context.round_index)
-                if key in self._rounds:
-                    raise ValueError("duplicate_round")
-                self._rounds[key] = pending
-                self._spawn(pending, now)
+            self._fill(now)
         except (store.BusyError, sqlite3.OperationalError) as exc:
             if isinstance(exc, sqlite3.OperationalError) and not is_contention(
                 exc
             ):
                 raise
+
+    def _fill(self, now: float) -> None:
+        """Allocate worker permits without replacing existing rounds."""
+        while len(self._rounds) < self.policy.concurrency:
+            pending = self._next.pop(0) if self._next else self._claim(now)
+            if pending is None:
+                break
+            key = (pending.context.attempt_id, pending.context.round_index)
+            if key in self._rounds:
+                raise ValueError("duplicate_round")
+            self._rounds[key] = pending
+            self._spawn(pending, now)
+
+    def _ready_to_spawn(self, now: float) -> bool:
+        """Preserve owner pauses while waiting for a bounded setup recheck."""
+        with closing(store.connect_ro(store.db_path(self.home))) as conn:
+            admitted = conn.execute(
+                "SELECT admission FROM review_control"
+            ).fetchone()[0]
+        if not admitted or now < self._recheck_at:
+            return False
+        if not self._inputs(now):
+            return False
+        if self._recheck_at:
+            for pending in self._rounds.values():
+                pending.context = pending.context.model_copy(
+                    update={
+                        "deadline": time.monotonic()
+                        + self.policy.deadline_seconds
+                    }
+                )
+            self._recheck_at = 0.0
+        return True
+
+    def _inputs(self, now: float) -> bool:
+        """Recheck unavailable setup without reopening owner admission."""
+        if self.capability is not None and self.artifact:
+            return True
+        stage = "runner setup file"
+        try:
+            self.capability = load_capability(self.home, self.policy)
+            stage = "review instructions"
+            self.artifact = load_prompt(self.home, self.policy)
+        except ValueError as exc:
+            if not review_recovery.enabled(self.policy):
+                raise
+            self._recheck_at = now + 60.0
+            with database(self.home) as conn:
+                review_recovery.record(conn, "setup", str(exc), stage, now)
+            return False
+        with database(self.home) as conn:
+            review_recovery.clear(conn, "setup")
+        return True
 
     def _claim(self, now: float) -> _Round | None:
         """Close claim ownership before root-owning initial admission reads."""
@@ -165,7 +195,9 @@ class Supervisor:
                 "SELECT * FROM review_request "
                 "WHERE state IN ('pending','waiting') "
                 "AND (retry_at IS NULL OR retry_at<=?) AND policy_digest=? "
-                "ORDER BY created_at,id LIMIT 1",
+                "ORDER BY CASE WHEN trigger IN "
+                "('hook','ingest','reconcile') THEN 0 ELSE 1 "
+                "END,created_at,id LIMIT 1",
                 (now, digest(self.policy)),
             ).fetchone()
             if row is None:
@@ -195,13 +227,21 @@ class Supervisor:
         key = (context.attempt_id, context.round_index)
         if pending.spawned:
             raise ValueError("duplicate_round")
+        stage = "evidence"
         try:
             if not pending.initialized:
+                version = review_snapshot.read(self.home, context.scope)
                 pending.context, pending.initial, pending.knowledge = (
                     review_prompt.initialize(self.home, context)
                 )
+                if version != review_snapshot.read(self.home, context.scope):
+                    raise ValueError("rejected_revision")
+                pending.context = pending.context.model_copy(
+                    update={"knowledge_digest": version}
+                )
                 pending.initialized = True
-            pending.context = review_prompt.refresh(self.home, context)
+            pending.context = review_prompt.refresh(self.home, pending.context)
+            stage = "prompt"
             pending.prompt = review_prompt.assemble(
                 self.artifact,
                 pending.context,
@@ -209,6 +249,7 @@ class Supervisor:
                 pending.knowledge,
                 pending.history,
             )
+            stage = "launch"
             assert self.capability is not None
             pending.launch = prepare_launch(
                 pending.context, self.capability, pending.prompt
@@ -219,10 +260,32 @@ class Supervisor:
                 pending.context, self.capability, pending.prompt
             )
             self._create(pending)
-        except (ValueError, OSError):
+            with database(self.home) as conn:
+                review_recovery.clear(conn, "setup")
+        except (ValueError, OSError) as exc:
             if pending.spawned:
                 raise RuntimeError("monitor_ownership_invariant") from None
-            self._fail(context, "config", now)
+            if review_recovery.enabled(self.policy) and review_recovery.shared(
+                str(exc)
+            ):
+                self._recheck_at = now + 60.0
+                pending.context = pending.context.model_copy(
+                    update={
+                        "deadline": time.monotonic()
+                        + self.policy.deadline_seconds
+                    }
+                )
+                with database(self.home) as conn:
+                    review_recovery.record(
+                        conn, "setup", str(exc), "launch", now
+                    )
+                return
+            self._fail(
+                context,
+                str(exc) if str(exc).startswith("rejected_") else "config",
+                now,
+                stage,
+            )
             del self._rounds[key]
 
     def _create(self, pending: _Round) -> None:
@@ -285,51 +348,17 @@ class Supervisor:
     def _result(
         self, pending: _Round, outcome: ProcessOutcome, now: float
     ) -> None:
-        """Execute only checked reads or the atomic final commit on main."""
-        try:
-            if outcome.error_code is not None:
-                self._fail(
-                    pending.context,
-                    (
-                        "deadline"
-                        if outcome.error_code == "deadline"
-                        else "unavailable"
-                    ),
-                    now,
-                )
-                return
-            context = review_prompt.refresh(self.home, pending.context)
-            request = parse_round(outcome.stdout, context)
-            if isinstance(request, FinalRequest):
-                with database(self.home, transaction=False) as conn:
-                    commit_review(
-                        conn,
-                        CommitContext(
-                            home=self.home,
-                            request_id=context.request_id,
-                            attempt_id=context.attempt_id,
-                            generation=context.generation,
-                            evidence_ids=context.evidence_ids,
-                            now=now,
-                        ),
-                        request.result,
-                    )
-                return
-            result = execute_read(self.home, request, context)
-            pending.context = review_prompt.refresh(
-                self.home, context
-            ).model_copy(update={"round_index": context.round_index + 1})
-            pending.history.append(
-                (request.model_dump(mode="json"), json.loads(result))
-            )
-            pending.spawned = False
-            pending.handle = None
-            pending.launch = None
+        """Retain only reads that passed durable outcome reconciliation."""
+        if execute_result(self.home, pending, outcome, now, self._fail):
             self._next.append(pending)
-        except ValueError:
-            self._fail(pending.context, "rejected_validation", now)
 
-    def _fail(self, context: ReviewContext, code: str, now: float) -> None:
+    def _fail(
+        self,
+        context: ReviewContext,
+        code: str,
+        now: float,
+        stage: str = "review",
+    ) -> None:
         """Preserve fenced requests and uncertain calls."""
         with database(self.home) as conn:
             try:
@@ -337,8 +366,12 @@ class Supervisor:
             except ValueError as exc:
                 if str(exc) != "rejected_fenced":
                     raise
-            if self.policy.experimental_codex is not None:
+            if (
+                self.policy.experimental_codex is not None
+                and not review_recovery.enabled(self.policy)
+            ):
                 conn.execute("UPDATE review_control SET admission=0")
+            review_recovery.record(conn, context.request_id, code, stage, now)
 
     def stop(self, now: float) -> None:
         """Stop admission, contain children, and fence this generation."""
@@ -346,6 +379,9 @@ class Supervisor:
         if self._owner is None:
             return
         self.monitor.stop_all()
+        if review_recovery.enabled(self.policy):
+            for event in self.monitor.drain():
+                persist_event(self.home, event, now)
         with database(self.home) as conn:
             halt_interrupted(conn, self.policy)
             conn.execute(

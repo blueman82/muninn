@@ -166,7 +166,7 @@ HELP
     fi
     exit 0
     ;;
-  --check | "") ;;
+  --check | "" | --learning-scope) ;;
   *)
     ensure_runtime
     ensure_git_hooks
@@ -195,7 +195,7 @@ if [ "${1:-}" = --check ]; then
     "--$mode" --dry-run
   echo "OK to run: bin/muninn-install"
 else
-  "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "--$mode"
+  "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "--$mode" "$@"
   pid=$(sed -n 's/.*"pid": *\([0-9][0-9]*\).*/\1/p' \
     "$data/status.json" 2>/dev/null || true)
   echo "installed $short ($mode); poller pid ${pid:-unknown}; doctor ok;" \

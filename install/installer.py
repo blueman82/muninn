@@ -17,6 +17,7 @@ from pathlib import Path
 
 from install import configedit as ce
 from install import (
+    learning_scope,
     legacy_state,
     legacy_transition,
 )
@@ -353,6 +354,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--home", type=Path)
     ap.add_argument("--review-policy", type=Path)
+    ap.add_argument("--learning-scope", choices=("now", "all"))
     return ap
 
 
@@ -395,6 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
     ctx.cursor_hooks = choose_cursor_hooks(ctx)
     try:
+        learning_scope.choose(ctx, args.learning_scope, input)
         result = install(ctx, args.repo.resolve(), args.sha)
         if result.get("legacy_outcome"):
             return 1

@@ -11,8 +11,8 @@ import stat
 from contextlib import closing, suppress
 from pathlib import Path
 
+from install import learning_scope, legacy_state, record, snapshot_io
 from install import legacy_baseline as baseline
-from install import legacy_state, record, snapshot_io
 from install import review_policy_default as default_policy
 from install.context import Ctx, StepFailedError, link_text
 from install.record import Record
@@ -278,6 +278,7 @@ def activate(
                 rec["policy_status"] = "activation_pending"
             else:
                 _bootstrap(ctx, rec, conn, path, policy, authority)
+            learning_scope.apply(ctx, rec, conn)
             check()
         file_sync.sync_path(path)
         check()

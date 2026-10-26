@@ -29,12 +29,14 @@ from muninn.review_progress import (
     require_transaction,
     source_admission,
     source_progress,
+    source_row,
     unsuppressed_window,
 )
 from muninn.review_read_budget import ReadBudget
 from muninn.review_request_views import attempt_view, request_row, request_view
+from muninn.review_state import selection
 
-_RETRYABLE = frozenset({"deadline", "unavailable"})
+_RETRYABLE = frozenset({"deadline", "unavailable", "rejected_revision"})
 _ERRORS = _RETRYABLE | {
     "auth",
     "config",
@@ -65,8 +67,23 @@ def enqueue_review(
     policy = checked_policy(policy)
     if not conn.execute("SELECT admission FROM review_control").fetchone()[0]:
         raise ValueError("review_policy_required")
-    if trigger not in {"explicit", "reconcile", "hook", "ingest"}:
+    if trigger not in {"explicit", "reconcile", "hook", "ingest", "history"}:
         raise ValueError("invalid_trigger")
+    saved = selection(conn)
+    if saved is not None and trigger in {"hook", "reconcile", "ingest"}:
+        if (
+            saved.project_id is not None
+            and saved.project_id != scope.project_id
+        ):
+            raise ValueError("rejected_scope")
+        if saved.mode == "now":
+            progress = source_progress(
+                conn, source_row(conn, window.source), now
+            )
+            first = max(window.from_line, progress["activation_line"] + 1)
+            if first > window.through_line:
+                raise ValueError("incomplete_window")
+            window = window.model_copy(update={"from_line": first})
     key = hashlib.sha256(
         (
             canonical_json(window)

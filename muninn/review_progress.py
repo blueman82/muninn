@@ -37,6 +37,7 @@ from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import ReadBudget
 from muninn.review_selectors import check_tombstones
+from muninn.review_state import baseline as setup_baseline
 
 
 def source_row(conn: sqlite3.Connection, source: SourceRef) -> sqlite3.Row:
@@ -150,7 +151,9 @@ def source_progress(
     if activated is None:
         raise ValueError("review_policy_required")
     last, last_hash = boundary(conn, source)
-    baseline = last if source["first_seen"] <= activated else 0
+    baseline = setup_baseline(
+        conn, source, last if source["first_seen"] <= activated else 0
+    )
     conn.execute(
         "INSERT OR IGNORE INTO review_source VALUES(?,?,?,?,?,?,?,?)",
         (

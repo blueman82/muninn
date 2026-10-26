@@ -1,0 +1,39 @@
+"""Keep learning choices and repair notes during store replacement."""
+
+from __future__ import annotations
+
+import sqlite3
+
+from muninn import review_history, review_state, store, store_copy
+from tests.test_review_requests import RequestCase
+
+
+class LearningStateCopyTests(RequestCase):
+    """Check both older stores and stores with additive learning state."""
+
+    def test_copy_preserves_the_future_only_choice(self) -> None:
+        self.transaction(
+            lambda: review_history.configure(
+                self.conn, self.policy, "now", None, 20.0, None
+            )
+        )
+        target = sqlite3.connect(":memory:", isolation_level=None)
+        target.row_factory = sqlite3.Row
+        self.addCleanup(target.close)
+        store.initialize_store(target)
+        store_copy.copy_governed_state(self.conn, target)
+        self.assertEqual(
+            review_state.selection(self.conn), review_state.selection(target)
+        )
+
+    def test_older_store_remains_a_valid_copy_source(self) -> None:
+        self.conn.execute("DROP TABLE learning_setup")
+        self.conn.execute("DROP TABLE review_issue")
+        self.assertEqual(store_copy.validate_source(self.conn), 1)
+
+    def test_unknown_extension_shape_is_refused(self) -> None:
+        self.conn.execute(
+            "ALTER TABLE learning_setup ADD COLUMN surprise TEXT"
+        )
+        with self.assertRaisesRegex(ValueError, "cutover_source_mismatch"):
+            store_copy.validate_source(self.conn)

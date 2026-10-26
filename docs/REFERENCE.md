@@ -118,8 +118,9 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local attempt and `Receipt`; no model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision; returns `KnowledgeView`. |
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. |
+| `muninn learn setup --mode now\|all [--project PATH] [--confirm SCAN_DIGEST]` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
-| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence and receipt/null. Content is shown only when requested, never logged. |
+| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, and safe `diagnostics`. Content is shown only when requested, never logged. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
 | `muninn learn resume --policy PATH --failed-request R_ID` | Re-enable stopped ongoing Codex admission after inspecting the latest exact `rejected_authority` failure. The file must equal the installed policy. All attempts must be terminal, all calls completed, and no other failure type, abandoned attempt or pending work may exist. Failed requests remain failed; output is `{"admission":true,"policy_id":...}`. |
@@ -256,40 +257,119 @@ Muninn binds the policy to the host, data directory and executable.
 If a requirement is missing, learning stays pending.
 Trust Codex hooks as a separate provider step.
 
-The default uses Codex CLI, model `gpt-6.1-sol` and low reasoning. Each request
-can use at most two rounds, 1 MiB of input, 32 KiB of output, 12,000 bytes of
-context and 120 seconds. The policy allows one attempt and one concurrent
-request. It allows project scope only. These byte limits apply to each request.
-They do not limit total calls or total cost. The policy has no aggregate quota
-or expiry. It also stops after a durable failure.
+The default uses Codex CLI, model `gpt-6.1-sol`, and low reasoning.
+Revision 3 allows four workers and three total attempts per request.
+Each attempt allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
+The first retry waits 5 seconds.
+The second retry waits 30 seconds.
+Live requests take priority over queued history.
+SQLite saves remain on the main thread.
+Before saving, Muninn compares current knowledge with the worker's original knowledge snapshot.
+A changed snapshot requires a fresh attempt within the same attempt limit.
 
-Before first activation, Muninn records a fixed activation time, store identity,
-policy generation and sorted source-boundary digest. It then commits the policy
-and admission together. The private install record freezes the selected
-profile and local inputs before installation changes begin. Recovery uses those
-same values. It does not find or apply a newer profile.
+Revision 3 continues after a rejected result or an exhausted temporary failure.
+A temporary failure is a deadline or an unavailable runner.
+A stale knowledge revision can also use a remaining attempt.
+Invalid output and failed authority, scope, or evidence checks receive no automatic retry.
+Existing policy revisions retain their earlier controls.
 
-An upgrade applies the profile if the store has no learning policy. It keeps
-every custom policy and its admission state, including admission set to zero.
-A repository-default policy can refresh only when admission is enabled and the
-store has no learning requests or knowledge entries. The new profile must have
-a later `approved_at` value.
+Missing setup keeps work queued while Muninn rechecks every 60 seconds.
+Muninn does not reopen an owner pause.
+The process monitor reports an outcome only after it contains and collects the child process.
+An uncertain process keeps learning blocked.
+A reported Codex tool action also stops admission.
+The runner retains its documented limits on tool isolation.
 
-Refresh keeps the host and runner bindings, prompt, budget identity, attempt,
-concurrency and scope settings. It also keeps admission and activation time.
-It can lower the input, round, output, context and deadline limits. It can
-raise the input limit only during the v1 to v2 transition, up to 1 MiB. The
-transition changes the policy generation. Custom policies, disabled defaults
-and defaults with learning activity stay unchanged. A changed
-`--review-policy PATH` is refused for a configured store, except for the
-approved v1 to v2 input-size transition when its conditions hold.
+Before first activation, Muninn freezes the policy and local paths in its private install record.
+It commits the policy and source boundaries together.
+Recovery uses the frozen policy.
+It does not select another policy during recovery.
 
-To customize the default, edit and commit the profile in your private clone.
-The installer requires a clean checkout. You can lower input, output, context,
-round and deadline limits within the built-in safety bounds. Keep the Codex
-runner, model, reasoning, single-attempt, concurrency and project-scope settings.
-Set `approved_by` and `approved_at` to record who approved the profile and when.
-The installer rejects values outside the built-in bounds.
+An upgrade can refresh an eligible repository default from revision 1 or 2 to revision 3.
+The new `approved_at` value must be later.
+No attempt can remain unfinished.
+The transition preserves the host, runner, prompt, budget identity, activation time, and admission state.
+Old request policies remain immutable.
+Unstarted old-policy requests become cancelled with `cancel_code=policy_replaced`.
+The chosen learning scope controls fresh requests.
+Custom policies keep their existing limits.
+An owner pause remains in force.
+
+To customise the profile, edit and commit `tools/default_codex_policy.json` in your private clone.
+For revision 3, edit `revisions.3.concurrency`, `revisions.3.max_attempts`, and `revisions.3.retry_backoff_seconds`.
+Use at most four workers and three total attempts.
+Provide one backoff value for each retry.
+The `limits` object controls bytes, context, rounds, and deadlines.
+These values can be reduced within the enforced bounds.
+Keep the runner, model, reasoning, host binding, and project-scope settings.
+Record approval with `approved_by` and UTC `approved_at`.
+
+### Learning scope and history
+
+The installer asks for a record scope when no choice exists.
+It retains the choice during later upgrades.
+`now` excludes indexed history at the install boundary.
+It also excludes older or undated records when their source is indexed later.
+`all` includes eligible older records and future records.
+Global records remain excluded.
+
+Before history starts, Muninn scans physical sources and shows the work for confirmation.
+It groups same-project records into intervals of at most 200 lines.
+Source, scope, erasure, and read limits still apply.
+The scan names excluded source ranges and their causes.
+It uses existing request identities to avoid duplicates after interruption.
+Completed ranges and owner cancellations remain excluded.
+
+Use these optional commands to change the choice:
+
+```sh
+muninn learn setup --mode now
+muninn learn setup --mode all
+muninn learn setup --mode all --confirm SCAN_DIGEST
+```
+
+The history preview returns `confirmation`, `eligible_requests`, `excluded`, `excluded_spans`, `estimate`, and `scope`.
+Copy its `confirmation` value into `SCAN_DIGEST`.
+If history changes before admission, confirmation fails with `history_scan_changed`.
+Preview the scan again before confirming.
+`--project PATH` narrows history to one indexed project.
+From-now mode applies to all projects and refuses `--project`.
+An active review prevents scope changes with `learning_busy`.
+
+Time estimates use comparable completed calls.
+The estimate shows its sample count and confidence.
+API cost estimates require reported costs from comparable calls.
+Unreported cost remains null.
+Subscription cost and remaining subscription allowance remain unknown.
+Capture-gap counts are never multiplied into a call or cost estimate.
+
+### Learning failure messages
+
+At the next Codex session start, `systemMessage` shows a stored cause and action.
+This message also appears with `recall.off` or `recall.advisory`.
+`muninn learn show R_ID` adds `diagnostics` with stage, cause, action, and code.
+`doctor` adds `review_attention` when a stored issue needs attention.
+These fields contain fixed program text and identifiers.
+They contain no transcript or model output.
+
+| Code | Meaning and response |
+|---|---|
+| `deadline` | The review exceeded its deadline. Muninn uses a remaining attempt. |
+| `unavailable` | The runner did not finish successfully. Muninn uses a remaining attempt. |
+| `config` | Setup verification failed. Older records may lack the precise stage or cause. |
+| `capability_changed` | The approved runner setup changed. Muninn waits for that approved setup to return. |
+| `rejected_authority` | The proposed change lacks verified owner evidence. Muninn rejects it and continues. |
+| `rejected_revision` | Saved knowledge changed during review. Muninn rebuilds the review within the attempt limit. |
+| `rejected_validation` | The result does not match the required format. Muninn rejects it and continues. |
+| `rejected_evidence` | Required source evidence is missing, changed, or unverifiable. Muninn excludes the request. |
+| `rejected_scope` | The proposed change is outside the admitted project scope. Muninn rejects it and continues. |
+| `rejected_erased` | An erase record excludes the evidence. Muninn excludes the request. |
+| `process_identity_unverified` | Muninn cannot verify that an earlier process stopped. Learning remains blocked. |
+| `native_tool_event` | Codex reported a tool action. Inspect that activity before enabling learning again. |
+
+Muninn can retry safe calls and recheck approved local setup.
+It cannot sign in for a person, approve changed security bindings, restore missing original transcripts, or infer provider allowance.
+These actions need account access, approval, original data, or provider information that Muninn does not have.
 
 You can also pass a custom `--review-policy PATH` for first activation of an
 unconfigured store. The file must be bounded, strict UTF-8 JSON. Muninn freezes

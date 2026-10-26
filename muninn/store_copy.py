@@ -9,7 +9,7 @@ import sqlite3
 import time
 from collections.abc import Sequence
 
-from muninn import knowledge_read, store
+from muninn import knowledge_read, review_state, store
 from muninn.knowledge_models import Scope
 from muninn.knowledge_write import claims
 
@@ -40,7 +40,12 @@ GOVERNED_TABLES = (
 )
 # The marked current format keeps an exact DDL identity.
 _SHAPES = {
-    1: "535cd228a984e4d5cd6f98787a33c657359bf780753c73ec33885a2ed62ddc3c",
+    1: frozenset(
+        {
+            "535cd228a984e4d5cd6f98787a33c657359bf780753c73ec33885a2ed62ddc3c",
+            "9ebab010e421fd9d431a439dc6aa25be7b47eaeada00c160ae05d63a35b6592f",
+        }
+    ),
 }
 _LEGACY_TABLES = {
     "citation",
@@ -93,7 +98,7 @@ def _shape(conn: sqlite3.Connection) -> int:
     fingerprint = hashlib.sha256(
         json.dumps(rows, separators=(",", ":")).encode()
     ).hexdigest()
-    if _SHAPES.get(version) != fingerprint:
+    if fingerprint not in _SHAPES.get(version, frozenset()):
         raise ValueError("cutover_source_mismatch")
     if version == 1:
         store.assert_store_format(conn)
@@ -133,7 +138,12 @@ def _empty(conn: sqlite3.Connection) -> None:
     """Accept only untouched current bootstrap rows and no governed content."""
     if _shape(conn) != 1:
         raise ValueError("cutover_target_mismatch")
-    for table in BASE_TABLES + GOVERNED_TABLES:
+    optional = tuple(
+        name
+        for name in ("learning_setup", "review_issue")
+        if review_state.available(conn, name)
+    )
+    for table in BASE_TABLES + GOVERNED_TABLES + optional:
         if table in ("store_meta", "review_control"):
             continue
         if conn.execute(f'SELECT 1 FROM "{table}" LIMIT 1').fetchone():
@@ -268,6 +278,12 @@ def copy_governed_state(
         try:
             target.execute("PRAGMA defer_foreign_keys=ON")
             tables = BASE_TABLES + (GOVERNED_TABLES if version == 1 else ())
+            if version == 1:
+                tables += tuple(
+                    name
+                    for name in ("learning_setup", "review_issue")
+                    if review_state.available(source, name)
+                )
             result = _copy(source, target, tables)
             rebuild_indexes(target)
             _validate(target)

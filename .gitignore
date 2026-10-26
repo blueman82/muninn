@@ -12,3 +12,7 @@ __pycache__/
 /docs/REPLAY-BENCHMARK.md
 /docs/SKILLS.md
 /docs/superpowers/
+
+# Keep local design previews out of release branches.
+/docs/review-recovery-design.html
+/docs/review-recovery-explainer.mp4

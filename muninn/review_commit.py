@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from muninn.knowledge_models import (
     AffectedRevision,
     AttemptId,
+    Digest,
     EvidenceId,
     RequestId,
     ReviewResult,
@@ -39,7 +40,9 @@ from muninn.review_progress import (
     require_transaction,
 )
 from muninn.review_read_budget import ReadBudget
+from muninn.review_recovery import clear as clear_issue
 from muninn.review_requests import fail_attempt, request_view
+from muninn.review_snapshot import snapshot
 from muninn.tombstones import require_current_tombstones
 
 
@@ -52,6 +55,7 @@ class CommitContext(StrictModel):
     generation: PositiveInt
     evidence_ids: tuple[EvidenceId, ...]
     now: UtcSeconds
+    knowledge_digest: Digest | None = None
 
 
 class CommitRejectedError(ValueError):
@@ -304,6 +308,7 @@ def _complete(
         "WHERE id=?",
         (context.now, context.now, receipt.outcome, context.attempt_id),
     )
+    clear_issue(conn, context.request_id)
     advance_completed(conn, request_view(row).window.source, context.now)
     return receipt
 
@@ -354,6 +359,18 @@ def commit_review(
             require_transaction(conn, context.now)
             row = _current(conn, context)
             policy = _policy(conn, row)
+            if (
+                context.knowledge_digest is not None
+                and context.knowledge_digest
+                != snapshot(conn, request_view(row).scope)
+            ):
+                raise CommitRejectedError("rejected_revision")
+            if (
+                policy.policy_id.endswith("-v3")
+                and row["origin"] == "review"
+                and context.knowledge_digest is None
+            ):
+                raise CommitRejectedError("rejected_revision")
             try:
                 result = parse_result(
                     canonical_json(result).encode(), policy.max_output_bytes

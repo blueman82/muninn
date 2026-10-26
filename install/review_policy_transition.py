@@ -43,6 +43,8 @@ def check(
     old = checked_policy(installed)
     new = checked_policy(selected)
     if old.policy_source == new.policy_source == "repository_default":
+        if _recovery_refresh(conn, old, new):
+            return
         _check_default_refresh(conn, old, new)
         return
     if (
@@ -65,6 +67,41 @@ def check(
     expected["budget"]["approved_at"] = new.budget.approved_at
     if expected != new.model_dump(mode="json"):
         raise StepFailedError("review_policy_transition_required")
+
+
+def _recovery_refresh(
+    conn: sqlite3.Connection, old: ReviewPolicy, new: ReviewPolicy
+) -> bool:
+    """Permit the approved recovery revision and preserve history."""
+    if (
+        old.policy_id
+        not in {
+            "muninn-codex-ongoing-production",
+            "muninn-codex-ongoing-production-v2",
+        }
+        or new.policy_id != "muninn-codex-ongoing-production-v3"
+    ):
+        return False
+    if (
+        not isinstance(old.budget, OngoingBudget)
+        or not isinstance(new.budget, OngoingBudget)
+        or new.budget.approved_at <= old.budget.approved_at
+    ):
+        return False
+    if conn.execute(
+        "SELECT 1 FROM review_attempt WHERE ended_at IS NULL LIMIT 1"
+    ).fetchone():
+        return False
+    expected = old.model_dump(mode="json")
+    expected.update(
+        policy_id=new.policy_id,
+        max_input_bytes=1_048_576,
+        max_attempts=3,
+        retry_backoff_seconds=[5.0, 30.0],
+        concurrency=4,
+    )
+    expected["budget"]["approved_at"] = new.budget.approved_at
+    return expected == new.model_dump(mode="json")
 
 
 def _check_default_refresh(
@@ -146,6 +183,14 @@ def apply(conn: sqlite3.Connection, selected: ReviewPolicy | None) -> None:
         if current["policy_digest"] != digest(installed):
             raise StepFailedError("review_policy_state_invalid")
         check(conn, installed, selected)
+        if selected.policy_id == "muninn-codex-ongoing-production-v3":
+            conn.execute(
+                "UPDATE review_request SET "
+                "state='cancelled',retry_at=NULL,"
+                "cancel_code='policy_replaced' "
+                "WHERE state IN ('pending','waiting') AND policy_digest!=?",
+                (digest(selected),),
+            )
         conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?,"
             "generation=generation+1 WHERE singleton=1",

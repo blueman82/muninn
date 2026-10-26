@@ -110,32 +110,59 @@ Codex prompts you at `/hooks`.
 The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt
 recall. They do not control learning from completed sessions.
 
-Each request can use at most two rounds, 1 MiB of input, 32 KiB of output,
-12,000 bytes of context and 120 seconds. The policy allows one attempt and one
-concurrent request. It allows project scope only. These limits apply to each
-request. There is no total call or cost limit. The policy does not expire. See the
-[policy flow](learning-policy-flow.html).
+During first setup, the installer asks which records to review:
 
-To customize the profile, edit and commit `tools/default_codex_policy.json` in
-your private clone before you install. The installer requires a clean checkout.
-You can lower the input, output, context, round and deadline limits within the
-enforced bounds. Set `approved_by` to the approver's name and `approved_at` to
-the approval time in UTC. Keep the runner, model, reasoning, attempt,
-concurrency and project-scope settings unchanged.
+- **From now:** review records created after this install or upgrade.
+- **All available history:** review verified older project records, then review new records.
 
-On upgrade, Muninn applies the profile if the store has no learning policy.
-It refreshes a repository default only when learning admission is enabled.
-The store must have no learning requests or knowledge entries.
-Learning admission means permission to accept learning requests.
-The new profile must have a later approval time.
-Muninn keeps the host and runner bindings, prompt, budget identity and
-admission state. It can lower input, round, output, context and deadline limits.
-It can raise the input limit only during the approved v1-to-v2 change, up to
-1 MiB. Custom policies, used defaults and disabled admission stay unchanged.
-A changed `--review-policy PATH` cannot replace a configured policy.
-The exception is the approved v1-to-v2 change when its conditions hold.
-Do not edit the store by hand. See the
-[policy reference](REFERENCE.md#default-learning-policy).
+The installer keeps your choice for later upgrades.
+If you choose history, it shows eligible requests, excluded ranges, and a time estimate before confirmation.
+A capture gap does not equal a review request.
+Muninn excludes missing, erased, changed, or unverifiable source ranges.
+For late imports, From now also excludes older or undated records.
+
+To select future records without a scope prompt, run:
+
+```sh
+bin/muninn-install --learning-scope now
+```
+
+Each attempt allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
+Revision 3 allows four concurrent requests and three total attempts per request.
+Temporary failures wait 5 seconds, then 30 seconds, before their remaining attempts.
+Live requests take priority over queued history.
+Muninn checks the current knowledge revision before saving each result.
+
+The policy allows project scope only.
+It has no total call limit or expiry.
+These controls cannot limit subscription allowance or predict subscription cost.
+An API cost estimate requires comparable calls with reported costs.
+A small sample gives a low-confidence estimate.
+
+Muninn rechecks unavailable setup every 60 seconds.
+One rejected request does not stop unrelated requests under revision 3.
+If help is required, the next Codex session shows the cause and action.
+You do not need to run `doctor` to receive this message.
+Muninn preserves owner pauses and blocks calls whose stopped state remains unverified.
+
+To customise the profile, edit `tools/default_codex_policy.json` in your private clone.
+Commit the change before installation.
+For revision 3, set `concurrency`, `max_attempts`, and `retry_backoff_seconds` under `revisions.3`.
+Use one backoff value for each permitted retry.
+Keep concurrency at or below 4 and attempts at or below 3.
+The `limits` object controls the other byte, round, context, and deadline limits.
+You can reduce these limits within the enforced bounds.
+Keep the runner, model, reasoning, host binding, and project-scope settings.
+Record the approver in `approved_by` and the UTC approval time in `approved_at`.
+
+Eligible repository defaults can move from revision 1 or 2 to revision 3 during upgrade.
+The new approval time must be later.
+Muninn preserves old request policies and knowledge.
+It marks unstarted old-policy requests as replaced.
+The selected learning scope controls new admission.
+Custom policies and owner pauses retain their existing limits and state.
+Do not edit the store by hand.
+See the [policy reference](REFERENCE.md#default-learning-policy).
 
 ## Uninstall
 
