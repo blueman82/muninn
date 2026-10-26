@@ -266,6 +266,18 @@ jobs:
               path.write(str(destination) + '\n')
           with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as env:
               env.write('MUNINN_PYTHON=' + str(copied) + '\n')
+      - name: Observe unqualified Windows boot-counter readiness
+        if: runner.os == 'Windows' && matrix.lane != 'gate' && !cancelled()
+        env:
+          MUNINN_NATIVE_SCRATCH: ${{ steps.native_scratch.outputs.root }}
+        shell: python
+        run: |
+          import subprocess
+          from pathlib import Path
+
+          python = str(Path('.venv/Scripts/python.exe').resolve())
+          subprocess.run([python, '-B', '-m', 'tests.windows_recovery_probe'],
+                         check=True, timeout=120)
       - name: Run real ordinary Windows lifecycle
         if: runner.os == 'Windows' && matrix.lane != 'gate' && !cancelled()
         env:
@@ -301,6 +313,7 @@ jobs:
             ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-lifecycle-proof.json
             ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-provider-proof.json
             ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-ordinary-proof.json
+            ${{ steps.native_scratch.outputs.root }}/muninn-native-diagnostics/muninn-recovery-probe.json
           if-no-files-found: error
           retention-days: 1
       - name: Check Windows native API typing
