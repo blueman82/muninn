@@ -16,6 +16,8 @@ A single worker also delayed large history runs.
 Offer From now and All available history during first setup.
 Keep the selected scope across upgrades and rebuilds.
 Verify history and show exclusions before confirmation.
+Bind confirmation to all traversed original bytes and indexed records.
+Reindexing changed originals must invalidate the earlier confirmation.
 Use existing request identities to prevent duplicate admission.
 Keep unverifiable sources excluded.
 
@@ -45,7 +47,12 @@ Refresh eligible repository defaults from revision 1 or 2 to revision 3.
 Preserve old request policies and saved knowledge.
 Mark unstarted old-policy requests as replaced.
 Use the selected scope to admit fresh requests.
-Preserve custom policies and owner pauses.
+Preserve changed custom policies.
+Keep owner pauses unless the person separately approves a checked restart.
+Recognise unchanged legacy defaults with their recorded runner version.
+Require every recorded call and attempt to have finished before restart.
+Keep uncertain processes blocked.
+Confirm replacement requests without moving an existing From now start time.
 
 Show required action at the next Codex session start.
 Provide safe diagnostic detail through `learn show` and `doctor`.
@@ -57,6 +64,9 @@ Four workers can reduce elapsed time and consume provider allowance faster.
 Concurrent knowledge changes can require fresh calls.
 Three attempts limit one request's retries.
 They do not limit account cost or subscription allowance.
+Estimate whole worker batches from comparable recorded calls.
+Separate first-attempt estimates from estimates with permitted retries and backoffs.
+Exclude setup waits and database delays from these estimates.
 
 Source verification can exclude history that exceeds the original-read limit.
 The scan reports these exclusions with their causes.

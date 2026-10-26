@@ -138,6 +138,9 @@ It has no total call limit or expiry.
 These controls cannot limit subscription allowance or predict subscription cost.
 An API cost estimate requires comparable calls with reported costs.
 A small sample gives a low-confidence estimate.
+Time estimates use whole worker batches.
+The installer separates first-attempt estimates from estimates with permitted retries.
+Estimates exclude setup waits and database delays.
 
 Muninn rechecks unavailable setup every 60 seconds.
 One rejected request does not stop unrelated requests under revision 3.
@@ -160,7 +163,16 @@ The new approval time must be later.
 Muninn preserves old request policies and knowledge.
 It marks unstarted old-policy requests as replaced.
 The selected learning scope controls new admission.
-Custom policies and owner pauses retain their existing limits and state.
+Changed custom policies retain their existing limits.
+If learning is paused, the installer asks separately before enabling it.
+Declining keeps the pause.
+An accepted restart requires every recorded call and attempt to have finished.
+An unchanged legacy default can receive this checked policy update.
+The update retains its recorded runner version and host settings.
+For an unattended, explicitly approved restart, use `bin/muninn-install --enable-learning`.
+This flag does not bypass process checks or approve changed custom policies.
+A retained From now choice keeps its original start time.
+The installer confirms replacement work before replacing an old queue.
 Do not edit the store by hand.
 See the [policy reference](REFERENCE.md#default-learning-policy).
 

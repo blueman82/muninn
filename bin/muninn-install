@@ -166,7 +166,7 @@ HELP
     fi
     exit 0
     ;;
-  --check | "" | --learning-scope) ;;
+  --check | "" | --learning-scope | --enable-learning) ;;
   *)
     ensure_runtime
     ensure_git_hooks

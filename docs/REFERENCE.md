@@ -293,7 +293,13 @@ Old request policies remain immutable.
 Unstarted old-policy requests become cancelled with `cancel_code=policy_replaced`.
 The chosen learning scope controls fresh requests.
 Custom policies keep their existing limits.
-An owner pause remains in force.
+An owner pause remains in force unless the person explicitly accepts the installer restart prompt.
+`--enable-learning` supplies this separate approval for an unattended install or upgrade.
+Every recorded call must be completed, and every attempt must have ended.
+Running requests prevent this restart.
+The installer can recognise an unchanged legacy default without a `policy_source` marker.
+It retains the recorded runner version and host settings.
+Changed custom policies require a newly approved `--review-policy PATH`; the flag alone cannot approve them.
 
 To customise the profile, edit and commit `tools/default_codex_policy.json` in your private clone.
 For revision 3, edit `revisions.3.concurrency`, `revisions.3.max_attempts`, and `revisions.3.retry_backoff_seconds`.
@@ -308,6 +314,9 @@ Record approval with `approved_by` and UTC `approved_at`.
 
 The installer asks for a record scope when no choice exists.
 It retains the choice during later upgrades.
+A retained From now choice keeps its original start time.
+After policy replacement, the installer confirms eligible replacement requests before queuing them.
+It does not silently discard an old queue.
 `now` excludes indexed history at the install boundary.
 It also excludes older or undated records when their source is indexed later.
 `all` includes eligible older records and future records.
@@ -330,7 +339,9 @@ muninn learn setup --mode all --confirm SCAN_DIGEST
 
 The history preview returns `confirmation`, `eligible_requests`, `excluded`, `excluded_spans`, `estimate`, and `scope`.
 Copy its `confirmation` value into `SCAN_DIGEST`.
+Confirmation includes all traversed original bytes and indexed records.
 If history changes before admission, confirmation fails with `history_scan_changed`.
+Reindexing changed originals does not preserve an earlier confirmation.
 Preview the scan again before confirming.
 `--project PATH` narrows history to one indexed project.
 From-now mode applies to all projects and refuses `--project`.
@@ -338,6 +349,11 @@ An active review prevents scope changes with `learning_busy`.
 
 Time estimates use comparable completed calls.
 The estimate shows its sample count and confidence.
+It uses whole worker batches, including a full batch for one request.
+`seconds_low` and `seconds_high` describe first-attempt work.
+`retry_seconds_high` includes permitted attempts and retry backoffs.
+`api_cost_decimal` describes first-attempt cost; `retry_api_cost_decimal` includes permitted attempts.
+These estimates exclude setup waits and database delays.
 API cost estimates require reported costs from comparable calls.
 Unreported cost remains null.
 Subscription cost and remaining subscription allowance remain unknown.

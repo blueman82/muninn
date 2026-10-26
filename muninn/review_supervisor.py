@@ -51,6 +51,7 @@ from muninn.review_supervisor_store import (
     halt_interrupted,
     is_contention,
     persist_event,
+    retire_unlaunched,
     startup_snapshot,
 )
 
@@ -383,6 +384,16 @@ class Supervisor:
             for event in self.monitor.drain():
                 persist_event(self.home, event, now)
         with database(self.home) as conn:
+            if review_recovery.enabled(self.policy):
+                retire_unlaunched(
+                    conn,
+                    (
+                        key
+                        for key, pending in self._rounds.items()
+                        if not pending.spawned and pending.handle is None
+                    ),
+                    now,
+                )
             halt_interrupted(conn, self.policy)
             conn.execute(
                 "UPDATE review_control SET generation=generation+1 "

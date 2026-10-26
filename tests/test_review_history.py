@@ -127,3 +127,30 @@ class LearningHistoryTests(RequestCase):
             lambda: source_progress(self.conn, source, 1_800_000_002.0)
         )
         self.assertEqual(progress["activation_line"], 3)
+
+    def test_reindexing_changed_interior_invalidates_old_confirmation(
+        self,
+    ) -> None:
+        preview = review_history.scan(
+            self.conn, self.policy, self.scope.project_id
+        )
+        self.path.write_bytes(
+            self.path.read_bytes().replace(b"q one", b"q two")
+        )
+        self.run_ingest(full=True)
+        refreshed = review_history.scan(
+            self.conn, self.policy, self.scope.project_id
+        )
+        self.assertEqual(len(refreshed.items), 1)
+        self.assertNotEqual(preview.digest, refreshed.digest)
+        with self.assertRaisesRegex(ValueError, "history_scan_changed"):
+            self.transaction(
+                lambda: review_history.configure(
+                    self.conn,
+                    self.policy,
+                    "all",
+                    self.scope.project_id,
+                    30.0,
+                    preview.digest,
+                )
+            )

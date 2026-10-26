@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import closing, contextmanager
 from pathlib import Path
 
@@ -153,3 +153,16 @@ def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
                 conn, "setup", event.error_code or "config", "runner", now
             )
             conn.execute("UPDATE review_control SET admission=0")
+
+
+def retire_unlaunched(
+    conn: sqlite3.Connection, keys: Iterable[tuple[str, int]], now: float
+) -> None:
+    """Close reservations proven unlaunched by the current owner."""
+    conn.executemany(
+        "UPDATE review_call SET state='completed',ended_at=?,"
+        "outcome='not_launched' WHERE attempt_id=? AND round_index=? "
+        "AND state='reserved' AND process_identity_json IS NULL "
+        "AND launched_at IS NULL",
+        ((now, attempt, index) for attempt, index in keys),
+    )

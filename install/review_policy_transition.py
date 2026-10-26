@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import suppress
 
+from install import learning_policy_recovery
 from install.context import StepFailedError
 from install.review_policy_parse import policy as parse_policy
 from muninn.review_json import canonical_json
@@ -42,9 +43,9 @@ def check(
     """Require only the recorded v1-to-v2 raw-read allowance change."""
     old = checked_policy(installed)
     new = checked_policy(selected)
+    if _recovery_refresh(conn, old, new):
+        return
     if old.policy_source == new.policy_source == "repository_default":
-        if _recovery_refresh(conn, old, new):
-            return
         _check_default_refresh(conn, old, new)
         return
     if (
@@ -78,6 +79,7 @@ def _recovery_refresh(
         not in {
             "muninn-codex-ongoing-production",
             "muninn-codex-ongoing-production-v2",
+            "muninn-codex-ongoing-production-v3",
         }
         or new.policy_id != "muninn-codex-ongoing-production-v3"
     ):
@@ -92,15 +94,27 @@ def _recovery_refresh(
         "SELECT 1 FROM review_attempt WHERE ended_at IS NULL LIMIT 1"
     ).fetchone():
         return False
+    if (
+        new.policy_source == "repository_default"
+        and old.policy_source is None
+        and not learning_policy_recovery.bundled(old)
+    ):
+        return False
     expected = old.model_dump(mode="json")
-    expected.update(
-        policy_id=new.policy_id,
-        max_input_bytes=1_048_576,
-        max_attempts=3,
-        retry_backoff_seconds=[5.0, 30.0],
-        concurrency=4,
-    )
+    expected["policy_source"] = new.policy_source
+    if new.policy_source is None:
+        expected.pop("policy_source", None)
+    if old.policy_id != "muninn-codex-ongoing-production-v3":
+        expected.update(
+            policy_id=new.policy_id,
+            max_attempts=new.max_attempts,
+            retry_backoff_seconds=new.retry_backoff_seconds,
+            concurrency=new.concurrency,
+        )
+        if old.policy_id == "muninn-codex-ongoing-production":
+            expected["max_input_bytes"] = new.max_input_bytes
     expected["budget"]["approved_at"] = new.budget.approved_at
+    expected["budget"]["approved_by"] = new.budget.approved_by
     return expected == new.model_dump(mode="json")
 
 
@@ -161,14 +175,21 @@ def _default_bounds_compatible(old: ReviewPolicy, new: ReviewPolicy) -> bool:
     )
 
 
-def apply(conn: sqlite3.Connection, selected: ReviewPolicy | None) -> None:
+def apply(
+    conn: sqlite3.Connection,
+    selected: ReviewPolicy | None,
+    *,
+    enable_admission: bool = False,
+) -> None:
     """Replace the selected policy atomically while preserving admission."""
+    if type(enable_admission) is not bool:
+        raise StepFailedError("learning_recovery_consent_required")
     row = conn.execute(
         "SELECT policy_json,policy_digest FROM review_control"
     ).fetchone()
     if row is None or row["policy_json"] is None or selected is None:
         return
-    if row["policy_digest"] == digest(selected):
+    if row["policy_digest"] == digest(selected) and not enable_admission:
         return
     if conn.in_transaction:
         raise StepFailedError("review_policy_transition_required")
@@ -179,10 +200,7 @@ def apply(conn: sqlite3.Connection, selected: ReviewPolicy | None) -> None:
         ).fetchone()
         if current is None or current["policy_json"] is None:
             raise StepFailedError("review_policy_transition_required")
-        installed = parse_policy(current["policy_json"])
-        if current["policy_digest"] != digest(installed):
-            raise StepFailedError("review_policy_state_invalid")
-        check(conn, installed, selected)
+        _validate_activation(conn, current, selected, enable_admission)
         if selected.policy_id == "muninn-codex-ongoing-production-v3":
             conn.execute(
                 "UPDATE review_request SET "
@@ -193,11 +211,30 @@ def apply(conn: sqlite3.Connection, selected: ReviewPolicy | None) -> None:
             )
         conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?,"
-            "generation=generation+1 WHERE singleton=1",
-            (canonical_json(selected), digest(selected)),
+            "generation=generation+1,admission=CASE WHEN ? THEN 1 "
+            "ELSE admission END WHERE singleton=1",
+            (canonical_json(selected), digest(selected), enable_admission),
         )
         conn.execute("COMMIT")
     except BaseException:
         with suppress(BaseException):
             conn.execute("ROLLBACK")
         raise
+
+
+def _validate_activation(
+    conn: sqlite3.Connection,
+    current: sqlite3.Row,
+    selected: ReviewPolicy,
+    enable_admission: bool,
+) -> None:
+    """Check the policy and finished calls inside the write transaction."""
+    installed = parse_policy(current["policy_json"])
+    if current["policy_digest"] != digest(installed):
+        raise StepFailedError("review_policy_state_invalid")
+    if current["policy_digest"] != digest(selected):
+        check(conn, installed, selected)
+    if enable_admission:
+        if selected.policy_id != "muninn-codex-ongoing-production-v3":
+            raise StepFailedError("learning_recovery_policy_required")
+        learning_policy_recovery.require_finished(conn)

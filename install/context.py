@@ -62,6 +62,8 @@ class Ctx:
         ts: UTC timestamp that names this run's directories.
         platform: Native platform, overridden only by isolated tests.
         default_home: Use native environment paths when HOME was omitted.
+        enable_learning: Explicit consent to restart a contained policy.
+        retained_learning_scope: Keep the original future-only boundary.
         learning_mode: Explicit first-run record scope, when selected.
         learning_prompt: CLI prompt used only for history confirmation.
         review_policy: Explicit policy input; never discovered automatically.
@@ -96,6 +98,8 @@ class Ctx:
     uid: int = getattr(os, "getuid", lambda: 0)()
     platform: str = sys.platform
     default_home: bool = False
+    enable_learning: bool = False
+    retained_learning_scope: bool = False
     learning_mode: Literal["now", "all"] | None = None
     learning_prompt: Callable[[str], str] | None = None
     review_policy: Path | None = None

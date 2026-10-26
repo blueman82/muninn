@@ -69,6 +69,27 @@ class AutomaticRecoveryTests(SupervisorCase):
         )
         self.assertIsNone(review_recovery.notice(self.conn))
 
+    def test_clean_stop_retires_only_proven_unlaunched_reservation(
+        self,
+    ) -> None:
+        with mock.patch.object(
+            self.supervisor,
+            "_create",
+            side_effect=ValueError("effective_host_changed"),
+        ):
+            self.supervisor.tick(13.0)
+        self.supervisor.stop(14.0)
+        row = self.conn.execute(
+            "SELECT state,outcome FROM review_call"
+        ).fetchone()
+        self.assertEqual(tuple(row), ("completed", "not_launched"))
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT admission FROM review_control"
+            ).fetchone()[0],
+            1,
+        )
+
     def test_owner_pause_survives_dependency_recheck(self) -> None:
         with mock.patch.object(
             self.supervisor,

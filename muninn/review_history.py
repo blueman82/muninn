@@ -5,10 +5,11 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterable
 from typing import Literal
 
 from muninn import classify, review_state
-from muninn.knowledge_models import Scope, StrictModel
+from muninn.knowledge_models import Digest, Scope, StrictModel
 from muninn.review_estimate import estimate
 from muninn.review_evidence_models import EvidenceWindow, SourceRef
 from muninn.review_json import canonical_json
@@ -22,6 +23,7 @@ from muninn.review_progress import (
     require_transaction,
 )
 from muninn.review_read_budget import ReadBudget
+from muninn.review_request_views import request_view
 from muninn.review_requests import enqueue_review
 
 _EXCLUDED_CAUSES = {
@@ -42,6 +44,7 @@ class HistoryItem(StrictModel):
 
     window: EvidenceWindow
     scope: Scope
+    content_digest: Digest | None = None
 
 
 class HistoryScan(StrictModel):
@@ -86,14 +89,16 @@ def _windows(
     source: sqlite3.Row,
     policy: ReviewPolicy,
     project: str | None,
+    bounds: tuple[int, int] | None = None,
 ) -> list[HistoryItem]:
     """Group same-scope indexed lines into intervals of at most 200 lines."""
     rows = conn.execute(
         "SELECT e.line,e.line_sha256,sc.key,sc.kind,max(e.kind IN "
         "('prompt','reply')) AS candidate "
         "FROM event e JOIN scope sc ON sc.id=e.scope_id WHERE e.source_id=? "
+        "AND e.line BETWEEN ? AND ? "
         "GROUP BY e.line,sc.id ORDER BY e.line",
-        (source["id"],),
+        (source["id"], *(bounds or (1, 2**63 - 1))),
     ).fetchall()
     lines: dict[int, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
@@ -140,74 +145,71 @@ def _windows(
     return output
 
 
-def scan(
-    conn: sqlite3.Connection, policy: ReviewPolicy, project: str | None
+def _verify(
+    conn: sqlite3.Connection, policy: ReviewPolicy, item: HistoryItem
+) -> HistoryItem:
+    """Bind confirmation to original bytes and indexed records."""
+    budget = ReadBudget(policy.max_input_bytes)
+    source = check_window(conn, item.window, item.scope, policy, budget=budget)
+    expected = {
+        row["line"]: row["line_sha256"]
+        for row in conn.execute(
+            "SELECT DISTINCT line,line_sha256 FROM event WHERE "
+            "source_id=? AND line BETWEEN ? AND ?",
+            (source["id"], item.window.from_line, item.window.through_line),
+        )
+    }
+    content = hashlib.sha256()
+    for line, raw, _ in originals(
+        conn,
+        source,
+        1,
+        item.window.through_line,
+        policy.max_input_bytes,
+        budget=budget,
+    ):
+        content.update(line.to_bytes(8, "big"))
+        content.update(len(raw).to_bytes(8, "big"))
+        content.update(raw)
+        if (
+            line == 1
+            and source["provider"] != "cursor"
+            and classify.record_hash(raw) != source["first_line_sha256"]
+        ):
+            raise ValueError("evidence_changed")
+        if line in expected and classify.record_hash(raw) != expected[line]:
+            raise ValueError("evidence_changed")
+    return item.model_copy(update={"content_digest": content.hexdigest()})
+
+
+def _inspect(
+    conn: sqlite3.Connection,
+    policy: ReviewPolicy,
+    project: str | None,
+    candidates: Iterable[HistoryItem],
 ) -> HistoryScan:
-    """Validate physical source bytes without admitting or launching work."""
+    """Use the same physical verification for history and replaced requests."""
     items: list[HistoryItem] = []
     excluded: list[dict[str, str | int]] = []
-    for source in conn.execute(
-        "SELECT * FROM source ORDER BY provider,thread_id"
-    ).fetchall():
-        for item in _windows(conn, source, policy, project):
-            try:
-                budget = ReadBudget(policy.max_input_bytes)
-                check_window(
-                    conn, item.window, item.scope, policy, budget=budget
-                )
-                expected = {
-                    row["line"]: row["line_sha256"]
-                    for row in conn.execute(
-                        "SELECT DISTINCT line,line_sha256 FROM event "
-                        "WHERE source_id=? AND line BETWEEN ? AND ?",
-                        (
-                            source["id"],
-                            item.window.from_line,
-                            item.window.through_line,
-                        ),
-                    )
+    for item in candidates:
+        try:
+            items.append(_verify(conn, policy, item))
+        except ValueError as exc:
+            code = (
+                str(exc)
+                if str(exc) in _EXCLUDED_CAUSES
+                else "source_unverifiable"
+            )
+            excluded.append(
+                {
+                    "provider": item.window.source.provider,
+                    "thread_id": item.window.source.thread_id,
+                    "from_line": item.window.from_line,
+                    "through_line": item.window.through_line,
+                    "code": code,
+                    "cause": _EXCLUDED_CAUSES[code],
                 }
-                for line, raw, _ in originals(
-                    conn,
-                    source,
-                    item.window.from_line,
-                    item.window.through_line,
-                    policy.max_input_bytes,
-                    budget=budget,
-                ):
-                    if (
-                        line in expected
-                        and classify.record_hash(raw) != expected[line]
-                    ):
-                        raise ValueError("evidence_changed")
-            except ValueError as exc:
-                code = (
-                    str(exc)
-                    if str(exc)
-                    in {
-                        "source_unavailable",
-                        "original_unavailable",
-                        "evidence_changed",
-                        "evidence_erased",
-                        "incomplete_window",
-                        "evidence_limit",
-                        "rejected_scope",
-                        "ancestry_unavailable",
-                    }
-                    else "source_unverifiable"
-                )
-                excluded.append(
-                    {
-                        "provider": source["provider"],
-                        "thread_id": source["thread_id"],
-                        "from_line": item.window.from_line,
-                        "through_line": item.window.through_line,
-                        "code": code,
-                        "cause": _EXCLUDED_CAUSES[code],
-                    }
-                )
-            else:
-                items.append(item)
+            )
     return HistoryScan(
         policy_digest=digest(policy),
         project_id=project,
@@ -215,6 +217,97 @@ def scan(
         excluded=excluded,
         estimate=estimate(conn, policy, len(items)),
     )
+
+
+def scan(
+    conn: sqlite3.Connection, policy: ReviewPolicy, project: str | None
+) -> HistoryScan:
+    """Validate physical source bytes without admitting or launching work."""
+    candidates = (
+        item
+        for source in conn.execute(
+            "SELECT * FROM source ORDER BY provider,thread_id"
+        ).fetchall()
+        for item in _windows(conn, source, policy, project)
+    )
+    return _inspect(conn, policy, project, candidates)
+
+
+def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Keep replacement intervals exact while combining overlaps."""
+    output: list[tuple[int, int]] = []
+    for first, last in sorted(ranges):
+        if output and first <= output[-1][1] + 1:
+            output[-1] = (output[-1][0], max(last, output[-1][1]))
+        else:
+            output.append((first, last))
+    return output
+
+
+def replacements(
+    conn: sqlite3.Connection,
+    policy: ReviewPolicy,
+    saved: review_state.LearningSelection,
+) -> HistoryScan:
+    """Recover only already-requested work within the retained start time."""
+    sources: dict[int, sqlite3.Row] = {}
+    ranges: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    rows = conn.execute(
+        "SELECT * FROM review_request WHERE policy_digest!=? AND "
+        "((state='cancelled' AND cancel_code='policy_replaced') "
+        "OR state='failed')",
+        (digest(policy),),
+    ).fetchall()
+    for row in rows:
+        view = request_view(row)
+        if (
+            saved.project_id is not None
+            and view.scope.project_id != saved.project_id
+        ):
+            continue
+        source = conn.execute(
+            "SELECT * FROM source WHERE provider=? AND thread_id=?",
+            (view.window.source.provider, view.window.source.thread_id),
+        ).fetchone()
+        if source is None:
+            continue
+        first = view.window.from_line
+        if saved.mode == "now":
+            progress = conn.execute(
+                "SELECT activation_line FROM review_source WHERE "
+                "provider=? AND thread_id=?",
+                (source["provider"], source["thread_id"]),
+            ).fetchone()
+            if progress is None:
+                continue
+            first = max(first, progress[0] + 1)
+        if first <= view.window.through_line:
+            sources[source["id"]] = source
+            ranges[source["id"]].append((first, view.window.through_line))
+    candidates = (
+        item
+        for ident, source in sources.items()
+        for bounds in _merge_ranges(ranges[ident])
+        for item in _windows(conn, source, policy, saved.project_id, bounds)
+    )
+    return _inspect(conn, policy, saved.project_id, candidates)
+
+
+def admit_replacements(
+    conn: sqlite3.Connection,
+    policy: ReviewPolicy,
+    saved: review_state.LearningSelection,
+    confirmation: str,
+    now: float,
+) -> int:
+    """Recheck confirmed replacement work inside its admission transaction."""
+    require_transaction(conn, now)
+    selected = replacements(conn, policy, saved)
+    if selected.digest != confirmation:
+        raise ValueError("history_scan_changed")
+    for item in selected.items:
+        enqueue_review(conn, item.window, item.scope, policy, "reconcile", now)
+    return len(selected.items)
 
 
 def _from_now(conn: sqlite3.Connection, now: float) -> None:

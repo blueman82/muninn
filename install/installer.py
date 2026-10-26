@@ -355,6 +355,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--home", type=Path)
     ap.add_argument("--review-policy", type=Path)
     ap.add_argument("--learning-scope", choices=("now", "all"))
+    ap.add_argument("--enable-learning", action="store_true")
     return ap
 
 
@@ -393,6 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         upgrade=args.upgrade,
         default_home=default_home,
         review_policy=args.review_policy,
+        enable_learning=args.enable_learning,
     )
     ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
     ctx.cursor_hooks = choose_cursor_hooks(ctx)

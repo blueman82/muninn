@@ -29,7 +29,11 @@ The installer offers the same scope choice and retains it during upgrades.
 The preview reports eligible requests, excluded source ranges, causes, estimates, and sample confidence.
 Capture gaps are not model calls.
 Unreported API cost and remaining subscription allowance stay unknown.
+Confirmation includes all traversed original bytes and indexed records.
 A changed scan refuses confirmation with `history_scan_changed`.
+Reindexing changed originals also requires a new confirmation.
+Estimates separate first-attempt work from work with permitted retries.
+They exclude setup waits and database delays.
 An active review refuses scope changes with `learning_busy`.
 
 `REF` identifies an indexed `provider:thread_id` or an unambiguous session root.
@@ -65,6 +69,10 @@ Resume retains its narrow legacy contract for the latest contained `rejected_aut
 It requires the exact installed policy and completed calls.
 It refuses pending work, abandoned attempts, and other failures.
 Routine revision 3 recovery does not require resume.
+The installer asks separately before enabling paused learning.
+`bin/muninn-install --enable-learning` supplies explicit restart approval.
+The restart still requires completed calls, ended attempts, and an eligible policy.
+It cannot approve a changed custom policy or an uncertain process.
 
 Replay requires explicit bounds and policy.
 Never enqueue an archive without authorisation.

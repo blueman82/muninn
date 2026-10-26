@@ -11,7 +11,11 @@ from contextlib import closing
 from pathlib import Path
 from typing import cast
 
-from install import review_policy_transition, snapshot_io
+from install import (
+    learning_policy_recovery,
+    review_policy_transition,
+    snapshot_io,
+)
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import review_codex_launch, store
@@ -48,6 +52,12 @@ def select(
         return None
     auth_home, auth_identity = auth_binding
     try:
+        prepare_codex_policy.default_policy(
+            ctx.data, stable_executable, profile_raw
+        )
+        profile_raw = learning_policy_recovery.profile(
+            profile_raw, installed, ctx.enable_learning, float(ctx.now())
+        )
         selected, _ = prepare_codex_policy.default_policy(
             ctx.data, stable_executable, profile_raw
         )
@@ -104,6 +114,14 @@ def _auth_binding(
             return None
         return auth_home, _directory_identity(auth_home)
     except (OSError, ValueError):
+        if ctx.enable_learning:
+            auth_home = ctx.codex_home
+            if (
+                auth_home.is_dir()
+                and not auth_home.is_symlink()
+                and auth_home.resolve() == auth_home
+            ):
+                return auth_home, _directory_identity(auth_home)
         return None
 
 
@@ -200,11 +218,19 @@ def _configured(ctx: Ctx) -> tuple[bool, ReviewPolicy | None]:
             if row["policy_json"] is None:
                 return False, None
             installed = ReviewPolicy.model_validate_json(row["policy_json"])
+            if ctx.enable_learning:
+                learning_policy_recovery.require_finished(conn)
+            permitted = row["admission"] == 1 or ctx.enable_learning
+            retained_default = installed.policy_source == "repository_default"
+            legacy_choice = (
+                ctx.learning_mode is not None or ctx.enable_learning
+            ) and learning_policy_recovery.bundled(installed)
             eligible = (
-                installed.policy_source == "repository_default"
-                and row["admission"] == 1
+                permitted
+                and (retained_default or legacy_choice)
                 and (
                     installed.policy_id != "muninn-codex-ongoing-production-v3"
+                    or ctx.enable_learning
                     or not any(
                         conn.execute(
                             f"SELECT 1 FROM {table} LIMIT 1"

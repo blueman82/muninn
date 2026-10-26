@@ -70,6 +70,7 @@ def capture(ctx: Ctx, sha: str, profile_raw: bytes | None = None) -> Record:
         "home": str(ctx.home),
         "home_identity": _home(ctx.home),
         "sha": sha,
+        "enable_learning": ctx.enable_learning,
     }
     selected: ReviewPolicy | None = None
     raw: str | None = None
@@ -120,6 +121,8 @@ def frozen(
             ("sha", rec["sha"]),
         )
     ):
+        raise StepFailedError("review_policy_snapshot_changed")
+    if type(value.get("enable_learning", False)) is not bool:
         raise StepFailedError("review_policy_snapshot_changed")
     raw = value.get("raw")
     if raw is None:
@@ -247,7 +250,14 @@ def activate(
                 != digest(policy)
             ):
                 default_policy.prepare(ctx, rec, policy)
-            apply_transition(conn, policy)
+            apply_transition(
+                conn,
+                policy,
+                enable_admission=rec.get("policy_input", {}).get(
+                    "enable_learning"
+                )
+                is True,
+            )
             control = conn.execute("SELECT * FROM review_control").fetchone()
             previous = rec.get("policy_activation")
             if control["policy_json"] is not None:
