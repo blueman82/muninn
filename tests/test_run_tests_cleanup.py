@@ -13,6 +13,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import BinaryIO
 from unittest import mock
 
@@ -127,6 +128,106 @@ class QuiescenceTests(unittest.TestCase):
                 with contextlib.suppress(ProcessLookupError):
                     kill_group(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
+
+    @unittest.skipIf(os.name == "nt", "requires native POSIX process groups")
+    def test_expired_cleanup_budget_keeps_the_leader_unreaped(self) -> None:
+        if os.name == "nt":
+            raise unittest.SkipTest("requires native POSIX process groups")
+        for phase in ("sleep", "observation"):
+            with self.subTest(phase=phase):
+                process = subprocess.Popen(
+                    [sys.executable, "-c", "pass"], start_new_session=True
+                )
+                try:
+                    until = time.monotonic() + 5
+                    exited = None
+                    while exited is None and time.monotonic() < until:
+                        exited = os.waitid(
+                            os.P_PID,
+                            process.pid,
+                            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                        )
+                        time.sleep(0.01)
+                    self.assertIsNotNone(exited)
+                    elapsed = [0.0]
+
+                    def now(clock: list[float] = elapsed) -> float:
+                        return clock[0]
+
+                    def sleep(
+                        seconds: float, clock: list[float] = elapsed
+                    ) -> None:
+                        clock[0] = 2.0
+
+                    def observe(
+                        pgid: int,
+                        phase: str = phase,
+                        clock: list[float] = elapsed,
+                    ) -> bool:
+                        if phase == "observation":
+                            clock[0] = 2.0
+                        return clock[0] > 0
+
+                    with (
+                        mock.patch.object(test_process, "CLEANUP_SECONDS", 1),
+                        mock.patch.object(
+                            test_process,
+                            "time",
+                            SimpleNamespace(monotonic=now, sleep=sleep),
+                        ),
+                        mock.patch.object(
+                            test_process, "group_quiescent", observe
+                        ),
+                        self.assertRaises(subprocess.TimeoutExpired),
+                    ):
+                        test_process._contain(process)
+                    self.assertIsNone(process.returncode)
+                finally:
+                    process.wait(timeout=5)
+
+    @unittest.skipIf(os.name == "nt", "requires native POSIX process groups")
+    def test_cleanup_rejects_wait_finishing_after_deadline(self) -> None:
+        if os.name == "nt":
+            raise unittest.SkipTest("requires native POSIX process groups")
+        process = subprocess.Popen(
+            [sys.executable, "-c", "pass"], start_new_session=True
+        )
+        try:
+            until = time.monotonic() + 5
+            exited = None
+            while exited is None and time.monotonic() < until:
+                exited = os.waitid(
+                    os.P_PID,
+                    process.pid,
+                    os.WEXITED | os.WNOHANG | os.WNOWAIT,
+                )
+                time.sleep(0.01)
+            self.assertIsNotNone(exited)
+            elapsed = [0.0]
+            wait = process.wait
+
+            def late_wait(timeout: float | None = None) -> int:
+                code = wait(timeout=timeout)
+                elapsed[0] = 2.0
+                return code
+
+            with (
+                mock.patch.object(test_process, "CLEANUP_SECONDS", 1),
+                mock.patch.object(
+                    test_process,
+                    "time",
+                    SimpleNamespace(
+                        monotonic=lambda: elapsed[0], sleep=time.sleep
+                    ),
+                ),
+                mock.patch.object(process, "wait", side_effect=late_wait),
+                self.assertRaises(subprocess.TimeoutExpired),
+            ):
+                test_process._contain(process)
+            # A completed wait has reaped the child; only success is refused.
+            self.assertEqual(process.returncode, 0)
+        finally:
+            process.wait(timeout=5)
 
 
 if __name__ == "__main__":

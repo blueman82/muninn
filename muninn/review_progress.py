@@ -27,7 +27,10 @@ from muninn.review_activation import (
 from muninn.review_activation import (
     require_transaction as require_transaction,
 )
-from muninn.review_evidence import validate_window_boundary
+from muninn.review_evidence import (
+    validate_cursor_boundary,
+    validate_window_boundary,
+)
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceWindow,
@@ -37,6 +40,7 @@ from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import ReadBudget
 from muninn.review_selectors import check_tombstones
+from muninn.review_windows import candidate_rows, resume_line
 
 
 def source_row(conn: sqlite3.Connection, source: SourceRef) -> sqlite3.Row:
@@ -233,6 +237,7 @@ def reconciliation_windows(
     source: sqlite3.Row,
     *,
     budget: ReadBudget,
+    limit: int | None = None,
 ) -> tuple[tuple[EvidenceWindow, Scope], ...]:
     """Expose one source's complete new intervals by mapped scope."""
     require_transaction(conn, now)
@@ -247,7 +252,10 @@ def reconciliation_windows(
     if last < progress["examined_line"]:
         raise ValueError("evidence_changed")
     if progress["eligible_line"]:
-        validate_window_boundary(
+        validate = (
+            validate_cursor_boundary if limit else validate_window_boundary
+        )
+        validate(
             conn,
             EvidenceWindow(
                 source=SourceRef(
@@ -261,14 +269,12 @@ def reconciliation_windows(
             policy.max_input_bytes,
             budget=budget,
         )
-    rows = conn.execute(
-        "SELECT e.line,e.line_sha256,sc.key,sc.kind FROM event e "
-        "JOIN scope sc ON sc.id=e.scope_id WHERE e.source_id=? "
-        "AND e.line>? AND e.line<=? AND e.kind IN ('prompt','reply') "
-        "GROUP BY e.line,sc.key ORDER BY e.line",
-        (source["id"], progress["eligible_line"], last),
-    ).fetchall()
-    first = progress["eligible_line"] + 1
+    first = (
+        resume_line(conn, source, progress, budget)
+        if limit is not None
+        else progress["eligible_line"]
+    ) + 1
+    rows = candidate_rows(conn, source["id"], first - 1, last, budget, limit)
     for row in rows:
         output.append(
             (
@@ -293,7 +299,12 @@ def reconciliation_windows(
     conn.execute(
         "UPDATE review_source SET examined_line=?,updated_at=? "
         "WHERE provider=? AND thread_id=?",
-        (last, now, source["provider"], source["thread_id"]),
+        (
+            rows[-1]["line"] if limit is not None and rows else last,
+            now,
+            source["provider"],
+            source["thread_id"],
+        ),
     )
     return tuple(output)
 

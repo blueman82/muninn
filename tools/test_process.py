@@ -43,7 +43,7 @@ def _contain(process: subprocess.Popen[bytes]) -> None:
     Raises:
         OSError: If signaling the owned group fails.
         PermissionError: If group signaling is denied without zombie proof.
-        subprocess.TimeoutExpired: If native observation stays unverified.
+        subprocess.TimeoutExpired: If cleanup exhausts its execution budget.
     """
     if os.name == "nt":
         raise OSError("unix_process_group_unavailable")
@@ -55,11 +55,19 @@ def _contain(process: subprocess.Popen[bytes]) -> None:
     except PermissionError:
         if not sole_zombie(process.pid):
             raise
-    while not group_quiescent(process.pid):
-        if time.monotonic() >= deadline:
-            raise subprocess.TimeoutExpired(process.args, CLEANUP_SECONDS)
-        time.sleep(0.01)
-    process.wait(timeout=max(0, deadline - time.monotonic()))
+    while time.monotonic() < deadline:
+        verified = group_quiescent(process.pid)
+        remaining = deadline - time.monotonic()
+        # Late evidence must not release the reserved leader after expiry.
+        if verified and remaining > 0:
+            process.wait(timeout=remaining)
+            if time.monotonic() >= deadline:
+                break
+            return
+        if remaining <= 0:
+            break
+        time.sleep(min(0.01, remaining))
+    raise subprocess.TimeoutExpired(process.args, CLEANUP_SECONDS)
 
 
 def posix_module(

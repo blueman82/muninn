@@ -13,13 +13,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from muninn import poller_stop as poller_stop
 from muninn import (
-    poller_stop,
     review_boot_identity,
     review_volume_identity,
     store,
 )
 from muninn import review_pause_state as state
+from muninn.review_pause_owner import (
+    POLL_SECONDS as _POLL_S,
+)
+from muninn.review_pause_owner import (
+    acquire as _owner,
+)
+from muninn.review_pause_owner import (
+    latest as _latest,
+)
+from muninn.review_pause_owner import (
+    same_owner as _same_owner,
+)
 from muninn.review_pause_replay import recover_paused_store
 from muninn.review_pause_state import (
     PauseRefusedError as PauseRefusedError,
@@ -31,8 +43,6 @@ from muninn.review_repair_binding import (
     same_repair_binding,
 )
 from muninn.tombstones import reapply_tombstones
-
-_POLL_S = 0.1
 
 
 @dataclass
@@ -234,58 +244,6 @@ def verify_current(owner: MaintenanceOwner, conn: sqlite3.Connection) -> None:
         selected=owner.selected,
         status=owner.status,
     )
-
-
-def _latest(home: Path) -> state.Witness | None:
-    """Read a safe bounded witness without treating a routing hint as proof."""
-    return state.parse(state.inspect(home, state.WITNESS)[0], state.Witness)
-
-
-def _same_owner(
-    selected: state.Witness | None, latest: state.Witness | None
-) -> None:
-    """Refuse any observed replacement of the one selected stop target."""
-    if selected is not None and (
-        latest is None
-        or latest.owner != selected.owner
-        or latest.lock_identity != selected.lock_identity
-    ):
-        raise PauseRefusedError("owner_changed")
-
-
-def _owner(
-    home: Path, deadline: float, status: EraseStatus
-) -> tuple[int, state.Witness | None]:
-    """Acquire lifetime ownership while targeting at most one active owner."""
-    selected = None
-    while True:
-        try:
-            return state.acquire(home), selected
-        except BlockingIOError:
-            latest = _latest(home)
-            _same_owner(selected, latest)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise PauseRefusedError("coordination_timeout") from None
-            if (
-                selected is None
-                and latest is not None
-                and latest.state == "active"
-            ):
-                assert latest.owner is not None
-                lock = (home / state.LOCK).stat()
-                if latest.lock_identity != (lock.st_dev, lock.st_ino):
-                    raise PauseRefusedError("pause_unverified") from None
-                selected = latest
-                status.stop_may_have_been_published = True
-                poller_stop.request(
-                    home,
-                    latest.owner.pid,
-                    latest.owner.generation,
-                    deadline=deadline,
-                )
-                continue
-            time.sleep(min(_POLL_S, remaining))
 
 
 def _writer(

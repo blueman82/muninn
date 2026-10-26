@@ -117,7 +117,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local attempt and `Receipt`; no model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision; returns `KnowledgeView`. |
-| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. |
+| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. `--task` binds the request to one task in the source project. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
 | `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence and receipt/null. Content is shown only when requested, never logged. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |

@@ -13,8 +13,8 @@ from typing import cast
 from unittest import mock
 
 from muninn import review_pause as pause
+from muninn import review_pause_owner, store
 from muninn import review_pause_state as state
-from muninn import store
 from tests.review_pause_support import initialize, interrupt_erasure
 
 BOOT_A = "linux:12345678-1234-4234-8234-123456789abc"
@@ -349,6 +349,7 @@ class PauseTests(PauseCase):
         clock = SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep)
         with (
             mock.patch.object(pause, "time", clock),
+            mock.patch.object(review_pause_owner, "time", clock),
             mock.patch.object(pause.poller_stop, "request") as request,
             self.assertRaisesRegex(ValueError, "coordination_timeout"),
             pause.erase_connection(self.home, wait_s=0.25, status=self.status),
@@ -377,6 +378,7 @@ class PauseTests(PauseCase):
         with (
             store.writer_lock(self.home, wait_s=0),
             mock.patch.object(pause, "time", clock),
+            mock.patch.object(review_pause_owner, "time", clock),
             mock.patch.object(pause.poller_stop, "request", side_effect=stop),
             self.assertRaises(store.BusyError),
             pause.erase_connection(self.home, wait_s=0.25, status=self.status),
@@ -396,6 +398,7 @@ class PauseTests(PauseCase):
         clock = SimpleNamespace(monotonic=lambda: elapsed[0])
         with (
             mock.patch.object(pause, "time", clock),
+            mock.patch.object(review_pause_owner, "time", clock),
             mock.patch.object(pause.poller_stop, "time", clock),
             mock.patch.object(
                 pause.poller_stop.file_sync, "sync_fd", side_effect=sync
