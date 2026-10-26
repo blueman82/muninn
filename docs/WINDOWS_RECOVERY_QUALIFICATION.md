@@ -28,8 +28,11 @@ counter, sample counts, and finite failure code. `qualified`, `reboot_proof`,
 `desktop_proof`, and `retirement_proof` remain false.
 
 The counter has no cross-host binding in this report and must not be used as repair authority.
-The existing CI artifact expires after one day. Copy its original bytes
-and run/job provenance into the campaign evidence directory before expiry.
+New native proof uploads request 30-day retention. Check the actual API `expires_at`;
+repository policies can limit the request, and older artifacts keep their original
+expiry. For evidence needed longer, copy the original ZIP, SHA256/API digest, source
+commit and run/job provenance into the campaign evidence directory before expiry.
+These archives do not include raw job logs, and retention does not qualify recovery.
 
 ## Evidence required before enabling recovery
 
