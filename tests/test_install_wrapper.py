@@ -211,7 +211,10 @@ class WrapperTest(WrapperFixture):
             '[ "${1:-}" = -B ]; do shift; done\n'
             'if [ "$2" = "import sys; print(sys.platform)" ]; '
             "then echo linux; exit 0; fi\n"
-            '[ "$0" = "$EXPECTED_VENV_PY" ] || exit 1\n'
+            '[ "$0" = "$EXPECTED_VENV_PY" ] || { '
+            'printf "alias target mismatch: actual=%s expected=%s\\n" '
+            f'"$0" "$EXPECTED_VENV_PY" >> {shlex.quote(self.log.as_posix())}; '
+            "exit 1; }\n"
             'if [ "$1" = "-c" ]; then exit 0; fi\n'
             f'echo "$@" >> {shlex.quote(self.log.as_posix())}\n'
         )
@@ -221,12 +224,28 @@ class WrapperTest(WrapperFixture):
         result = self.run_wrapper(
             "--check",
             script=root / "bin/muninn-install",
-            extra_env={"MUNINN_PYTHON": "", "EXPECTED_VENV_PY": str(target)},
+            extra_env={
+                "MUNINN_PYTHON": "",
+                "EXPECTED_VENV_PY": target.as_posix(),
+            },
         )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr + self.argv())
         self.assertNotIn("Pinned runtime dependencies", result.stderr)
         self.assertIn("--upgrade --dry-run", self.argv())
+
+        self.log.unlink()
+        refused = self.run_wrapper(
+            "--check",
+            script=root / "bin/muninn-install",
+            extra_env={
+                "MUNINN_PYTHON": "",
+                "EXPECTED_VENV_PY": "wrong-target",
+            },
+        )
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("alias target mismatch: actual=", self.argv())
+        self.assertIn("expected=wrong-target", self.argv())
 
     def test_accepting_git_hook_setup_installs_dev_tools_and_enables_hooks(
         self,

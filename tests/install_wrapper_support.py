@@ -125,5 +125,14 @@ class WrapperFixture(unittest.TestCase):
             ROOT / "requirements-dev.txt", root / "requirements-dev.txt"
         )
         git(root, "init", "-q")
-        git(root, "commit", "--allow-empty", "-qm", "initial")
+        # Background maintenance would race the read-only snapshot oracle.
+        git(
+            root,
+            "-c",
+            "maintenance.auto=false",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        )
         return root

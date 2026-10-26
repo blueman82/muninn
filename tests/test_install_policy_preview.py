@@ -88,18 +88,18 @@ class PolicyPreviewTests(PreviewFixture):
     def test_same_process_separate_opens_contend_in_both_directions(
         self,
     ) -> None:
+        before = states(self.home)
         fd = os.open(self.lock, os.O_RDWR)
         try:
             platform_lock.try_lock(fd)
-            before = states(self.home)
             with (
                 self.assertRaisesRegex(StepFailedError, "preview_unavailable"),
                 policy_preview.connection(self.path),
             ):
                 self.fail("held writer admitted")
-            self.assertEqual(states(self.home), before)
         finally:
             os.close(fd)
+        self.assertEqual(states(self.home), before)
         before = states(self.home)
         with policy_preview.connection(self.path):
             fd = os.open(self.lock, os.O_RDWR)
