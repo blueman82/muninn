@@ -157,13 +157,44 @@ HELP
     exit 0
     ;;
   --status)
+    installed_sha=${installed##*/}
     if [ "$mode" = fresh ]; then
       echo "not installed; checkout is at $short"
-    elif [ "$installed" = "$head" ]; then
+    elif [ "$mode" = half ]; then
+      echo "half-installed: data directory and current release link disagree;" \
+        "inspect installation before installing; checkout $short"
+    elif [ "$installed_sha" = "$head" ]; then
       echo "installed $short, checkout $short: up to date"
     else
-      echo "installed $(printf %s "$installed" | cut -c1-7)," \
-        "checkout $short: upgrade needed"
+      relation="versions differ; ancestry unknown; inspect versions before installing"
+      installed_short=unknown
+      case "$installed_sha" in
+        *[!0-9a-f]* | '') ;;
+        *)
+          if [ "${#installed_sha}" -eq 40 ]; then
+            installed_short=$(printf %s "$installed_sha" | cut -c1-7)
+            older=0
+            newer=0
+            env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+              GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL= git -C "$root" merge-base --is-ancestor \
+              "$installed_sha" "$head" 2>/dev/null || older=$?
+            env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+              GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL= git -C "$root" merge-base --is-ancestor \
+              "$head" "$installed_sha" 2>/dev/null || newer=$?
+            if [ "$older" -eq 0 ]; then
+              relation="checkout is newer; upgrade available; preview with bin/muninn-install --check"
+            elif [ "$newer" -eq 0 ]; then
+              relation="installed version is newer; update this checkout before installing"
+            elif [ "$older" -eq 1 ] && [ "$newer" -eq 1 ] && \
+              [ "$(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
+                git -C "$root" rev-parse --is-shallow-repository)" = false ]; then
+              relation="versions differ; histories diverged; inspect versions before installing"
+            fi
+          fi
+          ;;
+      esac
+      echo "installed $installed_short," \
+        "checkout $short: $relation"
     fi
     exit 0
     ;;

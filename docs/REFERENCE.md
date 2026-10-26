@@ -117,7 +117,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local attempt and `Receipt`; no model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision; returns `KnowledgeView`. |
-| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. |
+| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. `--task` binds the request to one task in the source project. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
 | `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence and receipt/null. Content is shown only when requested, never logged. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
@@ -404,7 +404,7 @@ after service startup.
 
 | Command | What it does |
 |---|---|
-| `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); it invokes the installed Python through its venv path rather than the outer symlink; if that runtime lacks pinned dependencies, it reuses a compatible checkout `.venv` or asks before creating one from the hashed runtime lock; on macOS/Linux, first install also offers to install developer requirements and set local `core.hooksPath` to `.githooks` unless another path is configured; `--check` previews and may perform accepted setup; `--status` compares the installed commit with `HEAD` |
+| `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); it invokes the installed Python through its venv path rather than the outer symlink; if that runtime lacks pinned dependencies, it reuses a compatible checkout `.venv` or asks before creating one from the hashed runtime lock; on macOS/Linux, first install also offers to install developer requirements and set local `core.hooksPath` to `.githooks` unless another path is configured; `--check` previews and may perform accepted setup; `--status` compares the installed commit with `HEAD` using local Git history: equal revisions are up to date; a newer checkout offers an upgrade preview; a newer installed revision asks you to update the checkout before installing; unknown or divergent history reports `versions differ` and asks you to inspect before installing. Status performs no fetch or installation |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | the same as `bin/muninn-install --uninstall`. Stops the poller; removes the launchd plist, Muninn's hooks from Claude's `settings.json` and Cursor's `hooks.json`, Muninn's sections from Codex's `config.toml`, the Codex plugin cache, `~/.local/lib/muninn` and the `~/.local/bin/muninn` link (only when it points into that release directory). Moves the data directory to `~/.local/share/muninn-removed-<ts>/muninn` (`--purge-data` deletes it instead). `--dry-run` writes nothing. Prints one line per action, then `uninstall done`, `dry run only: nothing was removed` or `muninn is not installed here`, and exits 0. A provider config it cannot edit safely, a taken data-move name, or a job launchd will not unload prints `FAILED: <why>` and exits 1; the config and name checks run first, in a dry run too, before anything is changed |
 
 ## `muninn erase`
@@ -429,6 +429,19 @@ changing requested content. It selects at most one owner; a replacement produces
 This differs from the older erase behavior. Dry runs retain their writer-only,
 no-stop path and may initialize an empty store; they create no `tombstone.key`.
 Neither an absent nor an empty store establishes process-containment evidence.
+
+POSIX review-worker shutdown retains its owned, unreaped group leader while
+checking native shutdown evidence, before publishing an outcome or discarding
+process buffers. Signals target only that verified process group. On 64-bit Linux,
+the check requires terminal members across the original isolated session,
+including members in other groups, and a stable kernel fork counter around
+complete observations. Darwin retains its native sole-current-group zombie
+observation with `WNOWAIT`; same-session escape/rejoin and closed-session safety
+remain unverified. This does not establish universal descendant isolation.
+Unknown or unavailable evidence keeps cleanup pending. Individual Linux
+observations have a work deadline; unrelated host forks or unavailable procfs
+can prevent completion. `stop_all()` has a bounded join and reports
+`process_cleanup_incomplete` if cleanup remains pending, retaining ownership.
 
 The Python APIs retain `run_erase` and caller-owned `erase`; the latter requires
 established pause as well as writer ownership for real erasure. Callers needing
@@ -574,7 +587,16 @@ four fields:
   there is nothing to add.
 
 When a repair baseline exists, the result includes `recovery_guidance`.
-It gives the platform, state, reason and next steps.
+It gives `platform`, `status`, `reason` and `steps`.
+`review_repair.detail: baseline_present_recovery_unverified` means only that a
+repair-baseline path exists; its record and containment safety have not been verified.
+On macOS or Linux, `status: recovery_check_required` with
+`reason: repair_baseline_present` asks you to run the checked recovery command.
+This is not a successful repair or a promise that automatic repair will pass.
+Windows and unsupported platforms return `status: manual_recovery_required`, with
+`reason: windows_repair_not_qualified` or `recovery_platform_unqualified`.
+Doctor does not open or validate repair records; malformed and unsafe paths also
+require checked recovery, which can refuse without repairing them.
 On macOS or Linux, run `muninn recover`.
 It uses the owner and writer barriers.
 It repairs pause records only when the saved boot and file identities match.

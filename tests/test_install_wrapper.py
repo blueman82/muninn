@@ -376,7 +376,7 @@ class WrapperTest(unittest.TestCase):
         self.installed("a" * 40)
         r = self.run_wrapper("--status")
         self.assertIn(f"installed aaaaaaa, checkout {self.sha[:7]}", r.stdout)
-        self.assertIn("upgrade needed", r.stdout)
+        self.assertIn("versions differ; ancestry unknown", r.stdout)
         self.assertEqual(self.argv(), "")
 
     def test_status_says_up_to_date_when_they_match(self) -> None:

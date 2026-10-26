@@ -11,6 +11,9 @@ Use only when the owner asks for recovery or `doctor` returns
 `recovery_guidance`. The command starts no new erase request. It may apply
 erasure intent saved in `tombstones.jsonl`. It waits for the managed writer.
 It repairs pause records only after the existing checks pass.
+Doctor's `baseline_present_recovery_unverified` and `recovery_check_required`
+report presence and a next step, not validated records or successful repair.
+Malformed or unsafe records can cause recovery to refuse.
 During an upgrade, the installer asks once about a matching older macOS record without a disk ID.
 The question explains that Muninn cannot verify the disk identity.
 Continue only if this is the Muninn data you intend to recover.

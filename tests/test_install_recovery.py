@@ -26,7 +26,7 @@ class DoctorRunner:
             subprocess.CompletedProcess(
                 [],
                 1,
-                b'{"recovery_guidance":{"status":"automatic_recovery_available"}}',
+                b'{"recovery_guidance":{"status":"recovery_check_required"}}',
                 b"",
             ),
             subprocess.CompletedProcess(
