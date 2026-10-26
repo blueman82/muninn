@@ -227,7 +227,7 @@ def _await_exit(process: subprocess.Popen[bytes], deadline: float) -> None:
 def run_command(
     argv: list[str], env: dict[str, str], cwd: Path, timeout: float = 45
 ) -> dict[str, object]:
-    """Contain the unreaped child group before publishing its exit result."""
+    """Signal the unreaped child group before publishing leader exit."""
     process = subprocess.Popen(
         argv,
         stdin=subprocess.PIPE,
@@ -269,7 +269,8 @@ def run_command(
         "stdout_sha256": hashlib.sha256(output["stdout"]).hexdigest(),
         "stderr_sha256": hashlib.sha256(output["stderr"]).hexdigest(),
         "output_complete": error is None,
-        "cleanup": "owned_group_contained_before_reap",
+        "cleanup": "group_signal_attempted_before_leader_reap",
+        "descendant_quiescence": "unverified",
         "stdout": bytes(output["stdout"]),
         "stderr": bytes(output["stderr"]),
     }

@@ -53,6 +53,11 @@ leave source isolation unverified. The probe provides no ambient credentials
 and forces file-based credential storage. It does not instrument all credential
 access or external network activity.
 
+Process cleanup attempts a group signal before reaping the owned leader. A
+successful signal and leader exit do not prove that every descendant or in-flight
+write has stopped. The report leaves descendant quiescence unverified. It does
+not use that cleanup sequence as proof of isolation or complete termination.
+
 OpenAI documents that read-only automation can still read files and execute
 commands. It documents `--ignore-user-config`, `--ignore-rules` and `--ephemeral`
 as separate controls. Those flags do not by themselves establish complete tool

@@ -282,6 +282,7 @@ def run(executable: Path, output: Path) -> dict[str, object]:
             "external_requests_not_measured",
             "credential_access_not_instrumented",
             "direct_argv_bypasses_runtime_capability_binding",
+            "descendant_quiescence_not_verified",
         ],
     }
     write_private(output, canonical(report) + b"\n")

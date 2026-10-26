@@ -43,6 +43,13 @@ class ProbeCompletionTests(unittest.TestCase):
                     self.assertEqual(result["error"], error)
                     self.assertEqual(result["exit_code"], code)
                     self.assertEqual(result["output_complete"], error is None)
+                    self.assertEqual(
+                        result["cleanup"],
+                        "group_signal_attempted_before_leader_reap",
+                    )
+                    self.assertEqual(
+                        result["descendant_quiescence"], "unverified"
+                    )
 
     def test_short_declared_body_is_not_valid_request_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
