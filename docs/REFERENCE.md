@@ -301,6 +301,8 @@ macOS signature. It binds the executable to a private capability and uses fixed
 launch arguments. This capability does not fully isolate Codex tools or
 actions. The default profile records this limit. The finite pilot account is a
 separate control. It does not prove runner status or full C6 acceptance.
+See [Codex learning qualification](CODEX_LEARNING_QUALIFICATION.md) for the
+native probe, test evidence boundaries and remaining assessment requirements.
 Windows legacy boot and termination proof, and native live qualification, are
 still separate requirements. During recovery, preserve the private operation
 record, source and archive, key, and journal. Manual restoration of the old
