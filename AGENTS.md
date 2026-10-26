@@ -90,7 +90,7 @@ Set up once, installing the hashed runtime separately from developer tools:
 ```sh
 python3.13 -m venv .venv
 .venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
-.venv/bin/python3.13 -m pip install -r requirements-dev.txt
+.venv/bin/python3.13 -m pip install --require-hashes -r requirements-dev.txt
 source .venv/bin/activate
 ```
 

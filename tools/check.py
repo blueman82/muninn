@@ -32,6 +32,7 @@ INSTALL_HINT = (
     "install the dev tools: python3.13 -m venv .venv && "
     ".venv/bin/python3.13 -m pip install --require-hashes "
     "-r requirements-runtime.lock && .venv/bin/python3.13 -m pip install "
+    "--require-hashes "
     "-r requirements-dev.txt"
 )
 HOOKS_HINT = "switch the git hooks on: git config core.hooksPath .githooks"

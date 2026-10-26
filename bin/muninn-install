@@ -103,8 +103,9 @@ ensure_git_hooks() {
     echo "muninn-install: could not install pinned runtime dependencies" >&2
     return 1
   }
-  "$env_python" -m pip install -r "$root/requirements-dev.txt" || {
-    echo "muninn-install: could not install developer tools" >&2
+  "$env_python" -m pip install --require-hashes -r "$root/requirements-dev.txt" || {
+    echo "muninn-install: could not install locked developer tools;" \
+      "check network, supported wheels and requirements-dev.txt hashes" >&2
     return 1
   }
   env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \

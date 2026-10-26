@@ -13,7 +13,7 @@ gate before an upgrade; the installer itself enforces only the stdlib rules S1 t
 | Stdlib rules S1 to S8 | `python3.13 -m tools.check` (also run by `tests/test_standards.py`) | size, docstrings, comments, imports, annotations |
 | Everything | `python3.13 -m tools.check --full` | the above plus ruff, black, pyright strict, shellcheck, the git-hook switch and the whole test suite (run in parallel) |
 | Tests | `python3.13 -m tools.run_tests` (`-j N` for N workers, `--timeout SECONDS` for the module deadline) | One process per module, at most four workers by default, and a 600-second deadline per module. |
-| Set up the tools | Separate hashed runtime and developer installs below | pins in `requirements-runtime.lock` and `requirements-dev.txt` |
+| Set up the tools | Separate hashed runtime and developer installs below | complete wheel hash locks in `requirements-runtime.lock` and `requirements-dev.txt` |
 
 A missing tool, failing test or disabled Git-hook configuration fails the gate. No
 required check is skipped.
@@ -43,9 +43,24 @@ separately; the hooks run the full gate and fail if a required tool is missing.
 ```sh
 python3.13 -m venv .venv
 .venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
-.venv/bin/python3.13 -m pip install -r requirements-dev.txt
+.venv/bin/python3.13 -m pip install --require-hashes -r requirements-dev.txt
 source .venv/bin/activate
 ```
+
+`requirements-dev.txt` is the complete developer lock, including Pyright's Node
+wheel. Install it separately from the runtime lock; it must not be included in a
+runtime release. Pyright normally prefers this Node wheel over ambient Node and
+nodeenv downloads. Do not override `PYRIGHT_PYTHON_NODEJS_WHEEL` when validating.
+ShellCheck is a separate native prerequisite.
+
+To refresh the developer lock, resolve the complete dependency closure for each
+supported Python/platform target. Preserve versions unless a tool update is intended.
+For each exact version, use PyPI's `/pypi/<package>/<version>/json` wheel records,
+verify downloaded wheel SHA-256 values, and record only approved wheel hashes.
+Retain `--require-hashes` and `--only-binary=:all:`. Verify a fresh install, missing
+and altered artifact rejection, and the native CI matrix, including Windows ARM.
+Hash or wheel failures stop setup; fix the index/network or reviewed lock rather
+than disabling verification or permitting source builds.
 
 On Windows create the same venv with the selected Python 3.13 interpreter and
 use `.\.venv\Scripts\python.exe` in both pip commands and every later test/gate
