@@ -187,14 +187,14 @@ def _doctor(ctx: Ctx, rec: Record) -> subprocess.CompletedProcess[bytes]:
     guidance = cast(dict[str, Any], guidance_value)
     if guidance.get(
         "status"
-    ) != "automatic_recovery_available" or ctx.platform not in (
+    ) != "recovery_check_required" or ctx.platform not in (
         "darwin",
         "linux",
     ):
         ctx.say("Install health check failed. Recovery steps:")
         _show_health_help(ctx, report)
         return result
-    ctx.say("Install health check failed. Trying Muninn's safe recovery now.")
+    ctx.say("Install health check failed. Checking whether recovery is safe.")
     repaired = ctx.run(command(ctx, "recover"), env=env)
     outcome_value = _health(repaired.stdout).get("recovery")
     outcome = (
