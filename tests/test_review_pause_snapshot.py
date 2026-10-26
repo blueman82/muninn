@@ -157,6 +157,15 @@ class SnapshotTests(unittest.TestCase):
 
     def test_late_replacement_cannot_change_selected_generation(self) -> None:
         case = self.fixture()
+        path = case.home / state.WITNESS
+        retained = case.home / "retained-witness"
+        # Keep the inspected inode allocated across all owner publications.
+        os.link(path, retained)
+        self.addCleanup(retained.unlink, missing_ok=True)
+        before, pinned = path.stat(), retained.stat()
+        self.assertEqual(
+            (before.st_dev, before.st_ino), (pinned.st_dev, pinned.st_ino)
+        )
         selected = [False]
 
         def stop(
@@ -178,6 +187,10 @@ class SnapshotTests(unittest.TestCase):
         ):
             self.fail("replacement admitted")
         request.assert_called_once()
+        after = path.stat()
+        self.assertNotEqual(
+            (before.st_dev, before.st_ino), (after.st_dev, after.st_ino)
+        )
 
     def test_same_inode_and_replaced_old_descriptor_mutations_stay_generic(
         self,
