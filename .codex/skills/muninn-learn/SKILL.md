@@ -5,7 +5,7 @@ description: Control bounded muninn learning requests with `muninn learn request
 
 # muninn learn
 
-    muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]
+    muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]
     muninn learn list [--state STATE]
     muninn learn show R_ID
     muninn learn cancel R_ID
@@ -15,6 +15,7 @@ description: Control bounded muninn learning requests with `muninn learn request
 
 - `REF` identifies an indexed `provider:thread_id` or an unambiguous session root. Request IDs are `R_` plus 32 lowercase hex characters.
 - Request bounds must be paired. Without bounds, request uses activation/uncompleted boundary through the latest complete record. A request is admission, not completed review.
+- `--task` uses a 1–128 character task ID with ASCII letters, digits, `.`, `_`, `:`, or `-`. The first character must be a letter or digit. The indexed source must belong to one project. Without `--task`, the request stays at project scope.
 - The installed admitted frozen policy is required, even for an explicit policy file, which must match it. Missing/invalid policy refuses `review_policy_required`; never invent runner/model/reasoning, bytes/rounds, deadlines, retries/backoffs, concurrency or budget. This command does not install a policy.
 - Request/cancel/retry return current `RequestView`; list returns `requests: [RequestView, ...]`. State is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`.
 - Show returns `ReviewDetail` with request, attempts, durable calls, governed evidence and receipt/null. Evidence is content, never suitable for logs. Open cited originals before making factual claims.
