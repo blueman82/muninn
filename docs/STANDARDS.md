@@ -20,11 +20,17 @@ required check is skipped.
 
 The runner requires a finite positive module timeout. A timeout names the
 module, retains its partial stdout and stderr, and fails the suite while other
-modules continue. Native process groups on Unix and Jobs on Windows contain
-module children before the runner releases their handles. Cleanup has a separate
-five-second bound. Ctrl-C cancels queued modules and cleans up active modules;
-the runner exits 130. Ordinary pass, failure and no-test exit handling stays the
-same. The stdlib-only standards command also remains usable without site packages.
+modules continue. Unix cleanup keeps the leader unreaped through native
+observation of its owned process group. Windows closes its exclusive Job before
+the final output drain. Cleanup has a separate five-second bound; a cleanup
+failure preserves captured output and fails the module. Ctrl-C cancels queued
+modules, cleans up active modules, and makes the runner exit 130. Ordinary pass,
+failure and no-test exit handling stays the same. The stdlib-only standards
+command also remains usable without site packages.
+
+On Darwin, the native observation covers the current owned-group snapshot.
+Session-wide quiescence and exclusion of later same-session group joins remain
+unverified. Signals stay confined to the owned process group.
 
 One-time setup per clone (the first two are checked by the gate and the tests):
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 from muninn.review_process_posix import sole_zombie
+from muninn.review_process_quiescence import group_quiescent
 from muninn.review_process_windows import launch
 
 TIMEOUT_EXIT = 124
@@ -30,9 +31,23 @@ def _interrupted(deadline: float, cancel: threading.Event) -> int | None:
 
 
 def _contain(process: subprocess.Popen[bytes]) -> None:
-    """Kill the owned Unix group before releasing its unreaped leader."""
+    """Kill the owned Unix group and retain its leader through observation.
+
+    Darwin observes the current group snapshot. Closed-session quiescence and
+    exclusion of later same-session group joins remain unverified. Signals
+    stay confined to the owned process group.
+
+    Args:
+        process: Owned group leader whose PID is reserved until observation.
+
+    Raises:
+        OSError: If signaling the owned group fails.
+        PermissionError: If group signaling is denied without zombie proof.
+        subprocess.TimeoutExpired: If native observation stays unverified.
+    """
     if os.name == "nt":
         raise OSError("unix_process_group_unavailable")
+    deadline = time.monotonic() + CLEANUP_SECONDS
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -40,7 +55,11 @@ def _contain(process: subprocess.Popen[bytes]) -> None:
     except PermissionError:
         if not sole_zombie(process.pid):
             raise
-    process.wait(timeout=CLEANUP_SECONDS)
+    while not group_quiescent(process.pid):
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, CLEANUP_SECONDS)
+        time.sleep(0.01)
+    process.wait(timeout=max(0, deadline - time.monotonic()))
 
 
 def posix_module(
@@ -160,9 +179,16 @@ def execute(
         (Path(temporary) / "stderr").open("w+b") as stderr,
     ):
         supervise = windows_module if os.name == "nt" else posix_module
-        code, interrupted = supervise(
-            argv, root, env, deadline, cancel, (stdout, stderr)
-        )
+        failure = ""
+        try:
+            code, interrupted = supervise(
+                argv, root, env, deadline, cancel, (stdout, stderr)
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            code, interrupted = 127, False
+            failure = (
+                f"\n{argv[-1]}: launch failed or cleanup failed: {error}\n"
+            )
         stdout.seek(0)
         stderr.seek(0)
         encoding = "utf-8" if sys.flags.utf8_mode else locale.getencoding()
@@ -172,4 +198,4 @@ def execute(
             .replace("\r\n", "\n")
             .replace("\r", "\n")
         )
-    return code, output, interrupted
+    return code, output + failure, interrupted
