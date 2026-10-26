@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import os
 import re
 import stat
@@ -13,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 from install import legacy_baseline as baseline
+from install import policy_records
 from install.context import Ctx, StepFailedError
 from install.record import Record, install_record, save
 from muninn import file_sync, platform_io, platform_lock, review_boot_identity
@@ -83,10 +83,7 @@ def read(path: Path) -> Record:
         or baseline.file_state(path, private=True) != before
     ):
         raise StepFailedError("legacy_record_unsafe")
-    value = json.loads(raw)
-    if not isinstance(value, dict):
-        raise StepFailedError("legacy_record_invalid")
-    return cast(Record, value)
+    return policy_records.parse(raw)
 
 
 def validate(ctx: Ctx, rec: Record) -> None:

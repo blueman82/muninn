@@ -9,10 +9,10 @@ import sqlite3
 import stat
 from contextlib import closing
 from pathlib import Path
-from typing import cast
 
-from install import review_policy_transition, snapshot_io
+from install import policy_records, review_policy_transition, snapshot_io
 from install.context import Ctx, StepFailedError
+from install.policy_record_models import DefaultSelection
 from install.record import Record
 from muninn import review_codex_launch, store
 from muninn.review_json import canonical_json
@@ -22,7 +22,7 @@ from tools import prepare_codex_policy
 
 def select(
     ctx: Ctx, profile_raw: bytes | None
-) -> tuple[ReviewPolicy, Record] | None:
+) -> tuple[ReviewPolicy, DefaultSelection] | None:
     """Freeze a default policy only for a supported, unconfigured install."""
     if (
         profile_raw is None
@@ -61,7 +61,7 @@ def select(
     except (OSError, ValueError):
         return None
     raw = canonical_json(selected)
-    frozen: Record = {
+    frozen: DefaultSelection = {
         "policy_origin": "repository_default",
         "raw": raw,
         "raw_digest": hashlib.sha256(raw.encode()).hexdigest(),
@@ -75,7 +75,7 @@ def select(
         "default_profile": profile_raw.decode("utf-8"),
         "default_profile_digest": profile_digest,
     }
-    return selected, frozen
+    return selected, policy_records.default_selection(frozen)
 
 
 def _auth_binding(
@@ -110,25 +110,24 @@ def _auth_binding(
 def prepare(ctx: Ctx, rec: Record, policy: ReviewPolicy) -> None:
     """Materialize capability files from the frozen default selection."""
     raw_source = rec.get("policy_input")
-    if not isinstance(raw_source, dict):
+    if raw_source is None:
         return
-    source = cast(dict[str, object], raw_source)
-    if source.get("policy_origin") != "repository_default":
+    try:
+        checked = policy_records.policy_input(raw_source)
+    except StepFailedError:
+        raise StepFailedError("review_policy_default_changed") from None
+    if checked.get("policy_origin") != "repository_default":
         return
-    profile_value = source.get("default_profile")
-    if not isinstance(profile_value, str):
-        raise StepFailedError("review_policy_default_changed")
-    profile_raw = profile_value.encode("utf-8")
+    source = policy_records.default_source(checked)
+    profile_raw = source["default_profile"].encode("utf-8")
     if source.get("default_profile_digest") != (
         prepare_codex_policy.profile_digest(profile_raw)
     ):
         raise StepFailedError("review_policy_default_changed")
     executable = Path(policy.runner.executable)
-    stable_executable = Path(cast(str, source.get("default_executable")))
-    executable_target = Path(
-        cast(str, source.get("default_executable_target"))
-    )
-    auth_home = Path(cast(str, source.get("default_auth_home")))
+    stable_executable = Path(source["default_executable"])
+    executable_target = Path(source["default_executable_target"])
+    auth_home = Path(source["default_auth_home"])
     try:
         current, digest = review_codex_launch.verify_codex_executable(
             executable
