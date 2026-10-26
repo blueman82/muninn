@@ -16,6 +16,7 @@ WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github/workflows/platforms.yml"
 )
 PROOFS = {
+    "Observe unqualified Windows boot-counter readiness",
     "Run real ordinary Windows lifecycle",
     "Provision pinned Codex native proof",
     "Run actual Codex and rendered provider routes",
@@ -108,6 +109,7 @@ class PlatformWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 [name for name in proof if name in PROOFS],
                 [
+                    "Observe unqualified Windows boot-counter readiness",
                     "Run real ordinary Windows lifecycle",
                     "Provision pinned Codex native proof",
                     "Run actual Codex and rendered provider routes",
