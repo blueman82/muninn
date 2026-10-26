@@ -20,9 +20,12 @@ Six cases check distinct outcomes:
 | Healthy complete witness matching the lock | No recovery needed |
 | Unapplied thread and keyed erasure intent | Windows repair unqualified |
 | Exited fixture owner and synthetic Linux baseline | Windows repair unqualified |
-| Live fixture owner retaining its lifetime lock | Windows repair unqualified; owner remains alive and locked |
+| Live fixture owner retaining its lifetime lock | Pause unverified; owner remains alive and locked |
 | Malformed baseline hard-linked to the test key | Pause unverified; key preserved |
 | Public read access on the witness | Pause unverified; unsafe ACL preserved |
+
+The live-owner case checks the observed state-verification refusal. It does
+not identify which native inspection refused or establish repair readiness.
 
 Before and after the command, the tests compare file identities and content
 hashes, populated database rows, pending intent and the exact material file

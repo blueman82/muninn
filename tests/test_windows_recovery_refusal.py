@@ -350,7 +350,7 @@ class WindowsRecoveryRefusalTests(StoreCase):
     def test_live_predecessor_is_neither_stopped_nor_unlocked(self) -> None:
         with self.owner(live=True) as proc:
             self.assert_owner_busy(proc)
-            self.recover("windows_repair_unqualified")
+            self.recover("pause_unverified")
             self.assert_owner_busy(proc)
 
     def test_malformed_baseline_alias_preserves_the_actual_key(self) -> None:
