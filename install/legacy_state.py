@@ -6,14 +6,14 @@ import dataclasses
 import os
 import re
 import stat
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast
 
 from install import legacy_baseline as baseline
-from install import policy_records
+from install import legacy_record, policy_records
 from install.context import Ctx, StepFailedError
+from install.legacy_record import RecoveryContext
 from install.record import Record, install_record, save
 from muninn import file_sync, platform_io, platform_lock, review_boot_identity
 from muninn.review_pause_state import PauseRefusedError
@@ -86,54 +86,26 @@ def read(path: Path) -> Record:
     return policy_records.parse(raw)
 
 
-def validate(ctx: Ctx, rec: Record) -> None:
+def validate(ctx: Ctx, rec: Mapping[str, object]) -> RecoveryContext:
     """Require the exact versioned record and derived operation location."""
     if ctx.platform not in ("darwin", "linux"):
         raise StepFailedError("legacy_boot_unsupported")
-    raw = rec.get("legacy")
-    if not isinstance(raw, dict):
-        raise StepFailedError("legacy_record_invalid")
-    state = cast(Record, raw)
+    bound = legacy_record.context(rec)
+    state = bound["legacy"]
     if (
-        state.get("version") != 1
-        or state.get("baseline") != baseline.BASELINE
-        or state.get("platform") != ctx.platform
-        or state.get("phase")
-        not in {
-            "intent",
-            "prepared",
-            "launcher_intent",
-            "launcher",
-            "runtime_intent",
-            "runtime",
-            "service_intent",
-            "service",
-            "armed",
-            "verified",
-            "recovery_required",
-            "publication_possible",
-            "published",
-            "configuring",
-            "configured",
-            "launcher_possible",
-            "activated",
-            "starting",
-            "complete",
-        }
-        or state.get("publication")
-        not in {"not_started", "possible", "complete"}
-        or not isinstance(rec.get("ts"), str)
-        or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", rec["ts"])
-        or rec.get("ts") != ctx.ts
-        or rec.get("rdir") != str(ctx.rdir)
-        or rec.get("home") != str(ctx.home)
-        or rec.get("upgrade") is not True
-        or rec.get("fresh") is not False
-        or not isinstance(rec.get("sha"), str)
-        or not re.fullmatch(r"[0-9a-f]{40}", rec["sha"])
+        state["version"] != 1
+        or state["baseline"] != baseline.BASELINE
+        or state["platform"] != ctx.platform
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", bound["ts"])
+        or bound["ts"] != ctx.ts
+        or bound["rdir"] != str(ctx.rdir)
+        or bound["home"] != str(ctx.home)
+        or bound["upgrade"] is not True
+        or bound["fresh"] is not False
+        or not re.fullmatch(r"[0-9a-f]{40}", bound["sha"])
     ):
         raise StepFailedError("legacy_record_invalid")
-    if state.get("publication") != "not_started" and not isinstance(
+    if state["publication"] != "not_started" and not isinstance(
         state.get("publication_binding"), dict
     ):
         raise StepFailedError("legacy_record_invalid")
@@ -142,6 +114,7 @@ def validate(ctx: Ctx, rec: Record) -> None:
         ctx.rdir, private=True
     ):
         raise StepFailedError("legacy_record_changed")
+    return bound
 
 
 def pending(ctx: Ctx) -> tuple[Ctx, Record] | None:
@@ -165,13 +138,12 @@ def pending(ctx: Ctx) -> tuple[Ctx, Record] | None:
             ):
                 raise StepFailedError("legacy_record_invalid")
             continue
-        if not isinstance(rec.get("ts"), str):
-            raise StepFailedError("legacy_record_invalid")
-        active = dataclasses.replace(ctx, ts=rec["ts"])
-        validate(active, rec)
+        selected = legacy_record.context(rec)
+        active = dataclasses.replace(ctx, ts=selected["ts"])
+        bound = validate(active, rec)
         if directory != active.rdir:
             raise StepFailedError("legacy_record_invalid")
-        if rec["legacy"].get("phase") != "complete":
+        if bound["legacy"]["phase"] != "complete":
             candidates.append((active, rec))
     _summary(ctx, candidates)
     return candidates[0] if candidates else None
