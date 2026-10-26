@@ -7,11 +7,12 @@ import platform
 import shutil
 import sqlite3
 import stat
-from contextlib import closing
+from contextlib import closing, nullcontext
 from pathlib import Path
 
 from install import (
     learning_policy_recovery,
+    policy_preview,
     policy_records,
     review_policy_transition,
     snapshot_io,
@@ -196,9 +197,17 @@ def _configured(ctx: Ctx) -> tuple[bool, ReviewPolicy | None]:
         return False, None
     try:
         with (
-            snapshot_io.validated(path) as check,
-            closing(
-                sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+            (
+                nullcontext(lambda: None)
+                if ctx.dry_run
+                else snapshot_io.validated(path)
+            ) as check,
+            (
+                policy_preview.connection(path)
+                if ctx.dry_run
+                else closing(
+                    sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+                )
             ) as conn,
         ):
             check()

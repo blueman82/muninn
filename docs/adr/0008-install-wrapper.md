@@ -19,15 +19,21 @@ error-prone, and a successful upgrade deletes the previous release (ADR 0001).
 - Without arguments, it installs this checkout's HEAD: `--fresh` when there is no
   current release and no data directory, `--upgrade` when both exist. If only one of
   them exists it refuses with an incomplete-installation diagnostic.
-- If the selected Python cannot import the pinned Pydantic version, the wrapper asks
+- For a real install, if the selected Python cannot import the pinned Pydantic version, the wrapper asks
   before creating the checkout's `.venv` and installing the hashed runtime lock. Declining
   runs no installer.
-- On macOS/Linux first install, the wrapper also offers to enable this checkout's Git hooks. Accepting
+- On macOS/Linux real install, the wrapper also offers to enable this checkout's Git hooks. Accepting
   installs `requirements-dev.txt` in `.venv` and sets local `core.hooksPath` to `.githooks`;
   an existing custom hooks path is left unchanged.
-- `--check` runs the installer's dry run without changing installed state or writing an
-  install log. Accepted runtime or Git-hook setup may create `.venv` and change local Git
-  configuration. It ends with the command to run.
+- `--check` runs the installer's dry run without writing to the checkout, Git
+  configuration or installed state, including bytecode and the install log. It
+  reuses a compatible selected interpreter or ready checkout `.venv`. If neither
+  provides the pinned runtime, it refuses with separate setup guidance. It never
+  prompts for setup. A successful preview ends with the command to run.
+  Upgrade policy reads hold the existing private writer lock without creation
+  or permission repair. They require a stable DELETE-mode image with no journal,
+  WAL or shared-memory sidecars and retain the same compatibility refusals.
+  Unavailable safe reads fail closed; preview never performs recovery.
 - `--status` compares the installed commit with this checkout's HEAD and runs no
   installer code.
 - `--help` describes the three forms above.

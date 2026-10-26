@@ -18,6 +18,24 @@ From the repository root, with a clean worktree at the required commit:
     bin/muninn-install --check    # plain-sentence preview; writes nothing
     bin/muninn-install
 
+`--check` never creates an environment, installs packages or enables Git hooks.
+It reuses a compatible selected interpreter or this checkout's ready `.venv`.
+If the pinned runtime is missing, prepare it separately before retrying:
+
+    python3.13 -m venv .venv
+    .venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
+
+Alternatively, set `MUNINN_PYTHON` to an existing compatible environment. A normal
+install can still offer runtime and Git-hook setup; accepting those prompts changes
+the checkout. That setup is separate from the read-only preview.
+
+An upgrade preview also needs the existing private writer lock and a stable
+DELETE-mode store without journal, WAL or shared-memory sidecars. It refuses
+missing, busy, unsafe or changing state with `review_policy_preview_unavailable`.
+The preview never creates a lock, repairs permissions, stops the service or
+clears recovery state. Preserve refused state and use the existing recovery
+guidance; the preview does not make it safe to install.
+
 `bin/muninn-install` installs this checkout's `HEAD`. It runs a fresh install when
 neither the data directory nor release exists, and an upgrade when both exist. An
 incomplete installation (only one exists) is refused. `--status` compares the installed

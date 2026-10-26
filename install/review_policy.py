@@ -14,6 +14,7 @@ from pathlib import Path
 from install import (
     learning_scope,
     legacy_state,
+    policy_preview,
     policy_records,
     record,
     snapshot_io,
@@ -174,22 +175,7 @@ def preflight(ctx: Ctx, rec: Record) -> None:
     policy = frozen(ctx, rec)
     if not ctx.upgrade or policy is None:
         return
-    with (
-        store.writer_lock(ctx.data, wait_s=0),
-        snapshot_io.validated(store.db_path(ctx.data)) as check,
-        closing(
-            sqlite3.connect(
-                store.db_path(ctx.data).as_uri() + "?mode=ro", uri=True
-            )
-        ) as conn,
-    ):
-        check()
-        if conn.execute("PRAGMA user_version").fetchone()[0] == 3:
-            return
-        conn.row_factory = sqlite3.Row
-        store.assert_store_format(conn)
-        compatible(conn, policy)
-        check()
+    policy_preview.validate(ctx, policy)
 
 
 def _activation(conn: sqlite3.Connection, path: Path) -> Intent:
