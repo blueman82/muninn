@@ -206,7 +206,14 @@ class RuntimeWorkflowTests(unittest.TestCase):
                     "-r",
                     "requirements-runtime.lock",
                 ],
-                ["-m", "pip", "install", "-r", "requirements-dev.txt"],
+                [
+                    "-m",
+                    "pip",
+                    "install",
+                    "--require-hashes",
+                    "-r",
+                    "requirements-dev.txt",
+                ],
             ],
         )
         self.assertTrue(
@@ -336,6 +343,7 @@ if sys.platform != "win32":
                         "-m venv .venv",
                         "-m pip install --require-hashes "
                         "-r requirements-runtime.lock",
-                        "-m pip install -r requirements-dev.txt",
+                        "-m pip install --require-hashes "
+                        "-r requirements-dev.txt",
                     ],
                 )

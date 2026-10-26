@@ -346,8 +346,11 @@ class WrapperTest(unittest.TestCase):
         hook_path = git(root, "config", "--get", "core.hooksPath")
         self.assertEqual(hook_path.decode().strip(), ".githooks")
         self.assertTrue((root / ".venv" / "bin" / "python3.13").is_file())
-        self.assertIn("-m pip install -r", self.argv())
-        self.assertIn("requirements-dev.txt", self.argv())
+        self.assertRegex(
+            self.argv(),
+            r"(?m)^-m pip install --require-hashes -r .+[/\\]"
+            r"requirements-dev\.txt$",
+        )
 
     def test_windows_setup_uses_windows_venv_interpreter(self) -> None:
         root = self.hook_repo()

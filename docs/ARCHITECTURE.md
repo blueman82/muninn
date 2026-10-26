@@ -118,7 +118,9 @@ flowchart LR
 
 Both Windows architectures run the full set of required checks. macOS and Linux run
 their checks in one job each. Python setup caches pip downloads using
-`requirements-dev.txt`; each job still installs and verifies its tools.
+both `requirements-runtime.lock` and `requirements-dev.txt`; each job still
+installs the separate hash-verified wheel closures, including Pyright's pinned
+Node wheel. Cache reuse does not bypass artifact verification.
 
 Lifecycle diagnostics include bounded integer phase durations in milliseconds, retained
 across phase transitions and failures. These durations are inclusive; nested timings
