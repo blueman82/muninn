@@ -52,6 +52,7 @@ def acquire(
     Raises:
         OSError: If a read fails for a reason other than identity replacement.
         PauseRefusedError: If the deadline or selected-owner check fails.
+        SnapshotChangedError: If changed evidence cannot be safely retried.
     """
     selected = None
     while True:
@@ -60,11 +61,12 @@ def acquire(
         except BlockingIOError:
             try:
                 current = latest(home)
-            except OSError as error:
+            except (OSError, state.SnapshotChangedError) as error:
                 # Completion replaces the witness before lifetime lock release.
                 # Retry only this opener refusal, never a failed safety check.
-                if type(error) is not OSError or error.args != (
-                    "source changed identity",
+                if not isinstance(error, state.SnapshotChangedError) and (
+                    type(error) is not OSError
+                    or error.args != ("source changed identity",)
                 ):
                     raise
                 remaining = deadline - time.monotonic()
