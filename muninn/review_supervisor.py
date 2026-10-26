@@ -17,6 +17,7 @@ from muninn import (
     store,
 )
 from muninn.review_budget import reserve_call
+from muninn.review_catchup import catch_up
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_launch_inputs import load_capability, load_prompt
 from muninn.review_models import (
@@ -92,6 +93,8 @@ class Supervisor:
         self._next: list[_Round] = []
         self.capability: RunnerCapability | None = None
         self.artifact = b""
+        self._catchup_after = 0
+        self._catchup_at = 0.0
         self.monitor: ProcessMonitor
 
     def start(self, now: float) -> None:
@@ -140,6 +143,7 @@ class Supervisor:
             while self._pending:
                 self._event(self._pending[0], now)
                 del self._pending[0]
+            self._catch_up(now)
             for pending in tuple(self._rounds.values()):
                 if not pending.spawned:
                     self._spawn(pending, now)
@@ -188,6 +192,15 @@ class Supervisor:
             deadline=time.monotonic() + self.policy.deadline_seconds,
         )
         return _Round(context, {}, {})
+
+    def _catch_up(self, now: float) -> None:
+        """Give one source a turn between closed writer transactions."""
+        if now < self._catchup_at:
+            return
+        with database(self.home) as conn:
+            after = catch_up(conn, self.policy, now, self._catchup_after)
+        self._catchup_after = after
+        self._catchup_at = now + 5.0
 
     def _spawn(self, pending: _Round, now: float) -> None:
         """Reserve one unique permit and durable charge before Popen."""
