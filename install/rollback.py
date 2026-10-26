@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install import legacy_state, legacy_transition, lifecycle
+from install import legacy_state, legacy_transition, lifecycle, policy_records
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
 from install.provider_paths import cursor_commands
@@ -285,10 +285,11 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
         exceptions, so the list is empty; the signature leaves room for
         actions that should be survivable.
     """
+    policy_records.validate(rec)
     problems: list[str] = []
     if (
         rec.get("recovery_required")
-        or rec.get("policy_activation")
+        or policy_records.activation_phase(rec) is not None
         or (
             rec.get("upgrade")
             and (rec.get("paused") or rec.get("store") or rec.get("snapshot"))

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
+from install import policy_records
 from install.constants import CODEX_KEYS, INSTALL_RECORD
 from install.context import Ctx
 from install.transforms import codex_scan
@@ -83,13 +84,14 @@ def codex_record(text: str) -> list[dict[str, Any]]:
 
 def save(ctx: Ctx, rec: Record) -> None:
     """Write the rollback record (0600: it holds config before-values)."""
+    policy_records.validate(rec)
     data = json.dumps(rec, indent=1).encode()
     ce.atomic_write(ctx.rdir / "rollback-record.json", data, 0o600)
 
 
 def load_record(path: Path | str) -> Record:
     """Read a rollback record written by ``save``."""
-    return json.loads(Path(path).read_text())
+    return policy_records.parse(Path(path).read_bytes())
 
 
 def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:

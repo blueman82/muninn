@@ -6,7 +6,7 @@ from pathlib import Path
 
 from install import legacy_baseline as baseline
 from install import legacy_exclusion as exclusion
-from install import legacy_recovery, review_policy
+from install import legacy_recovery, policy_records, review_policy
 from install import legacy_state as state
 from install.context import Ctx, StepFailedError, link_text
 from install.cutover import install_legacy, resume_policy
@@ -216,7 +216,7 @@ def resume_install(
         "legacy" not in rec
         and rec["sha"] != sha
         and rec.get("policy_status") == "active"
-        and rec.get("policy_activation", {}).get("phase") == "complete"
+        and policy_records.activation_phase(rec) == "complete"
         and rec.get("failed", {}).get("step") == "verify"
     ):
         review_policy.verify_ready(active, rec)

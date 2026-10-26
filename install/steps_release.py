@@ -13,13 +13,8 @@ from typing import cast
 
 from install import configedit as ce
 from install import legacy_baseline as baseline
-from install import lifecycle
-from install.constants import (
-    GIT_ENV,
-    HEARTBEAT_S,
-    LABEL,
-    RECALL_OFF,
-)
+from install import lifecycle, policy_records
+from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
 from install.context import (
     Ctx,
     StepFailedError,
@@ -103,6 +98,7 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
 
 def prepare_release(ctx: Ctx, rec: Record) -> None:
     """Publish source before provisioning an immutable candidate runtime."""
+    policy_records.validate(rec)
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
     if dry(ctx, f"would prepare the release and runtime at {dest}"):
         return
@@ -116,7 +112,7 @@ def prepare_release(ctx: Ctx, rec: Record) -> None:
     python = prepare_runtime(ctx, dest)
     rec["python"]["path"] = str(python)
     rec["runtime_prepared"] = True
-    if ctx.review_policy or rec.get("policy_input", {}).get("raw"):
+    if ctx.review_policy or policy_records.input_raw(rec):
         rec["prepared_runtime"] = baseline.tree_state(dest, links=True)
 
 
