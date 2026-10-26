@@ -430,6 +430,19 @@ This differs from the older erase behavior. Dry runs retain their writer-only,
 no-stop path and may initialize an empty store; they create no `tombstone.key`.
 Neither an absent nor an empty store establishes process-containment evidence.
 
+POSIX review-worker shutdown retains its owned, unreaped group leader while
+checking native shutdown evidence, before publishing an outcome or discarding
+process buffers. Signals target only that verified process group. On 64-bit Linux,
+the check requires terminal members across the original isolated session,
+including members in other groups, and a stable kernel fork counter around
+complete observations. Darwin retains its native sole-current-group zombie
+observation with `WNOWAIT`; same-session escape/rejoin and closed-session safety
+remain unverified. This does not establish universal descendant isolation.
+Unknown or unavailable evidence keeps cleanup pending. Individual Linux
+observations have a work deadline; unrelated host forks or unavailable procfs
+can prevent completion. `stop_all()` has a bounded join and reports
+`process_cleanup_incomplete` if cleanup remains pending, retaining ownership.
+
 The Python APIs retain `run_erase` and caller-owned `erase`; the latter requires
 established pause as well as writer ownership for real erasure. Callers needing
 observable status use `run_erase_request(home, EraseRequest(...), status=...)`.

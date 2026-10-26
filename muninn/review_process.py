@@ -28,6 +28,7 @@ from muninn.review_process_protocol import (
     TerminalNotice,
     load,
 )
+from muninn.review_process_quiescence import group_quiescent
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,8 @@ def contain(handle: RunningProcess) -> int:
         except PermissionError:
             if not sole_zombie(proc.pid):
                 raise
+        if not group_quiescent(proc.pid):
+            raise subprocess.TimeoutExpired(proc.args, 0.01)
     result = proc.wait(timeout=0.01)
     for pipe in (proc.stdin, proc.stdout, proc.stderr):
         if pipe is not None:
