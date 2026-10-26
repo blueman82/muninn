@@ -9,6 +9,7 @@ import selectors
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from contextlib import suppress
@@ -212,6 +213,8 @@ def _collect(
 
 def _await_exit(process: subprocess.Popen[bytes], deadline: float) -> None:
     """Observe child exit without releasing its process-group identity."""
+    if sys.platform == "win32":
+        raise ValueError("native_probe_posix_only")
     while True:
         exited = os.waitid(
             os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
@@ -228,6 +231,8 @@ def run_command(
     argv: list[str], env: dict[str, str], cwd: Path, timeout: float = 45
 ) -> dict[str, object]:
     """Signal the unreaped child group before publishing leader exit."""
+    if sys.platform == "win32":
+        raise ValueError("native_probe_posix_only")
     process = subprocess.Popen(
         argv,
         stdin=subprocess.PIPE,

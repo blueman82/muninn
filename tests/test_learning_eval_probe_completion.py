@@ -10,6 +10,7 @@ import threading
 import unittest
 from http.server import HTTPServer
 from pathlib import Path
+from unittest import mock
 
 from tools.learning_eval.codex_tool_probe_io import (
     capture_handler,
@@ -19,6 +20,18 @@ from tools.learning_eval.codex_tool_probe_io import (
 
 class ProbeCompletionTests(unittest.TestCase):
     """Exercise EOF boundaries with real sockets and owned children."""
+
+    def test_windows_command_is_refused_before_child_spawn(self) -> None:
+        with (
+            mock.patch.object(sys, "platform", "win32"),
+            mock.patch(
+                "subprocess.Popen",
+                side_effect=AssertionError("spawn_before_refusal"),
+            ) as spawn,
+            self.assertRaisesRegex(ValueError, "native_probe_posix_only"),
+        ):
+            run_command([], {}, Path())
+        spawn.assert_not_called()
 
     @unittest.skipIf(sys.platform == "win32", "POSIX process group contract")
     def test_pipe_eof_waits_for_actual_exit_or_reports_timeout(self) -> None:

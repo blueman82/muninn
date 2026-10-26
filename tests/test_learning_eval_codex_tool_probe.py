@@ -329,7 +329,8 @@ class CodexToolProbeTests(unittest.TestCase):
                 while not marker.exists() and time.monotonic() < until:
                     time.sleep(0.01)
                 if not marker.exists():
-                    os.killpg(child.pid, signal.SIGKILL)
+                    if sys.platform != "win32":
+                        os.killpg(child.pid, signal.SIGKILL)
                     child.wait(timeout=5)
                     raise AssertionError("child failed to close stdin")
                 return cast(subprocess.Popen[bytes], child)
