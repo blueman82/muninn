@@ -28,6 +28,7 @@ from muninn.obs_status import (
     read_status,
 )
 from muninn.review_models import ReviewStats, Usage
+from muninn.review_policy_status import policy_status
 
 _LAST_PASS_FIELDS = (
     "last_pass_at",
@@ -400,6 +401,7 @@ def review_stats(conn: sqlite3.Connection, now: float) -> ReviewStats:
         return ReviewStats.model_validate(
             {
                 "schema_version": 1,
+                "admission": policy_status(conn),
                 "requests_by_state": _pairs(
                     conn,
                     "SELECT state,count(*) FROM review_request GROUP BY state",
