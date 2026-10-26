@@ -144,10 +144,17 @@ class WindowsRecoveryRefusalTests(StoreCase):
             self.assertGreater(
                 info.st_ino, 0, "native file identity unavailable"
             )
-            result[path.relative_to(self.home).as_posix()] = (
+            relative = path.relative_to(self.home).as_posix()
+            if relative == state.LOCK:
+                # Windows byte-range locks can deny a read even past EOF.
+                self.assertEqual(info.st_size, 0, "nonempty lifetime lock")
+                data = b""
+            else:
+                data = path.read_bytes()
+            result[relative] = (
                 info.st_dev,
                 info.st_ino,
-                hashlib.sha256(path.read_bytes()).hexdigest(),
+                hashlib.sha256(data).hexdigest(),
             )
         return result
 

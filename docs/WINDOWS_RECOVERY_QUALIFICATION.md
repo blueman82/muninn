@@ -26,7 +26,10 @@ Six cases check distinct outcomes:
 
 Before and after the command, the tests compare file identities and content
 hashes, populated database rows, pending intent and the exact material file
-set. Only the named, content-free `calls.jsonl` append is permitted. Child
+set. Only the named, content-free `calls.jsonl` append is permitted.
+The exact lifetime-lock file instead requires zero length and unchanged
+identity while its byte range is locked; all other material is read and
+hashed. A nonempty lifetime lock fails the check. Child
 cleanup uses the retained fixture process handle and bounded waits. Token
 elevation codes are observations about the CI account, not desktop proof.
 
