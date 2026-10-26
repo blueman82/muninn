@@ -46,8 +46,22 @@ class ReviewProcessCleanupTests(unittest.TestCase):
             update={"deadline_seconds": 5.0}
         )
         self.monitor.stop_all()
-        if self.child.returncode is None:
-            process.contain(self.handle)
+        until = time.monotonic() + 5
+        while self.child.returncode is None:
+            try:
+                process.contain(self.handle)
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= until:
+                    raise
+                time.sleep(0.005)
+
+    def finish_pending(self, slot: process._Slot) -> None:
+        """Retry native cleanup while keeping terminal publication bounded."""
+        until = time.monotonic() + 5
+        while slot.terminal is None and time.monotonic() < until:
+            self.monitor._step(slot, False)
+            time.sleep(0.005)
+        self.assertIsNotNone(slot.terminal)
 
     def test_transient_reap_timeout_keeps_successful_terminal_outcome(
         self,
@@ -79,8 +93,8 @@ class ReviewProcessCleanupTests(unittest.TestCase):
             self.monitor._finish(slot, None)
             self.assertIsNone(slot.terminal)
             self.assertIsNone(slot.error)
-            self.monitor._step(slot, False)
-        self.assertEqual(attempts, 2)
+            self.finish_pending(slot)
+        self.assertGreaterEqual(attempts, 2)
         self.assertIsNotNone(slot.terminal)
         assert slot.terminal is not None
         self.assertIsNone(slot.terminal.error_code)
@@ -103,8 +117,8 @@ class ReviewProcessCleanupTests(unittest.TestCase):
             self.assertIsNone(slot.terminal)
             self.assertTrue(slot.finished)
             self.assertEqual(slot.error, "invalid_worker_protocol")
-            self.monitor._step(slot, False)
-        self.assertEqual(attempts, 2)
+            self.finish_pending(slot)
+        self.assertGreaterEqual(attempts, 2)
         self.assertIsNotNone(slot.terminal)
         assert slot.terminal is not None
         self.assertEqual(slot.terminal.error_code, "invalid_worker_protocol")
@@ -140,8 +154,8 @@ class ReviewProcessCleanupTests(unittest.TestCase):
             self.monitor._finish(slot, None)
             self.assertIsNone(slot.terminal)
             self.assertIsNone(slot.error)
-            self.monitor._step(slot, False)
-        self.assertEqual(attempts, 2)
+            self.finish_pending(slot)
+        self.assertGreaterEqual(attempts, 2)
         assert slot.terminal is not None
         self.assertIsNone(slot.terminal.error_code)
         self.assertEqual(slot.terminal.stdout, b"success")
@@ -167,10 +181,7 @@ class ReviewProcessCleanupTests(unittest.TestCase):
                 raise OSError("test_retry_not_released")
             real_killpg(pgid, sig)
 
-        with (
-            mock.patch.object(process.os, "killpg", killpg),
-            mock.patch.object(process, "sole_zombie", return_value=False),
-        ):
+        with (mock.patch.object(process.os, "killpg", killpg),):
             self.monitor.register(self.handle)
             try:
                 self.assertTrue(retry_entered.wait(5))

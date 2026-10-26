@@ -32,8 +32,9 @@ class OwnerEnvironmentTests(unittest.TestCase):
         child = mock.Mock(returncode=0)
         child.communicate.return_value = (b"", b"")
 
-        def ready(path: Path) -> None:
+        def ready(path: Path) -> str:
             store.write_json_atomic(path, {})
+            return path.read_text(encoding="utf-8")
 
         with (
             mock.patch.object(
@@ -48,7 +49,7 @@ class OwnerEnvironmentTests(unittest.TestCase):
             mock.patch.object(
                 fixtures.subprocess, "Popen", return_value=child
             ) as run,
-            mock.patch.object(fixtures, "wait_file", side_effect=ready),
+            mock.patch.object(fixtures, "read_ready_text", side_effect=ready),
         ):
             fixture.start_owner()
         self.assertEqual(run.call_args.args[0][0], "synthetic-base-python")

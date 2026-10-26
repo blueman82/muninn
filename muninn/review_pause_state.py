@@ -45,6 +45,14 @@ class PauseRefusedError(ValueError):
         super().__init__(code)
 
 
+class SnapshotChangedError(PauseRefusedError):
+    """Refuse discarded evidence after a safe pathname changed identity."""
+
+    def __init__(self) -> None:
+        """Preserve the public refusal code without certifying publication."""
+        super().__init__("pause_unverified")
+
+
 class Owner(StrictModel):
     """Identify the one process and stop generation selected for a run."""
 
@@ -175,6 +183,7 @@ def inspect(home: Path, name: str) -> tuple[bytes, Fingerprint | None]:
             digest.update(chunk)
             if len(result) <= LIMIT:
                 result.extend(chunk[: LIMIT + 1 - len(result)])
+        platform_io.assert_private_fd(handle.fileno())
         after = os.fstat(handle.fileno())
     latest = _private(path)
 
@@ -202,9 +211,28 @@ def inspect(home: Path, name: str) -> tuple[bytes, Fingerprint | None]:
         or before.st_ctime_ns != latest.st_ctime_ns
         or initial.st_ctime_ns != after.st_ctime_ns
     ):
+        if _identity(after) != _identity(latest) and (
+            _descriptor_metadata(before)
+            == _descriptor_metadata(initial)
+            == _descriptor_metadata(after)
+        ):
+            # Unlink can change ctime; the rejected snapshot grants nothing.
+            raise SnapshotChangedError()
         raise PauseRefusedError("pause_unverified")
     return bytes(result), Fingerprint(
         identity=_identity(after), sha256=digest.hexdigest()
+    )
+
+
+def _descriptor_metadata(info: os.stat_result) -> tuple[int, ...]:
+    """Compare observed descriptor fields without certifying its bytes."""
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_mode,
+        info.st_uid,
     )
 
 
