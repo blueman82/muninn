@@ -125,6 +125,15 @@ class WitnessPollingTests(unittest.TestCase):
             request.assert_called_once()
 
     def test_changed_owner_after_transient_read_is_still_refused(self) -> None:
+        path = self.home / state.WITNESS
+        retained = self.home / "retained-witness"
+        # Keep the discovered inode allocated across all owner publications.
+        os.link(path, retained)
+        self.addCleanup(retained.unlink, missing_ok=True)
+        before, pinned = path.stat(), retained.stat()
+        self.assertEqual(
+            (before.st_dev, before.st_ino), (pinned.st_dev, pinned.st_ino)
+        )
         selected = False
 
         def stop(
@@ -151,6 +160,10 @@ class WitnessPollingTests(unittest.TestCase):
         ):
             self.fail("replacement owner admitted")
         request.assert_called_once()
+        after = path.stat()
+        self.assertNotEqual(
+            (before.st_dev, before.st_ino), (after.st_dev, after.st_ino)
+        )
 
     def test_repeated_identity_changes_exhaust_the_original_deadline(
         self,
