@@ -100,6 +100,21 @@ def write_private(path: Path, raw: bytes) -> None:
         os.fsync(stream.fileno())
 
 
+def _body_evidence(raw: bytes, declared: int) -> dict[str, object]:
+    """Keep incomplete transport separate from a complete request payload."""
+    error = "request_body_incomplete"
+    if len(raw) == declared:
+        try:
+            return request_evidence(raw)
+        except (ValueError, UnicodeError, RecursionError):
+            error = "request_evidence_invalid"
+    return {
+        "error": error,
+        "qualification": "unverified",
+        "request_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
 def capture_handler(
     records: list[dict[str, object]], root: Path
 ) -> type[BaseHTTPRequestHandler]:
@@ -153,14 +168,7 @@ def capture_handler(
             raw = self.rfile.read(int(length))
             path = root / f"request-{len(records) + 1}.json"
             write_private(path, raw)
-            try:
-                evidence = request_evidence(raw)
-            except (ValueError, UnicodeError, RecursionError):
-                evidence = {
-                    "error": "request_evidence_invalid",
-                    "qualification": "unverified",
-                    "request_sha256": hashlib.sha256(raw).hexdigest(),
-                }
+            evidence = _body_evidence(raw, int(length))
             records.append(
                 {"path": self.path, "raw_path": str(path), **evidence}
             )
@@ -202,6 +210,20 @@ def _collect(
                     output[key.data].extend(data)
 
 
+def _await_exit(process: subprocess.Popen[bytes], deadline: float) -> None:
+    """Observe child exit without releasing its process-group identity."""
+    while True:
+        exited = os.waitid(
+            os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT
+        )
+        if exited is not None and exited.si_pid == process.pid:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError("process_timeout")
+        time.sleep(min(0.01, remaining))
+
+
 def run_command(
     argv: list[str], env: dict[str, str], cwd: Path, timeout: float = 45
 ) -> dict[str, object]:
@@ -224,7 +246,9 @@ def run_command(
             process.stdin.close()
         except BrokenPipeError:
             error = "process_stdin_closed"
-        _collect(process, time.monotonic() + timeout, output)
+        deadline = time.monotonic() + timeout
+        _collect(process, deadline, output)
+        _await_exit(process, deadline)
     except ValueError as exc:
         error = str(exc)
     finally:
