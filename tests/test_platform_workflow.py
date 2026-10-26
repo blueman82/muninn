@@ -17,6 +17,7 @@ WORKFLOW = (
 )
 PROOFS = {
     "Observe unqualified Windows boot-counter readiness",
+    "Verify Windows refusal preserves native material",
     "Run real ordinary Windows lifecycle",
     "Provision pinned Codex native proof",
     "Run actual Codex and rendered provider routes",
@@ -110,6 +111,7 @@ class PlatformWorkflowTests(unittest.TestCase):
                 [name for name in proof if name in PROOFS],
                 [
                     "Observe unqualified Windows boot-counter readiness",
+                    "Verify Windows refusal preserves native material",
                     "Run real ordinary Windows lifecycle",
                     "Provision pinned Codex native proof",
                     "Run actual Codex and rendered provider routes",

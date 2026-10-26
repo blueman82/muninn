@@ -4,6 +4,41 @@ Windows maintenance recovery remains unqualified. The runtime continues to
 refuse `muninn recover` when Windows repair is required. A passing readiness
 probe does not change that behavior.
 
+## Native CI refusal and preservation checks
+
+`tests.test_windows_recovery_refusal` runs actual CLI subprocesses on Windows
+x64 and ARM. Both proof lanes run the module explicitly before lifecycle
+checks. The fixture uses a private temporary home, a populated current
+database and retained database archive, and an existing tombstone key.
+Windows user, application-data, temporary and provider paths are isolated.
+The tests do not mock boot observations, platform selection, ACLs or locks.
+
+Six cases check distinct outcomes:
+
+| Fixture state | Required result |
+|---|---|
+| Healthy complete witness matching the lock | No recovery needed |
+| Unapplied thread and keyed erasure intent | Windows repair unqualified |
+| Exited fixture owner and synthetic Linux baseline | Windows repair unqualified |
+| Live fixture owner retaining its lifetime lock | Windows repair unqualified; owner remains alive and locked |
+| Malformed baseline hard-linked to the test key | Pause unverified; key preserved |
+| Public read access on the witness | Pause unverified; unsafe ACL preserved |
+
+Before and after the command, the tests compare file identities and content
+hashes, populated database rows, pending intent and the exact material file
+set. Only the named, content-free `calls.jsonl` append is permitted. Child
+cleanup uses the retained fixture process handle and bounded waits. Token
+elevation codes are observations about the CI account, not desktop proof.
+
+These checks measure refusal and preservation on hosted runners. They do
+not implement repair or prove a successful recovery, boot transition,
+crash-durable retirement or ordinary non-admin desktop behavior. The Linux
+baseline is synthetic input; it is not a Windows boot observation. The
+hard-link case checks malformed-state refusal, not a retirement algorithm.
+Qualification flags remain false. A local non-Windows skip supplies no
+native evidence; acceptance requires actual x64 and ARM execution with raw
+logs and tested-source bindings. No personal Windows machine is assumed.
+
 ## Native boot-counter readiness probe
 
 `tests.windows_recovery_probe` reads `BootId` from the 64-bit registry view at

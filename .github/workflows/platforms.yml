@@ -278,6 +278,17 @@ jobs:
           python = str(Path('.venv/Scripts/python.exe').resolve())
           subprocess.run([python, '-B', '-m', 'tests.windows_recovery_probe'],
                          check=True, timeout=120)
+      - name: Verify Windows refusal preserves native material
+        if: runner.os == 'Windows' && matrix.lane != 'gate' && !cancelled()
+        shell: python
+        run: |
+          import subprocess
+          from pathlib import Path
+
+          python = str(Path('.venv/Scripts/python.exe').resolve())
+          subprocess.run([python, '-B', '-m', 'unittest', '-v',
+                          'tests.test_windows_recovery_refusal'],
+                         check=True, timeout=180)
       - name: Run real ordinary Windows lifecycle
         if: runner.os == 'Windows' && matrix.lane != 'gate' && !cancelled()
         env:
