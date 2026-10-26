@@ -12,11 +12,25 @@ gate before an upgrade; the installer itself enforces only the stdlib rules S1 t
 |---|---|---|
 | Stdlib rules S1 to S8 | `python3.13 -m tools.check` (also run by `tests/test_standards.py`) | size, docstrings, comments, imports, annotations |
 | Everything | `python3.13 -m tools.check --full` | the above plus ruff, black, pyright strict, shellcheck, the git-hook switch and the whole test suite (run in parallel) |
-| Tests | `python3.13 -m tools.run_tests` (`-j N` for N workers) | The runner uses one process per test module. It uses at most four workers by default. |
+| Tests | `python3.13 -m tools.run_tests` (`-j N` for N workers, `--timeout SECONDS` for the module deadline) | One process per module, at most four workers by default, and a 600-second deadline per module. |
 | Set up the tools | Separate hashed runtime and developer installs below | pins in `requirements-runtime.lock` and `requirements-dev.txt` |
 
 A missing tool, failing test or disabled Git-hook configuration fails the gate. No
 required check is skipped.
+
+The runner requires a finite positive module timeout. A timeout names the
+module, retains its partial stdout and stderr, and fails the suite while other
+modules continue. Unix cleanup keeps the leader unreaped through native
+observation of its owned process group. Windows closes its exclusive Job before
+the final output drain. Cleanup has a separate five-second bound; a cleanup
+failure preserves captured output and fails the module. Ctrl-C cancels queued
+modules, cleans up active modules, and makes the runner exit 130. Ordinary pass,
+failure and no-test exit handling stays the same. The stdlib-only standards
+command also remains usable without site packages.
+
+On Darwin, the native observation covers the current owned-group snapshot.
+Session-wide quiescence and exclusion of later same-session group joins remain
+unverified. Signals stay confined to the owned process group.
 
 One-time setup per clone (the first two are checked by the gate and the tests):
 

@@ -1,6 +1,6 @@
 """Run the unittest modules in parallel processes.
 
-``python3.13 -m tools.run_tests [-j N]`` is the fast path to the same result as
+``python3.13 -m tools.run_tests [-j N] [--timeout SECONDS]`` runs the tests of
 ``python3.13 -m unittest discover -s tests -t .``. Each test module runs in its
 own interpreter, so tests never share process state; threads only supervise the
 subprocesses. Threads inside one interpreter would not help: the suite is
@@ -12,18 +12,23 @@ from __future__ import annotations
 
 import argparse
 import functools
+import math
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+from tools.test_process import CANCELLED_EXIT, TIMEOUT_EXIT, execute
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_JOBS_CAP = 4
+DEFAULT_TIMEOUT = 600.0
 # unittest exits 5 for a module that defines no tests (a re-export shim).
 NO_TESTS_EXIT = 5
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.M)
@@ -101,31 +106,48 @@ def clean_environment(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k not in GIT_REPO_VARS}
 
 
-def run_module(module: str, root: Path = ROOT) -> ModuleResult:
+def run_module(
+    module: str,
+    root: Path = ROOT,
+    timeout: float = DEFAULT_TIMEOUT,
+    cancel: threading.Event | None = None,
+) -> ModuleResult:
     """Run one test module in a fresh interpreter.
 
     Args:
         module: Dotted module name.
         root: Directory to run in, so ``tests`` is importable.
+        timeout: Finite positive execution limit in seconds.
+        cancel: Optional shared signal to stop active and queued modules.
 
     Returns:
         The module's result.
     """
     start = time.monotonic()
-    done = subprocess.run(
-        [sys.executable, "-m", "unittest", module],
-        cwd=root,
-        env=clean_environment(os.environ),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    output = done.stdout + done.stderr
-    if done.returncode not in (0, NO_TESTS_EXIT):
+    validate_timeout(timeout)
+    try:
+        code, output, interrupted = execute(
+            (sys.executable, "-m", "unittest", module),
+            root,
+            clean_environment(os.environ),
+            timeout,
+            cancel if cancel is not None else threading.Event(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        interrupted = False
+        code, output = (
+            127,
+            f"{module}: launch failed or cleanup failed: {error}\n",
+        )
+    if interrupted and code == TIMEOUT_EXIT:
+        output += f"\n{module}: timed out after {timeout:g}s\n"
+    elif interrupted and code == CANCELLED_EXIT:
+        output += f"\n{module}: cancelled\n"
+    if code not in (0, NO_TESTS_EXIT):
         print(f"tests: failed {module}", flush=True)
     return ModuleResult(
         module,
-        done.returncode,
+        code,
         parse_ran(output),
         time.monotonic() - start,
         output,
@@ -142,7 +164,10 @@ def default_jobs() -> int:
 
 
 def run_all(
-    modules: Sequence[str], jobs: int, root: Path = ROOT
+    modules: Sequence[str],
+    jobs: int,
+    root: Path = ROOT,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> list[ModuleResult]:
     """Run every module, ``jobs`` at a time.
 
@@ -150,14 +175,61 @@ def run_all(
         modules: Dotted module names.
         jobs: Maximum number of interpreters running at once.
         root: Directory to run in.
+        timeout: Finite positive per-module execution limit in seconds.
 
     Returns:
         One result per module, in the order given.
     """
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
+    validate_timeout(timeout)
+    cancel = threading.Event()
+    pool = ThreadPoolExecutor(max_workers=jobs)
+    try:
         return list(
-            pool.map(functools.partial(run_module, root=root), modules)
+            pool.map(
+                functools.partial(
+                    run_module, root=root, timeout=timeout, cancel=cancel
+                ),
+                modules,
+            )
         )
+    finally:
+        cancel.set()
+        pool.shutdown(wait=True, cancel_futures=True)
+
+
+def validate_timeout(value: float) -> float:
+    """Require a finite positive module timeout.
+
+    Args:
+        value: Requested execution limit in seconds.
+
+    Returns:
+        The validated timeout.
+
+    Raises:
+        ValueError: If the timeout is nonfinite or not positive.
+    """
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("timeout must be finite and greater than zero")
+    return value
+
+
+def timeout_argument(value: str) -> float:
+    """Validate a timeout supplied through argparse.
+
+    Args:
+        value: Command-line number of seconds.
+
+    Returns:
+        A finite positive timeout.
+
+    Raises:
+        argparse.ArgumentTypeError: If the argument is invalid.
+    """
+    try:
+        return validate_timeout(float(value))
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
 
 
 def passed(result: ModuleResult) -> bool:
@@ -207,9 +279,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(prog="tools.run_tests")
     parser.add_argument("-j", "--jobs", type=int, default=default_jobs())
+    parser.add_argument(
+        "--timeout",
+        type=timeout_argument,
+        default=DEFAULT_TIMEOUT,
+        help="maximum seconds per module (default: %(default)g)",
+    )
     args = parser.parse_args(argv)
     start = time.monotonic()
-    results = run_all(test_modules(), max(1, args.jobs))
+    try:
+        results = run_all(
+            test_modules(), max(1, args.jobs), timeout=args.timeout
+        )
+    except KeyboardInterrupt:
+        print("tests: cancelled", file=sys.stderr)
+        return CANCELLED_EXIT
     return report(results, time.monotonic() - start)
 
 

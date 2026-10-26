@@ -22,10 +22,13 @@ class TermsRuleTests(QueryCase):
     def fill(self, events: int) -> None:
         """Add events that all hold 'the'; every tenth holds 'rareword'."""
         scope, source = self.add_scope(), self.add_source()
-        for index in range(events):
-            extra = " rareword" if index % 10 == 0 else ""
-            self.add_event(source, scope, f"the item{index}{extra}")
-        self.rw.commit()
+        # The store uses autocommit; batch synthetic rows without changing
+        # durability settings or paying for one durable commit per event.
+        with self.rw:
+            self.rw.execute("BEGIN IMMEDIATE")
+            for index in range(events):
+                extra = " rareword" if index % 10 == 0 else ""
+                self.add_event(source, scope, f"the item{index}{extra}")
 
     def test_list_rule_matches_build_fts_query(self) -> None:
         conn = self.ro()
