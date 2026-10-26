@@ -228,6 +228,8 @@ def _add_learning(cmd: _Commands) -> None:
         p.add_argument("--from-line", type=int, required=name == "replay")
         p.add_argument("--through-line", type=int, required=name == "replay")
         p.add_argument("--policy", required=name == "replay")
+        if name == "request":
+            p.add_argument("--task")
     p = learn.add("setup", "choose future records or verified history")
     p.add_argument("--mode", choices=("now", "all"), required=True)
     p.add_argument("--project")

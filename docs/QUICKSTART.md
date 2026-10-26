@@ -21,7 +21,11 @@ From the repository root, with a clean worktree at the required commit:
 `bin/muninn-install` installs this checkout's `HEAD`. It runs a fresh install when
 neither the data directory nor release exists, and an upgrade when both exist. An
 incomplete installation (only one exists) is refused. `--status` compares the installed
-commit with `HEAD`. Other arguments are forwarded to `install.installer` (`--repo`,
+commit with `HEAD` using local Git history. It reports whether the checkout or
+installed version is newer. If the installed version is newer, update the checkout
+before installing. Unknown or divergent history reports `versions differ`; inspect
+the revisions before installing. Status does not fetch from the network or change
+the installation. Other arguments are forwarded to `install.installer` (`--repo`,
 `--sha`, `--fresh`, `--upgrade`, `--dry-run`, `--home`, `--review-policy`), which needs a full 40-hex
 `--sha` equal to `HEAD`. A fresh install refuses if the data directory or the launchd
 plist already exists. It pins the release, indexes your existing transcripts, configures the managed provider hooks, starts the
@@ -130,7 +134,8 @@ bin/muninn-install --learning-scope now
 Each attempt allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
 Revision 3 allows four concurrent requests and three total attempts per request.
 Temporary failures wait 5 seconds, then 30 seconds, before their remaining attempts.
-Live requests take priority over queued history.
+Manual and live requests take priority over queued history.
+Within each group, Muninn processes older requests first.
 Muninn checks the current knowledge revision before saving each result.
 
 The policy allows project scope only.

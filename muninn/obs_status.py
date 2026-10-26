@@ -290,7 +290,7 @@ def review_protocol(
             "review_repair",
             not repair,
             (
-                "baseline_present_manual_recovery_required"
+                "baseline_present_recovery_unverified"
                 if repair
                 else "baseline_absent"
             ),

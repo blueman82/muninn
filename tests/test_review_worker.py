@@ -110,6 +110,19 @@ class ReviewWorkerTests(unittest.TestCase):
             f"worker stderr={detail!r}"
         )
 
+    def wait_terminals(self, monitor: process.ProcessMonitor) -> None:
+        """Wait for retained outcomes without consuming monitor events."""
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            with monitor.lock:
+                if monitor.slots and all(
+                    slot.terminal is not None
+                    for slot in monitor.slots.values()
+                ):
+                    return
+            time.sleep(0.01)
+        self.fail("missing retained worker terminal")
+
     def test_registration_precedes_first_cli_launch(self) -> None:
         self.worker()
         self.assertEqual([e.kind for e in self.events("ready")], ["ready"])
@@ -320,7 +333,7 @@ class ReviewWorkerTests(unittest.TestCase):
             handles.append(handle)
             monitor.register(handle)
             process.cancel_registered(monitor, handle.attempt_id, 1, "stopped")
-        time.sleep(0.2)
+        self.wait_terminals(monitor)
         self.assertEqual(len(monitor.slots), 2)
         with self.assertRaisesRegex(ValueError, "monitor_capacity"):
             monitor.register(handles[0])
@@ -336,7 +349,7 @@ class ReviewWorkerTests(unittest.TestCase):
     ) -> None:
         running = self.worker()
         process.cancel_registered(self.monitor, ATTEMPT, 1, "stopped")
-        time.sleep(0.2)
+        self.wait_terminals(self.monitor)
         slot = self.monitor.slots[ATTEMPT, 1]
         self.assertIsNotNone(slot.terminal)
         process.adopt_after_registration_error(self.monitor, running)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from unittest import mock
 
 from muninn import review_requests, review_supervisor
 from muninn.review_json import canonical_json
@@ -12,6 +13,27 @@ from tests.test_review_supervisor import SupervisorCase
 
 class ParallelReviewTests(SupervisorCase):
     """Use fake provider processes with actual main-thread coordination."""
+
+    def test_manual_request_precedes_newer_catchup(self) -> None:
+        self.conn.execute(
+            "UPDATE review_request SET trigger='history',created_at=1.0"
+        )
+        manual = self.enqueue(self.window(1, 2))
+        recovered = self.transaction(
+            lambda: review_requests.enqueue_review(
+                self.conn,
+                self.window(3, 3),
+                self.scope,
+                self.policy,
+                "reconcile",
+                12.0,
+            )
+        )
+        with mock.patch.object(self.supervisor, "_spawn"):
+            self.supervisor.tick(13.0)
+        selected = next(iter(self.supervisor._rounds.values()))
+        self.assertEqual(selected.context.request_id, manual.id)
+        self.assertNotEqual(selected.context.request_id, recovered.id)
 
     def test_four_workers_claim_live_work_before_older_history(self) -> None:
         self.supervisor.stop(12.0)

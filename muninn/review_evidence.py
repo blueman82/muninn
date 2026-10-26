@@ -80,6 +80,20 @@ def validate_window_boundary(
         line_sha256=window.boundary_hash,
     )
     check_tombstones(conn, source, locator)
+    validate_cursor_boundary(conn, window, max_bytes, budget=budget)
+
+
+def validate_cursor_boundary(
+    conn: sqlite3.Connection,
+    window: EvidenceWindow,
+    max_bytes: int,
+    *,
+    budget: ReadBudget | None = None,
+) -> None:
+    """Check an old cursor hash without admitting its record as evidence."""
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError("evidence_limit")
+    source = _source(conn, window.source)
     _, raw, _ = originals(
         conn,
         source,

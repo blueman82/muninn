@@ -85,6 +85,59 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Keep learning paused until Muninn can verify the process.",
     ),
 }
+_SETUP_FAILURES = {
+    "capability_unavailable": (
+        "Muninn cannot read a required runner executable, "
+        "proof, or schema file."
+    ),
+    "capability_invalid": (
+        "A runner capability or proof file has an invalid format."
+    ),
+    "capability_path": (
+        "A runner path is relative or resolves to a different path."
+    ),
+    "capability_storage": (
+        "A runner setup file or directory fails "
+        "its ownership or access checks."
+    ),
+    "capability_executable_storage": (
+        "The runner executable fails its ownership or access checks."
+    ),
+    "capability_executable_provenance": (
+        "Muninn cannot verify the runner executable's origin."
+    ),
+    "capability_platform": (
+        "The runner is unavailable on this operating system or processor."
+    ),
+    "capability_limit": (
+        "The runner setup exceeds a file size or scan limit."
+    ),
+    "codex_experimental_boundary": (
+        "The Codex host, policy, or project does not match the approved setup."
+    ),
+    "native_prompt_instruction": (
+        "The review instructions do not match the required Codex format."
+    ),
+    "launch_input_platform": (
+        "This operating system cannot use the approved review setup."
+    ),
+    "launch_input_storage": (
+        "A review setup file is outside its required private directory."
+    ),
+    "runner_unsupported": (
+        "The selected runner has no supported launch method."
+    ),
+}
+_EXPLANATIONS.update(
+    {
+        code: (
+            cause,
+            "Restore the approved setup. "
+            "Muninn will check again in 60 seconds.",
+        )
+        for code, cause in _SETUP_FAILURES.items()
+    }
+)
 _SHARED = frozenset(
     {
         "auth",
@@ -97,7 +150,7 @@ _SHARED = frozenset(
         "launch_input_binding",
         "launch_input_invalid",
     }
-)
+).union(_SETUP_FAILURES)
 
 
 def enabled(policy: ReviewPolicy) -> bool:

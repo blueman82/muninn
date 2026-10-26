@@ -210,11 +210,16 @@ class NativeChild:
             raise OSError("native_process_unavailable")
         return None if status.value == 259 else status.value
 
+    def close_job(self) -> None:
+        """Contain descendants while retaining pipes for a final drain."""
+        if self.job:
+            if not self.kernel.CloseHandle(self.job):
+                raise OSError("native_job_close_failed")
+            self.job = 0
+
     def close(self) -> None:
         """Close the sole Job first so live descendants cannot survive."""
-        if self.job:
-            self.kernel.CloseHandle(self.job)
-            self.job = 0
+        self.close_job()
         self.kernel.CloseHandle(self.process)
         for pipe in (self.stdin, self.stdout, self.stderr):
             pipe.close()

@@ -148,10 +148,16 @@ def log_has_keyed(home: Path) -> bool:
             path, root=home, expected=discovered
         ) as handle:
             platform_io.assert_private_fd(handle.fileno())
-            data = handle.read()
+            marker, found, tail = KEYED_PREFIX.encode(), False, b""
+            # Consume through EOF so a marker cannot hide later read failures.
+            while block := handle.read(64 * 1024):
+                window = tail + block
+                found = found or marker in window
+                # Consecutive short reads need the combined window's suffix.
+                tail = window[-3:]
     except OSError:
         return True
-    return KEYED_PREFIX.encode() in data
+    return found
 
 
 def key_for(conn: sqlite3.Connection) -> bytes:

@@ -9,7 +9,7 @@ description: Control Muninn learning requests and choose future records or verif
 muninn learn setup --mode now
 muninn learn setup --mode all
 muninn learn setup --mode all --confirm SCAN_DIGEST
-muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]
+muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]
 muninn learn list [--state STATE]
 muninn learn show R_ID
 muninn learn cancel R_ID
@@ -22,7 +22,7 @@ muninn learn replay --session REF --from-line N --through-line N --policy PATH
 It excludes indexed history and older or undated late imports.
 `all` previews verified project history before confirmation.
 Copy the returned `confirmation` value into `SCAN_DIGEST`.
-`--project PATH` can narrow history to one indexed project.
+`--project PATH` limits automatic learning to one indexed project.
 From-now mode applies to all projects.
 The installer offers the same scope choice and retains it during upgrades.
 
@@ -56,7 +56,8 @@ Open cited originals before making factual claims.
 
 Revision 3 allows four workers and three total attempts.
 Temporary failures wait 5 seconds, then 30 seconds, before their remaining attempts.
-Live requests take priority over queued history.
+Manual and live requests take priority over queued history.
+Within each group, Muninn processes older requests first.
 Rejected results do not stop unrelated requests.
 Shared setup failures receive automatic checks every 60 seconds.
 Owner pauses remain in force.
@@ -84,3 +85,17 @@ Output is one JSON object.
 Hooks return compact JSON and exit 0.
 Writer exit 3 means busy.
 See `docs/REFERENCE.md` for complete shapes and refusal rules.
+
+`--task` binds an explicit request to one task in its indexed project.
+Use 1–128 ASCII letters, digits, `.`, `_`, `:`, or `-`.
+Start the task ID with a letter or digit.
+Without `--task`, the request uses project scope.
+
+End and precompact capture are separate from startup context refresh.
+A busy enqueue does not prove durable capture.
+Later recovery cannot prove the exact missed event or cutoff.
+Cursor waits for native import or explicit full ingest.
+Cursor resume and postcompact injection remain unproven.
+Use `muninn know context` to request that context explicitly.
+Previously injected context cannot be retracted.
+Per-prompt recall starts off on fresh installs.

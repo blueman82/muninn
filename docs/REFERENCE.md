@@ -117,7 +117,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local attempt and `Receipt`; no model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision; returns `KnowledgeView`. |
-| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. |
+| `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. `--task` binds the request to one task in the source project. |
 | `muninn learn setup --mode now\|all [--project PATH] [--confirm SCAN_DIGEST]` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
 | `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, and safe `diagnostics`. Content is shown only when requested, never logged. |
@@ -262,7 +262,8 @@ Revision 3 allows four workers and three total attempts per request.
 Each attempt allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
 The first retry waits 5 seconds.
 The second retry waits 30 seconds.
-Live requests take priority over queued history.
+Manual and live requests take priority over queued history.
+Within each group, Muninn processes older requests first.
 SQLite saves remain on the main thread.
 Before saving, Muninn compares current knowledge with the worker's original knowledge snapshot.
 A changed snapshot requires a fresh attempt within the same attempt limit.
@@ -321,6 +322,8 @@ It does not silently discard an old queue.
 It also excludes older or undated records when their source is indexed later.
 `all` includes eligible older records and future records.
 Global records remain excluded.
+All available history also admits verified older transcripts indexed after setup.
+Native-source checks still apply.
 
 Before history starts, Muninn scans physical sources and shows the work for confirmation.
 It groups same-project records into intervals of at most 200 lines.
@@ -343,7 +346,7 @@ Confirmation includes all traversed original bytes and indexed records.
 If history changes before admission, confirmation fails with `history_scan_changed`.
 Reindexing changed originals does not preserve an earlier confirmation.
 Preview the scan again before confirming.
-`--project PATH` narrows history to one indexed project.
+`--project PATH` limits automatic learning to one indexed project.
 From-now mode applies to all projects and refuses `--project`.
 An active review prevents scope changes with `learning_busy`.
 
@@ -374,6 +377,17 @@ They contain no transcript or model output.
 | `unavailable` | The runner did not finish successfully. Muninn uses a remaining attempt. |
 | `config` | Setup verification failed. Older records may lack the precise stage or cause. |
 | `capability_changed` | The approved runner setup changed. Muninn waits for that approved setup to return. |
+| `capability_unavailable` | A required runner executable, proof, or schema file cannot be read. Muninn waits for the approved files. |
+| `capability_invalid` | A runner capability or proof file has an invalid format. Muninn waits for the approved file. |
+| `capability_path` | A runner path is relative or resolves to another path. Restore the approved path. |
+| `capability_storage`, `capability_executable_storage` | Ownership or access checks failed. Restore the approved file protections. |
+| `capability_executable_provenance` | The executable's origin cannot be verified. Restore the approved executable. |
+| `capability_platform`, `launch_input_platform` | The approved runner cannot use this operating system or processor. Use the approved host. |
+| `capability_limit` | Runner setup exceeded a file size or scan limit. Restore the approved setup. |
+| `codex_experimental_boundary` | The Codex host, policy, or project differs from the approved setup. Restore that setup. |
+| `native_prompt_instruction` | Review instructions do not match the required Codex format. Restore the approved instructions. |
+| `launch_input_storage` | A review setup file is outside its required private directory. Restore the approved location. |
+| `runner_unsupported` | The selected runner has no supported launch method. Use the approved runner. |
 | `rejected_authority` | The proposed change lacks verified owner evidence. Muninn rejects it and continues. |
 | `rejected_revision` | Saved knowledge changed during review. Muninn rebuilds the review within the attempt limit. |
 | `rejected_validation` | The result does not match the required format. Muninn rejects it and continues. |
@@ -384,6 +398,8 @@ They contain no transcript or model output.
 | `native_tool_event` | Codex reported a tool action. Inspect that activity before enabling learning again. |
 
 Muninn can retry safe calls and recheck approved local setup.
+Setup failures keep queued requests available.
+Muninn checks the setup again every 60 seconds without making a model call.
 It cannot sign in for a person, approve changed security bindings, restore missing original transcripts, or infer provider allowance.
 These actions need account access, approval, original data, or provider information that Muninn does not have.
 
@@ -397,6 +413,8 @@ macOS signature. It binds the executable to a private capability and uses fixed
 launch arguments. This capability does not fully isolate Codex tools or
 actions. The default profile records this limit. The finite pilot account is a
 separate control. It does not prove runner status or full C6 acceptance.
+See [Codex learning qualification](CODEX_LEARNING_QUALIFICATION.md) for the
+native probe, test evidence boundaries and remaining assessment requirements.
 Windows legacy boot and termination proof, and native live qualification, are
 still separate requirements. During recovery, preserve the private operation
 record, source and archive, key, and journal. Manual restoration of the old
@@ -500,7 +518,7 @@ after service startup.
 
 | Command | What it does |
 |---|---|
-| `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); it invokes the installed Python through its venv path rather than the outer symlink; if that runtime lacks pinned dependencies, it reuses a compatible checkout `.venv` or asks before creating one from the hashed runtime lock; on macOS/Linux, first install also offers to install developer requirements and set local `core.hooksPath` to `.githooks` unless another path is configured; `--check` previews and may perform accepted setup; `--status` compares the installed commit with `HEAD` |
+| `bin/muninn-install` | fresh install, or upgrade when installed (the last step moves each old release to `.pruning-<ts>-<sha>` so a failure can still roll back, then a sweep deletes those dirs after the point of no return; a sweep that fails warns, is listed as `sweep_failed` in the install record, and the next upgrade retries; `muninn doctor` warns with `release_leftovers` while a `.pruning-<ts>-<sha>` directory remains in `~/.local/lib/muninn`, which is where they live, not in the data directory); it invokes the installed Python through its venv path rather than the outer symlink; if that runtime lacks pinned dependencies, it reuses a compatible checkout `.venv` or asks before creating one from the hashed runtime lock; on macOS/Linux, first install also offers to install developer requirements and set local `core.hooksPath` to `.githooks` unless another path is configured; `--check` previews and may perform accepted setup; `--status` compares the installed commit with `HEAD` using local Git history: equal revisions are up to date; a newer checkout offers an upgrade preview; a newer installed revision asks you to update the checkout before installing; unknown or divergent history reports `versions differ` and asks you to inspect before installing. Status performs no fetch or installation |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | the same as `bin/muninn-install --uninstall`. Stops the poller; removes the launchd plist, Muninn's hooks from Claude's `settings.json` and Cursor's `hooks.json`, Muninn's sections from Codex's `config.toml`, the Codex plugin cache, `~/.local/lib/muninn` and the `~/.local/bin/muninn` link (only when it points into that release directory). Moves the data directory to `~/.local/share/muninn-removed-<ts>/muninn` (`--purge-data` deletes it instead). `--dry-run` writes nothing. Prints one line per action, then `uninstall done`, `dry run only: nothing was removed` or `muninn is not installed here`, and exits 0. A provider config it cannot edit safely, a taken data-move name, or a job launchd will not unload prints `FAILED: <why>` and exits 1; the config and name checks run first, in a dry run too, before anything is changed |
 
 ## `muninn erase`
@@ -525,6 +543,19 @@ changing requested content. It selects at most one owner; a replacement produces
 This differs from the older erase behavior. Dry runs retain their writer-only,
 no-stop path and may initialize an empty store; they create no `tombstone.key`.
 Neither an absent nor an empty store establishes process-containment evidence.
+
+POSIX review-worker shutdown retains its owned, unreaped group leader while
+checking native shutdown evidence, before publishing an outcome or discarding
+process buffers. Signals target only that verified process group. On 64-bit Linux,
+the check requires terminal members across the original isolated session,
+including members in other groups, and a stable kernel fork counter around
+complete observations. Darwin retains its native sole-current-group zombie
+observation with `WNOWAIT`; same-session escape/rejoin and closed-session safety
+remain unverified. This does not establish universal descendant isolation.
+Unknown or unavailable evidence keeps cleanup pending. Individual Linux
+observations have a work deadline; unrelated host forks or unavailable procfs
+can prevent completion. `stop_all()` has a bounded join and reports
+`process_cleanup_incomplete` if cleanup remains pending, retaining ownership.
 
 The Python APIs retain `run_erase` and caller-owned `erase`; the latter requires
 established pause as well as writer ownership for real erasure. Callers needing
@@ -670,7 +701,16 @@ four fields:
   there is nothing to add.
 
 When a repair baseline exists, the result includes `recovery_guidance`.
-It gives the platform, state, reason and next steps.
+It gives `platform`, `status`, `reason` and `steps`.
+`review_repair.detail: baseline_present_recovery_unverified` means only that a
+repair-baseline path exists; its record and containment safety have not been verified.
+On macOS or Linux, `status: recovery_check_required` with
+`reason: repair_baseline_present` asks you to run the checked recovery command.
+This is not a successful repair or a promise that automatic repair will pass.
+Windows and unsupported platforms return `status: manual_recovery_required`, with
+`reason: windows_repair_not_qualified` or `recovery_platform_unqualified`.
+Doctor does not open or validate repair records; malformed and unsafe paths also
+require checked recovery, which can refuse without repairing them.
 On macOS or Linux, run `muninn recover`.
 It uses the owner and writer barriers.
 It repairs pause records only when the saved boot and file identities match.

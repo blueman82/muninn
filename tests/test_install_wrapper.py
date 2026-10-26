@@ -346,8 +346,11 @@ class WrapperTest(unittest.TestCase):
         hook_path = git(root, "config", "--get", "core.hooksPath")
         self.assertEqual(hook_path.decode().strip(), ".githooks")
         self.assertTrue((root / ".venv" / "bin" / "python3.13").is_file())
-        self.assertIn("-m pip install -r", self.argv())
-        self.assertIn("requirements-dev.txt", self.argv())
+        self.assertRegex(
+            self.argv(),
+            r"(?m)^-m pip install --require-hashes -r .+[/\\]"
+            r"requirements-dev\.txt$",
+        )
 
     def test_windows_setup_uses_windows_venv_interpreter(self) -> None:
         root = self.hook_repo()
@@ -373,7 +376,7 @@ class WrapperTest(unittest.TestCase):
         self.installed("a" * 40)
         r = self.run_wrapper("--status")
         self.assertIn(f"installed aaaaaaa, checkout {self.sha[:7]}", r.stdout)
-        self.assertIn("upgrade needed", r.stdout)
+        self.assertIn("versions differ; ancestry unknown", r.stdout)
         self.assertEqual(self.argv(), "")
 
     def test_status_says_up_to_date_when_they_match(self) -> None:

@@ -23,7 +23,8 @@ Keep unverifiable sources excluded.
 
 The new default uses policy revision 3.
 It permits four workers and three total attempts per request.
-Live work takes priority over queued history.
+Manual and live work take priority over queued history.
+Keep creation order within each priority group.
 Keep SQLite writes on the main thread.
 Check current knowledge metadata inside the commit transaction.
 Rebuild stale results within the same attempt limit.

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess as subprocess
-import threading
 import time
 from contextlib import closing
 from pathlib import Path
@@ -47,6 +46,7 @@ from muninn.review_runner import RunnerCapability, prepare_launch
 from muninn.review_spawn import create_wrapper
 from muninn.review_supervisor_result import execute as execute_result
 from muninn.review_supervisor_store import (
+    catch_up_due,
     database,
     halt_interrupted,
     is_contention,
@@ -54,12 +54,9 @@ from muninn.review_supervisor_store import (
     retire_unlaunched,
     startup_snapshot,
 )
-
-
-def _main() -> None:
-    """Refuse SQLite ownership and creation outside the process main thread."""
-    if threading.current_thread() is not threading.main_thread():
-        raise RuntimeError("main_thread_required")
+from muninn.review_supervisor_store import (
+    require_main as _main,
+)
 
 
 class Supervisor:
@@ -77,6 +74,7 @@ class Supervisor:
         self.capability: RunnerCapability | None = None
         self.artifact = b""
         self._recheck_at = 0.0
+        self._catchup = (0, 0.0)
         self.monitor: ProcessMonitor
 
     def start(self, now: float) -> None:
@@ -126,6 +124,9 @@ class Supervisor:
                 del self._pending[0]
             if not self._ready_to_spawn(now):
                 return
+            self._catchup = catch_up_due(
+                self.home, self.policy, now, self._catchup
+            )
             for pending in tuple(self._rounds.values()):
                 if not pending.spawned:
                     self._spawn(pending, now)
@@ -196,8 +197,7 @@ class Supervisor:
                 "SELECT * FROM review_request "
                 "WHERE state IN ('pending','waiting') "
                 "AND (retry_at IS NULL OR retry_at<=?) AND policy_digest=? "
-                "ORDER BY CASE WHEN trigger IN "
-                "('hook','ingest','reconcile') THEN 0 ELSE 1 "
+                "ORDER BY CASE WHEN trigger='history' THEN 1 ELSE 0 "
                 "END,created_at,id LIMIT 1",
                 (now, digest(self.policy)),
             ).fetchone()

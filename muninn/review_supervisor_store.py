@@ -9,6 +9,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 
 from muninn import review_recovery, store
+from muninn.review_catchup import catch_up
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_process import (
@@ -34,8 +35,7 @@ def database(
     home: Path, *, transaction: bool = True
 ) -> Generator[sqlite3.Connection]:
     """Close SQLite before releasing the non-reentrant writer descriptor."""
-    if threading.current_thread() is not threading.main_thread():
-        raise RuntimeError("main_thread_required")
+    require_main()
     with (
         store.writer_lock(home, wait_s=0),
         closing(store.connect_rw(store.db_path(home))) as conn,
@@ -166,3 +166,24 @@ def retire_unlaunched(
         "AND launched_at IS NULL",
         ((now, attempt, index) for attempt, index in keys),
     )
+
+
+def require_main() -> None:
+    """Refuse SQLite ownership and creation outside the main thread."""
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError("main_thread_required")
+
+
+def catch_up_due(
+    home: Path,
+    policy: ReviewPolicy,
+    now: float,
+    state: tuple[int, float],
+) -> tuple[int, float]:
+    """Give one source a turn between closed writer transactions."""
+    after, due = state
+    if now < due:
+        return state
+    with database(home) as conn:
+        after = catch_up(conn, policy, now, after)
+    return after, now + 5.0

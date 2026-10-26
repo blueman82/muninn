@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from unittest import mock
 
-from muninn import review_recovery
+from muninn import review_recovery, review_supervisor
 from muninn.review_models import ReviewPolicy
 from tests.test_review_supervisor import SupervisorCase
 from tools.prepare_codex_policy import policy
@@ -89,6 +90,75 @@ class AutomaticRecoveryTests(SupervisorCase):
             ).fetchone()[0],
             1,
         )
+
+    def test_missing_launch_files_hold_queue_until_restored(self) -> None:
+        self.enqueue(self.window(1, 2))
+        codes = (
+            "capability_unavailable",
+            "capability_invalid",
+            "capability_path",
+            "capability_storage",
+            "capability_executable_storage",
+            "capability_executable_provenance",
+            "capability_platform",
+            "capability_limit",
+            "codex_experimental_boundary",
+            "native_prompt_instruction",
+            "launch_input_platform",
+            "launch_input_storage",
+            "runner_unsupported",
+        )
+        for index, code in enumerate(codes):
+            with (
+                self.subTest(code=code),
+                mock.patch.object(
+                    review_supervisor,
+                    "prepare_launch",
+                    side_effect=ValueError(code),
+                ),
+            ):
+                self.supervisor.tick(13.0 + index * 61.0)
+                self.assertEqual(
+                    self.conn.execute(
+                        "SELECT count(*) FROM review_request "
+                        "WHERE state IN ('running','pending')"
+                    ).fetchone()[0],
+                    2,
+                )
+                self.assertEqual(
+                    self.conn.execute(
+                        "SELECT count(*) FROM review_call"
+                    ).fetchone()[0],
+                    0,
+                )
+                issue = review_recovery.notice(self.conn)
+                self.assertIsNotNone(issue)
+                assert issue is not None
+                self.assertEqual(issue["code"], code)
+        until = time.monotonic() + 8.0
+        while time.monotonic() < until:
+            self.supervisor.tick(900.0)
+            if (
+                self.conn.execute(
+                    "SELECT count(*) FROM review_receipt"
+                ).fetchone()[0]
+                == 2
+            ):
+                break
+            time.sleep(0.01)
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT count(*) FROM review_receipt"
+            ).fetchone()[0],
+            2,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT count(*) FROM review_attempt"
+            ).fetchone()[0],
+            2,
+        )
+        self.assertIsNone(review_recovery.notice(self.conn))
 
     def test_owner_pause_survives_dependency_recheck(self) -> None:
         with mock.patch.object(

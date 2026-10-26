@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from argparse import Namespace
@@ -144,6 +145,15 @@ def _request(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
     """Admit replay and ordinary windows through the same explicit queue."""
     policy = _policy(conn, a.policy)
     window, scope = _window(conn, a, now)
+    task = getattr(a, "task", None)
+    if task is not None:
+        if (
+            scope.project_id is None
+            or len(task) > 128
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", task) is None
+        ):
+            raise ValueError("rejected_scope")
+        scope = Scope(project_id=scope.project_id, task=task)
     return review_requests.enqueue_review(
         conn, window, scope, policy, "explicit", now
     ).model_dump(mode="json")

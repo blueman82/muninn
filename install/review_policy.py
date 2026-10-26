@@ -11,12 +11,26 @@ import stat
 from contextlib import closing, suppress
 from pathlib import Path
 
-from install import learning_scope, legacy_state, record, snapshot_io
+from install import (
+    learning_scope,
+    legacy_state,
+    policy_records,
+    record,
+    snapshot_io,
+)
 from install import legacy_baseline as baseline
 from install import review_policy_default as default_policy
-from install.context import Ctx, StepFailedError, link_text
+from install.context import Ctx, StepFailedError
+from install.policy_record_models import (
+    Activation,
+    InputBinding,
+    Intent,
+    PolicyInput,
+)
 from install.record import Record
 from install.review_policy_parse import policy as _policy
+from install.review_policy_ready import selection as _selection
+from install.review_policy_ready import verify_ready as verify_ready
 from install.review_policy_transition import apply as apply_transition
 from install.review_policy_transition import compatible as compatible
 from muninn import (
@@ -62,9 +76,11 @@ def _home(path: Path) -> list[int]:
     return [info.st_dev, info.st_ino, stat.S_IMODE(info.st_mode)]
 
 
-def capture(ctx: Ctx, sha: str, profile_raw: bytes | None = None) -> Record:
+def capture(
+    ctx: Ctx, sha: str, profile_raw: bytes | None = None
+) -> PolicyInput:
     """Capture raw and canonical input before any installation disruption."""
-    result: Record = {
+    result: InputBinding = {
         "status": "activation_pending",
         "operation": ctx.ts,
         "home": str(ctx.home),
@@ -90,17 +106,20 @@ def capture(ctx: Ctx, sha: str, profile_raw: bytes | None = None) -> Record:
         default = default_policy.select(ctx, profile_raw)
         if default is not None:
             selected, source = default
-            result.update(source)
+            return policy_records.policy_input({**result, **source})
     if selected is not None:
         if raw is None:
             raw = canonical_json(selected)
-        result.update(
-            raw=raw,
-            raw_digest=hashlib.sha256(raw.encode()).hexdigest(),
-            canonical=canonical_json(selected),
-            digest=digest(selected),
+        return policy_records.policy_input(
+            {
+                **result,
+                "raw": raw,
+                "raw_digest": hashlib.sha256(raw.encode()).hexdigest(),
+                "canonical": canonical_json(selected),
+                "digest": digest(selected),
+            }
         )
-    return result
+    return policy_records.policy_input(result)
 
 
 def frozen(
@@ -108,10 +127,11 @@ def frozen(
 ) -> ReviewPolicy | None:
     """Authenticate the retained snapshot and any explicitly repeated input."""
     value = rec.get("policy_input")
-    if value is None:
+    if "policy_input" not in rec:
         if check_supplied and ctx.review_policy is not None:
             raise StepFailedError("review_policy_snapshot_missing")
         return None
+    value = policy_records.policy_input(value)
     if any(
         value.get(key) != expected
         for key, expected in (
@@ -172,7 +192,7 @@ def preflight(ctx: Ctx, rec: Record) -> None:
         check()
 
 
-def _activation(conn: sqlite3.Connection, path: Path) -> Record:
+def _activation(conn: sqlite3.Connection, path: Path) -> Intent:
     """Bind control and sorted source boundaries in the caller snapshot."""
     control = dict(conn.execute("SELECT * FROM review_control").fetchone())
     rows = [
@@ -182,13 +202,15 @@ def _activation(conn: sqlite3.Connection, path: Path) -> Record:
         )
     ]
     info = path.lstat()
-    return {
-        "store": [info.st_dev, info.st_ino],
-        "control": control,
-        "boundaries": hashlib.sha256(
-            json.dumps(rows, separators=(",", ":")).encode()
-        ).hexdigest(),
-    }
+    return policy_records.intent(
+        {
+            "store": [info.st_dev, info.st_ino],
+            "control": control,
+            "boundaries": hashlib.sha256(
+                json.dumps(rows, separators=(",", ":")).encode()
+            ).hexdigest(),
+        }
+    )
 
 
 def _check_live(ctx: Ctx, rec: Record, path: Path) -> None:
@@ -219,6 +241,7 @@ def activate(
     operation_check: legacy_state.OperationCheck,
 ) -> None:
     """Replay latest erasure and activate only on installer normal exit."""
+    policy_records.validate(rec)
     policy = frozen(ctx, rec)
 
     def authority() -> tuple[int, int]:
@@ -253,20 +276,21 @@ def activate(
             apply_transition(
                 conn,
                 policy,
-                enable_admission=rec.get("policy_input", {}).get(
-                    "enable_learning"
-                )
-                is True,
+                enable_admission=policy_records.learning_consent(rec),
             )
             control = conn.execute("SELECT * FROM review_control").fetchone()
-            previous = rec.get("policy_activation")
+            previous = (
+                policy_records.activation(rec["policy_activation"])
+                if "policy_activation" in rec
+                else None
+            )
             if control["policy_json"] is not None:
                 if previous and previous.get("intent"):
                     actual = _activation(conn, path)
                     wanted = previous["intent"]
-                    admission = actual["control"].pop("admission")
-                    expected = dict(wanted["control"])
-                    expected.pop("admission")
+                    admission = actual["control"]["admission"]
+                    expected = wanted["control"].copy()
+                    expected["admission"] = admission
                     if not admission:
                         if (
                             actual["control"]["generation"]
@@ -279,6 +303,7 @@ def activate(
                     if actual != wanted | {"control": expected}:
                         raise StepFailedError("review_activation_changed")
                     previous["phase"] = "complete"
+                    rec["policy_activation"] = previous
                     rec["policy_status"] = (
                         "active" if admission else "activation_incomplete"
                     )
@@ -304,7 +329,11 @@ def _bootstrap(
     operation_check: legacy_state.OperationCheck,
 ) -> None:
     """Durably record exact uncommitted activation before its single commit."""
-    previous = rec.get("policy_activation")
+    previous = (
+        policy_records.activation(rec["policy_activation"])
+        if "policy_activation" in rec
+        else None
+    )
     now = (
         previous["intent"]["control"]["activated_at"]
         if previous
@@ -319,7 +348,8 @@ def _bootstrap(
         intent = _activation(conn, path)
         if previous and previous["intent"] != intent:
             raise StepFailedError("review_activation_changed")
-        rec["policy_activation"] = {"phase": "intent", "intent": intent}
+        activation: Activation = {"phase": "intent", "intent": intent}
+        rec["policy_activation"] = activation
         record.save(ctx, rec)
         operation_check()
         conn.execute("COMMIT")
@@ -327,7 +357,7 @@ def _bootstrap(
         with suppress(BaseException):
             conn.execute("ROLLBACK")
         raise
-    rec["policy_activation"]["phase"] = "complete"
+    activation["phase"] = "complete"
     rec["policy_status"] = "active"
 
 
@@ -339,15 +369,13 @@ def pending(ctx: Ctx) -> tuple[Ctx, Record] | None:
         raise StepFailedError("review_activation_ambiguous")
     for path in paths:
         rec = legacy_state.read(path / "rollback-record.json")
-        if (
-            "legacy" in rec
-            or not rec.get("policy_activation")
-            or rec.get("install_complete")
-            or rec.get("superseded_by")
-        ):
+        if "legacy" in rec or not rec.get("policy_activation"):
+            continue
+        bound = policy_records.envelope(rec)
+        if bound.get("install_complete") or bound.get("superseded_by"):
             continue
         active = dataclasses.replace(
-            ctx, ts=rec["ts"], fresh=rec["fresh"], upgrade=rec["upgrade"]
+            ctx, ts=bound["ts"], fresh=bound["fresh"], upgrade=bound["upgrade"]
         )
         if (
             path != active.rdir
@@ -360,24 +388,6 @@ def pending(ctx: Ctx) -> tuple[Ctx, Record] | None:
     if len(candidates) > 1:
         raise StepFailedError("review_activation_ambiguous")
     return candidates[0] if candidates else None
-
-
-def _selection(ctx: Ctx) -> Record:
-    """Bind all selected launch paths and the configured plugin cache."""
-    links: Record = {}
-    for path in (ctx.lib / "current", ctx.lib / "python", ctx.muninn):
-        if not path.is_symlink():
-            raise StepFailedError("review_activation_runtime_changed")
-        info = path.lstat()
-        links[str(path)] = [link_text(path), info.st_dev, info.st_ino]
-    return {
-        "links": links,
-        "cache": (
-            baseline.tree_state(ctx.cache, private=False)
-            if os.path.lexists(ctx.cache)
-            else None
-        ),
-    }
 
 
 def ready(ctx: Ctx, rec: Record) -> None:
@@ -393,37 +403,22 @@ def ready(ctx: Ctx, rec: Record) -> None:
     ):
         raise StepFailedError("review_activation_runtime_changed")
     if "policy_ready" not in rec:
-        rec["policy_ready"] = {
-            "runtime": baseline.tree_state(ctx.lib / rec["sha"], links=True),
-            "files": {
-                str(path): (
-                    baseline.file_state(path)
-                    if os.path.lexists(path)
-                    else None
-                )
-                for path in (ctx.settings, ctx.config, ctx.cursor_settings)
+        rec["policy_ready"] = policy_records.ready(
+            {
+                "runtime": baseline.tree_state(
+                    ctx.lib / rec["sha"], links=True
+                ),
+                "files": {
+                    str(path): (
+                        baseline.file_state(path)
+                        if os.path.lexists(path)
+                        else None
+                    )
+                    for path in (ctx.settings, ctx.config, ctx.cursor_settings)
+                },
+                "selection": _selection(ctx),
             },
-            "selection": _selection(ctx),
-        }
+            ctx,
+        )
         record.save(ctx, rec)
     verify_ready(ctx, rec)
-
-
-def verify_ready(ctx: Ctx, rec: Record) -> None:
-    """Require the exact completed compatible configuration during recovery."""
-    wanted = rec.get("policy_ready")
-    if (
-        not wanted
-        or baseline.tree_state(ctx.lib / rec["sha"], links=True)
-        != wanted["runtime"]
-    ):
-        raise StepFailedError("review_activation_runtime_changed")
-    for name, expected in wanted["files"].items():
-        path = Path(name)
-        if (
-            baseline.file_state(path) if os.path.lexists(path) else None
-        ) != expected:
-            raise StepFailedError("review_activation_configuration_changed")
-    actual = _selection(ctx)
-    if actual != wanted["selection"]:
-        raise StepFailedError("review_activation_runtime_changed")

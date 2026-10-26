@@ -12,8 +12,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from muninn import review_pause as q
+from muninn import review_pause_owner, store
 from muninn import review_pause_state as state
-from muninn import store
 from tests.review_pause_support import interrupt_erasure
 from tests.store_support import Child
 from tests.test_review_pause import PauseCase
@@ -266,6 +266,7 @@ for name in ("review.supervisor.lock", "writer.lock"):
         clock = SimpleNamespace(monotonic=lambda: elapsed[0], sleep=sleep)
         with (
             mock.patch.object(q, "time", clock),
+            mock.patch.object(review_pause_owner, "time", clock),
             mock.patch.object(q.poller_stop, "request", side_effect=stop),
         ):
             if replace:
