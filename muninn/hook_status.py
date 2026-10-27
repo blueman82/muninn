@@ -4,6 +4,31 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from pydantic import TypeAdapter, ValidationError
+
+from muninn.hook_frame import escape_delimiter
+from muninn.knowledge_models import RequestId
+
+
+def learning_status(issue: Mapping[str, str]) -> str:
+    """Render a safe notice with commands only for a valid request ID."""
+    message = escape_delimiter(
+        printable(
+            f"Muninn learning ({issue['stage']}): "
+            f"{issue['cause']} {issue['action']}"
+        )
+    )
+    try:
+        ident = TypeAdapter(RequestId).validate_python(
+            issue["id"], strict=True
+        )
+    except ValidationError:
+        return message
+    return (
+        f"{message} Inspect: muninn learn show {ident}. "
+        f"Dismiss notice: muninn learn dismiss {ident}."
+    )
+
 
 def status_line(
     event: str, trace: Mapping[str, object], shown: list[str]

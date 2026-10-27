@@ -121,6 +121,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn learn setup --mode now\|all [--project PATH] [--confirm SCAN_DIGEST]` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
 | `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, and safe `diagnostics`. Content is shown only when requested, never logged. |
+| `muninn learn dismiss R_ID` | `request_id` and `dismissed` (boolean). Remove only that request's saved failure notice. A repeated dismissal returns `false`; an unknown request returns `request_unavailable`. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
 | `muninn learn resume --policy PATH --failed-request R_ID` | Re-enable stopped ongoing Codex admission after inspecting the latest exact `rejected_authority` failure. The file must equal the installed policy. All attempts must be terminal, all calls completed, and no other failure type, abandoned attempt or pending work may exist. Failed requests remain failed; output is `{"admission":true,"policy_id":...}`. |
@@ -366,7 +367,17 @@ Capture-gap counts are never multiplied into a call or cost estimate.
 
 At the next Codex session start, `systemMessage` shows a stored cause and action.
 This message also appears with `recall.off` or `recall.advisory`.
+Request notices include their request ID in commands to inspect and dismiss them.
+Setup notices take priority over request notices and cannot be dismissed this way.
 `muninn learn show R_ID` adds `diagnostics` with stage, cause, action, and code.
+`muninn learn dismiss R_ID` removes the saved notice for that request only.
+It retains the request, attempts, calls, evidence, and receipt.
+Failed requests remain in `learn list --state failed` and `learn show`.
+Dismissal does not retry a request, enable learning, or resolve a setup failure.
+It removes the saved notice's stage and action text.
+Show then reconstructs diagnostics from recorded attempt error codes,
+with stage `not recorded` and the default cause and action.
+A new failure after dismissal can create another notice for the same request.
 `doctor` adds `review_attention` when a stored issue needs attention.
 These fields contain fixed program text and identifiers.
 They contain no transcript or model output.
