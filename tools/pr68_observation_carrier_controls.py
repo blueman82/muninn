@@ -5,7 +5,11 @@ from __future__ import annotations
 import ast
 import hashlib
 import os
+import re
+import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -18,6 +22,88 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class CarrierControls(unittest.TestCase):
     """Check one-shot topology and unchanged platform definitions."""
+
+    def test_job_environment_uses_only_server_available_contexts(self) -> None:
+        """Check expression roots in the carrier's simple job environment."""
+        allowed = {
+            "github",
+            "needs",
+            "strategy",
+            "matrix",
+            "vars",
+            "secrets",
+            "inputs",
+        }
+
+        def roots(value: str) -> set[str]:
+            expressions = re.findall(r"\$\{\{(.*?)\}\}", value)
+            return set(
+                re.findall(r"\b([A-Za-z_]\w*)\s*[.\[]", " ".join(expressions))
+            )
+
+        text = (ROOT / ".github/workflows/worker-quiescence.yml").read_text()
+        block = text.split("    env:\n", 1)[1].split("    steps:\n", 1)[0]
+        self.assertLessEqual(roots(block), allowed)
+        for context in allowed:
+            with self.subTest(context=context):
+                self.assertLessEqual(
+                    roots("${{ " + context + ".value }}"), allowed
+                )
+        for context in ("runner", "env", "job", "steps"):
+            for access in (".temp", "['temp']"):
+                with self.subTest(context=context, access=access):
+                    self.assertFalse(
+                        roots("${{ " + context + access + " }}") <= allowed
+                    )
+
+    def test_observation_paths_are_set_from_runner_scratch(self) -> None:
+        """Execute only the first preparation snippet in private fake paths."""
+        text = (ROOT / ".github/workflows/worker-quiescence.yml").read_text()
+        steps = text.split("    steps:\n", 1)[1]
+        first = steps.split("      - name: ", 2)[1]
+        self.assertTrue(
+            first.startswith("Set observation paths from runner scratch\n")
+        )
+        self.assertIn("        shell: bash\n", first)
+        snippet = textwrap.dedent(first.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory(
+            prefix="observation paths "
+        ) as directory:
+            root = Path(directory).resolve()
+            root.chmod(0o700)
+            scratch, home = root / "runner scratch", root / "private home"
+            scratch.mkdir(mode=0o700)
+            home.mkdir(mode=0o700)
+            exported = root / "step environment file"
+            exported.write_text("")
+            exported.chmod(0o600)
+            before = set(root.rglob("*"))
+            result = subprocess.run(
+                ["/bin/bash", "--noprofile", "--norc", "-eu", "-c", snippet],
+                cwd=root,
+                env={
+                    "HOME": str(home),
+                    "RUNNER_TEMP": str(scratch),
+                    "GITHUB_ENV": str(exported),
+                    "PATH": "/usr/bin:/bin",
+                },
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual((result.stdout, result.stderr), ("", ""))
+            self.assertEqual(
+                exported.read_text().splitlines(),
+                [
+                    f"MUNINN_CLEANUP_OBSERVATION_DIR={scratch}/pr68-cleanup-observation",
+                    f"MUNINN_CLEANUP_OBSERVATION_WORKTREE={scratch}/pr68-cleanup-source",
+                ],
+            )
+            self.assertEqual(set(root.rglob("*")), before)
+            self.assertEqual(list(scratch.iterdir()), [])
+            self.assertEqual(list(home.iterdir()), [])
 
     def test_collector_is_stdlib_only_and_logical_runtime_copy_is_absent(
         self,
@@ -72,7 +158,7 @@ class CarrierControls(unittest.TestCase):
         )
         self.assertIn("if: always()", text)
         self.assertIn("retention-days: 30", text)
-        self.assertIn("MUNINN_CLEANUP_OBSERVATION_WORKTREE:", text)
+        self.assertIn("MUNINN_CLEANUP_OBSERVATION_WORKTREE=", text)
         self.assertEqual(
             text.count(
                 "working-directory: "

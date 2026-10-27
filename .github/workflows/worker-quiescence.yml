@@ -18,9 +18,12 @@ jobs:
     env:
       PYTHONUTF8: '1'
       PYTHONUNBUFFERED: '1'
-      MUNINN_CLEANUP_OBSERVATION_DIR: ${{ runner.temp }}/pr68-cleanup-observation
-      MUNINN_CLEANUP_OBSERVATION_WORKTREE: ${{ runner.temp }}/pr68-cleanup-source
     steps:
+      - name: Set observation paths from runner scratch
+        shell: bash
+        run: |
+          printf 'MUNINN_CLEANUP_OBSERVATION_DIR=%s\n' "$RUNNER_TEMP/pr68-cleanup-observation" >> "$GITHUB_ENV"
+          printf 'MUNINN_CLEANUP_OBSERVATION_WORKTREE=%s\n' "$RUNNER_TEMP/pr68-cleanup-source" >> "$GITHUB_ENV"
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
