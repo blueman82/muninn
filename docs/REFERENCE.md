@@ -540,6 +540,30 @@ preview creates no lock, repairs no permissions and performs no recovery or
 checkpoint. Preserve refused state. A refused preview has not established policy
 compatibility; use the recovery guidance when required.
 
+The installer keeps that refusal code and appends one finite reason, for example
+`FAILED: review_policy_preview_unavailable: writer_busy`. It does not print raw
+operating-system or SQLite errors. The reason identifies the first observed
+failed check; it does not identify a competing process or prove a persistent
+fault. Refusal still exits 1 and has not established policy compatibility.
+
+| Reason | Observed condition |
+|---|---|
+| `writer_busy` | The native cooperating-writer lock reported contention. Try the preview again after other commands finish; contention can be transient. |
+| `state_missing` | Required state disappeared or was absent. Preserve the remaining state and inspect installation health. |
+| `unsafe_state` | A privacy or permission check failed. The preview does not repair it. |
+| `directory_changed` | The data directory metadata changed during the read. A heartbeat publication can cause this; the reason does not prove which operation changed it. |
+| `lock_changed` | The lock identity or metadata changed. On POSIX, even a competing writer that fails to acquire the lock can change its metadata before trying. |
+| `database_changed` | The database pathname or held descriptor metadata changed. |
+| `sidecar_present` | A journal, WAL or shared-memory path was present at the sidecar check. Preserve it; do not remove it to force a preview. |
+| `unsupported_header` | The image had a short, invalid or non-DELETE SQLite header. |
+| `sqlite_error` | SQLite could not open or query the guarded image. |
+| `io_error` | Another operating-system read, identity, lock or cleanup operation failed. The reason does not expose the native error or identify its exact operation. |
+
+Several conditions can occur together. An earlier privacy or metadata check can
+refuse the read before a sidecar check. A running service alone does not prove
+writer contention. Do not bypass locks, remove sidecars or change permissions
+to force a successful preview.
+
 ## `muninn erase`
 
 Choose exactly one session, event reference or literal match (at least four

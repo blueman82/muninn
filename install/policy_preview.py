@@ -67,17 +67,29 @@ def _ownership(home: Path) -> Generator[Callable[[], None]]:
         platform_io.assert_private_fd(fd)
         opened = os.fstat(fd)
         if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-            raise OSError("preview lock changed")
-        platform_lock.try_lock(fd)
+            raise StepFailedError(
+                "review_policy_preview_unavailable: lock_changed"
+            )
+        try:
+            platform_lock.try_lock(fd)
+        except BlockingIOError as exc:
+            raise StepFailedError(
+                "review_policy_preview_unavailable: writer_busy"
+            ) from exc
 
         def check() -> None:
-            if (
-                _metadata(_private(home, directory=True))
-                != _metadata(directory)
-                or _metadata(_private(path)) != _metadata(before)
-                or _metadata(os.fstat(fd)) != _metadata(opened)
+            if _metadata(_private(home, directory=True)) != _metadata(
+                directory
             ):
-                raise OSError("preview ownership changed")
+                raise StepFailedError(
+                    "review_policy_preview_unavailable: directory_changed"
+                )
+            if _metadata(_private(path)) != _metadata(before) or _metadata(
+                os.fstat(fd)
+            ) != _metadata(opened):
+                raise StepFailedError(
+                    "review_policy_preview_unavailable: lock_changed"
+                )
             platform_io.assert_private_fd(fd)
 
         check()
@@ -96,7 +108,9 @@ def _no_sidecars(path: Path) -> None:
         os.path.lexists(f"{path}{suffix}")
         for suffix in ("-journal", "-wal", "-shm")
     ):
-        raise OSError("preview needs a stable DELETE store without sidecars")
+        raise StepFailedError(
+            "review_policy_preview_unavailable: sidecar_present"
+        )
 
 
 @contextmanager
@@ -138,7 +152,8 @@ def connection(path: Path) -> Generator[sqlite3.Connection]:
                         opened
                     ):
                         raise StepFailedError(
-                            "review_policy_preview_unavailable"
+                            "review_policy_preview_unavailable: "
+                            "database_changed"
                         )
 
                 check()
@@ -148,7 +163,10 @@ def connection(path: Path) -> Generator[sqlite3.Connection]:
                     or header[:16] != b"SQLite format 3\x00"
                     or header[18:20] != b"\x01\x01"
                 ):
-                    raise StepFailedError("review_policy_preview_unavailable")
+                    raise StepFailedError(
+                        "review_policy_preview_unavailable: "
+                        "unsupported_header"
+                    )
                 check()
                 with closing(
                     sqlite3.connect(
@@ -160,8 +178,22 @@ def connection(path: Path) -> Generator[sqlite3.Connection]:
                     yield conn
                     check()
                 check()
-    except (OSError, sqlite3.Error) as exc:
-        raise StepFailedError("review_policy_preview_unavailable") from exc
+    except FileNotFoundError as exc:
+        raise StepFailedError(
+            "review_policy_preview_unavailable: state_missing"
+        ) from exc
+    except PermissionError as exc:
+        raise StepFailedError(
+            "review_policy_preview_unavailable: unsafe_state"
+        ) from exc
+    except sqlite3.Error as exc:
+        raise StepFailedError(
+            "review_policy_preview_unavailable: sqlite_error"
+        ) from exc
+    except OSError as exc:
+        raise StepFailedError(
+            "review_policy_preview_unavailable: io_error"
+        ) from exc
 
 
 def validate(ctx: Ctx, policy: ReviewPolicy) -> None:
