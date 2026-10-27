@@ -269,6 +269,12 @@ def _write(conn: sqlite3.Connection, a: Namespace) -> Out:
             out = _request(conn, a, now)
         elif a.learn_cmd == "resume":
             out = _resume(conn, a, now)
+        elif a.learn_cmd == "dismiss":
+            request_row(conn, a.request_id)
+            out = {
+                "request_id": a.request_id,
+                "dismissed": review_recovery.clear(conn, a.request_id),
+            }
         else:
             operation = (
                 review_requests.cancel_request

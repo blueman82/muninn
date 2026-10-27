@@ -42,6 +42,7 @@ knowledge and learning:
   new erasure request or reboots, but may apply an already-recorded tombstone.
   learn request requires installed frozen policy; line bounds must be paired.
   learn retry explicitly restarts the same request; completed receipts persist.
+  learn dismiss R_ID removes only that request's saved failure notice.
   learn resume requires the exact installed policy and one inspected refusal.
   learn replay requires --from-line, --through-line and --policy.
   No implicit runner/model/budget settings. Old know add/check flags retired.
@@ -246,7 +247,7 @@ def _add_learning(cmd: _Commands) -> None:
             "cancelled",
         ),
     )
-    for name in ("show", "cancel", "retry"):
+    for name in ("show", "cancel", "retry", "dismiss"):
         learn.add(name).add_argument("request_id", type=request_argument)
     p = learn.add("resume")
     p.add_argument("--policy", required=True)

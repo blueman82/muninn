@@ -12,6 +12,7 @@ muninn learn setup --mode all --confirm SCAN_DIGEST
 muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]
 muninn learn list [--state STATE]
 muninn learn show R_ID
+muninn learn dismiss R_ID
 muninn learn cancel R_ID
 muninn learn retry R_ID
 muninn learn resume --policy PATH --failed-request R_ID
@@ -50,6 +51,18 @@ Never invent runner settings, limits, approval, or evidence.
 List returns `requests` containing `RequestView` objects.
 Show returns `ReviewDetail` with attempts, calls, evidence, receipt, and `diagnostics`.
 Diagnostics explain the failure stage, cause, and action.
+Request notices include the request ID in show and dismiss commands.
+Dismiss returns `request_id` and the boolean `dismissed`.
+It removes only that request's saved notice, without changing learning state.
+It retains requests, attempts, calls, evidence, and receipts.
+Failed requests remain visible in list and show.
+After dismissal, diagnostics use recorded attempt error codes with stage
+`not recorded` and the default cause and action.
+Inspect the saved stage and action before dismissal if you need them.
+A repeated dismissal returns `dismissed: false`.
+An unknown request returns `request_unavailable`.
+New failures after dismissal can create another notice.
+Setup notices take priority and cannot be dismissed with a request ID.
 Evidence can contain transcript text.
 Keep evidence out of logs.
 Open cited originals before making factual claims.

@@ -212,10 +212,16 @@ def record(
     )
 
 
-def clear(conn: sqlite3.Connection, ident: str) -> None:
-    """Remove resolved setup state without changing admission."""
+def clear(conn: sqlite3.Connection, ident: str) -> bool:
+    """Remove one saved notice without changing learning state."""
     if review_state.available(conn, "review_issue"):
-        conn.execute("DELETE FROM review_issue WHERE id=?", (ident,))
+        return (
+            conn.execute(
+                "DELETE FROM review_issue WHERE id=?", (ident,)
+            ).rowcount
+            > 0
+        )
+    return False
 
 
 def notice(conn: sqlite3.Connection) -> dict[str, str] | None:

@@ -31,7 +31,7 @@ from muninn.hook_recall import (
     recall_block,
 )
 from muninn.hook_retrieval import RECALL_ADVISORY, advisory_output
-from muninn.hook_status import printable, status_line
+from muninn.hook_status import learning_status, printable, status_line
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
 from muninn.review_recovery import notice as learning_notice
@@ -318,14 +318,7 @@ def _start_block(
     """Build the SessionStart block for the payload's repository."""
     issue = learning_notice(conn)
     if issue is not None:
-        trace["learning_notice"] = (
-            "Muninn learning ("
-            + issue["stage"]
-            + "): "
-            + issue["cause"]
-            + " "
-            + issue["action"]
-        )
+        trace["learning_notice"] = learning_status(issue)
     cwd = project_cwd(payload, env)
     with knowledge_read.read_snapshot(conn):
         ids = scope.scope_ids_for_read(conn, cwd)
