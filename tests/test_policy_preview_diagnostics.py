@@ -33,14 +33,18 @@ class PreviewDiagnosticTests(PreviewFixture):
     def test_native_writer_contention_reports_busy_without_mutation(
         self,
     ) -> None:
-        with store.writer_lock(self.ctx.data, wait_s=0):
-            before = states(self.home)
+        before = states(self.home)
+        fd = os.open(self.lock, os.O_RDWR)
+        try:
+            platform_lock.try_lock(fd)
             with self.assertRaisesRegex(
                 StepFailedError,
                 "^review_policy_preview_unavailable: writer_busy$",
             ):
                 review_policy.preflight(self.ctx, self.rec)
-            self.assertEqual(states(self.home), before)
+        finally:
+            os.close(fd)
+        self.assertEqual(states(self.home), before)
         with policy_preview.connection(self.path):
             pass
 
