@@ -150,7 +150,9 @@ def _verify(
 ) -> HistoryItem:
     """Bind confirmation to original bytes and indexed records."""
     budget = ReadBudget(policy.max_input_bytes)
-    source = check_window(conn, item.window, item.scope, policy, budget=budget)
+    source, _ = check_window(
+        conn, item.window, item.scope, policy, budget=budget
+    )
     expected = {
         row["line"]: row["line_sha256"]
         for row in conn.execute(

@@ -18,6 +18,7 @@ from muninn.review_evidence_models import (
     EvidenceSelector,
     EvidenceWindow,
     InitialEvidence,
+    OriginalRecord,
     OutcomeLocator,
     SourceRef,
 )
@@ -57,7 +58,8 @@ def validate_window_boundary(
     max_bytes: int,
     *,
     budget: ReadBudget | None = None,
-) -> None:
+    selected_line: int | None = None,
+) -> OriginalRecord:
     """Check a complete physical boundary within the caller's read budget.
 
     Args:
@@ -65,6 +67,10 @@ def validate_window_boundary(
         window: Inclusive physical boundary and original hash.
         max_bytes: Positive cap on all original and traversal bytes read.
         budget: Shared operation allowance, or a new standalone account.
+        selected_line: Optional admitted line to retain from the boundary scan.
+
+    Returns:
+        The selected original, or the boundary original when none is selected.
 
     Raises:
         ValueError: If the boundary is changed, erased or unavailable, or
@@ -80,7 +86,9 @@ def validate_window_boundary(
         line_sha256=window.boundary_hash,
     )
     check_tombstones(conn, source, locator)
-    validate_cursor_boundary(conn, window, max_bytes, budget=budget)
+    return validate_cursor_boundary(
+        conn, window, max_bytes, budget=budget, selected_line=selected_line
+    )
 
 
 def validate_cursor_boundary(
@@ -89,22 +97,27 @@ def validate_cursor_boundary(
     max_bytes: int,
     *,
     budget: ReadBudget | None = None,
-) -> None:
+    selected_line: int | None = None,
+) -> OriginalRecord:
     """Check an old cursor hash without admitting its record as evidence."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError("evidence_limit")
     source = _source(conn, window.source)
-    _, raw, _ = originals(
+    first = window.through_line if selected_line is None else selected_line
+    if not window.from_line <= first <= window.through_line:
+        raise ValueError("rejected_scope")
+    records = originals(
         conn,
         source,
-        window.through_line,
+        first,
         window.through_line,
         max_bytes,
         require_cursor=False,
         budget=budget,
-    )[0]
-    if classify.record_hash(raw) != window.boundary_hash:
+    )
+    if classify.record_hash(records[-1][1]) != window.boundary_hash:
         raise ValueError("evidence_changed")
+    return records[0]
 
 
 def select_evidence(

@@ -40,6 +40,7 @@ _RETRYABLE = frozenset({"deadline", "unavailable", "rejected_revision"})
 _ERRORS = _RETRYABLE | {
     "auth",
     "config",
+    "evidence_limit",
     "budget",
     "review_policy_required",
     "rejected_validation",
@@ -101,7 +102,7 @@ def enqueue_review(
         if existing["state"] not in {"cancelled", "completed"}:
             check_window(conn, window, scope, policy, budget=budget)
         return request_view(existing)
-    source = check_window(conn, window, scope, policy, budget=budget)
+    source, _ = check_window(conn, window, scope, policy, budget=budget)
     source_progress(conn, source, now)
     ident = f"R_{uuid4().hex}"
     conn.execute(

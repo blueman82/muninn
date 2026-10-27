@@ -34,6 +34,7 @@ from muninn.review_evidence import (
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceWindow,
+    OriginalRecord,
     SourceRef,
 )
 from muninn.review_json import canonical_json
@@ -67,7 +68,8 @@ def check_window(
     policy: ReviewPolicy,
     *,
     budget: ReadBudget,
-) -> sqlite3.Row:
+    selected_line: int | None = None,
+) -> tuple[sqlite3.Row, OriginalRecord]:
     """Check complete boundaries, scope and erasure before admission."""
     checked_policy(policy)
     window = EvidenceWindow.model_validate_json(canonical_json(window))
@@ -76,8 +78,12 @@ def check_window(
     last, _last_hash = boundary(conn, source)
     if window.through_line > last:
         raise ValueError("incomplete_window")
-    validate_window_boundary(
-        conn, window, policy.max_input_bytes, budget=budget
+    original = validate_window_boundary(
+        conn,
+        window,
+        policy.max_input_bytes,
+        budget=budget,
+        selected_line=selected_line,
     )
     _check_interval(conn, source, window)
     scopes = conn.execute(
@@ -89,7 +95,7 @@ def check_window(
     mapped = {None if r["kind"] == "global" else r["key"] for r in scopes}
     if mapped != {expected} or (expected is None and not policy.allow_global):
         raise ValueError("rejected_scope")
-    return source
+    return source, original
 
 
 def _check_interval(

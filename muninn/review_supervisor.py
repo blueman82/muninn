@@ -281,12 +281,10 @@ class Supervisor:
                         conn, "setup", str(exc), "launch", now
                     )
                 return
-            self._fail(
-                context,
-                str(exc) if str(exc).startswith("rejected_") else "config",
-                now,
-                stage,
-            )
+            code = str(exc)
+            if code != "evidence_limit" and not code.startswith("rejected_"):
+                code = "config"
+            self._fail(context, code, now, stage)
             del self._rounds[key]
 
     def _create(self, pending: _Round) -> None:

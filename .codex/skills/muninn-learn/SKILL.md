@@ -51,6 +51,12 @@ Never invent runner settings, limits, approval, or evidence.
 List returns `requests` containing `RequestView` objects.
 Show returns `ReviewDetail` with attempts, calls, evidence, receipt, and `diagnostics`.
 Diagnostics explain the failure stage, cause, and action.
+`evidence_limit` means source verification exceeded a byte, record, or database-work limit.
+Do not retry that request unchanged; ask the maintainer to inspect its source-read budget.
+A narrower window can still require reading earlier records.
+The operation limit includes source traversal, not just selected text.
+The request fails without automatic retry; limits and admission stay unchanged.
+Older `config` records cannot recover the discarded cause.
 Request notices include the request ID in show and dismiss commands.
 Dismiss returns `request_id` and the boolean `dismissed`.
 It removes only that request's saved notice, without changing learning state.

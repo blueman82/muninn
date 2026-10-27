@@ -382,11 +382,18 @@ A new failure after dismissal can create another notice for the same request.
 These fields contain fixed program text and identifiers.
 They contain no transcript or model output.
 
+Evidence selection and window-boundary verification use one physical source scan.
+The selected record is then reread before admission.
+Both reads share the existing operation budget.
+The limit includes source traversal, not just selected text.
+No source text is cached between operations.
+
 | Code | Meaning and response |
 |---|---|
 | `deadline` | The review exceeded its deadline. Muninn uses a remaining attempt. |
 | `unavailable` | The runner did not finish successfully. Muninn uses a remaining attempt. |
 | `config` | Setup verification failed. Older records may lack the precise stage or cause. |
+| `evidence_limit` | Original-source verification exceeded its byte, record, or database-work limit. Do not retry the request unchanged. Ask the maintainer to inspect its source-read budget. A narrower window can still require reading earlier records. The request fails without automatic retry; limits and learning admission remain unchanged. Older `config` records cannot recover the discarded cause. |
 | `capability_changed` | The approved runner setup changed. Muninn waits for that approved setup to return. |
 | `capability_unavailable` | A required runner executable, proof, or schema file cannot be read. Muninn waits for the approved files. |
 | `capability_invalid` | A runner capability or proof file has an invalid format. Muninn waits for the approved file. |

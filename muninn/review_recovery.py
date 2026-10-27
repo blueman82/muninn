@@ -20,6 +20,13 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Muninn could not verify the review setup.",
         "Inspect the recorded setup stage before retrying.",
     ),
+    "evidence_limit": (
+        "Original-source verification exceeded its byte, record, "
+        "or database-work limit.",
+        "Do not retry this request unchanged. "
+        "Ask the Muninn maintainer to inspect its source-read budget. "
+        "A narrower window can still require reading earlier records.",
+    ),
     "auth": (
         "Codex sign-in is unavailable.",
         "Open Codex and sign in. Muninn will check again.",

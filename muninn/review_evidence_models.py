@@ -108,6 +108,7 @@ class CursorOriginal(StrictModel):
 type OriginalLocator = Annotated[
     JsonlOriginal | CursorOriginal, Field(discriminator="kind")
 ]
+type OriginalRecord = tuple[int, bytes, OriginalLocator]
 
 
 class EvidenceRecord(StrictModel):
