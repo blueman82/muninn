@@ -211,9 +211,14 @@ class WrapperTest(WrapperFixture):
             '[ "${1:-}" = -B ]; do shift; done\n'
             'if [ "$2" = "import sys; print(sys.platform)" ]; '
             "then echo linux; exit 0; fi\n"
-            '[ "$0" = "$EXPECTED_VENV_PY" ] || { '
+            'expected=$EXPECTED_VENV_PY\ncase "$expected" in [A-Za-z]:/*) '
+            'expected=$(cygpath -u "$expected") && [ -n "$expected" ] || { '
+            'echo "alias expected path conversion failed" >> '
+            f"{shlex.quote(self.log.as_posix())}; "
+            "exit 1; }; esac\n"
+            '[ "$0" = "$expected" ] || { '
             'printf "alias target mismatch: actual=%s expected=%s\\n" '
-            f'"$0" "$EXPECTED_VENV_PY" >> {shlex.quote(self.log.as_posix())}; '
+            f'"$0" "$expected" >> {shlex.quote(self.log.as_posix())}; '
             "exit 1; }\n"
             'if [ "$1" = "-c" ]; then exit 0; fi\n'
             f'echo "$@" >> {shlex.quote(self.log.as_posix())}\n'
@@ -246,6 +251,19 @@ class WrapperTest(WrapperFixture):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("alias target mismatch: actual=", self.argv())
         self.assertIn("expected=wrong-target", self.argv())
+
+        self.log.unlink()
+        alias_refused = self.run_wrapper(
+            "--check",
+            script=root / "bin/muninn-install",
+            extra_env={
+                "MUNINN_PYTHON": "",
+                "EXPECTED_VENV_PY": (self.lib / "python").as_posix(),
+            },
+        )
+        self.assertNotEqual(alias_refused.returncode, 0)
+        self.assertIn("alias target mismatch: actual=", self.argv())
+        self.assertRegex(self.argv(), r"expected=.+/muninn/python\n")
 
     def test_accepting_git_hook_setup_installs_dev_tools_and_enables_hooks(
         self,

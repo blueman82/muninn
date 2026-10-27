@@ -67,6 +67,25 @@ or source isolation. See [non-interactive mode](https://learn.chatgpt.com/docs/n
 
 ## Qualification decision
 
+The offline subscription contract in `tools/learning_eval/subscription_terms.py`
+describes a separate first characterization, capped at two inference activations
+within ten minutes and ninety seconds per activation. It preserves null monetary
+values and checks declared selections before opening a harness account. Explicit
+refuse-on-unclean entry persists its mode and stop without recovery signals;
+cleanup or default-mode reopening cannot clear that stop. Historical unmarked
+accounts retain their existing recovery behavior. These validators have no native
+dispatch integration and do not observe authentication or authorize a live run.
+Running-call deadlines and native stop enforcement still require that integration.
+Strict accounts carry versioned controller metadata separate from trial results.
+Do not open those new account artifacts with older controller code after rollback;
+that code does not enforce the new refusal mode or stop.
+
+Declared ChatGPT authentication does not prove included-only use or exclude paid
+credits. Unreported dollar cost and internal requests remain unknown. The first
+characterization account cannot grow or become a C6 predecessor; a later C6
+assessment requires its own complete, approved schedule and repeated required
+proofs. No production policy, admission, recall mode or ongoing budget is changed.
+
 Status remains **unverified**. The executable probe and regression tests reduce
 uncertainty about the tested failure paths. They do not complete C6 or authorize a
 new trial. Keep every unresolved requirement visible in the release and final

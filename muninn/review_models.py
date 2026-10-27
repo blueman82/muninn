@@ -313,10 +313,33 @@ class ReviewDetail(StrictModel):
     )
 
 
+class ReviewAdmission(StrictModel):
+    """Report stored admission separately from checked policy integrity."""
+
+    enabled: bool | None
+    policy_status: Literal[
+        "control_absent",
+        "control_invalid",
+        "policy_absent",
+        "policy_invalid",
+        "policy_digest_mismatch",
+        "valid",
+    ]
+
+    @model_validator(mode="after")
+    def consistent_control(self) -> Self:
+        """Reserve an unknown switch for absent or invalid control metadata."""
+        unknown = self.policy_status in {"control_absent", "control_invalid"}
+        if unknown != (self.enabled is None):
+            raise ValueError("inconsistent_admission_control")
+        return self
+
+
 class ReviewStats(StrictModel):
     """Present nonnegative counts and explicitly incomplete busy coverage."""
 
     schema_version: SchemaVersion
+    admission: ReviewAdmission
     requests_by_state: dict[RequestState, NonnegativeInt]
     calls_by_state: dict[CallState, NonnegativeInt]
     oldest_pending_age_seconds: UtcSeconds | None

@@ -17,6 +17,7 @@ WORKFLOW = (
 )
 PROOFS = {
     "Observe unqualified Windows boot-counter readiness",
+    "Verify Windows refusal preserves native material",
     "Run real ordinary Windows lifecycle",
     "Provision pinned Codex native proof",
     "Run actual Codex and rendered provider routes",
@@ -110,6 +111,7 @@ class PlatformWorkflowTests(unittest.TestCase):
                 [name for name in proof if name in PROOFS],
                 [
                     "Observe unqualified Windows boot-counter readiness",
+                    "Verify Windows refusal preserves native material",
                     "Run real ordinary Windows lifecycle",
                     "Provision pinned Codex native proof",
                     "Run actual Codex and rendered provider routes",
@@ -137,7 +139,9 @@ class PlatformWorkflowTests(unittest.TestCase):
         self.assertIn("cancel-in-progress: true", source)
         self.assertIn("name: native-proof-codes-${{ matrix.runner }}", source)
         self.assertIn("if-no-files-found: error", source)
-        self.assertIn("retention-days: 1", source)
+        self.assertIn(
+            "retention-days: 30", proof["Upload early native proof codes"]
+        )
 
     def test_unix_rows_keep_their_existing_checks(self) -> None:
         source = WORKFLOW.read_text()

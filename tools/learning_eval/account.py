@@ -16,6 +16,7 @@ from muninn.review_json import canonical_json
 from muninn.review_models import PilotBudget, ProcessIdentity, Usage
 from muninn.review_process_identity import identify, recover_group
 from muninn.review_runner import check_private_path
+from tools.learning_eval.account_recovery import recover_calls, refuse_unclean
 from tools.learning_eval.cases import digest
 from tools.learning_eval.models import Assessment, TrialAuthorization
 from tools.learning_eval.trial_models import (
@@ -34,12 +35,18 @@ class Account:
     """Hold the non-reentrant controller lock through spawn and cleanup."""
 
     def __init__(
-        self, path: Path, assessment: Assessment, *, initialize: bool = False
+        self,
+        path: Path,
+        assessment: Assessment,
+        *,
+        initialize: bool = False,
+        refuse_unclean: bool = False,
     ) -> None:
         """Retain an explicit account path and immutable original authority."""
         self.path = path
         self.assessment = checked_assessment(assessment)
         self.initialize = initialize
+        self.refuse_unclean = refuse_unclean
         self._fd: int | None = None
         self._blocked = False
 
@@ -54,7 +61,14 @@ class Account:
             raise ValueError("account_busy") from None
         try:
             self._open()
-            self._recover()
+            calls = self.calls()
+            if not refuse_unclean(
+                calls, self._transaction, self.refuse_unclean
+            ):
+                self._blocked = (
+                    recover_calls(calls, self._save, recover_group)
+                    or self._blocked
+                )
         except BaseException:
             os.close(self._fd)
             self._fd = None
@@ -148,27 +162,6 @@ class Account:
                     ),
                 )
 
-    def _recover(self) -> None:
-        """Keep unresolved claims spent and signal only verified identities."""
-        for call in self.calls():
-            if call.cleaned:
-                continue
-            updated = call.model_copy(
-                update={
-                    "state": "unknown",
-                    "outcome": "account_recovery_required",
-                }
-            )
-            self._save(updated)
-            try:
-                if call.process_identity is None:
-                    raise ValueError("process_identity_unverified")
-                recover_group(call.process_identity)
-            except (ValueError, OSError):
-                self._blocked = True
-            else:
-                self._save(updated.model_copy(update={"cleaned": True}))
-
     def calls(self) -> tuple[AccountCall, ...]:
         """Read all retained calls without resolving unknown usage."""
         with self._transaction() as conn:
@@ -214,6 +207,10 @@ class Account:
                         "UPDATE scheduled SET outcome=? WHERE id=?",
                         (str(exc), schedule.id),
                     )
+            if str(exc) == "account_recovery_required":
+                refuse_unclean(
+                    (), self._transaction, self.refuse_unclean, stop=True
+                )
             raise
 
     def plan(
@@ -257,6 +254,7 @@ class Account:
         now: float,
     ) -> tuple[AccountCall, bool]:
         """Commit the one-use claim separately from scheduling metadata."""
+        refuse_unclean((), self._transaction, self.refuse_unclean)
         slot = schedule.slot()
         with self._transaction() as conn:
             row = conn.execute(
@@ -343,6 +341,7 @@ class Account:
 
     def activate(self, identity: str, now: float) -> None:
         """Spend activation once after durable identity and validation."""
+        refuse_unclean((), self._transaction, self.refuse_unclean)
         call = self._get(identity, now)
         if (
             call.state != "reserved"

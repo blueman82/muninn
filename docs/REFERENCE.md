@@ -671,6 +671,14 @@ measured costs, and mixed/unknown or unsafe currencies leave cost
 and currency null. Diagnostic currency must match `[A-Z]{3}`. `--usage` remains
 separate transcript-observed CLI usage.
 
+`admission.enabled` reports the stored admission switch as a boolean. It is null
+when the singleton control is absent or invalid. `admission.policy_status` is one
+of `control_absent`, `control_invalid`, `policy_absent`, `policy_invalid`,
+`policy_digest_mismatch`, or `valid`. `valid` requires the checked policy, its
+current projection, and a matching canonical digest. An enabled, valid control
+reports stored prerequisites only; it does not prove provider access, scanning,
+or learning success. These observations do not change admission or repair state.
+
 `eligible_records` and `completed_records` count currently indexed logical
 prompt/reply records, deduplicated by provider, thread and physical line. They are
 neither absolute source cursors nor lifetime counts of erased/removed data.
@@ -783,6 +791,7 @@ Review diagnostics also use the same four-field check contract:
 |---|---|---|
 | `review_backlog` | info | durable pending/waiting request count |
 | `review_policy` | warn | installed durable policy configured, or absent/invalid while admission is enabled |
+| `review_admission` | info/warn | stored admission and checked policy integrity; `open` or `closed`, policy refusal code, or unknown control metadata |
 | `review_auth`, `review_config` | warn | attempt-history counts with those finite error codes; invalid stored attempt policies count as configuration failures |
 | `review_process_deadline` | warn | recorded deadline failures, or unfinished attempts past their explicit policy deadline with unended calls; not proof of a live process or completed kill |
 | `review_commit_delay` | warn | overdue running attempts without an unended call, awaiting durable finalization |
@@ -794,6 +803,21 @@ Review diagnostics also use the same four-field check contract:
 | `review_repair` | warn | repair-baseline presence requires recovery guidance; do not remove its files |
 | `review_erasure_intent` | info | journal presence, with consistency unverified; presence does not prove an outstanding intent |
 | `review_windows_repair` | warn | Windows boot repair and durable repair-baseline retirement remain unqualified |
+
+`review_policy` retains its configuration-only meaning; it does not check the
+policy digest or establish that admission is open. `review_admission` reports
+`open` with `ok: true` only when the switch is enabled and the checked policy has
+a matching canonical digest. A closed switch is informational with `ok: false`:
+`closed` for a valid policy, or `closed_policy_absent`, `closed_policy_invalid`,
+or `closed_policy_digest_mismatch`. An open switch with `policy_absent`,
+`policy_invalid`, or `policy_digest_mismatch` produces a warning. An absent or
+invalid singleton produces `control_absent` or `control_invalid`, a warning with
+`ok: null`. These checks do not prove provider access, scanning, or learning
+success. `review_config` counts historical attempts; it does not by itself
+establish a current admission failure or authorize a recovery action.
+With no control row, `review_abandoned` is unknown with `generation_unavailable`
+and `review_capture_gaps` is unknown with `control_absent`; both are warnings.
+Independent history, backlog, coverage, and attention checks remain available.
 
 If `recovery_guidance` is present, check the service status in the report.
 If Muninn is stopped, leave it stopped until recovery is complete.

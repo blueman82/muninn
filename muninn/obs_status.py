@@ -19,6 +19,10 @@ from muninn import platform_io, query, store
 from muninn.platform_paths import read_selection, windows_base
 from muninn.query.index_age import ALIVE_AT, seconds_since
 from muninn.review_models import ReviewPolicy
+from muninn.review_policy_status import admission_check, policy_status
+from muninn.review_policy_status import (
+    configured_policy_check as _review_policy,
+)
 from muninn.review_recovery import health_checks as learning_checks
 
 DATA_FILES = frozenset(
@@ -196,9 +200,10 @@ def review_health(
         "AND c.ended_at IS NULL),a.error_code,a.outcome "
         "FROM review_attempt a JOIN review_request r ON r.id=a.request_id"
     ).fetchall()
-    generation = conn.execute(
-        "SELECT generation FROM review_control"
-    ).fetchone()[0]
+    control = conn.execute(
+        "SELECT generation FROM review_control WHERE singleton=1"
+    ).fetchone()
+    generation = None if control is None else control[0]
     counts = dict.fromkeys(
         (
             "process_deadline",
@@ -234,12 +239,21 @@ def review_health(
         )
         counts["cancel_delay"] += overdue and state == "cancelled"
         counts["abandoned"] += outcome == "abandoned" or (
-            ended is None and epoch != generation
+            ended is None and generation is not None and epoch != generation
         )
         if error in ("auth", "config"):
             counts[error] += 1
     output: list[tuple[str, bool | None, str, str]] = [
-        ("review_" + key, not value, str(value), "warn")
+        (
+            "review_" + key,
+            None if key == "abandoned" and control is None else not value,
+            (
+                "generation_unavailable"
+                if key == "abandoned" and control is None
+                else str(value)
+            ),
+            "warn",
+        )
         for key, value in counts.items()
     ]
     output.append(
@@ -255,8 +269,9 @@ def review_health(
             "info",
         )
     )
-    output.extend(_review_gap_checks(conn))
+    output.extend(_review_gap_checks(conn, control is not None))
     output.append(_review_policy(conn))
+    output.append(admission_check(policy_status(conn)))
     output.extend(learning_checks(conn))
     return tuple(output)
 
@@ -382,26 +397,6 @@ def writer_secure_delete() -> bool:
         conn.close()
 
 
-def _review_policy(conn: sqlite3.Connection) -> tuple[str, bool, str, str]:
-    """Inspect installed durable policy without returning its configuration."""
-    control = conn.execute(
-        "SELECT admission,policy_json FROM review_control"
-    ).fetchone()
-    configured = control[1] is not None
-    valid = configured
-    if configured:
-        try:
-            ReviewPolicy.model_validate_json(control[1])
-        except ValueError:
-            valid = False
-    return (
-        "review_policy",
-        not control[0] or valid,
-        "configured" if valid else "absent_or_invalid",
-        "warn",
-    )
-
-
 def _protocol_present(path: Path) -> bool:
     """Keep unsafe or uninspectable protocol paths visible without opening."""
     try:
@@ -415,6 +410,7 @@ def _protocol_present(path: Path) -> bool:
 
 def _review_gap_checks(
     conn: sqlite3.Connection,
+    control_present: bool,
 ) -> list[tuple[str, bool | None, str, str]]:
     """Count indexed capture and completion gaps independently of logs."""
     output: list[tuple[str, bool | None, str, str]] = []
@@ -447,6 +443,11 @@ def _review_gap_checks(
             "ELSE s.cursor_line END))",
         ),
     ):
+        if check == "capture_gaps" and not control_present:
+            output.append(
+                ("review_capture_gaps", None, "control_absent", "warn")
+            )
+            continue
         count = conn.execute(sql).fetchone()[0]
         output.append(("review_" + check, not count, str(count), "warn"))
     return output
