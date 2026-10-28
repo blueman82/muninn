@@ -374,9 +374,8 @@ def failed_capture(exc: Exception) -> HookCapture:
     busy = isinstance(exc, store.BusyError) or getattr(
         cause, "sqlite_errorcode", None
     ) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
-    return HookCapture(
-        False, (), "review_enqueue_busy" if busy else "unavailable"
-    )
+    code = "review_enqueue_busy" if busy else "unavailable"
+    return HookCapture(False, (), code)
 
 
 def capture_event(
@@ -413,6 +412,7 @@ def record_capture(
 ) -> None:
     """Record persistence and missed-boundary counters without content."""
     errors = {
+        "evidence_limit",
         "review_policy_required",
         "rejected_scope",
         "rejected_validation",

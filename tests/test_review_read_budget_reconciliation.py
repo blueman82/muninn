@@ -196,6 +196,6 @@ class ReconciliationReadBudgetTests(RequestCase):
                 0,
             )
             self.assertIn(
-                '"error_code":"unavailable"',
+                '"error_code":"evidence_limit"',
                 (self.home / "calls.jsonl").read_text(),
             )

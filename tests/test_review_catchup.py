@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from unittest import mock
 
@@ -163,6 +164,10 @@ class ReviewCatchupTests(RequestCase):
         ):
             self.step()
             self.assertEqual(self.windows(), [])
+            records = (self.home / "calls.jsonl").read_text().splitlines()
+            self.assertEqual(
+                json.loads(records[-1])["error_code"], "evidence_limit"
+            )
             self.step()
         self.assertEqual(self.windows(), [(1, 2)])
 

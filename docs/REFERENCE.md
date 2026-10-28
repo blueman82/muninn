@@ -818,7 +818,7 @@ owns those files.
 | `poller_error` | warn | the last poller pass did not end in an exception; the poller's next good pass clears it, a manual `ingest` does not | the exception class name only |
 | `unreadable_files` | warn | no transcript open attempt failed during the last completed invocation | failed open attempts (permissions; a vanished file does not count), possibly including subsequently recovered sources. The SessionStart block, and a recall block that has a hit, also report these attempts |
 | `aside_files` | warn | no historical unreadable stores or retained recovery copies remain | names of retained store artifacts; inspect the actual reported paths |
-| `upgrade_snapshot` | warn | no pre-upgrade copy of the store is left in the data dir | names of leftover `muninn.sqlite.pre-upgrade-*` files |
+| `upgrade_snapshot` | warn | no retained pre-upgrade recovery archive is present | names of retained `muninn.sqlite.pre-upgrade-*` files; successful upgrades preserve them. Keep them until the owner reviews recovery and retention needs. They can contain transcript text and the legacy knowledge ledger that `erase` cannot scrub. Never remove them merely to clear this warning or restore them over newer data. |
 | `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
 | `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
 | `launchd_job` | error | on macOS, the launchd job is loaded with a live process | its pid |
@@ -860,6 +860,13 @@ establish a current admission failure or authorize a recovery action.
 With no control row, `review_abandoned` is unknown with `generation_unavailable`
 and `review_capture_gaps` is unknown with `control_absent`; both are warnings.
 Independent history, backlog, coverage, and attention checks remain available.
+
+Capture-gap counts do not identify refusal causes or prove lost lifecycle events.
+New hook, catch-up and attempt logs retain `evidence_limit` when source verification
+exceeds its shared byte, record or database-work allowance.
+These limits include source traversal, not just selected text.
+Older capture logs may contain only `unavailable`; their exact cause is unknown.
+Do not raise limits or replay history merely to clear a count.
 
 If `recovery_guidance` is present, check the service status in the report.
 If Muninn is stopped, leave it stopped until recovery is complete.

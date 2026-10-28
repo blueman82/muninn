@@ -355,9 +355,9 @@ def _aside_files(home: Path) -> CheckResult:
 
 
 def _upgrade_snapshots(home: Path) -> CheckResult:
-    """No pre-upgrade copy of the store is left on disk."""
-    # The installer deletes it after a good upgrade; one left behind is a
-    # full copy of the transcript text that erase cannot scrub.
+    """Report retained pre-upgrade archives without removing recovery data."""
+    # Recovery archives can hold transcript text that erase cannot scrub;
+    # their removal needs an owner decision about recovery and retention.
     kept = [n for n in _names(home) if n.startswith(store.PRE_UPGRADE_PREFIX)]
     return _result("upgrade_snapshot", not kept, ",".join(kept), level="warn")
 
