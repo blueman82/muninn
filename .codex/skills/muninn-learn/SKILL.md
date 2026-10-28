@@ -55,6 +55,8 @@ Diagnostics explain the failure stage, cause, and action.
 Do not retry that request unchanged; ask the maintainer to inspect its source-read budget.
 A narrower window can still require reading earlier records.
 The operation limit includes source traversal, not just selected text.
+Capture, catch-up and attempt logs preserve this code without transcript text.
+Older capture logs may contain only `unavailable`; their exact cause is unknown.
 The request fails without automatic retry; limits and admission stay unchanged.
 Older `config` records cannot recover the discarded cause.
 Request notices include the request ID in show and dismiss commands.

@@ -34,9 +34,12 @@ Read `detail` before taking action.
   Do not recreate the key by hand.
 - `aside_files`: an unreadable retained store can still contain erased text.
   Salvage required data before deleting that retained store.
-- `upgrade_snapshot`: an undeleted pre-upgrade store copy can contain transcript text.
+- `upgrade_snapshot`: the installer retains private pre-upgrade recovery archives.
+  A successful upgrade does not remove them.
+  They can contain transcript text, including the legacy knowledge ledger.
   `erase` cannot scrub this copy.
-  Delete the named leftover copy.
+  Keep it until the owner reviews recovery and retention needs.
+  Do not delete it just to clear this warning or restore it over newer data.
 - `release_leftovers`: the next installer run removes leftover `.pruning-*` release directories.
 
 ## Ingest checks
@@ -86,6 +89,11 @@ Read `detail` before taking action.
   Endpoint equality cannot prove unchanged interior content.
   Missing, changed, or erased evidence remains a gap.
   Refusals and lost logs do not count as success.
+  A capture gap does not identify its cause or prove a lost lifecycle event.
+  New capture and catch-up log entries preserve `evidence_limit` for source-read refusals.
+  Those limits include source traversal, not just selected text.
+  A narrower window can still require reading earlier records.
+  Do not raise limits or replay history merely to clear the count.
 - `review_pause` reports witness presence.
   It does not verify process containment.
 - `review_repair` reports a saved repair record.

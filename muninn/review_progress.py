@@ -213,7 +213,7 @@ def source_admission(
                 "source_unavailable": "unavailable",
                 "original_unavailable": "unavailable",
                 "ancestry_unavailable": "unavailable",
-                "evidence_limit": "unavailable",
+                "evidence_limit": "evidence_limit",
                 "incomplete_window": "rejected_evidence",
                 "evidence_changed": "rejected_evidence",
                 "evidence_erased": "rejected_erased",

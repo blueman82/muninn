@@ -98,6 +98,7 @@ _REVIEW_ERRORS = frozenset(
         "rejected_fenced",
         "auth",
         "config",
+        "evidence_limit",
         "deadline",
         "budget",
         "unavailable",

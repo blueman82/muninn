@@ -366,7 +366,7 @@ class ReviewProgressEdgeTests(RequestCase):
                         {
                             "event": "review_enqueued",
                             "accepted": False,
-                            "error_code": "unavailable",
+                            "error_code": "evidence_limit",
                             "recovery_gaps": 1,
                         },
                     )
