@@ -167,7 +167,7 @@ def _evidence(
     view = request_view(row)
     try:
         budget = ReadBudget(policy.max_input_bytes)
-        source = check_window(
+        source, _ = check_window(
             conn, view.window, view.scope, policy, budget=budget
         )
         if source["session_root"] != row["session_root"]:

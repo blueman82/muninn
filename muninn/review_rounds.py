@@ -24,6 +24,7 @@ from muninn.review_evidence import validate_evidence
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceSelector,
+    OriginalRecord,
 )
 from muninn.review_json import (
     canonical_json,
@@ -32,7 +33,6 @@ from muninn.review_json import (
     unique_object,
 )
 from muninn.review_models import ReviewContext, ReviewPolicy
-from muninn.review_originals import originals
 from muninn.review_progress import check_window, digest
 from muninn.review_read_budget import ReadBudget
 from muninn.review_request_views import request_row, request_view
@@ -133,8 +133,11 @@ def parse_round(raw: bytes, context: ReviewContext) -> RoundRequest:
 
 
 def _current(
-    conn: sqlite3.Connection, context: ReviewContext, budget: ReadBudget
-) -> sqlite3.Row:
+    conn: sqlite3.Connection,
+    context: ReviewContext,
+    budget: ReadBudget,
+    selected_line: int | None,
+) -> tuple[sqlite3.Row, OriginalRecord]:
     """Fence mutable attempts and prove the durable request boundary."""
     row = request_row(conn, context.request_id)
     attempt = conn.execute(
@@ -180,12 +183,17 @@ def _current(
         context.evidence_ids
     ):
         raise ValueError("rejected_evidence")
-    source = check_window(
-        conn, view.window, view.scope, context.policy, budget=budget
+    source, original = check_window(
+        conn,
+        view.window,
+        view.scope,
+        context.policy,
+        budget=budget,
+        selected_line=selected_line,
     )
     if source["session_root"] != row["session_root"]:
         raise ValueError("evidence_changed")
-    return source
+    return source, original
 
 
 def _link(
@@ -202,19 +210,11 @@ def _selection(
     conn: sqlite3.Connection,
     request: EvidenceRequest,
     source: sqlite3.Row,
-    context: ReviewContext,
-    budget: ReadBudget,
+    selected: OriginalRecord,
 ) -> str:
     """Persist a selection from this request's exact admitted original."""
     locator = request.locator
-    _, raw, original = originals(
-        conn,
-        source,
-        locator.line,
-        locator.line,
-        context.policy.max_input_bytes,
-        budget=budget,
-    )[0]
+    _, raw, original = selected
     record = build_record(
         conn, source, locator, request.selector, raw, original
     )
@@ -339,9 +339,18 @@ def _execute(
         try:
             check_round(context)
             budget = ReadBudget(context.policy.max_input_bytes)
-            source = _current(conn, context, budget)
+            source, original = _current(
+                conn,
+                context,
+                budget,
+                (
+                    request.locator.line
+                    if isinstance(request, EvidenceRequest)
+                    else None
+                ),
+            )
             if isinstance(request, EvidenceRequest):
-                ident = _selection(conn, request, source, context, budget)
+                ident = _selection(conn, request, source, original)
                 records = validate_evidence(
                     conn,
                     home,

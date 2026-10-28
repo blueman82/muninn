@@ -53,7 +53,7 @@ class SupervisorCase(RequestCase):
             proof_path=self.home / "fake-proof",
         )
         self.script = (
-            "import json; print(json.dumps("
+            "import json,sys; json.load(sys.stdin); print(json.dumps("
             + repr(
                 {
                     "type": "result",

@@ -293,7 +293,7 @@ class NativeReviewReadTests(unittest.TestCase):
                 case.case.home, operation, admitted
             )
         self.assertEqual(json.loads(raw)["id"], case.record.id)
-        account = case.checked_reads(3)
+        account = case.checked_reads(2)
         used = 100000 - account.sql_steps_left
         restricted = ReadBudget(case.policy.max_input_bytes)
         for _ in range(100000 - used + 1):
