@@ -1,10 +1,11 @@
 # Improve the existing Muninn memory lifecycle
 
-Status: PROPOSED. Owner approval pending.
-The earlier approval request no longer applies.
+Status: APPROVED by the owner on 2026-10-29. Implementation is not yet complete.
+Owner authorization: “all above is approved what questions would you ask”.
+This records design and implementation authority, not runtime owner-decision evidence.
 The owner requested approval, edit, and reject actions in conversation.
 The owner delegated scheduling choices to the builder.
-Implementation requires approval of this revised design and both ADR proposals.
+The approval includes this revised design and both ADR changes.
 
 This prose revision preserves the accepted ADR 0017 decision. Its wording has changed.
 
@@ -585,16 +586,16 @@ HyperSkill sources, pinned to the inspected checkout:
 
 [ADR 0017](adr/0017-learning-scope-and-recovery.md) currently says:
 “Reject deterministic invalid results once.”
-Owner approval is required for the [proposed narrow amendment](adr/0017-learning-scope-and-recovery.md#proposed-amendment-bounded-correction-and-action-routing)
-before correction is implemented.
+The owner approved the [narrow amendment](adr/0017-learning-scope-and-recovery.md#proposed-amendment-bounded-correction-and-action-routing)
+on 2026-10-29 before implementation.
 The amendment must identify eligible format failures and reduction to an unchanged subset of candidates.
 All other deterministic refusals retain their existing terminal behavior.
 The approved maximum remains two rounds, three total attempts, and four workers.
 Existing transient backoffs remain unchanged.
 
-The [proposed ADR 0018](adr/0018-conversational-memory-decisions.md) covers exact candidate retention,
+The [approved ADR 0018](adr/0018-conversational-memory-decisions.md) covers exact candidate retention,
 owner-decision provenance, authorization, real question resolution, and schema maintenance.
-If approved, this ADR would authorize exact source-bound decisions and the disclosed support transformation.
+This ADR authorizes exact source-bound decisions and the disclosed support transformation.
 It does not create a separate authority override or make recalled text or CLI execution into owner evidence.
 
 Preserve policy binding, runner proof, child containment, owner pauses, generation fencing,
@@ -687,11 +688,12 @@ Do not split the decision schema from its maintenance or erasure obligations.
     The final tree passes `.venv/bin/python3.13 -m tools.check --full` after the last edit.
     Report live host and cross-machine verification separately.
 
-## Revised approval required
+## Revised approval recorded
 
-Conduct a fresh design review.
-Then request one approval for this revised behavior plan and both ADR changes.
+The owner approved this revised behavior plan and both ADR changes on 2026-10-29.
+The authorizing statement was “all above is approved what questions would you ask”.
+Implementation plans and independent review follow this approval.
 The owner delegated foreground versus background execution. It is not an unresolved product choice.
 Exact-candidate approval, verified source binding, and truthful receipt status apply under either schedule.
 
-The earlier approval request no longer applies. It does not authorize this new workflow.
+This approval is project authority. It is not proof of any runtime memory candidate decision.

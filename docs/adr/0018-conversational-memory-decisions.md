@@ -2,8 +2,9 @@
 
 ## Status
 
-PROPOSED. Owner approval pending.
-This document does not authorize implementation or change an accepted decision.
+ACCEPTED by the owner on 2026-10-29. Implementation is not yet complete.
+Owner authorization: “all above is approved what questions would you ask”.
+This approval authorizes implementation. It is not runtime proof of any memory decision.
 
 Related proposal: [memory lifecycle design](../memory-lifecycle-design.md).
 The separate [ADR 0017 amendment](0017-learning-scope-and-recovery.md#proposed-amendment-bounded-correction-and-action-routing)

@@ -84,10 +84,10 @@ Use measured queue age, retries, and revision conflicts to reconsider worker cou
 
 ## Proposed amendment: bounded correction and action routing
 
-Status: PROPOSED. Owner approval pending.
-The accepted decision above remains in force, including “Reject deterministic invalid results once.”
-This section proposes a narrow exception and changes to failure presentation.
-It does not record acceptance or authorize implementation.
+Status: ACCEPTED by the owner on 2026-10-29. Implementation is not yet complete.
+Owner authorization: “all above is approved what questions would you ask”.
+The accepted decision above remains in force except for this narrow correction and presentation amendment.
+This approval records project authority, not runtime owner-decision evidence.
 
 See the [memory lifecycle design](../memory-lifecycle-design.md).
 The separate [ADR 0018 proposal](0018-conversational-memory-decisions.md) covers conversational owner decisions and their governed schema.
