@@ -20,4 +20,5 @@ identify acceptance; exceptions and deferred decisions are marked explicitly.
 | [0013](0013-cursor-imports.md) | Import Cursor history during full ingest |
 | [0015](0015-default-learning-policy.md) | Install the repository learning policy by default |
 | [0016](0016-confirm-legacy-macos-recovery.md) | Ask before repairing a matching older macOS record without a disk ID |
-| [0017](0017-learning-scope-and-recovery.md) | Choose learning scope and recover bounded review failures |
+| [0017](0017-learning-scope-and-recovery.md) | Choose learning scope and recover bounded review failures; narrow correction amendment proposed, owner approval pending |
+| [0018](0018-conversational-memory-decisions.md) | Proposed: bind conversational memory decisions to exact candidates; owner approval pending |
