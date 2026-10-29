@@ -1,116 +1,166 @@
 # Learning failure inspection and evidence checks
 
-The learning review accepts a batch only after independent original-source
-verification and owner-authority checks. A rejected batch changes no knowledge.
-This document records the implementation boundaries for issue #75.
+Muninn checks the original source and the owner's authority before it accepts a
+batch of proposed knowledge changes. If Muninn rejects a batch, it saves no
+knowledge changes from that batch. This document describes the checks and
+inspection commands added for issue #75.
 
 ## Owner authority
 
-The source must be an active primary session and the selected field must be a
-permitted user-message field. User role alone does not establish owner authority.
-The selected span must express affirmative direct owner intent or instruction.
-Direct speech elsewhere cannot give authority to an ambiguous selected span.
-The selection must retain the complete enclosing instruction or sentence,
-including its negation, contextual scope, and restriction at either end. It may
-trim outer whitespace and terminal punctuation. Removing `Never` from
-`Never use Python.` cannot authorize `use Python.` Newlines can continue an
-instruction's operand; a continuation does not become independent owner speech.
+Owner authority means that the evidence can support a decision by the owner.
+The source must be an active primary session. The selected field must be a
+permitted user-message field. A user role alone does not prove owner authority.
 
-Ordinary contextual wording can qualify without a mandatory opening word.
-For example, `For this project, I prefer Python.` can express direct intent.
-The optional leading adjunct has a closed grammar: `for`, `in`, `on`, `within`,
-or `regarding`, followed by `this` or `the current`, followed by `project`,
-`repository`, `repo`, or `task`, and a comma. Only spaces and tabs separate
-these words. Other contexts remain untrusted, including named or possessive
-attributions, narrative framing, and examples. `In Alice's words, use Rust.`
-and `For example, I prefer Rust.` cannot become direct owner instructions by
-removing their prefixes.
-A single backticked identifier or path is treated as an opaque code operand.
-Quoted prose, fenced content, pasted or reported instructions, provider injection
-markers, assistant or tool content, and harness metadata cannot acquire authority
-from surrounding direct speech. Questions, conditionals, hedges, and ambiguous
-wording fail closed.
-Reporting predicates are checked without assuming the speaker's name. Thus
-`I prefer Rust, Alice said.` and `Use Rust, the README says.` remain reported
-material. The adjective in `Use reported errors.` does not identify a speaker.
-After an optional leading context phrase, a further comma introduces an
-unsupported extra clause and makes the sentence untrusted. This conservative
-boundary also covers unfamiliar attribution verbs without guessing names.
+The selected text must state the owner's direct intent or instruction.
+Direct speech elsewhere in the message cannot give authority to an ambiguous
+selection. The selection must keep the complete instruction or sentence that
+contains it. It must keep negation, context, scope, and restrictions at both ends.
+It can omit outer whitespace and terminal punctuation.
 
-This bounded syntax classifier is not a universal language or provenance detector.
-An unmarked copy of direct prose cannot be distinguished from typed prose using
-the transcript alone. Unsupported wording remains untrusted. Preferences,
-decisions, global changes, and replacements retain their existing requirements
-for `direct_owner` and `owner_statement` evidence. No owner approval workflow or
-pinned policy decision changes.
+For example, the selection `use Python.` from `Never use Python.` omits the
+negation. Muninn rejects that selection. A newline can continue the object of an
+instruction. The continuation does not become a separate owner statement.
 
-## Source-reading allowance
+Muninn accepts a limited set of context phrases before an instruction.
+For example, `For this project, I prefer Python.` can state direct intent.
+The opening phrase must have these parts, in this order:
 
-One `validate_evidence` operation reuses freshly read original bytes by complete
-physical locator. JSONL keys include path, offset, and byte length. Cursor keys
-include database, conversation, and record key. Each distinct physical read is
-charged. Each selection still receives its own source, state, scope, projection,
-selector, hash, excerpt, tombstone, and provenance checks.
+1. `for`, `in`, `on`, `within`, or `regarding`.
+2. `this` or `the current`.
+3. `project`, `repository`, `repo`, or `task`.
+4. A comma.
 
-Accumulated durable evidence text has a separate UTF-8 bound. Excerpts,
-selectors, locators, scope, identity, hash, and version strings consume it.
-Repeated and overlapping selections consume the bound repeatedly, so reuse
-cannot permit unlimited selected content or locator metadata.
-The operation discards reused bytes on return or failure. Preparation, boundary
-checking, and final acceptance remain independent verification operations.
-A later operation rereads originals and detects intervening changes.
-No configured allowance is increased.
+Only spaces and tabs can separate these words. Other opening contexts remain
+untrusted. These include named or possessive attributions, narrative framing,
+and examples. `In Alice's words, use Rust.` reports another speaker's words.
+`For example, I prefer Rust.` introduces an example. A selection after either
+prefix cannot become a direct owner instruction.
 
-Final failures preserve `evidence_byte_limit`, `evidence_record_limit`,
-`evidence_work_limit`, or `evidence_selection_limit`. Older `evidence_limit`
-records retain their generic meaning. An old `config` code cannot recover its
-discarded cause. No historical limit or measured counter is invented.
-An unchanged deterministic source-limit failure has no automatic retry.
+Muninn treats one identifier or path in backticks as a code value. It does not
+interpret that value as prose or use it to identify a speaker. Quoted prose,
+fenced content, pasted or reported instructions, and provider injection markers
+cannot gain authority from nearby direct speech. Neither can assistant content,
+tool content, or metadata from the host that runs the agent. Muninn treats
+questions, conditions, uncertain statements, and ambiguous wording as untrusted.
+
+Muninn checks wording that reports another speaker. It does not assume that
+speaker's name. `I prefer Rust, Alice said.` and `Use Rust, the README says.`
+remain reported material. In `Use reported errors.`, the word `reported`
+describes errors and does not identify a speaker.
+
+After the optional opening context phrase, another comma makes the sentence
+untrusted. Muninn treats it as an unsupported extra clause. This check also
+rejects unfamiliar attribution verbs without a guessed speaker name.
+
+These checks recognize limited sentence patterns. They cannot identify every
+language form or prove where all text originated. The transcript cannot
+distinguish an unmarked copy of direct prose from the same prose typed by the
+owner. Unsupported wording remains untrusted.
+
+Preferences, decisions, global changes, and replacements keep their existing
+requirements for `direct_owner` and `owner_statement` evidence. This change
+adds no owner approval workflow. Pinned policy decisions stay unchanged.
+
+## Source-read allowance
+
+An allowance limits the work or content that one verification operation can use.
+During one `validate_evidence` operation, Muninn reuses original bytes that it
+has just read. It identifies each original by its complete physical locator:
+
+- JSONL locators include the path, byte offset, and byte length.
+- Cursor locators include the database, conversation, and record key.
+
+Each distinct physical read uses the read allowance. Each selection still gets
+separate checks of its source, state, scope, projection, selector, hash, excerpt,
+tombstone, and provenance. Projection identifies how Muninn extracted the field.
+The selector identifies the chosen part of that field. A tombstone records
+content that erasure excludes. Provenance records where the evidence originated.
+
+Saved evidence text has a separate limit, measured in UTF-8 bytes. Excerpts,
+selectors, locators, scope, identity, hash, and version strings all use this
+allowance. Repeated or overlapping selections use it again for each selection.
+This reuse therefore cannot allow unlimited selected content or
+locator metadata.
+
+Muninn discards the reused bytes when the operation returns or fails.
+Preparation, boundary checks, and final acceptance remain separate verification
+operations. Each later operation rereads originals to detect changes between
+operations. This change increases no configured allowance.
+
+Final failures retain the specific code: `evidence_byte_limit`,
+`evidence_record_limit`, `evidence_work_limit`, or `evidence_selection_limit`.
+Older `evidence_limit` records keep their generic meaning. An old `config`
+record cannot recover a cause that Muninn did not retain. Muninn does not invent
+historical limits or measured counters. Muninn does not automatically retry an
+unchanged source-limit failure: the same input would reach the same limit.
 
 ## Human inspection and privacy
 
-`muninn learn explain R_ID` returns JSON with `request_id` and a self-contained
-ordinary-language `explanation`. `--human` also prints the final redacted prose
-to stderr. `muninn learn explain R_ID --human >/dev/null` gives plain inspection
-without asking a person to interpret JSON. `--pretty` only changes JSON indentation.
-Hook output remains compact JSON with exit 0.
+`muninn learn explain R_ID` returns JSON with `request_id` and `explanation`.
+The `explanation` field contains a complete explanation in ordinary language.
+With `--human`, Muninn also prints the final redacted explanation to stderr.
+To read only that explanation, run:
 
-The explanation uses retained metadata. It reports the request state, available
-evidence count, recorded failure phase, receipt-based saved impact, model-launch
-records, current admission, appropriate actor and action, and notice lifecycle.
-It distinguishes missing launch records from proof that no call occurred.
-It distinguishes saved setup notices from proof of a current live setup failure.
+```sh
+muninn learn explain R_ID --human >/dev/null
+```
 
-Failed proposals are not retained. Their sentence and exact cited passage are
-explicitly unavailable. The explanation displays no transcript or proposal text.
-Existing `learn show` remains the explicit governed evidence inspection surface.
-Erasure and changed evidence can make excerpts unavailable. No new source read
-or privacy-sensitive retention is introduced. Automatic startup notices, logs,
-stats, and doctor receive no new transcript or proposal text.
+The command still writes JSON to stdout. `--pretty` changes only JSON
+indentation. Hooks still return compact JSON and exit 0.
 
-Safety rejections can be inspected and dismissed. A rejection code alone does
-not prove the classifier was correct; incorrectly rejected direct owner wording
-requires maintainer investigation. Local operators can
-restore approved setup. Maintainers must investigate unclear defects and source
-allowances. The explanation does not recommend retrying unchanged rejected input
-or changing policy to suppress a refusal.
+The explanation uses only retained metadata: records that describe the request.
+It displays no source text. It reports:
 
-Upgrades preserve notices. Startup selects the newest saved notice, with setup
-priority. Dismissal removes one request reminder and can reveal an older notice.
-It preserves attempts, requests, calls, evidence, receipts, and attempt error
-codes; the saved stage and action are removed. Success clears that request's
-notice, and a later failure can create another. Dismissal neither repairs setup
-nor enables learning.
+- The request state and retained evidence count.
+- The recorded failure phase.
+- Saved changes recorded in the commit receipt.
+- Recorded model launches.
+- Current admission, which controls whether learning can accept work.
+- The responsible person and the action they can take.
+- How Muninn saves and clears failure notices.
+
+Missing launch records do not prove that no model call occurred.
+A saved setup notice does not prove that the setup still fails.
+
+Muninn does not retain failed proposals. Their proposed sentence and exact
+cited passage are unavailable. The explanation displays no transcript or
+proposal text. Use `muninn learn show R_ID` to inspect evidence under the
+existing access checks. Changed or erased evidence can have no usable excerpt.
+
+The explanation adds no source reads and retains no new private content.
+Automatic startup notices, logs, stats, and doctor receive no new transcript or
+proposal text.
+
+You can inspect and dismiss safety rejections. A rejection code alone does not
+prove that the wording check was correct. If Muninn incorrectly rejects direct
+owner wording, the maintainer must investigate. Local operators can restore
+approved setup. Maintainers must investigate unclear defects and exhausted
+source allowances. The explanation does not recommend an unchanged retry or a
+policy change to suppress a refusal.
+
+Upgrades preserve saved notices. At startup, setup notices take priority.
+Otherwise, Muninn selects the newest saved request notice. After you dismiss one
+request notice, an older notice can appear.
+
+Dismissal preserves requests, attempts, calls, evidence, receipts, and attempt
+error codes. It removes the saved notice's stage and action. Successful
+completion clears that request's notice. A later failure can create another
+notice. Dismissal does not repair setup or enable learning.
 
 ## Verification boundary
 
-Regression fixtures use synthetic originals and disposable homes. Coverage
-includes shared JSONL and Cursor originals, distinct locators, bounded selected
-content, later changed originals, owner wording and hostile attribution controls,
-atomic rejection, generic historical causes, explicit human streams, JSON
-compatibility, erased or other-scope content withholding, notice priority,
-dismissal, new failures, successful completion, and state copying during upgrade.
+Regression tests use synthetic originals and disposable homes. They cover:
 
-These tests do not inspect private owner requests, qualify a production runner,
-approve policy, deploy a release, or retry real requests. Issue #70's historical
-preview refusal remains separately unproven; this change does not claim its cause.
+- Shared JSONL and Cursor originals, and distinct physical locators.
+- Limits on selected content, and later changes to originals.
+- Owner wording and attempts to disguise reported material as owner speech.
+- Rejection of a complete batch without partial knowledge changes.
+- Generic historical causes, human output streams, and JSON compatibility.
+- Exclusion of erased content and content from another scope.
+- Notice priority, dismissal, later failures, and successful completion.
+- Copies of saved state during upgrade.
+
+These tests do not inspect private owner requests or qualify a production
+runner. They do not establish policy approval, deploy a release, or retry real requests.
+Issue #70's historical preview refusal remains a separate unresolved question.
+This change does not establish its cause.
