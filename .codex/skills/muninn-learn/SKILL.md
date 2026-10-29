@@ -12,6 +12,7 @@ muninn learn setup --mode all --confirm SCAN_DIGEST
 muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]
 muninn learn list [--state STATE]
 muninn learn show R_ID
+muninn learn explain R_ID [--human]
 muninn learn dismiss R_ID
 muninn learn cancel R_ID
 muninn learn retry R_ID
@@ -51,6 +52,25 @@ Never invent runner settings, limits, approval, or evidence.
 List returns `requests` containing `RequestView` objects.
 Show returns `ReviewDetail` with attempts, calls, evidence, receipt, and `diagnostics`.
 Diagnostics explain the failure stage, cause, and action.
+For ordinary-language inspection, run `muninn learn explain R_ID --human`.
+To display only readable prose, redirect JSON stdout: `muninn learn explain R_ID --human >/dev/null`.
+Explain returns `request_id` and `explanation` as JSON.
+`--human` also prints the final redacted explanation to stderr.
+It does not change stdout or `--pretty` semantics.
+The explanation displays no source or proposal text.
+Failed model proposals are not retained; their exact sentence and cited passage are unavailable.
+Evidence counts describe retained input rather than reconstructing a rejected proposal.
+Use show for explicit governed evidence inspection; excerpts may be changed or erased.
+Only the commit receipt establishes saved impact; a rejected batch saves no partial changes.
+Missing model-launch records do not prove that no call occurred.
+Saved failure stages identify only the recorded phase.
+Current admission and setup notices are distinct from historical request failures.
+A valid stored policy does not prove live setup checks pass or a worker is running.
+A safety rejection can be valid or can require a classifier repair.
+Incorrectly rejected direct owner wording requires maintainer investigation.
+No new approval workflow is added.
+Operator setup repairs must restore the approved setup.
+Unclear defects and exhausted source-read allowances require a Muninn maintainer.
 `evidence_limit` means source verification exceeded a byte, record, or database-work limit.
 Do not retry that request unchanged; ask the maintainer to inspect its source-read budget.
 A narrower window can still require reading earlier records.
@@ -59,6 +79,12 @@ Capture, catch-up and attempt logs preserve this code without transcript text.
 Older capture logs may contain only `unavailable`; their exact cause is unknown.
 The request fails without automatic retry; limits and admission stay unchanged.
 Older `config` records cannot recover the discarded cause.
+Run `muninn doctor --pretty` for current checks; do not expect the old stage to recover the cause.
+Final diagnostics distinguish `evidence_byte_limit`, `evidence_record_limit`,
+`evidence_work_limit`, and `evidence_selection_limit`.
+They identify physical bytes, records, database work, or accumulated selected content.
+These allowances differ from memory storage capacity and model context size.
+Historical configured limits and measured counters are not reconstructed.
 Request notices include the request ID in show and dismiss commands.
 Dismiss returns `request_id` and the boolean `dismissed`.
 It removes only that request's saved notice, without changing learning state.
@@ -70,6 +96,10 @@ Inspect the saved stage and action before dismissal if you need them.
 A repeated dismissal returns `dismissed: false`.
 An unknown request returns `request_unavailable`.
 New failures after dismissal can create another notice.
+Upgrades preserve saved notices.
+Startup selects the newest saved notice, with setup priority.
+Dismissing one can reveal an older notice.
+Successful completion clears the request notice.
 Setup notices take priority and cannot be dismissed with a request ID.
 Evidence can contain transcript text.
 Keep evidence out of logs.

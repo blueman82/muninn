@@ -121,6 +121,7 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn learn setup --mode now\|all [--project PATH] [--confirm SCAN_DIGEST]` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
 | `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, and safe `diagnostics`. Content is shown only when requested, never logged. |
+| `muninn learn explain R_ID [--human]` | `request_id` and an ordinary-language `explanation` of retained history, missing detail, saved impact, current admission, recovery, and dismissal. `--human` also prints the explanation to stderr; stdout remains JSON. No transcript or proposal text is displayed. |
 | `muninn learn dismiss R_ID` | `request_id` and `dismissed` (boolean). Remove only that request's saved failure notice. A repeated dismissal returns `false`; an unknown request returns `request_unavailable`. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
@@ -370,6 +371,27 @@ This message also appears with `recall.off` or `recall.advisory`.
 Request notices include their request ID in commands to inspect and dismiss them.
 Setup notices take priority over request notices and cannot be dismissed this way.
 `muninn learn show R_ID` adds `diagnostics` with stage, cause, action, and code.
+For an explanation that does not require interpreting those fields, use:
+
+```sh
+muninn learn explain R_ID --human >/dev/null
+```
+
+`--human` writes readable prose to stderr and keeps the JSON answer on stdout.
+Without it, `explanation` is an ordinary-language string in the JSON answer.
+`--pretty` still changes only JSON indentation.
+The explanation uses retained metadata and displays no source excerpts.
+Failed model proposals are not retained, so their proposed sentence and exact
+supporting passage are explicitly unavailable.
+Evidence counts describe the request's retained input, not a reconstructed proposal.
+Use `learn show` for explicit inspection of governed evidence records.
+Changed or erased evidence may have no usable excerpt.
+The commit receipt establishes saved impact; rejected batches apply no partial changes.
+Missing launch records do not prove that no model call occurred.
+Saved failure stages identify only the recorded phase; finer detail is not invented.
+Current admission and setup notices are reported separately from request history.
+A valid stored policy does not prove a worker is running or live setup checks pass.
+
 `muninn learn dismiss R_ID` removes the saved notice for that request only.
 It retains the request, attempts, calls, evidence, and receipt.
 Failed requests remain in `learn list --state failed` and `learn show`.
@@ -378,6 +400,9 @@ It removes the saved notice's stage and action text.
 Show then reconstructs diagnostics from recorded attempt error codes,
 with stage `not recorded` and the default cause and action.
 A new failure after dismissal can create another notice for the same request.
+Upgrades preserve saved notices. Startup selects the newest saved notice,
+with setup notices taking priority. Dismissing one can reveal an older notice.
+Successful completion clears the notice for that request.
 `doctor` adds `review_attention` when a stored issue needs attention.
 These fields contain fixed program text and identifiers.
 They contain no transcript or model output.
@@ -392,8 +417,9 @@ No source text is cached between operations.
 |---|---|
 | `deadline` | The review exceeded its deadline. Muninn uses a remaining attempt. |
 | `unavailable` | The runner did not finish successfully. Muninn uses a remaining attempt. |
-| `config` | Setup verification failed. Older records may lack the precise stage or cause. |
+| `config` | Setup verification failed; the specific cause was not recorded. The old stage cannot recover it. Run `muninn doctor --pretty` for current checks and give unresolved safe diagnostics to the maintainer. |
 | `evidence_limit` | Original-source verification exceeded its byte, record, or database-work limit. Do not retry the request unchanged. Ask the maintainer to inspect its source-read budget. A narrower window can still require reading earlier records. The request fails without automatic retry; limits and learning admission remain unchanged. Older `config` records cannot recover the discarded cause. |
+| `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, `evidence_selection_limit` | Final diagnostics distinguish physical bytes, physical records, database work, and accumulated selected content. These are source-verification allowances, distinct from memory storage capacity and model context. The maintainer must inspect the allowance; do not retry unchanged. Configured limits or measured counters are not reconstructed when no historical record exists. |
 | `capability_changed` | The approved runner setup changed. Muninn waits for that approved setup to return. |
 | `capability_unavailable` | A required runner executable, proof, or schema file cannot be read. Muninn waits for the approved files. |
 | `capability_invalid` | A runner capability or proof file has an invalid format. Muninn waits for the approved file. |

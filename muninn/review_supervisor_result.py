@@ -10,9 +10,20 @@ from muninn import review_prompt
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_models import ReviewContext
 from muninn.review_process import ProcessOutcome
+from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
 from muninn.review_round_state import Round
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
 from muninn.review_supervisor_store import database
+
+
+def failure_code(error: ValueError | OSError, fallback: str) -> str:
+    """Keep known verification causes without exposing exception text."""
+    cause = error.code if isinstance(error, EvidenceLimitError) else str(error)
+    return (
+        cause
+        if cause.startswith("rejected_") or cause in EVIDENCE_LIMIT_CODES
+        else fallback
+    )
 
 
 def execute(
@@ -70,11 +81,6 @@ def execute(
         pending.launch = None
         return True
     except ValueError as exc:
-        code = (
-            str(exc)
-            if str(exc).startswith("rejected_")
-            else "rejected_validation"
-        )
-        fail(pending.context, code, now)
+        fail(pending.context, failure_code(exc, "rejected_validation"), now)
 
     return False

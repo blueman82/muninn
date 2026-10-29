@@ -43,6 +43,7 @@ knowledge and learning:
   learn request requires installed frozen policy; line bounds must be paired.
   learn retry explicitly restarts the same request; completed receipts persist.
   learn dismiss R_ID removes only that request's saved failure notice.
+  learn explain R_ID --human also prints a plain explanation to stderr.
   learn resume requires the exact installed policy and one inspected refusal.
   learn replay requires --from-line, --through-line and --policy.
   No implicit runner/model/budget settings. Old know add/check flags retired.
@@ -249,6 +250,9 @@ def _add_learning(cmd: _Commands) -> None:
     )
     for name in ("show", "cancel", "retry", "dismiss"):
         learn.add(name).add_argument("request_id", type=request_argument)
+    p = learn.add("explain", "explain retained learning history")
+    p.add_argument("request_id", type=request_argument)
+    p.add_argument("--human", action="store_true")
     p = learn.add("resume")
     p.add_argument("--policy", required=True)
     p.add_argument("--failed-request", type=request_argument, required=True)

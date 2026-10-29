@@ -21,7 +21,7 @@ from muninn.review_progress import (
     digest,
     require_transaction,
 )
-from muninn.review_read_budget import ReadBudget
+from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_request_views import attempt_view, request_row, request_view
 from muninn.tombstones import require_current_tombstones
 
@@ -275,7 +275,10 @@ def claim_or_refuse(
     try:
         _sources(conn, row, policy, budget=budget)
     except ValueError as exc:
-        if type(exc) is not ValueError or str(exc) not in _SOURCE_REFUSALS:
+        if (
+            type(exc) not in (ValueError, EvidenceLimitError)
+            or str(exc) not in _SOURCE_REFUSALS
+        ):
             raise
         conn.execute(
             "UPDATE review_request SET state='failed',retry_at=NULL,"

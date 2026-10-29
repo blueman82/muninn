@@ -25,7 +25,7 @@ from muninn.review_evidence_models import (
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_originals import originals, reread
-from muninn.review_read_budget import ReadBudget
+from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_selectors import (
     MAX_RECORDS,
     MAX_SCAN_BYTES,
@@ -202,7 +202,7 @@ def initial_evidence(
 
 def _stored(
     conn: sqlite3.Connection, evidence_id: EvidenceId, limit: int
-) -> EvidenceRecord:
+) -> tuple[EvidenceRecord, int]:
     """Load one bounded durable record through the strict data contract."""
     row = conn.execute(
         "SELECT * FROM review_evidence WHERE id=? AND "
@@ -213,16 +213,21 @@ def _stored(
         (evidence_id, limit),
     ).fetchone()
     if row is None:
+        if conn.execute(
+            "SELECT 1 FROM review_evidence WHERE id=?", (evidence_id,)
+        ).fetchone():
+            raise EvidenceLimitError("evidence_selection_limit")
         raise ValueError("evidence_unavailable")
     data: dict[str, Any] = dict(row)
-    if (
-        sum(len(v.encode()) for v in data.values() if isinstance(v, str))
-        > limit
-    ):
-        raise ValueError("evidence_limit")
+    size = sum(len(v.encode()) for v in data.values() if isinstance(v, str))
+    if size > limit:
+        raise EvidenceLimitError("evidence_selection_limit")
     for key in ("scope", "selector", "original_locator"):
         data[key] = decode(data.pop(f"{key}_json").encode())
-    return EvidenceRecord.model_validate_json(json.dumps(data), strict=True)
+    return (
+        EvidenceRecord.model_validate_json(json.dumps(data), strict=True),
+        size,
+    )
 
 
 def _check_physical(source: sqlite3.Row, record: EvidenceRecord) -> None:
@@ -267,10 +272,13 @@ def validate_evidence(
     )
     result: list[EvidenceRecord] = []
     remaining = min(policy.max_input_bytes, MAX_SCAN_BYTES)
+    selected_remaining = remaining
+    fresh_originals: dict[str, bytes] = {}
     connections: dict[Path, sqlite3.Connection] = {}
     with ExitStack() as stack:
         for evidence_id in evidence_ids:
-            record = _stored(conn, evidence_id, remaining)
+            record, size = _stored(conn, evidence_id, selected_remaining)
+            selected_remaining -= size
             if (
                 record.state != "live"
                 or not scope_applies(record.scope, scope)
@@ -287,14 +295,18 @@ def validate_evidence(
             )
             source = _source(conn, locator.source)
             _check_physical(source, record)
-            raw = reread(
-                stack,
-                connections,
-                record.original_locator,
-                remaining,
-                budget=budget,
-            )
-            remaining -= len(raw)
+            key = canonical_json(record.original_locator)
+            raw = fresh_originals.get(key)
+            if raw is None:
+                raw = reread(
+                    stack,
+                    connections,
+                    record.original_locator,
+                    remaining,
+                    budget=budget,
+                )
+                remaining -= len(raw)
+                fresh_originals[key] = raw
             fresh = build_record(
                 conn,
                 source,

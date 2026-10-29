@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from muninn import query, review_recovery, review_requests
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
+from muninn.cli_learn_explain import explain
 from muninn.cli_learning_setup import failure as setup_failure
 from muninn.cli_learning_setup import setup
 from muninn.knowledge_models import RequestId, Scope
@@ -248,6 +249,8 @@ def _read(conn: sqlite3.Connection, a: Namespace) -> Out:
     """Return the requested durable detail or optionally filtered list."""
     if a.learn_cmd == "show":
         return _detail(conn, a.request_id)
+    if a.learn_cmd == "explain":
+        return explain(conn, a.request_id)
     rows = conn.execute(
         "SELECT * FROM review_request WHERE (? IS NULL OR state=?) ORDER BY "
         "created_at,id",
@@ -353,7 +356,7 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
                     conn, a, installed_policy(conn), time.time()
                 ),
             )
-        elif a.learn_cmd in {"list", "show"}:
+        elif a.learn_cmd in {"list", "show", "explain"}:
             out = read_store(home, lambda conn: _read(conn, a))
         else:
             out = write_store(home, lambda conn: _write(conn, a))

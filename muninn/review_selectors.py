@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -12,11 +11,10 @@ from typing import Any, cast
 from uuid import uuid4
 
 from muninn import classify
-from muninn.claude_events import CLAUDE_HARNESS_PREFIXES
-from muninn.codex_events import HARNESS_TAGS
 from muninn.event_model import TEXT_LIMIT, as_record, finish
 from muninn.knowledge_models import Provider, Scope
 from muninn.redaction import redact
+from muninn.review_authority import direct_speech
 from muninn.review_evidence_models import (
     Authority,
     EvidenceLocator,
@@ -260,7 +258,11 @@ def selected(
 
 
 def authority(
-    field: Field, context: list[Field], record: dict[str, Any], primary: bool
+    field: Field,
+    context: list[Field],
+    record: dict[str, Any],
+    primary: bool,
+    selector: EvidenceSelector | None = None,
 ) -> Authority:
     """Make a conservative contextual judgment, not from role alone."""
     if field.evidence_type == "assistant_report":
@@ -272,28 +274,17 @@ def authority(
     ).strip()
     if any(f.evidence_type == "tool_result" for f in context):
         return "untrusted"
-    injected = any(
-        record.get(k) is True
-        for k in ("isMeta", "isSidechain", "isCompactSummary")
+    start = selector.start if selector and selector.start is not None else 0
+    end = (
+        selector.end
+        if selector and selector.end is not None
+        else len(field.text)
     )
-    quoted = re.search(
-        r'[>"“”`]|\b(quot\w*|said|wrote|relay\w*|colleague|referenced|reported)\b',
-        text,
-        re.I,
+    return (
+        "direct_owner"
+        if direct_speech(text, field.text, (start, end), record)
+        else "untrusted"
     )
-    if (
-        injected
-        or quoted
-        or text.startswith((*HARNESS_TAGS, *CLAUDE_HARNESS_PREFIXES))
-    ):
-        return "untrusted"
-    explicit = re.match(
-        r"(?:I (?:want|prefer|decide|require)|Please\b|Use\b|"
-        r"Always\b|Never\b|Remember\b)",
-        text,
-        re.I,
-    )
-    return "direct_owner" if explicit else "untrusted"
 
 
 def _scope(conn: sqlite3.Connection, source_id: int, line: int) -> Scope:
@@ -388,7 +379,7 @@ def build_record(
             canonical_json(selector).encode()
         ).hexdigest(),
         evidence_type=field.evidence_type,
-        authority=authority(field, permitted, record, True),
+        authority=authority(field, permitted, record, True, selector),
         scope=scope,
         excerpt=excerpt,
         state="live",

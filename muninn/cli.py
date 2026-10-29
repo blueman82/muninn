@@ -142,6 +142,10 @@ def _answer(
     if "detail" in out and out["error"] == "store_unavailable":
         record["detail"] = out["detail"]
     out["logged"] = obs.log_call(home, record, env)
+    if getattr(args, "human", False) and isinstance(
+        out.get("explanation"), str
+    ):
+        print(out["explanation"], file=sys.stderr)
     pretty = getattr(args, "pretty", False) or os.environ.get("MUNINN_PRETTY")
     print(json.dumps(out, sort_keys=True, indent=2 if pretty else None))
     return code
