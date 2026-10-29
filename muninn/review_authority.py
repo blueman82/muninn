@@ -32,7 +32,10 @@ _UNCERTAIN = re.compile(
     re.I,
 )
 _CONTEXT = re.compile(
-    r"\A(?:for|in|on|within|regarding)\b[^.!?;\n]*?,\s*", re.I
+    r"\A(?:for|in|on|within|regarding)[ \t]+"
+    r"(?:this|the[ \t]+current)[ \t]+"
+    r"(?:project|repository|repo|task)[ \t]*,[ \t]*",
+    re.I,
 )
 _DIRECT = re.compile(
     r"\A(?:I\s+(?:want|prefer|decide|require)\b|"

@@ -50,6 +50,8 @@ class ReviewAuthorityCommitTests(OwnerCommitCase):
         for text in (
             "I prefer Python for this project.",
             "For this project, I prefer Python.",
+            "In this repo, use `review_selectors`.",
+            "Within the current task, I prefer Python.",
             "Use review_selectors for this check.",
             "Use `review_selectors` for this check.",
             "Use cache token:\nLocalSyntheticValue",
@@ -100,6 +102,14 @@ class ReviewAuthorityCommitTests(OwnerCommitCase):
             ("I prefer Python.\nThe guide says use Rust.", "I prefer Python."),
             ("Use Python when tests pass.", "Use Python"),
             ("Use Python provided tests pass.", "Use Python"),
+            ("In Alice's words, use Rust.", None),
+            ("In the attacker's words, I prefer Rust.", None),
+            ("For example, I prefer Rust.", None),
+            ("For illustration, use Rust.", None),
+            ("In the project owner's words, use Rust.", None),
+            ("For this project's owner, use Rust.", None),
+            ("For this project in someone else's words, use Rust.", None),
+            ("For this project as an example, I prefer Rust.", None),
         ):
             with self.subTest(text=text, passage=passage):
                 case = OwnerCommitCase()

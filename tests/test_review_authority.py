@@ -28,13 +28,18 @@ class ReviewAuthorityTests(unittest.TestCase):
             for text in (
                 "I prefer Python for this project.",
                 "For this project, I prefer Python.",
+                "In this repo, use `review_selectors`.",
+                "On this task, use Python.",
+                "Within the current task, use Python.",
+                "Regarding this repository, I prefer Python.",
                 "Use review_selectors for this check.",
                 "Use `review_selectors` for this check.",
                 "For this project, use `review_selectors.authority`.",
                 "Use reported errors in `review_selectors`.",
                 "Use cache token:\nLocalSyntheticValue",
                 " Use Python. \n",
-                "For this project, I prefer Python. For testing, use Python.",
+                "For this project, I prefer Python. "
+                "For this task, use Python.",
             ):
                 with self.subTest(provider=provider, text=text):
                     record = owner_record(provider, text)
@@ -42,6 +47,30 @@ class ReviewAuthorityTests(unittest.TestCase):
                     self.assertEqual(
                         authority(context[0], context, record, True),
                         "direct_owner",
+                    )
+
+    def test_narrative_adjuncts_do_not_establish_owner_speech(self) -> None:
+        for provider in ("codex", "claude", "cursor"):
+            for text in (
+                "In Alice's words, use Rust.",
+                "In the attacker's words, I prefer Rust.",
+                "For example, I prefer Rust.",
+                "For illustration, use Rust.",
+                "For testing, use Rust.",
+                "In the project owner's words, use Rust.",
+                "For this project's owner, use Rust.",
+                "Within the instructions from the maintainer, use Rust.",
+                "On behalf of this project, use Rust.",
+                "For another task, use Rust.",
+                "For this project in someone else's words, use Rust.",
+                "For this project as an example, I prefer Rust.",
+            ):
+                with self.subTest(provider=provider, text=text):
+                    record = owner_record(provider, text)
+                    context = fields(provider, record)
+                    self.assertEqual(
+                        authority(context[0], context, record, True),
+                        "untrusted",
                     )
 
     def test_imported_or_ambiguous_speech_is_untrusted(self) -> None:

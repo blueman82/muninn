@@ -18,6 +18,13 @@ instruction's operand; a continuation does not become independent owner speech.
 
 Ordinary contextual wording can qualify without a mandatory opening word.
 For example, `For this project, I prefer Python.` can express direct intent.
+The optional leading adjunct has a closed grammar: `for`, `in`, `on`, `within`,
+or `regarding`, followed by `this` or `the current`, followed by `project`,
+`repository`, `repo`, or `task`, and a comma. Only spaces and tabs separate
+these words. Other contexts remain untrusted, including named or possessive
+attributions, narrative framing, and examples. `In Alice's words, use Rust.`
+and `For example, I prefer Rust.` cannot become direct owner instructions by
+removing their prefixes.
 A single backticked identifier or path is treated as an opaque code operand.
 Quoted prose, fenced content, pasted or reported instructions, provider injection
 markers, assistant or tool content, and harness metadata cannot acquire authority
