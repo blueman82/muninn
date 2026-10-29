@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 from muninn import review_evidence, review_recovery, review_supervisor
+from muninn.review_read_budget import EvidenceLimitError
 from tests import test_review_window_boundary as boundary_tests
 from tests.ingest_support import rollout
 from tests.test_review_supervisor import SupervisorCase
@@ -101,6 +102,29 @@ class ReviewPreparationFailureTests(SupervisorCase):
         assert issue is not None
         self.assertEqual(issue["code"], "config")
         self.assertNotIn("private-exception-canary", str(issue))
+
+    def test_typed_preparation_limit_preserves_allowance(self) -> None:
+        with (
+            mock.patch.object(
+                review_supervisor.review_prompt,
+                "initialize",
+                side_effect=EvidenceLimitError("evidence_work_limit"),
+            ),
+            mock.patch.object(self.supervisor, "_create") as create,
+        ):
+            self.supervisor.tick(13.0)
+            self.supervisor.tick(80.0)
+        create.assert_not_called()
+        issue = review_recovery.notice(self.conn)
+        assert issue is not None
+        self.assertEqual(issue["code"], "evidence_work_limit")
+        self.assertEqual(issue["stage"], "evidence")
+        self.assertEqual(
+            self.conn.execute(
+                "SELECT error_code FROM review_attempt"
+            ).fetchone()[0],
+            "evidence_work_limit",
+        )
 
     def test_fake_provider_waits_for_complete_prompt(self) -> None:
         with subprocess.Popen(

@@ -17,7 +17,7 @@ from muninn.review_evidence_models import (
     JsonlOriginal,
     OriginalLocator,
 )
-from muninn.review_read_budget import ReadBudget
+from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_selectors import (
     MAX_RECORD_BYTES,
     MAX_RECORDS,
@@ -35,7 +35,7 @@ def _lines(
     pending = b""
     while remaining > 0:
         if budget.records_left == 0:
-            raise ValueError("evidence_limit")
+            raise EvidenceLimitError("evidence_record_limit")
         # read1 performs at most one bounded raw read, unlike readline's
         # implicit buffer refill which may exceed a small caller budget.
         block = cast(BufferedReader, handle).read1(
@@ -52,7 +52,7 @@ def _lines(
             yield raw + b"\n"
         if not block or len(pending) >= MAX_RECORD_BYTES:
             raise ValueError("original_unavailable")
-    raise ValueError("evidence_limit")
+    raise EvidenceLimitError("evidence_byte_limit")
 
 
 def _jsonl(
@@ -75,7 +75,7 @@ def _jsonl(
         handle.seek(offset)
         for count, raw in enumerate(_lines(handle, max_bytes, budget=budget)):
             if count == MAX_RECORDS:
-                raise ValueError("evidence_limit")
+                raise EvidenceLimitError("evidence_record_limit")
             if number >= first:
                 output.append(
                     (
@@ -105,7 +105,7 @@ def _execute(
 ) -> sqlite3.Cursor:
     """Refuse new native statements after the shared VM grant expires."""
     if budget.sql_steps_left == 0:
-        raise ValueError("evidence_limit")
+        raise EvidenceLimitError("evidence_work_limit")
     return conn.execute(sql, parameters)
 
 
@@ -114,7 +114,7 @@ def _cursor_connection(
 ) -> sqlite3.Connection:
     """Hold a read-only snapshot charged to the operation until closure."""
     if budget.sql_steps_left == 0:
-        raise ValueError("evidence_limit")
+        raise EvidenceLimitError("evidence_work_limit")
     conn = stack.enter_context(
         closing(
             sqlite3.connect(f"{path.absolute().as_uri()}?mode=ro", uri=True)
@@ -159,7 +159,7 @@ def _cell(
     if row is None:
         raise ValueError("original_unavailable")
     if not isinstance(row[0], bytes):
-        raise ValueError("evidence_limit")
+        raise EvidenceLimitError("evidence_byte_limit")
     budget.consume_bytes(len(row[0]))
     return row[0]
 
@@ -172,7 +172,7 @@ def _keys(
     rowid: int | None = None
     while True:
         if budget.records_left == 0:
-            raise ValueError("evidence_limit")
+            raise EvidenceLimitError("evidence_record_limit")
         row = _execute(
             conn,
             "SELECT rowid,CASE WHEN length(CAST(key AS BLOB))<=? "
@@ -195,8 +195,12 @@ def _keys(
             size = len(key.encode("utf-8"))
             budget.consume_bytes(size)
             limit -= size
-        if not isinstance(key, str) or key in keys or len(keys) == MAX_RECORDS:
+        if not isinstance(key, str):
+            raise EvidenceLimitError("evidence_byte_limit")
+        if key in keys:
             raise ValueError("evidence_limit")
+        if len(keys) == MAX_RECORDS:
+            raise EvidenceLimitError("evidence_record_limit")
         keys.append(key)
 
 
@@ -235,7 +239,7 @@ def _cursor(
                 )
             )
         if len(keys) > MAX_RECORDS:
-            raise ValueError("evidence_limit")
+            raise EvidenceLimitError("evidence_record_limit")
         number = 0
         for key in keys:
             raw = _cell(conn, key, remaining, budget=budget)
@@ -277,7 +281,7 @@ def originals(
         raise ValueError("evidence_limit")
     budget = budget if budget is not None else ReadBudget(max_bytes)
     if last - first >= MAX_RECORDS:
-        raise ValueError("evidence_limit")
+        raise EvidenceLimitError("evidence_record_limit")
     if (
         require_cursor
         and source["provider"] != "cursor"
@@ -291,14 +295,13 @@ def originals(
             else _jsonl(source, first, last, max_bytes, budget=budget)
         )
     except (OSError, sqlite3.Error) as exc:
-        code = (
-            "evidence_limit"
-            if isinstance(exc, sqlite3.Error)
+        if (
+            isinstance(exc, sqlite3.Error)
             and exc.sqlite_errorcode == sqlite3.SQLITE_INTERRUPT
             and budget.sql_steps_left == 0
-            else "original_unavailable"
-        )
-        raise ValueError(code) from exc
+        ):
+            raise EvidenceLimitError("evidence_work_limit") from exc
+        raise ValueError("original_unavailable") from exc
 
 
 def reread(
@@ -327,7 +330,7 @@ def reread(
         if original.byte_length > min(
             limit, MAX_RECORD_BYTES, budget.bytes_left
         ):
-            raise ValueError("evidence_limit")
+            raise EvidenceLimitError("evidence_byte_limit")
         budget.consume_record()
         with open_regular(original.path) as handle:
             handle.seek(original.byte_offset)
@@ -348,11 +351,10 @@ def reread(
             raise ValueError("original_unavailable")
         return raw
     except (OSError, sqlite3.Error) as exc:
-        code = (
-            "evidence_limit"
-            if isinstance(exc, sqlite3.Error)
+        if (
+            isinstance(exc, sqlite3.Error)
             and exc.sqlite_errorcode == sqlite3.SQLITE_INTERRUPT
             and budget.sql_steps_left == 0
-            else "original_unavailable"
-        )
-        raise ValueError(code) from exc
+        ):
+            raise EvidenceLimitError("evidence_work_limit") from exc
+        raise ValueError("original_unavailable") from exc

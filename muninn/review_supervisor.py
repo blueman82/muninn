@@ -45,6 +45,7 @@ from muninn.review_round_state import Round as _Round
 from muninn.review_runner import RunnerCapability, prepare_launch
 from muninn.review_spawn import create_wrapper
 from muninn.review_supervisor_result import execute as execute_result
+from muninn.review_supervisor_result import failure_code
 from muninn.review_supervisor_store import (
     catch_up_due,
     database,
@@ -281,10 +282,7 @@ class Supervisor:
                         conn, "setup", str(exc), "launch", now
                     )
                 return
-            code = str(exc)
-            if code != "evidence_limit" and not code.startswith("rejected_"):
-                code = "config"
-            self._fail(context, code, now, stage)
+            self._fail(context, failure_code(exc, "config"), now, stage)
             del self._rounds[key]
 
     def _create(self, pending: _Round) -> None:

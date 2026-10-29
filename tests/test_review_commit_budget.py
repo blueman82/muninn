@@ -24,6 +24,7 @@ from muninn.review_evidence_models import (
 from muninn.review_json import canonical_json
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import line
+from tests.test_classify import user_msg
 from tests.test_review_commit import CommitCase
 
 
@@ -80,6 +81,37 @@ class ReviewCommitBudgetTests(CommitCase):
             ),
         ):
             self.assertEqual(self.save(self.result([])), receipt)
+
+    def test_final_acceptance_reuses_one_fresh_shared_original(self) -> None:
+        self.records[1] = user_msg(1, "Use Python. Please test.")
+        self.records[1]["metadata"] = "x" * 16_000
+        self.path.write_bytes(b"".join(line(r) for r in self.records))
+        self.run_ingest(full=True)
+        window = self.window(2, 2)
+        self.evidence = tuple(
+            review_evidence.select_evidence(
+                self.home,
+                EvidenceLocator(
+                    source=window.source,
+                    line=2,
+                    part=1,
+                    line_sha256=window.boundary_hash,
+                ),
+                EvidenceSelector(
+                    json_pointer="/payload/content/0/text",
+                    start=start,
+                    end=end,
+                ),
+            )
+            for start, end in ((0, 11), (12, 24))
+        )
+        for record in self.evidence:
+            self.persist(record)
+        exact = len(self.path.read_bytes()) + len(line(self.records[1]))
+        self.claim_inputs(window, exact)
+        receipt = self.save(self.result([self.note()]))
+        self.assertEqual(receipt.outcome, "completed")
+        self.assertEqual(len(receipt.applied), 1)
 
     def test_unselected_boundary_change_rejects_no_change(self) -> None:
         self.evidence = self.evidence[:1]
@@ -185,7 +217,7 @@ class ReviewCommitBudgetTests(CommitCase):
                         )
                     else:
                         with self.assertRaisesRegex(
-                            ValueError, "rejected_evidence"
+                            ValueError, "evidence_byte_limit"
                         ):
                             self.save(self.result([self.note()]))
                         self.assertEqual(self.counts(), before)
@@ -220,7 +252,7 @@ class ReviewCommitBudgetTests(CommitCase):
                     )
                 else:
                     with self.assertRaisesRegex(
-                        ValueError, "rejected_evidence"
+                        ValueError, "evidence_record_limit"
                     ):
                         self.save(self.result([self.note()]))
                     self.assertEqual(self.counts(), before)
@@ -303,7 +335,7 @@ class ReviewCommitBudgetTests(CommitCase):
                     )
                 else:
                     with self.assertRaisesRegex(
-                        ValueError, "rejected_evidence"
+                        ValueError, "evidence_work_limit"
                     ):
                         self.save(self.result([self.note()]))
             for _, conn in seen:

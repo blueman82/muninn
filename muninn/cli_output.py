@@ -30,6 +30,7 @@ _TEXT_KEYS = frozenset(
         "claim",
         "no_change_reason",
         "retracted_reason",
+        "explanation",
     }
 )
 

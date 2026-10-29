@@ -26,6 +26,7 @@ def learning_status(issue: Mapping[str, str]) -> str:
         return message
     return (
         f"{message} Inspect: muninn learn show {ident}. "
+        f"Explain: muninn learn explain {ident} --human. "
         f"Dismiss notice: muninn learn dismiss {ident}."
     )
 

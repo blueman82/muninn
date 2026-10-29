@@ -17,8 +17,10 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Muninn will retry within the request limit.",
     ),
     "config": (
-        "Muninn could not verify the review setup.",
-        "Inspect the recorded setup stage before retrying.",
+        "Muninn could not verify the review setup. "
+        "The specific cause was not recorded.",
+        "Run muninn doctor --pretty for current setup checks. "
+        "Give unresolved safe diagnostics to the Muninn maintainer.",
     ),
     "evidence_limit": (
         "Original-source verification exceeded its byte, record, "
@@ -92,6 +94,20 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Keep learning paused until Muninn can verify the process.",
     ),
 }
+_EXPLANATIONS.update(
+    {
+        f"evidence_{kind}_limit": (
+            f"Original-source verification exceeded its {allowance} limit.",
+            _EXPLANATIONS["evidence_limit"][1],
+        )
+        for kind, allowance in (
+            ("byte", "physical byte-read"),
+            ("record", "physical record-read"),
+            ("work", "database-work"),
+            ("selection", "accumulated selected-content"),
+        )
+    }
+)
 _SETUP_FAILURES = {
     "capability_unavailable": (
         "Muninn cannot read a required runner executable, "

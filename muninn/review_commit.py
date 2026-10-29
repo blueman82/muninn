@@ -39,7 +39,7 @@ from muninn.review_progress import (
     digest,
     require_transaction,
 )
-from muninn.review_read_budget import ReadBudget
+from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_recovery import clear as clear_issue
 from muninn.review_requests import fail_attempt, request_view
 from muninn.review_snapshot import snapshot
@@ -66,7 +66,7 @@ _EVIDENCE_ERRORS = {
     "evidence_erased": "rejected_erased",
     "evidence_changed": "rejected_evidence",
     "evidence_unavailable": "rejected_evidence",
-    "evidence_limit": "rejected_evidence",
+    "evidence_limit": "evidence_limit",
     "evidence_policy": "rejected_validation",
     "source_unavailable": "rejected_evidence",
     "incomplete_window": "rejected_evidence",
@@ -177,6 +177,8 @@ def _evidence(
         )
     except ValidationError:
         raise CommitRejectedError("rejected_evidence") from None
+    except EvidenceLimitError as exc:
+        raise CommitRejectedError(exc.code) from None
     except ValueError as exc:
         code = _EVIDENCE_ERRORS.get(str(exc))
         if code is None:

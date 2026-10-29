@@ -2,9 +2,37 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from muninn.review_selectors import MAX_RECORDS, MAX_SCAN_BYTES
 
 MAX_SQL_STEPS = 100_000
+EVIDENCE_LIMIT_CODES = frozenset(
+    {
+        "evidence_limit",
+        "evidence_byte_limit",
+        "evidence_record_limit",
+        "evidence_work_limit",
+        "evidence_selection_limit",
+    }
+)
+
+
+class EvidenceLimitError(ValueError):
+    """Preserve a finite allowance cause without changing reader errors."""
+
+    def __init__(
+        self,
+        code: Literal[
+            "evidence_byte_limit",
+            "evidence_record_limit",
+            "evidence_work_limit",
+            "evidence_selection_limit",
+        ],
+    ) -> None:
+        """Attach only the program-owned exhausted allowance code."""
+        super().__init__("evidence_limit")
+        self.code = code
 
 
 class ReadBudget:
@@ -43,13 +71,13 @@ class ReadBudget:
         if type(count) is not int or count < 0 or not self._active:
             raise ValueError("evidence_limit")
         if count > self.bytes_left:
-            raise ValueError("evidence_limit")
+            raise EvidenceLimitError("evidence_byte_limit")
         self._used[0] += count
 
     def consume_record(self) -> None:
         """Charge before processing one record, including repeated access."""
         if self.records_left == 0:
-            raise ValueError("evidence_limit")
+            raise EvidenceLimitError("evidence_record_limit")
         self._used[1] += 1
 
     def sqlite_progress(self) -> int:
