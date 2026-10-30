@@ -1,0 +1,229 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "phase": "pilot",
+  "families": {
+    "conditioned-renewal": "Synthetic conditional credential renewal"
+  },
+  "cases": [
+    {
+      "id": "condition_success",
+      "family_id": "conditioned-renewal",
+      "partition": "pilot",
+      "chronology": 1,
+      "evidence": [],
+      "later_task": "Renewal: credential expired; renewal endpoint reachable. Restore sign-in.",
+      "expected": {
+        "eligible_claim_keys": [
+          "LABEL_SUCCESS_UNDER_A"
+        ],
+        "must_not_save_claim_keys": [],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [
+          "LABEL_SUCCESS_UNDER_A"
+        ],
+        "later_task_success_rule": "LABEL_RULE_CONDITION_RETAINED",
+        "labeler_id": "independent-synthetic-contract-labeler",
+        "label_evidence_paths": [
+          "procedure-conditions.json#sources/0"
+        ]
+      }
+    },
+    {
+      "id": "condition_paraphrase",
+      "family_id": "conditioned-renewal",
+      "partition": "pilot",
+      "chronology": 2,
+      "evidence": [],
+      "later_task": "Restore access: the login token has lapsed, and its replacement service responds.",
+      "expected": {
+        "eligible_claim_keys": [],
+        "must_not_save_claim_keys": [],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [
+          "LABEL_SUCCESS_UNDER_A"
+        ],
+        "later_task_success_rule": "LABEL_RULE_PARAPHRASE_SAME_A",
+        "labeler_id": "independent-synthetic-contract-labeler",
+        "label_evidence_paths": [
+          "procedure-conditions.json#sources/1"
+        ]
+      }
+    },
+    {
+      "id": "condition_absent",
+      "family_id": "conditioned-renewal",
+      "partition": "pilot",
+      "chronology": 3,
+      "evidence": [],
+      "later_task": "Renewal: credential is valid; endpoint unreachable. Restore sign-in.",
+      "expected": {
+        "eligible_claim_keys": [],
+        "must_not_save_claim_keys": [
+          "LABEL_UNCONDITIONAL_GENERALIZATION"
+        ],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [],
+        "later_task_success_rule": "LABEL_RULE_ABSENT_A_UNSUPPORTED",
+        "labeler_id": "independent-synthetic-contract-labeler",
+        "label_evidence_paths": [
+          "procedure-conditions.json#sources/2"
+        ]
+      }
+    },
+    {
+      "id": "failure_unknown",
+      "family_id": "conditioned-renewal",
+      "partition": "pilot",
+      "chronology": 4,
+      "evidence": [],
+      "later_task": "Renewal attempt failed. Cause unknown; determine what happened.",
+      "expected": {
+        "eligible_claim_keys": [],
+        "must_not_save_claim_keys": [
+          "LABEL_PROVED_FAILURE_CAUSE"
+        ],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [],
+        "later_task_success_rule": "LABEL_RULE_CAUSE_UNESTABLISHED",
+        "labeler_id": "independent-synthetic-contract-labeler",
+        "label_evidence_paths": [
+          "procedure-conditions.json#sources/3"
+        ]
+      }
+    },
+    {
+      "id": "recalled_repeat",
+      "family_id": "conditioned-renewal",
+      "partition": "pilot",
+      "chronology": 5,
+      "evidence": [],
+      "later_task": "Renewal advice was recalled again. Is there any new independent observation?",
+      "expected": {
+        "eligible_claim_keys": [],
+        "must_not_save_claim_keys": [
+          "LABEL_NEW_INDEPENDENT_SUPPORT"
+        ],
+        "permitted_scope": {
+          "project_id": "/work/repo",
+          "task": null
+        },
+        "retrieval_claim_keys": [],
+        "later_task_success_rule": "LABEL_RULE_REPEAT_NOT_CORROBORATION",
+        "labeler_id": "independent-synthetic-contract-labeler",
+        "label_evidence_paths": [
+          "procedure-conditions.json#sources/4"
+        ]
+      }
+    }
+  ],
+  "sources": [
+    {
+      "case_id": "condition_success",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Observed success: the credential was expired and the renewal endpoint was reachable. Renewing the expired credential then retrying sign-in restored access. This observation establishes no result for a valid credential or an unreachable renewal endpoint.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "46508d64a4aa29ece7a88c4083e063f624edce0f97b8da2e49d7af8ae9f64aca",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 1,
+        "through_line": 2,
+        "boundary_hash": "9d8309d57d0b4c2bd6121d072c301636429f9b2668d0e369289884c2c49733e2"
+      },
+      "mutation": "none"
+    },
+    {
+      "case_id": "condition_paraphrase",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Observed success: the credential was expired and the renewal endpoint was reachable. Renewing the expired credential then retrying sign-in restored access. This observation establishes no result for a valid credential or an unreachable renewal endpoint.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":2,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The login token has lapsed, and its replacement service responds. This is a restatement of the earlier condition; no new execution occurred.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "00428e0e06e3f69b9881e60f4c90b8bb9b1eefba29231580fd2daffee4385534",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 3,
+        "through_line": 3,
+        "boundary_hash": "f92059a76d93a1706c7020f1deddaf498cb2d4da8e63f75c2312d3558283ff41"
+      },
+      "mutation": "none"
+    },
+    {
+      "case_id": "condition_absent",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Observed success: the credential was expired and the renewal endpoint was reachable. Renewing the expired credential then retrying sign-in restored access. This observation establishes no result for a valid credential or an unreachable renewal endpoint.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":2,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The login token has lapsed, and its replacement service responds. This is a restatement of the earlier condition; no new execution occurred.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":3,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The credential is valid and the renewal endpoint is unreachable. No renewal success was observed under this condition.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "9086e7118bdf28a31af094722fac15ad65a54cb36cffa8aac4813f7bbaea1b9c",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 4,
+        "through_line": 4,
+        "boundary_hash": "7c806a2b5eeb96be32c882c4c2b3796252793f40dd6daf245246ed7004fd7529"
+      },
+      "mutation": "none"
+    },
+    {
+      "case_id": "failure_unknown",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Observed success: the credential was expired and the renewal endpoint was reachable. Renewing the expired credential then retrying sign-in restored access. This observation establishes no result for a valid credential or an unreachable renewal endpoint.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":2,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The login token has lapsed, and its replacement service responds. This is a restatement of the earlier condition; no new execution occurred.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":3,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The credential is valid and the renewal endpoint is unreachable. No renewal success was observed under this condition.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":4,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Renewal attempt failed. Cause unknown; no causal explanation or proved pitfall is established.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "ff177bdcd9469eeeff8533a99a7b4deb1d71ec15ff35a209bbaa8732f451c941",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 5,
+        "through_line": 5,
+        "boundary_hash": "455de64ec55af2986f35740dd60212d6f7112cc0d6a9f54e20ccf0d17dbbd3b1"
+      },
+      "mutation": "none"
+    },
+    {
+      "case_id": "recalled_repeat",
+      "provider": "codex",
+      "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "session_root": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      "relative_path": "2026/01/02/rollout-2026-01-02T03-04-05-0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.jsonl",
+      "content": "{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"session_meta\",\"ordinal\":0,\"payload\":{\"id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"session_id\":\"0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"cwd\":\"/work/repo\",\"originator\":\"codex_cli_rs\",\"cli_version\":\"0.0.0\",\"source\":\"cli\",\"thread_source\":\"user\",\"model_provider\":\"openai\",\"history_mode\":\"synthetic\",\"multi_agent_version\":\"synthetic\",\"context_window\":{},\"base_instructions\":{\"text\":\"synthetic base instructions\"},\"git\":{\"branch\":\"main\",\"commit_hash\":\"0000000000000000000000000000000000000000\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":1,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Observed success: the credential was expired and the renewal endpoint was reachable. Renewing the expired credential then retrying sign-in restored access. This observation establishes no result for a valid credential or an unreachable renewal endpoint.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":2,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The login token has lapsed, and its replacement service responds. This is a restatement of the earlier condition; no new execution occurred.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":3,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"The credential is valid and the renewal endpoint is unreachable. No renewal success was observed under this condition.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":4,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Renewal attempt failed. Cause unknown; no causal explanation or proved pitfall is established.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":5,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<hook_prompt>Recalled advice: renew the expired credential, then retry sign-in. Applies only to an expired credential and a reachable renewal endpoint. No new execution occurred.</hook_prompt>\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n{\"timestamp\":\"2026-01-02T03:04:05.678Z\",\"type\":\"response_item\",\"ordinal\":6,\"payload\":{\"type\":\"message\",\"id\":\"m\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Earlier recalled advice: renew the expired credential, then retry sign-in. No new execution or independent result.\"}],\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"t1\"}}}\n",
+      "sha256": "5d94de7d38caf1a22f2553b05e1836cd2e7fb61305fc890d2823b00f6a85e8e9",
+      "window": {
+        "source": {
+          "provider": "codex",
+          "thread_id": "0199aaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "from_line": 6,
+        "through_line": 7,
+        "boundary_hash": "11b8620fc0cf4f4889c1e9625607aa15efffeb2766d0e952d2c91d8129ffa72d"
+      },
+      "mutation": "none"
+    }
+  ]
+}

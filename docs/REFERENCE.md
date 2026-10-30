@@ -507,6 +507,19 @@ actions. The default profile records this limit. The finite pilot account is a
 separate control. It does not prove runner status or full C6 acceptance.
 See [Codex learning qualification](CODEX_LEARNING_QUALIFICATION.md) for the
 native probe, test evidence boundaries and remaining assessment requirements.
+
+The procedural evaluation tests cover five synthetic episodes: success under a
+condition, different wording of that condition, its absence, failure with an
+unknown cause, and repeated recalled advice. They exercise real capture,
+evidence, commit, and retrieval with a scripted child and isolated stores.
+Checks inspect applicability, pitfalls, original support IDs, and actual
+present/withheld exposure. Expected labels stay outside runner prompts.
+Separate frozen retrieval checks confirm that opening a guide adds no support
+edges. These tests establish contract coverage, not measured model benefit or
+semantic judgments. Project procedures can cite reported or untrusted evidence;
+the tests prove neither causal diagnosis nor universal prevention of repeated
+advice becoming new support.
+
 Windows legacy boot and termination proof, and native live qualification, are
 still separate requirements. During recovery, preserve the private operation
 record, source and archive, key, and journal. Manual restoration of the old
