@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from muninn import store
+from muninn.review_correction import CorrectionFeedback
 from muninn.review_evidence import initial_evidence
 from muninn.review_evidence_models import EvidenceLocator, SourceRef
 from muninn.review_launch_inputs import PromptArtifact
@@ -106,11 +107,13 @@ def assemble(
     initial: object,
     knowledge: object,
     history: list[tuple[object, object]],
+    *,
+    correction: CorrectionFeedback | None = None,
 ) -> bytes:
     """Encode complete canonical data and stop at the final prompt byte cap."""
     check_round(context)
     template = PromptArtifact.model_validate_json(artifact)
-    value = {
+    value: dict[str, Any] = {
         "protocol": template.assembly,
         "instructions": template.instructions,
         "data": {
@@ -126,6 +129,8 @@ def assemble(
             "history": history,
         },
     }
+    if correction is not None:
+        value["data"]["correction"] = correction.model_dump(mode="json")
     output = bytearray()
     encoder = json.JSONEncoder(
         sort_keys=True,

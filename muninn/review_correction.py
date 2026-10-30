@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
@@ -51,6 +52,14 @@ class CorrectionFeedback(StrictModel):
         ):
             raise ValueError("invalid_reduction_feedback")
         return self
+
+
+@dataclass(frozen=True)
+class CorrectionState:
+    """Retain finite feedback and an optional batch only in worker memory."""
+
+    feedback: CorrectionFeedback
+    original: ReviewResult | None
 
 
 def _subsequence(original: list[str], corrected: list[str]) -> bool:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from muninn.review_correction import CorrectionState
 from muninn.review_models import ReviewContext
 from muninn.review_process import RunningProcess
 from muninn.review_runner import LaunchSpec
@@ -19,6 +20,7 @@ class Round:
     history: list[tuple[object, object]] = field(
         default_factory=list[tuple[object, object]]
     )
+    correction: CorrectionState | None = None
     prompt: bytes = b""
     launch: LaunchSpec | None = None
     initialized: bool = False

@@ -7,11 +7,12 @@ import threading
 from collections.abc import Generator, Iterable
 from contextlib import closing, contextmanager
 from pathlib import Path
+from typing import Literal
 
 from muninn import review_recovery, store
 from muninn.review_catchup import catch_up
 from muninn.review_json import canonical_json
-from muninn.review_models import ReviewPolicy
+from muninn.review_models import ReviewContext, ReviewPolicy
 from muninn.review_process import (
     ProcessEvent,
     ProcessOutcome,
@@ -187,3 +188,46 @@ def catch_up_due(
     with database(home) as conn:
         after = catch_up(conn, policy, now, after)
     return after, now + 5.0
+
+
+def mark_correction(
+    conn: sqlite3.Connection,
+    context: ReviewContext,
+    kind: Literal["format", "reduction"],
+) -> None:
+    """Mark one completed call under the caller's fenced transaction."""
+    if not conn.in_transaction:
+        raise ValueError("transaction_required")
+    policy = canonical_json(context.policy)
+    active = conn.execute("SELECT policy_json FROM review_control").fetchone()
+    if (
+        active is None
+        or active[0] is None
+        or canonical_json(ReviewPolicy.model_validate_json(active[0]))
+        != policy
+    ):
+        raise ValueError("rejected_fenced")
+    changed = conn.execute(
+        "UPDATE review_call SET outcome=? WHERE attempt_id=? "
+        "AND round_index=? AND state='completed' AND ended_at IS NOT NULL "
+        "AND policy_digest=? AND EXISTS ("
+        "SELECT 1 FROM review_request r JOIN review_attempt a "
+        "ON a.id=r.current_attempt_id CROSS JOIN review_control c "
+        "WHERE r.id=? AND a.id=review_call.attempt_id AND a.request_id=r.id "
+        "AND r.state='running' AND a.ended_at IS NULL "
+        "AND a.generation=? AND c.generation=a.generation "
+        "AND c.admission=1 AND r.policy_digest=review_call.policy_digest "
+        "AND c.policy_digest=r.policy_digest "
+        "AND r.policy_json=?)",
+        (
+            f"correction_{kind}_requested",
+            context.attempt_id,
+            context.round_index,
+            digest(context.policy),
+            context.request_id,
+            context.generation,
+            policy,
+        ),
+    ).rowcount
+    if changed != 1:
+        raise ValueError("rejected_fenced")
