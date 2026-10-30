@@ -185,7 +185,7 @@ def fingerprint(binding: ExperimentalBinding) -> str:
     ).hexdigest()
 
 
-def _binding(
+def checked_binding(
     home: Path, capability: review_runner.RunnerCapability
 ) -> tuple[ExperimentalBinding, Path]:
     """Load a content-addressed private explicit experimental selection."""
@@ -255,7 +255,7 @@ def selected_auth_home(home: Path, policy: ReviewPolicy) -> Path:
         for key, value in policy.runner.model_dump().items()
     ):
         raise ValueError("capability_changed")
-    binding, _ = _binding(home, capability)
+    binding, _ = checked_binding(home, capability)
     return binding.auth_home
 
 
@@ -292,7 +292,7 @@ def prepare(
     review_runner.check_private_path(home, directory=True)
     _check_setup(context, capability, home)
     assert terms is not None
-    binding, executable = _binding(home, capability)
+    binding, executable = checked_binding(home, capability)
     if (
         binding.requested != policy.runner
         or binding.host_identity != terms.host_identity

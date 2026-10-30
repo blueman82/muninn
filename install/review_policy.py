@@ -50,7 +50,7 @@ from muninn.review_progress import bootstrap_policy, digest
 LIMIT = 1024 * 1024
 
 
-def _read(path: Path) -> str:
+def read_policy(path: Path) -> str:
     """Read bounded UTF8 from a stable ordinary file."""
     try:
         if path.lstat().st_size > LIMIT:
@@ -94,7 +94,7 @@ def capture(
     if ctx.review_policy is not None:
         if ctx.platform not in {"darwin", "linux"}:
             raise StepFailedError("review_policy_unsupported")
-        raw = _read(ctx.review_policy)
+        raw = read_policy(ctx.review_policy)
         selected = _policy(raw)
         if selected.policy_source is not None:
             raise StepFailedError("review_policy_invalid")
@@ -163,7 +163,7 @@ def frozen(
         or (
             check_supplied
             and ctx.review_policy is not None
-            and _read(ctx.review_policy) != raw
+            and read_policy(ctx.review_policy) != raw
         )
     ):
         raise StepFailedError("review_policy_snapshot_changed")

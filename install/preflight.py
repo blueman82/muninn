@@ -34,7 +34,7 @@ from install.transforms import (
 )
 from install.trust import codex_hooks
 from muninn.platform_paths import read_selection
-from tools.standards import check_repo
+from tools.standards import check_repo as check_standards
 
 CODEX_HOOKS_FILE = "integrations/codex/hooks/hooks.json"
 CURSOR_HOOKS_FILE = "integrations/cursor/hooks.json"
@@ -96,7 +96,7 @@ def _check_cursor_fragment(data: bytes, ctx: Ctx) -> None:
             )
 
 
-def _check_repo(
+def check_repo(
     ctx: Ctx, repo: Path, sha: str
 ) -> tuple[dict[str, bytes], dict[str, Any]]:
     """Check the repo is clean at ``sha`` and read the pinned files.
@@ -126,7 +126,7 @@ def _check_repo(
         raise StepFailedError("repo worktree is not clean")
     # The tree is clean, so what is checked is exactly what gets pinned: a
     # commit that breaks the standards never reaches the live machine.
-    broken = check_repo(repo)
+    broken = check_standards(repo)
     if broken:
         first = "; ".join(str(v) for v in broken[:3])
         raise StepFailedError(
@@ -230,7 +230,7 @@ def _dry_apply(
 
     Args:
         ctx: The run context.
-        files: The pinned files from ``_check_repo``.
+        files: The pinned files from ``check_repo``.
         fragment: The Claude hook groups per event.
         provider_configs: Whether Claude and Codex config will be edited.
 
@@ -299,7 +299,7 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     """
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise StepFailedError("--sha must be a full 40-hex commit id")
-    files, fragment = _check_repo(ctx, repo, sha)
+    files, fragment = check_repo(ctx, repo, sha)
     _check_machine(ctx)
     preflight_service(ctx)
     ctx.cursor_hooks = installed(ctx, "cursor") and (
@@ -338,4 +338,4 @@ def validate_resume_repo(ctx: Ctx, repo: Path, sha: str) -> None:
     """Revalidate the candidate while managed launch paths are blocked."""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise StepFailedError("--sha must be a full 40-hex commit id")
-    _check_repo(ctx, repo, sha)
+    check_repo(ctx, repo, sha)

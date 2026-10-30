@@ -165,7 +165,7 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _journal(home: Path) -> Generator[IntentRow]:
+def read_journal(home: Path) -> Generator[IntentRow]:
     """Read every private journal record, refusing torn or malformed lines."""
     path = home / TOMBSTONE_FILE
     try:
@@ -222,7 +222,7 @@ def read_intent(conn: sqlite3.Connection, home: Path) -> TombstoneIntent:
     }
     missing: list[IntentRow] = []
     # Keep only distinct intent; a repeated journal entry still needs parsing.
-    with closing(_journal(home)) as journal:
+    with closing(read_journal(home)) as journal:
         for record in journal:
             if record.key not in rows:
                 rows[record.key] = record
