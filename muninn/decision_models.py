@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from muninn.knowledge_models import (
     AffectedRevision,
@@ -17,6 +17,11 @@ from muninn.knowledge_models import (
     Text,
     UnresolvedId,
     UnresolvedProposal,
+)
+from muninn.review_evidence_models import (
+    EvidenceLocator,
+    EvidenceSelector,
+    EvidenceWindow,
 )
 from muninn.review_models import Receipt
 
@@ -52,6 +57,12 @@ type DecisionCode = Literal[
     "display_proof",
     "candidate_changed",
     "learning_paused",
+    "decision_reference_required",
+    "already_saved",
+    "evidence_byte_limit",
+    "evidence_record_limit",
+    "evidence_work_limit",
+    "evidence_selection_limit",
 ]
 
 
@@ -119,3 +130,53 @@ class UnresolvedView(StrictModel):
     stale_affected: tuple[AffectedRevision, ...]
     support_ids: tuple[EvidenceId, ...]
     scope: Scope
+
+
+class DecisionIntent(StrictModel):
+    """Bind a proposed action to exact original owner and display fields."""
+
+    candidate_id: DecisionId
+    action: Literal["approve", "reject", "edit"]
+    owner_locator: EvidenceLocator
+    owner_selector: EvidenceSelector
+    display_locator: EvidenceLocator
+    display_selector: EvidenceSelector
+    replacement_id: DecisionId | None
+
+    @model_validator(mode="after")
+    def replacement(self) -> Self:
+        """Require a distinct replacement identity only for an edit."""
+        if (self.action == "edit") != (
+            self.replacement_id is not None
+        ) or self.replacement_id == self.candidate_id:
+            raise ValueError("decision_invalid")
+        return self
+
+
+class VerifiedDecision(StrictModel):
+    """Carry physical verification results for internal orchestration."""
+
+    candidate_id: DecisionId
+    candidate_digest: Digest
+    action: Literal["approve", "reject", "edit"]
+    owner_evidence_id: EvidenceId
+    display_evidence_id: EvidenceId
+    owner_window: EvidenceWindow
+    replacement_id: DecisionId | None
+    replacement_digest: Digest | None
+
+    @model_validator(mode="after")
+    def replacement(self) -> Self:
+        """Keep replacement identity and frozen digest paired for edits."""
+        if (
+            (self.action == "edit")
+            != (
+                self.replacement_id is not None
+                and self.replacement_digest is not None
+            )
+            or (self.replacement_id is None)
+            != (self.replacement_digest is None)
+            or self.replacement_id == self.candidate_id
+        ):
+            raise ValueError("decision_invalid")
+        return self
