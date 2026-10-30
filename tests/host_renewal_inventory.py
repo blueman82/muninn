@@ -26,10 +26,7 @@ def seed_inventory(self: host_renewal_support.HostFixture) -> None:
         "UPDATE review_attempt SET ended_at=3.0,progress_at=3.0,"
         "outcome='completed'"
     )
-    self.sql(
-        "UPDATE review_request SET state='completed',"
-        "current_attempt_id=NULL"
-    )
+    self.sql("UPDATE review_request SET state='completed'")
     self.insert(
         "review_source",
         {
