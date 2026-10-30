@@ -78,13 +78,40 @@ class PreviewDiagnosticTests(PreviewFixture):
         with policy_preview.connection(self.path):
             pass
 
-    def test_competing_writer_open_changes_lock_before_lock_refusal(
+    def test_competing_writer_refusal_preserves_preview_lock(
         self,
     ) -> None:
         if os.name == "nt":
             self.skipTest("POSIX fchmod metadata; Windows has native ACLs")
-        before = policy_preview._metadata(self.lock.stat())
+        before = states(self.home)
+        identity = self.lock.stat()
+        lock_bytes = self.lock.read_bytes()
         database = self.path.read_bytes()
+        with policy_preview.connection(self.path) as conn:
+            with (
+                self.assertRaises(store.BusyError),
+                store.writer_lock(self.ctx.data, wait_s=0),
+            ):
+                self.fail("competing writer acquired preview ownership")
+            self.assertEqual(conn.execute("SELECT 1").fetchone()[0], 1)
+        after = self.lock.stat()
+        self.assertEqual(
+            (after.st_dev, after.st_ino),
+            (identity.st_dev, identity.st_ino),
+        )
+        self.assertEqual(after.st_uid, identity.st_uid)
+        self.assertEqual(after.st_nlink, identity.st_nlink)
+        self.assertEqual(self.lock.read_bytes(), lock_bytes)
+        self.assertEqual(self.path.read_bytes(), database)
+        self.assertEqual(states(self.home), before)
+        with store.writer_lock(self.ctx.data, wait_s=0):
+            pass
+
+    def test_real_lock_ctime_change_still_discards_preview(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX fchmod metadata; Windows has native ACLs")
+        before = self.lock.stat()
+        raw = self.lock.read_bytes()
         with (
             self.assertRaisesRegex(
                 StepFailedError,
@@ -92,17 +119,63 @@ class PreviewDiagnosticTests(PreviewFixture):
             ),
             policy_preview.connection(self.path),
         ):
-            with (
-                self.assertRaises(store.BusyError),
-                store.writer_lock(self.ctx.data, wait_s=0),
-            ):
-                self.fail("competing writer acquired preview ownership")
-            self.assertNotEqual(
-                policy_preview._metadata(self.lock.stat()), before
+            descriptor = os.open(self.lock, os.O_RDWR)
+            try:
+                os.fchmod(descriptor, 0o600)
+            finally:
+                os.close(descriptor)
+            after = self.lock.stat()
+            self.assertNotEqual(after.st_ctime_ns, before.st_ctime_ns)
+            self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual(after.st_mode, before.st_mode)
+            self.assertEqual(
+                (after.st_dev, after.st_ino),
+                (before.st_dev, before.st_ino),
             )
-        self.assertEqual(self.path.read_bytes(), database)
+            self.assertEqual(self.lock.read_bytes(), raw)
         with store.writer_lock(self.ctx.data, wait_s=0):
             pass
+
+    def test_lock_content_or_mtime_change_still_discards_preview(
+        self,
+    ) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX permits writes beside a held flock")
+        database = self.path.read_bytes()
+        for change in ("content", "mtime"):
+            with self.subTest(change=change):
+                original = self.lock.read_bytes()
+                before = self.lock.stat()
+                with (
+                    self.assertRaisesRegex(
+                        StepFailedError,
+                        "^review_policy_preview_unavailable: lock_changed$",
+                    ),
+                    policy_preview.connection(self.path),
+                ):
+                    if change == "content":
+                        with self.lock.open("ab") as stream:
+                            stream.write(b"changed")
+                    else:
+                        os.utime(
+                            self.lock,
+                            ns=(
+                                before.st_atime_ns,
+                                before.st_mtime_ns + 1_000_000_000,
+                            ),
+                        )
+                self.assertEqual(
+                    self.lock.read_bytes(),
+                    original + b"changed" if change == "content" else original,
+                )
+                after = self.lock.stat()
+                self.assertEqual(
+                    (after.st_dev, after.st_ino),
+                    (before.st_dev, before.st_ino),
+                )
+                self.assertEqual(self.path.read_bytes(), database)
+                with store.writer_lock(self.ctx.data, wait_s=0):
+                    pass
 
     def test_sidecars_keep_reason_and_all_bytes(self) -> None:
         sidecar = Path(f"{self.path}-wal")
