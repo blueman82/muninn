@@ -145,9 +145,29 @@ An unknown request returns `request_unavailable`.
 
 New failures after dismissal can create another notice.
 Upgrades preserve saved notices.
-At startup, setup notices take priority.
-Otherwise, Muninn selects the newest saved request notice.
-After you dismiss one request notice, an older notice can appear.
+At session start, `systemMessage` shows learning actions that require the owner.
+This also applies with `recall.off` or `recall.advisory`.
+Setup notices take priority over eligible request notices.
+Muninn then selects the newest eligible request notice.
+A newer contained failure cannot hide an older required action, even when admission is unsafe.
+If admission is unsafe and no required action remains, Muninn shows a contained issue with current pause guidance.
+
+With open admission and a valid stored policy and digest, contained request failures stay quiet at startup.
+These include rejected proposals, exhausted corrections, bounded retries, and deterministic source-read limits.
+The finite contained codes are `deadline`, `unavailable`, `rejected_revision`, `rejected_authority`, `rejected_validation`, `rejected_evidence`, `rejected_erased`, `rejected_scope`, `evidence_limit`, `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, and `evidence_selection_limit`.
+Sign-in, capability, binding, security, native tool events, uncertain processes, approval failures, and unknown codes remain visible.
+Setup notices remain visible.
+
+Closed admission remains visible even without a saved issue.
+An absent, invalid, or mismatched stored policy also produces a startup action.
+Muninn reads saved admission and validates the stored policy and digest for this decision.
+Saved action wording does not establish current admission.
+These checks do not prove live host, account, or worker health.
+Startup changes no saved issues, requests, admission, or history.
+It displays fixed program text, never question bodies, source text, or model output.
+`doctor` still reports `review_attention` for saved issues, including failures hidden at startup.
+Inspect contained failures with `muninn learn list --state failed`, `muninn learn show R_ID`, or `muninn learn explain R_ID --human`.
+After you dismiss one request notice, an older eligible notice can appear.
 Successful completion clears the request notice.
 
 You cannot dismiss a setup notice with a request ID.

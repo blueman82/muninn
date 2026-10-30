@@ -366,10 +366,28 @@ Capture-gap counts are never multiplied into a call or cost estimate.
 
 ### Learning failure messages
 
-At the next Codex session start, `systemMessage` shows a stored cause and action.
+At session start, `systemMessage` shows a learning action when the owner must act.
 This message also appears with `recall.off` or `recall.advisory`.
 Request notices include their request ID in commands to inspect and dismiss them.
-Setup notices take priority over request notices.
+Setup notices take priority over eligible request notices.
+Muninn then selects the newest eligible request notice.
+A newer contained failure cannot hide an older required action, even when admission is unsafe.
+If admission is unsafe and no required action remains, Muninn shows a contained issue with current pause guidance.
+
+With open admission and a valid stored policy and digest, contained request failures stay quiet at startup.
+These include rejected proposals, exhausted corrections, bounded retries, and deterministic source-read limits.
+The finite contained codes are `deadline`, `unavailable`, `rejected_revision`, `rejected_authority`, `rejected_validation`, `rejected_evidence`, `rejected_erased`, `rejected_scope`, and all five `evidence_*limit` codes below.
+Sign-in, capability, binding, security, native tool events, uncertain processes, approval failures, and unknown codes remain visible.
+Setup notices remain visible.
+
+Closed admission remains visible even without a saved issue.
+An absent, invalid, or mismatched stored policy also produces a startup action.
+Muninn reads saved admission and validates the stored policy and digest for this decision.
+Saved action wording does not establish current admission.
+These checks do not prove live host, account, or worker health.
+Run `muninn doctor --pretty` for current checks.
+Startup changes no saved issues, requests, admission, or history.
+It displays fixed program text, never question bodies, source text, or model output.
 You cannot dismiss a setup notice with a request ID.
 `muninn learn show R_ID` adds `diagnostics` with stage, cause, action, and code.
 To read an explanation in ordinary language, run:
@@ -428,12 +446,12 @@ The stage is `not recorded`.
 The cause and action use their default text.
 A new failure after dismissal can create another notice for the same request.
 Upgrades preserve saved notices.
-At startup, setup notices take priority.
-Otherwise, Muninn selects the newest saved request notice.
-After you dismiss one request notice, an older notice can appear.
+Startup filters only the displayed action.
+Contained failures remain available through `learn list`, `learn show`, and `learn explain`.
+After you dismiss one request notice, an older eligible notice can appear.
 Successful completion clears the notice for that request.
 
-`doctor` adds `review_attention` when a stored issue needs attention.
+`doctor` still adds `review_attention` for a stored issue, including a contained failure hidden at startup.
 These fields contain fixed program text and identifiers.
 They contain no transcript or model output.
 

@@ -73,7 +73,7 @@ class LearningMessageTests(RequestCase):
         )
         self.transaction(
             lambda: review_recovery.record(
-                self.conn, request.id, "rejected_authority", "review", 20.0
+                self.conn, request.id, "auth", "review", 20.0
             )
         )
         env = dict(os.environ) | {
