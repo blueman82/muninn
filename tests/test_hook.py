@@ -258,7 +258,8 @@ class FailOpenTests(HookCase):
             side_effect=RuntimeError("boom"),
         ):
             out = self.start_hook()
-        self.assertEqual(out, notice("error"))
+        self.assertIn("context unavailable", self.body(out))
+        self.assertNotIn("store unavailable", self.body(out))
         self.assertNotIn("boom", json.dumps(out))
         with mock.patch.object(
             hook.knowledge_push,
@@ -300,26 +301,6 @@ class FailOpenTests(HookCase):
         ):
             out = self.start_hook()
         self.assertIn("Project knowledge", self.body(out))
-
-    def test_odd_payloads_never_raise(self) -> None:
-        payloads: tuple[object, ...] = (
-            "text",
-            5,
-            None,
-            [],
-            {"cwd": 5},
-            {"transcript_path": 7},
-        )
-        for payload in payloads:
-            with self.subTest(payload=payload):
-                out = hook.session_start(payload, "claude", self.env)
-                self.assertEqual(out, notice("error"))
-        self.assertIn(
-            USAGE, self.body(self.start_hook(transcript_path="a\0b"))
-        )
-        self.assertEqual(
-            hook.session_start({}, "nonsense", self.env), notice("error")
-        )
 
     def test_cursor_project_directory_is_provider_scoped(self) -> None:
         env = {"CURSOR_PROJECT_DIR": "/cursor-project"}

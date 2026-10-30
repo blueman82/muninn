@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from muninn import query, review_recovery, review_requests
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
+from muninn.cli_know_shared import saved_policy
 from muninn.cli_learn_explain import explain
 from muninn.cli_learning_setup import failure as setup_failure
 from muninn.cli_learning_setup import setup
@@ -42,7 +43,6 @@ from muninn.review_models import (
 from muninn.review_progress import (
     boundary,
     checked_policy,
-    digest,
     source_progress,
 )
 from muninn.review_request_views import attempt_view, request_row, request_view
@@ -55,15 +55,7 @@ def installed_policy(conn: sqlite3.Connection) -> ReviewPolicy:
     ).fetchone()
     if row is None or not row["admission"] or row["policy_json"] is None:
         raise ValueError("review_policy_required")
-    try:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(row["policy_json"])
-        )
-    except ValueError:
-        raise ValueError("review_policy_required") from None
-    if row["policy_digest"] != digest(policy):
-        raise ValueError("review_policy_required")
-    return policy
+    return saved_policy(conn)
 
 
 def _policy(conn: sqlite3.Connection, path: str | None) -> ReviewPolicy:

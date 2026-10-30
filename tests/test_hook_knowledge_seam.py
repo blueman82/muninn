@@ -15,8 +15,8 @@ from tests.knowledge_context_support import KnowledgeContextCase
 from tests.test_classify import codex_meta, function_call, user_msg
 
 
-class HookKnowledgeSeamTests(KnowledgeContextCase):
-    """Catch broken imports and empty-success typed hook substitutions."""
+class HookKnowledgeCase(KnowledgeContextCase):
+    """Supply actual parser dispatch for temporary knowledge and hooks."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -68,6 +68,17 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
         self.assertEqual(code, 0)
         return json.loads(out.getvalue())
 
+    def body(self, answer: dict[str, object]) -> str:
+        """Read the real provider envelope without substituting its shape."""
+        output = answer["hookSpecificOutput"]
+        if not isinstance(output, dict):
+            self.fail("missing provider output object")
+        return str(output["additionalContext"])
+
+
+class HookKnowledgeSeamTests(HookKnowledgeCase):
+    """Catch broken imports and empty-success typed hook substitutions."""
+
     def test_real_dispatch_renders_nonempty_notes_and_guide_index(
         self,
     ) -> None:
@@ -82,13 +93,6 @@ class HookKnowledgeSeamTests(KnowledgeContextCase):
         self.assertIn("revision 1", text)
         self.assertIn("untrusted-data", text)
         self.assertNotIn("know add", text)
-
-    def body(self, answer: dict[str, object]) -> str:
-        """Read the real provider envelope without substituting its shape."""
-        output = answer["hookSpecificOutput"]
-        if not isinstance(output, dict):
-            self.fail("missing provider output object")
-        return str(output["additionalContext"])
 
     def test_current_revision_scope_support_and_complete_conditions(
         self,

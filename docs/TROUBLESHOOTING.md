@@ -162,3 +162,64 @@ archives, `tombstone.key` and latest `tombstones.jsonl` as observed. Never resto
 an archive or promote an orphan automatically. A fresh process refuses an existing
 `muninn.sqlite.rebuild`; it cannot infer a lost pre-crash admission value.
 Resolve that recovery state before retrying or restarting consumers.
+
+## Conversational memory choices
+
+The agent handles checks and commands for this flow.
+Ordinary supported learning does not need approval for each memory.
+A relevant unresolved question or explicit review can start a separate checked proposal.
+
+| Result | Meaning and next action |
+|---|---|
+| `waiting_verification` with `waiting_index` | Muninn has not verified the original reply. Existing background work can continue when indexing makes the record eligible. It has not saved the memory. |
+| `approved_pending` | Approval is verified. The memory has not committed. The agent can run the bounded targeted application. |
+| `decision_display_limit` | The complete proposal and instructions exceed the saved display limit. Muninn accepted no shortened display. The agent must prepare a complete proposal that fits. |
+| `display_proof`, `owner_proof`, `owner_intent` | The exact complete original fields did not pass proof checks. A wrapper, cropped field, or agent claim cannot supply consent. |
+| `decision_reference_required` | A bare `approved` does not identify the complete proposal. Use the exact sentence from the complete display. |
+| `rejected_revision` | A target changed. Application refuses. The agent can prepare a fresh proposal when checked evidence permits it. |
+| `rejected_evidence`, `rejected_erased` | Required evidence changed, is unavailable, or was erased. The agent must investigate the specific finite refusal. It must not reconstruct erased content. |
+| `learning_paused` | Views do not restart learning. Application keeps the pause in force. |
+| `already_saved` or state `saved` | The existing receipt remains valid. A later change needs separate checked retraction or replacement of saved knowledge. |
+| `rejected` | Verified rejection saved no knowledge through this decision. It does not restore withheld knowledge or automatically resolve a question. |
+| `superseded` | The old draft was replaced. The new draft needs a complete display and its own approval. |
+
+An unverified negative intent does not cancel an accepted approval.
+Status keeps `intent_state` separate from the proposal's actual `state` and receipt.
+An independent new draft remains separate and unapproved.
+The agent reports the actual receipt or pending state. A reply, queue entry, or launch is not saved memory.
+
+## Saved setup warnings
+
+A setup warning can appear on startup, resume, clear, or compact.
+The warning read does not check current host health or start a timer.
+The background program can check again only while it runs and learning is enabled.
+Its setup delay is at least 60 seconds, not an exact promised check time.
+A failed check retains or replaces the warning. A successful relevant setup check or launch clears it.
+Clearing a warning does not establish saved memory.
+
+`codex_host_changed` means the saved computer ID does not match this computer.
+Why that ID changed remains unknown.
+The agent can inspect the saved approval. This does not renew it or change permissions.
+`codex_data_home_changed`, `codex_platform_changed`, and `codex_project_required` identify different boundaries.
+`codex_approval_required` and `codex_capability_status` identify missing approval or a changed runner status.
+Older `codex_experimental_boundary` records did not retain the exact mismatch.
+Muninn cannot infer it from that old code.
+Human wording comes from safe current code, not a saved arbitrary message.
+
+## A new project has no memory yet
+
+A healthy new project can lack an indexed project mapping.
+The startup hook then returns normal empty project context.
+It does not use global memory or another project's knowledge instead.
+The indexer creates the mapping when it indexes a relevant event.
+SessionEnd requests learning only from already indexed eligible records.
+It does not ingest, wait for indexing, or schedule a new startup event.
+A later startup, resume, clear, or compact can read the new mapping.
+Prompt recall remains separate and conditional.
+A successful prompt hook does not prove startup memory delivery.
+Waiting 60 seconds alone does not refresh the current conversation's startup context.
+
+Real open, corruption, format, privacy, and nonregular-file refusals remain store failures.
+`context_unavailable` instead means context generation failed and the exact detail was not recorded.
+The agent can investigate with the normal read-only checks.
+It must not guess the cause of an older generic `error` record.

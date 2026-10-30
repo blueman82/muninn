@@ -138,7 +138,7 @@ class CodexProductionLaunchTests(IngestCase):
                 self.capability,
                 self.prompt,
             )
-        with self.assertRaisesRegex(ValueError, "codex_experimental_boundary"):
+        with self.assertRaisesRegex(ValueError, "codex_capability_status"):
             review_runner.prepare_launch(
                 self.context,
                 self.capability.model_copy(update={"status": "verified"}),

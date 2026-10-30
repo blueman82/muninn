@@ -17,6 +17,7 @@ from muninn.decision_models import (
     DecisionView,
     VerifiedDecision,
 )
+from muninn.decision_words import choice_words
 from muninn.knowledge_scope import scope_applies
 from muninn.review_authority import injected
 from muninn.review_commit_state import EVIDENCE_ERRORS
@@ -44,12 +45,9 @@ from muninn.tombstones import require_current_tombstones
 
 def decision_words(intent: DecisionIntent) -> str:
     """Return the supported dedicated whole-field instruction."""
-    if intent.action == "edit":
-        return (
-            f"Please replace memory {intent.candidate_id} "
-            f"with memory {intent.replacement_id}."
-        )
-    return f"Please {intent.action} memory {intent.candidate_id}."
+    return choice_words(
+        intent.candidate_id, intent.action, intent.replacement_id
+    )
 
 
 def _original(

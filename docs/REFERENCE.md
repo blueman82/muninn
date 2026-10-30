@@ -196,7 +196,139 @@ Existing governed archives are retained. Any installer path that actually replac
 a live store still requires its durable conservative publication record before
 replacement and before runtime/configuration rollback decisions.
 
-### Exact legacy exclusion and forward cutover
+#### Conversational memory decisions
+
+Ordinary supported learning saves without a new owner approval step.
+A relevant unresolved question, or an explicit owner review request, can start a separate decision.
+The agent prepares a complete checked proposal and handles all commands.
+A question or an earlier failure code alone is not a complete proposal.
+If an earlier rejected proposal is unavailable, the agent prepares a new draft from checked evidence.
+
+These are agent operations:
+
+```sh
+muninn know unresolved [U_ID] [--human] [--limit N] [--after U_ID] [--all-projects] [--task TASK]
+muninn know decision stage --input FILE
+muninn know decision show D_ID [--human]
+muninn know decision submit --input FILE
+muninn know decision status D_ID [--human]
+muninn know decision apply D_ID
+```
+
+`D_ID` identifies one complete proposal. `U_ID` identifies one recorded question.
+Each ID has its prefix and 32 lowercase hexadecimal characters.
+These IDs are opaque handles. Their parts give no meaning or authority.
+Opening either record gives no approval and admits no new evidence.
+Without `U_ID`, unresolved lists open questions in the existing permitted project or task scopes.
+`--all-projects` uses the existing explicit union of read scopes.
+Global guidance is not inherited by projects.
+The list includes questions with no affected knowledge.
+Its default limit is 50, with a range of 1–100.
+`--after` is an exclusive ID cursor. Results use ascending ID order.
+An explicit `U_ID` reads that exact historical question, including resolved or erased state.
+
+Unresolved list returns `unresolved: [UnresolvedView, ...]`.
+One question returns `id`, `request_id`, `state`, `item`, `affected`, `stale_affected`, `support_ids`, and `scope`.
+`state` is `open`, `resolved`, or `erased`.
+The originating request supplies the scope. Stale affected revisions remain distinct from resolution.
+Erased question bodies remain absent.
+
+Stage takes strict `CandidateInput`: `request_id`, `result`, and `disposition`.
+Use the checked preparation request and its actual admitted evidence.
+`result` uses the complete note or guide result contract above.
+`disposition` is null or contains `unresolved_id`, `answer`, `affected`, and `complete`.
+`affected` contains exact `knowledge_id` and `revision` pairs.
+Stage checks and normalizes the complete change before saving it.
+The saved proposal is immutable. Its complete fields cannot change.
+It allocates no owner authority.
+
+A canonical display is the stable text Muninn generates from the saved proposal.
+A digest checks the integrity of its exact fields.
+Show returns `DecisionDisplay`: `id`, `digest`, `text`, and `complete: true`.
+The canonical `text` contains `candidate`, `enrichment`, and `owner_decision`.
+The complete candidate retains content, scope, targets, original supports, versions, disposition, and digest.
+Disposition describes the proposed answer to an originating question.
+Enrichment is the disclosed rule for adding verified owner support.
+That unchanged rule appends owner evidence without changing the proposal's other fields.
+`owner_decision` contains these program-owned fields:
+
+| Field | Meaning |
+|---|---|
+| `meaning` | Identifies this complete proposal and says viewing gives no approval. |
+| `approve` | The exact sentence `Please approve memory D_ID.` with the real ID. |
+| `reject` | The exact sentence `Please reject memory D_ID.` with the real ID. |
+| `edit` | Asks the agent to prepare and display a new complete proposal with its own approval. |
+| `reply` | Requires the complete plain chat sentence, unchanged case, spaces, and final period. |
+| `agent` | Assigns commands and checks to the agent. A reply alone does not establish saved memory. |
+
+The agent sends the exact decoded `text` as its whole original final message.
+It adds no Markdown fence, prose, or newline outside that text.
+The owner sends the exact approve or reject sentence as a whole plain chat message.
+A bare `approved`, copied wrapper, tool response, or agent statement gives no approval.
+Viewing and status checks do not verify or accept a decision.
+
+For an edit, the agent stages and displays a new complete proposal.
+The exact replacement sentence is `Please replace memory D_OLD with memory D_NEW.`.
+It uses the real IDs and the new proposal's complete display.
+Verified replacement supersedes the old draft. It does not approve the new draft.
+The new draft needs its own later exact approval.
+
+Submit takes strict `DecisionIntent`: `candidate_id`, `action`, `owner_locator`, `owner_selector`,
+`display_locator`, `display_selector`, and `replacement_id`.
+`action` is `approve`, `reject`, or `edit`.
+`replacement_id` is a distinct new D ID for edit, otherwise null.
+Each locator has `source` (`provider`, `thread_id`), `line`, `part`, and `line_sha256`.
+Each selector has `json_pointer`, `start`, and `end`.
+The verifier requires the complete supported original fields, not a selected substring.
+Only current eligible primary sources and genuine direct-owner wording can establish proof.
+Input files, labels, claimed IDs, and commands cannot establish proof.
+
+Stage, submit, status, and apply return `DecisionView`:
+`id`, `digest`, `state`, `revision`, `candidate`, `receipt`, `code`, and `intent_state`.
+`intent_state` is null, `waiting_verification`, `verified`, or `blocked`.
+It describes submitted intent separately from the proposal's actual state.
+A pending unverified rejection does not cancel verified approval.
+The states have these meanings:
+
+| State | Meaning |
+|---|---|
+| `waiting_verification` | The original reply has not been verified. |
+| `approved_pending` | Approval is verified. The memory has not been saved. |
+| `saved` | All application changes committed together and have a durable receipt. |
+| `rejected` | Verified rejection saved no knowledge through this decision. |
+| `blocked` | A required check refused progress. Inspect its finite `code`. |
+| `superseded` | A verified replacement superseded this draft. |
+| `erased` | The proposal content is unavailable after erasure. |
+
+Apply checks only the named proposal through the existing bounded application driver.
+It can return pending, blocked, or the actual saved receipt. It invokes no model.
+Missing indexing returns `waiting_index` promptly. Existing background work can continue verification.
+No command waits in an indexing loop or restarts paused learning.
+A saved proposal keeps its exact receipt. Duplicate delivery cannot save it twice.
+A later change needs separate checked retraction or replacement of the saved knowledge.
+An independently staged new proposal remains separate and unapproved.
+A changed target blocks application. The agent can prepare a fresh proposal when checked evidence permits it.
+A rejected draft does not restore withheld knowledge or automatically resolve its question.
+
+Explicit views use the actual saved strict policy and digest, even while learning is paused.
+The complete show text must fit that policy's current `context_bytes` in UTF-8 bytes.
+The limit includes all owner instructions. Muninn refuses oversize displays instead of truncating them.
+Invalid saved policy returns `review_policy_required`.
+Unknown or malformed records use finite codes such as `decision_unknown`, `decision_invalid`,
+`unresolved_unknown`, or `unresolved_invalid`. Erased content is never reconstructed.
+`--human` adds `explanation` and prints it to stderr. Stdout remains JSON.
+`--pretty` changes only JSON indentation. The decoded canonical `text` stays unchanged.
+Candidate, question, and proof content stay out of logs, doctor output, and automatic startup notices.
+Hook store failures keep `error: store_unavailable` and use finite `detail` codes.
+Known details are `cutover_required`, `store_access_refused`, `store_open_failed`, `store_corrupt`, and `store_read_failed`.
+An unknown detail is `store_detail_unknown`. Raw exception text is not retained.
+`context_unavailable` identifies a separate context-generation failure with no recorded exact detail.
+
+SessionEnd requests later learning from already indexed eligible records.
+It does not ingest or wait for indexing. It cannot promise a reply in a closed conversation.
+A later relevant review can present a checked proposal during an active conversation.
+
+## Exact legacy exclusion and forward cutover
 
 For the exact inventoried legacy release `5c1a69b0edff81df80836d72a80971a91a8f9520`
 on macOS/Linux, the installer can stage managed launch exclusion. This requires
@@ -276,7 +408,8 @@ A stale knowledge revision can also use a remaining attempt.
 Invalid output and failed authority, scope, or evidence checks receive no automatic retry.
 Existing policy revisions retain their earlier controls.
 
-Missing setup keeps work queued while Muninn rechecks every 60 seconds.
+Missing setup keeps work queued. The running background program can recheck while learning remains enabled.
+Setup checks wait at least 60 seconds. This is not a promised check time.
 Muninn does not reopen an owner pause.
 The process monitor reports an outcome only after it contains and collects the child process.
 An uncertain process keeps learning blocked.
@@ -481,7 +614,13 @@ Muninn keeps no source text between operations.
 | `capability_executable_provenance` | The executable's origin cannot be verified. Restore the approved executable. |
 | `capability_platform`, `launch_input_platform` | The approved runner cannot use this operating system or processor. Use the approved host. |
 | `capability_limit` | Runner setup exceeded a file size or scan limit. Restore the approved setup. |
-| `codex_experimental_boundary` | The Codex host, policy, or project differs from the approved setup. Restore that setup. |
+| `codex_experimental_boundary` | An older setup refusal did not record the exact mismatch. Its cause remains unknown. |
+| `codex_approval_required` | The saved Codex approval is missing. |
+| `codex_data_home_changed` | The saved and current data directories differ. |
+| `codex_capability_status` | The runner status differs from the approved setup. |
+| `codex_platform_changed` | The operating system or processor differs from the approved setup. |
+| `codex_host_changed` | The saved computer ID differs from this computer. Why it changed remains unknown. |
+| `codex_project_required` | This review has no project binding. |
 | `native_prompt_instruction` | Review instructions do not match the required Codex format. Restore the approved instructions. |
 | `launch_input_storage` | A review setup file is outside its required private directory. Restore the approved location. |
 | `runner_unsupported` | The selected runner has no supported launch method. Use the approved runner. |
@@ -496,7 +635,12 @@ Muninn keeps no source text between operations.
 
 Muninn can retry safe calls and recheck approved local setup.
 Setup failures keep queued requests available.
-Muninn checks the setup again every 60 seconds without making a model call.
+The background program can check setup again while running and learning is enabled.
+Its setup delay is at least 60 seconds, not an exact promised time.
+Reading a saved notice starts no timer.
+A failed check retains or replaces the notice. A successful relevant setup check or launch clears it.
+Clearing a notice does not establish saved knowledge.
+Muninn renders current notices from finite safe codes. It does not reuse saved human text.
 It cannot sign in for a person, approve changed security bindings, restore missing original transcripts, or infer provider allowance.
 These actions need account access, approval, original data, or provider information that Muninn does not have.
 

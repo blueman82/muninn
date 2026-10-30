@@ -43,7 +43,7 @@ class DecisionCase(CommitCase):
     def setUp(self) -> None:
         super().setUp()
         self.policy = self.policy.model_copy(
-            update={"max_input_bytes": 1_000_000}
+            update={"max_input_bytes": 1_000_000, "context_bytes": 12000}
         )
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",

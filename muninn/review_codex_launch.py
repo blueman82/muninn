@@ -259,6 +259,27 @@ def selected_auth_home(home: Path, policy: ReviewPolicy) -> Path:
     return binding.auth_home
 
 
+def _check_setup(
+    context: ReviewContext,
+    capability: review_runner.RunnerCapability,
+    home: Path,
+) -> None:
+    """Retain the exact native boundary comparisons and finite causes."""
+    terms = context.policy.experimental_codex
+    if terms is None:
+        raise ValueError("codex_approval_required")
+    if terms.data_home != home:
+        raise ValueError("codex_data_home_changed")
+    if capability.status != "unverified":
+        raise ValueError("codex_capability_status")
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        raise ValueError("codex_platform_changed")
+    if terms.host_identity != host_identity():
+        raise ValueError("codex_host_changed")
+    if context.scope.project_id is None:
+        raise ValueError("codex_project_required")
+
+
 def prepare(
     context: ReviewContext,
     capability: review_runner.RunnerCapability,
@@ -269,16 +290,8 @@ def prepare(
     terms = policy.experimental_codex
     home = store.data_home(os.environ)
     review_runner.check_private_path(home, directory=True)
-    if (
-        terms is None
-        or terms.data_home != home
-        or capability.status != "unverified"
-        or platform.system() != "Darwin"
-        or platform.machine() != "arm64"
-        or terms.host_identity != host_identity()
-        or context.scope.project_id is None
-    ):
-        raise ValueError("codex_experimental_boundary")
+    _check_setup(context, capability, home)
+    assert terms is not None
     binding, executable = _binding(home, capability)
     if (
         binding.requested != policy.runner

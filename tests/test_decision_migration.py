@@ -129,11 +129,15 @@ class DecisionMigrationTests(V1PreviewFixture):
                     )
                 self.ctx.dry_run = False
                 before, rows = self.path.read_bytes(), self.rows()
-                with mock.patch.object(
-                    recovery_guidance.cli_recovery,
-                    "recover",
-                    side_effect=AssertionError(
-                        "current recovery must not open v1"
+                messages: list[str] = []
+                with (
+                    mock.patch.object(self.ctx, "say", messages.append),
+                    mock.patch.object(
+                        recovery_guidance.cli_recovery,
+                        "recover",
+                        side_effect=AssertionError(
+                            "current recovery must not open v1"
+                        ),
                     ),
                 ):
                     if condition == "healthy":
@@ -145,6 +149,16 @@ class DecisionMigrationTests(V1PreviewFixture):
                             recovery_guidance.recover_pause(self.ctx, self.rec)
                 self.assertEqual(self.path.read_bytes(), before)
                 self.assertEqual(self.rows(), rows)
+                self.assertEqual(
+                    len(messages), 0 if condition == "healthy" else 3
+                )
+                if messages:
+                    self.assertIn("marked-v1 pause or erasure", messages[0])
+                    self.assertIn(
+                        "verified v1 installed muninn recover", messages[1]
+                    )
+                    self.assertIn("Keep the old release", messages[2])
+                    self.assertIn("all data unchanged", messages[2])
 
     def test_failure_after_publication_retains_actual_current_and_raw_archive(
         self,

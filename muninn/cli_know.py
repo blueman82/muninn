@@ -15,23 +15,15 @@ from muninn.cli_core import (
     Out,
     Record,
     Result,
-    current_dir,
     read_store,
     write_store,
 )
+from muninn.cli_decision import decision
+from muninn.cli_know_shared import scopes as _scopes
 from muninn.cli_learn import installed_policy, propose
-from muninn.knowledge_models import KnowledgeView, Scope
-from muninn.query.answers import event_ref, knowledge_scopes
+from muninn.knowledge_models import KnowledgeView
+from muninn.query.answers import event_ref
 from muninn.review_models import ProposalInput
-from muninn.scope import scope_ids_for_read
-
-
-def _scopes(conn: sqlite3.Connection, a: Namespace, env: Env) -> list[Scope]:
-    """Resolve permitted mapped project/task scopes without writing paths."""
-    ids = scope_ids_for_read(conn, current_dir(env))
-    return knowledge_scopes(
-        conn, ids, getattr(a, "all_projects", False), getattr(a, "task", None)
-    )
 
 
 def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
@@ -115,6 +107,8 @@ def _proposal(a: Namespace) -> ProposalInput:
 @query.guarded
 def know(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Dispatch current knowledge controls and emit safe refusal codes."""
+    if a.know_cmd in {"decision", "unresolved"}:
+        return decision(a, env, home, record)
     record["cmd"] = f"know {a.know_cmd}"
     try:
         if a.know_cmd == "propose":

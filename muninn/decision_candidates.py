@@ -19,6 +19,7 @@ from muninn.decision_models import (
     QuestionDisposition,
 )
 from muninn.decision_read import show_unresolved
+from muninn.decision_words import owner_instructions
 from muninn.knowledge_models import (
     AffectedRevision,
     EvidenceId,
@@ -336,6 +337,7 @@ def show_candidate(
         {
             "candidate": view.candidate.model_dump(mode="json"),
             "enrichment": {"version": 1, "rule": ENRICHMENT_RULE},
+            "owner_decision": owner_instructions(ident),
         }
     )
     if len(text.encode()) > max_bytes:

@@ -103,6 +103,12 @@ class AutomaticRecoveryTests(SupervisorCase):
             "capability_platform",
             "capability_limit",
             "codex_experimental_boundary",
+            "codex_approval_required",
+            "codex_data_home_changed",
+            "codex_capability_status",
+            "codex_platform_changed",
+            "codex_host_changed",
+            "codex_project_required",
             "native_prompt_instruction",
             "launch_input_platform",
             "launch_input_storage",
@@ -137,7 +143,7 @@ class AutomaticRecoveryTests(SupervisorCase):
                 self.assertEqual(issue["code"], code)
         until = time.monotonic() + 8.0
         while time.monotonic() < until:
-            self.supervisor.tick(900.0)
+            self.supervisor.tick(1500.0)
             if (
                 self.conn.execute(
                     "SELECT count(*) FROM review_receipt"

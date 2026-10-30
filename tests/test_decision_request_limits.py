@@ -216,7 +216,7 @@ class DecisionRequestLimitTests(DecisionCase):
                 self.conn, self.context.request_id, 14.0
             )
         )
-        self.policy = self.policy.model_copy(update={"max_input_bytes": 8000})
+        self.policy = self.policy.model_copy(update={"max_input_bytes": 11000})
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",
             (canonical_json(self.policy), self.digest(self.policy)),
