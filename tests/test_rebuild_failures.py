@@ -213,6 +213,31 @@ class RebuildFailureTests(CliCase):
             home: Path, original: cli_rebuild.fingerprint.Fingerprint
         ) -> None:
             before = dataclasses.asdict(original)
+            if os.name != "nt":
+                path = store.db_path(home)
+                raw, prior = path.read_bytes(), path.stat()
+                descriptor = os.open(
+                    path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+                )
+                try:
+                    os.fchmod(descriptor, 0o600)
+                    after = os.fstat(descriptor)
+                finally:
+                    os.close(descriptor)
+                self.assertNotEqual(after.st_ctime_ns, prior.st_ctime_ns)
+                for field in (
+                    "st_dev",
+                    "st_ino",
+                    "st_mode",
+                    "st_uid",
+                    "st_nlink",
+                    "st_size",
+                    "st_mtime_ns",
+                ):
+                    self.assertEqual(
+                        getattr(after, field), getattr(prior, field), field
+                    )
+                self.assertEqual(path.read_bytes(), raw)
             current = cli_rebuild.fingerprint.capture(home)
             with (
                 self.assertRaises(store.BusyError),

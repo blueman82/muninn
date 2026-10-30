@@ -188,7 +188,7 @@ def _verify_after_own_open(
 ) -> None:
     """Check the source after our RW open, within the same final writer.
 
-    The existing opener normalizes private permissions and changes DB ctime.
+    The opener may change DB ctime when normalizing private permissions.
     Only that timestamp may differ after a strict pre-open comparison; the
     original remains immutable and every across-gap comparison stays strict.
 
