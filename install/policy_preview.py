@@ -12,6 +12,7 @@ from pathlib import Path
 
 from install import snapshot_io
 from install.context import Ctx, StepFailedError
+from install.policy_source_format import validate_policy_source
 from install.review_policy_transition import compatible
 from muninn import platform_io, platform_lock, platform_windows, store
 from muninn.review_models import ReviewPolicy
@@ -223,6 +224,6 @@ def validate(ctx: Ctx, policy: ReviewPolicy) -> None:
         if conn.execute("PRAGMA user_version").fetchone()[0] == 3:
             return
         conn.row_factory = sqlite3.Row
-        store.assert_store_format(conn)
+        validate_policy_source(conn)
         compatible(conn, policy)
         check()

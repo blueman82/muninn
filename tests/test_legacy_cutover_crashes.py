@@ -35,7 +35,7 @@ class LegacyCrashTests(LegacyCase):
         )
         with closing(sqlite3.connect(self.ctx.data / "muninn.sqlite")) as conn:
             self.assertEqual(
-                conn.execute("PRAGMA user_version").fetchone()[0], 1
+                conn.execute("PRAGMA user_version").fetchone()[0], 2
             )
         self.assertTrue((self.ctx.rdir / "rollback-record.json").exists())
         self.assertEqual(self.summary()["outcome"], "ok")
@@ -47,16 +47,16 @@ class LegacyCrashTests(LegacyCase):
         )
 
     def test_crash_after_replace_recovers_actual_marked_store(self) -> None:
-        self.check_cut("after_publish", 1)
+        self.check_cut("after_publish", 2)
 
     def test_crash_after_config_preserves_exact_completed_config(self) -> None:
-        self.check_cut("after_configure", 1)
+        self.check_cut("after_configure", 2)
 
     def test_crash_after_launcher_exposure_uses_current_witness(self) -> None:
-        self.check_cut("after_expose", 1)
+        self.check_cut("after_expose", 2)
 
     def test_crash_after_service_start_revalidates_registration(self) -> None:
-        self.check_cut("after_start", 1)
+        self.check_cut("after_start", 2)
 
     def test_crash_after_policy_commit_recognizes_exact_activation(
         self,

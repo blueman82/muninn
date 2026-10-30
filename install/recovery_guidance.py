@@ -9,11 +9,13 @@ from argparse import Namespace
 from contextlib import closing
 from typing import NoReturn, cast
 
-from install import snapshot_io
+from install import decision_source, policy_preview, snapshot_io
 from install.context import Ctx, StepFailedError, dry
+from install.policy_source_format import legacy_source, validate_policy_source
 from install.record import Record
 from install.steps_release import installed_env
 from muninn import cli_recovery, store
+from muninn import review_pause as q
 
 
 def health_report_command(ctx: Ctx) -> str:
@@ -56,9 +58,9 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
     Raises:
         StepFailedError: If repair fails or needs a person.
     """
+    if _historical_checked(ctx, rec):
+        return
     try:
-        if _historical_store(ctx):
-            return
         code, result = cli_recovery.recover(
             Namespace(), installed_env(ctx), ctx.data, {}
         )
@@ -123,6 +125,29 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
     )
 
 
+def _historical_checked(ctx: Ctx, rec: Record) -> bool:
+    """Explain historical repair without invoking a current-only recovery."""
+    try:
+        return _historical_store(ctx)
+    except StepFailedError as exc:
+        if str(exc) != "marked_v1_recovery_required":
+            raise
+        rec["recovery_required"] = True
+        ctx.say(
+            "The marked-v1 pause or erasure needs its verified installed "
+            "recovery."
+        )
+        ctx.say(
+            "  Use the verified v1 installed muninn recover command, then "
+            "retry this upgrade."
+        )
+        ctx.say(
+            "  Keep the old release and all data unchanged until recovery "
+            "succeeds."
+        )
+        raise
+
+
 def _reason(result: object) -> str:
     """Return one fixed recovery reason from a CLI result."""
     if not isinstance(result, dict):
@@ -154,17 +179,36 @@ def _confirm_legacy_volume(ctx: Ctx) -> bool | None:
 
 
 def _historical_store(ctx: Ctx) -> bool:
-    """Leave schema-v3 stores for the installer's migration step."""
+    """Leave supported historical stores for explicit installer migration."""
     path = store.db_path(ctx.data)
     if not path.is_file():
         return False
+    if legacy_source(path):
+        return True
+    with policy_preview.connection(path) as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version != 1:
+            return False
+        try:
+            validate_policy_source(conn)
+        except StepFailedError as exc:
+            raise StepFailedError("cutover_source_mismatch") from exc
     with (
+        q.maintenance_owner(
+            ctx.data, wait_s=15.0, status=q.EraseStatus()
+        ) as owner,
+        q.maintenance_writer(owner),
         snapshot_io.validated(path) as check,
-        closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn,
+        closing(
+            sqlite3.connect(
+                path.as_uri() + "?mode=ro", uri=True, isolation_level=None
+            )
+        ) as conn,
     ):
         check()
-        # Current-format recovery cannot open v3 before its cutover.
-        return conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        decision_source.verify_source(owner, conn)
+        check()
+    return True
 
 
 def _fail_pause_recovery(

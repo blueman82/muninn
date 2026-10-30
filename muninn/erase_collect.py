@@ -1,52 +1,31 @@
-"""Erase planning: find everything one erase request removes.
+"""Plan exact erasure targets through read-only transcript and graph queries.
 
-Nothing is written here. The collectors fill a ``Target`` from read-only
-queries so ``--dry-run`` can report exact counts and ``erase`` can then apply
-the whole plan in one transaction.
+The caller uses one collected plan for dry-run counts and atomic erasure.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
 
-from muninn import query
-from muninn.erase_family import copies_of
-from muninn.knowledge_erase import SupportClosure, support_closure
+from muninn import decision_erase, query
+from muninn.erase_line_selection import (
+    add_line as _add_line,
+)
+from muninn.erase_line_selection import (
+    decision_lines as _decision_lines,
+)
+from muninn.erase_line_selection import (
+    evidence_lines as _evidence_lines,
+)
+from muninn.erase_target import Target
+from muninn.knowledge_erase import support_closure
+from muninn.tombstone_intent import IntentRow, TombstoneRow, event_tag
 from muninn.tombstone_key import key_for
-from muninn.tombstones import TombstoneRow, event_tag, tombstone_row
+from muninn.tombstone_rows import tombstone_row
 
 # Providers blocked when a session has not been ingested yet, so a later
 # ingest cannot resurrect it.
 _ALL_PROVIDERS = ["codex", "claude", "cursor"]
-
-
-@dataclass
-class Target:
-    """Everything one erase request will remove or list."""
-
-    sessions: set[tuple[str, str]] = field(
-        default_factory=set[tuple[str, str]]
-    )
-    # Source rows are deleted; touched ones (a superset) are only reported.
-    sources: dict[int, sqlite3.Row] = field(
-        default_factory=dict[int, sqlite3.Row]
-    )
-    touched: dict[int, sqlite3.Row] = field(
-        default_factory=dict[int, sqlite3.Row]
-    )
-    lines: set[tuple[int, int]] = field(default_factory=set[tuple[int, int]])
-    events: list[int] = field(default_factory=list[int])
-    tombstones: list[TombstoneRow] = field(default_factory=list[TombstoneRow])
-    # (provider, thread, role, text) of each content tombstone to write.
-    # Kept as text, not tags, so planning (and a dry run) needs no key.
-    content: list[tuple[str, str, str, str]] = field(
-        default_factory=list[tuple[str, str, str, str]]
-    )
-    knowledge: set[str] = field(default_factory=set[str])
-    review: SupportClosure = field(
-        default_factory=lambda: SupportClosure(set(), set(), set(), set())
-    )
 
 
 def _marks(count: int) -> str:
@@ -175,6 +154,7 @@ def collect_match(
         ).fetchone()
         _add_line(conn, target, source, line)
     plan = target.review
+    decision_erase.collect_match(conn, plan, match)
     plan.evidence.update(
         r[0]
         for r in conn.execute(
@@ -222,6 +202,8 @@ def collect_match(
         request_ids=tuple(plan.requests),
         versions=tuple(plan.versions),
         unresolved_ids=tuple(plan.unresolved),
+        candidate_ids=tuple(plan.candidates),
+        decision_ids=tuple(plan.decisions),
     )
     # Re-admitting the producing inputs must not regenerate matched output.
     for ident in plan.requests:
@@ -233,58 +215,6 @@ def collect_match(
             )
         )
     target.review = plan
-
-
-def _add_line(
-    conn: sqlite3.Connection,
-    target: Target,
-    source: sqlite3.Row,
-    line: int,
-    *,
-    copies: bool = True,
-) -> None:
-    """Add every part of one line; a line tombstone blocks all its parts.
-
-    Each event also gets a content tombstone, and with ``copies`` the same
-    content already stored as a copy of the history in the thread's fork
-    family is added too (see ``erase_family.copies_of``), so an erased line
-    cannot come back through another copy.
-
-    Args:
-        conn: Read connection.
-        target: Plan to fill.
-        source: The source row that holds the line.
-        line: 1-based transcript line.
-        copies: Also collect the family's copies of the line's content.
-    """
-    if (source["id"], line) in target.lines:
-        return
-    rows = conn.execute(
-        "SELECT id, line_sha256, role, text FROM event"
-        " WHERE source_id = ? AND line = ?",
-        (source["id"], line),
-    ).fetchall()
-    target.lines.add((source["id"], line))
-    target.touched[source["id"]] = source
-    target.events += [r[0] for r in rows]
-    target.tombstones.append(
-        tombstone_row(
-            source["provider"],
-            "line",
-            thread_id=source["thread_id"],
-            line=line,
-            line_sha256=rows[0][1],
-        )
-    )
-    pairs = {(r[2], r[3]) for r in rows}
-    target.content += [
-        (source["provider"], source["thread_id"], role, text)
-        for role, text in sorted(pairs)
-    ]
-    if not copies:
-        return
-    for member, copy in copies_of(conn, source, pairs):
-        _add_line(conn, target, member, copy, copies=False)
 
 
 def content_tombstones(
@@ -342,7 +272,22 @@ def collect_knowledge(conn: sqlite3.Connection, target: Target) -> None:
         )
     seen: set[str] = set()
     while True:
-        before = (len(target.lines), len(plan.evidence))
+        before = (len(target.lines), *plan.sizes())
+        decision_erase.collect_intents(
+            conn,
+            plan,
+            tuple(IntentRow(**row) for row in target.tombstones),
+        )
+        plan = support_closure(
+            conn,
+            tuple(plan.evidence),
+            request_ids=tuple(plan.requests),
+            versions=tuple(plan.versions),
+            unresolved_ids=tuple(plan.unresolved),
+            candidate_ids=tuple(plan.candidates),
+            decision_ids=tuple(plan.decisions),
+        )
+        _decision_lines(conn, target, plan)
         for source_id, line in tuple(target.lines):
             source = target.touched[source_id]
             plan.evidence.update(
@@ -372,45 +317,7 @@ def collect_knowledge(conn: sqlite3.Connection, target: Target) -> None:
             )
         _evidence_lines(conn, target, plan.evidence - seen)
         seen.update(plan.evidence)
-        if before == (len(target.lines), len(plan.evidence)):
+        if before == (len(target.lines), *plan.sizes()):
             break
-    target.review = support_closure(
-        conn,
-        tuple(plan.evidence),
-        request_ids=tuple(plan.requests),
-        versions=tuple(plan.versions),
-        unresolved_ids=tuple(plan.unresolved),
-    )
+    target.review = plan
     target.knowledge = {ident for ident, _ in target.review.versions}
-
-
-def _evidence_lines(
-    conn: sqlite3.Connection, target: Target, ids: set[str]
-) -> None:
-    """Tombstone physical evidence even when it has no indexed event."""
-    for ident in sorted(ids):
-        row = conn.execute(
-            "SELECT * FROM review_evidence WHERE id=?", (ident,)
-        ).fetchone()
-        target.tombstones.append(
-            tombstone_row(
-                row["provider"],
-                "line",
-                thread_id=row["thread_id"],
-                line=row["line"],
-                line_sha256=row["line_sha256"],
-            )
-        )
-        source = conn.execute(
-            "SELECT * FROM source WHERE provider=? AND thread_id=?",
-            (row["provider"], row["thread_id"]),
-        ).fetchone()
-        if source is None or source["id"] in target.sources:
-            continue
-        lines = conn.execute(
-            "SELECT DISTINCT line FROM event WHERE source_id=? AND "
-            "line_sha256=?",
-            (source["id"], row["line_sha256"]),
-        ).fetchall()
-        for line in lines:
-            _add_line(conn, target, source, line[0])

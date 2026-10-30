@@ -98,7 +98,9 @@ def enqueue_review(
         ).encode()
     ).hexdigest()
     existing = conn.execute(
-        "SELECT * FROM review_request WHERE duplicate_key=?", (key,)
+        "SELECT * FROM review_request WHERE duplicate_key=? "
+        "AND candidate_id IS NULL",
+        (key,),
     ).fetchone()
     budget = (
         budget if budget is not None else ReadBudget(policy.max_input_bytes)

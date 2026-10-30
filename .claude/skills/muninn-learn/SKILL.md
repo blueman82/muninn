@@ -99,7 +99,8 @@ A valid stored policy does not prove that setup checks pass or a worker is runni
 You can inspect and dismiss a safety rejection.
 A rejection code alone does not prove that the wording check was correct.
 If Muninn incorrectly rejects direct owner wording, the maintainer must investigate.
-This change adds no owner approval workflow.
+For a relevant unresolved question or explicit owner review, use the separate `muninn-know` decision flow.
+Ordinary supported learning still saves without a new approval step.
 Local operators must restore the approved setup when they repair it.
 Maintainers must investigate unclear defects and exhausted source-read allowances.
 
@@ -184,7 +185,17 @@ Temporary failures wait 5 seconds, then 30 seconds, before their remaining attem
 Manual and live requests take priority over queued history.
 Within each group, Muninn processes older requests first.
 Rejected results do not stop unrelated requests.
-Shared setup failures receive automatic checks every 60 seconds.
+The background program can recheck shared setup failures while running and learning is enabled.
+Its setup delay is at least 60 seconds. This is not a promised check time.
+Reading a saved warning starts no timer.
+A failed check retains or replaces the warning. A successful relevant setup check or launch clears it.
+Clearing the warning does not establish saved memory.
+Current human wording comes from safe codes, never raw saved text.
+`codex_host_changed` means the saved computer ID differs. Why it changed remains unknown.
+Other distinct setup codes are `codex_approval_required`, `codex_data_home_changed`,
+`codex_capability_status`, `codex_platform_changed`, and `codex_project_required`.
+An older `codex_experimental_boundary` record did not retain the exact mismatch.
+The agent can inspect these refusals. Inspection does not renew approval or enable learning.
 Owner pauses remain in force.
 Unknown process state blocks learning.
 The next Codex session shows required action without a manual command.
@@ -224,3 +235,13 @@ Cursor resume and postcompact injection remain unproven.
 Use `muninn know context` to request that context explicitly.
 Previously injected context cannot be retracted.
 Per-prompt recall starts off on fresh installs.
+
+A healthy new project can have no indexed project mapping yet.
+Startup then returns normal empty project context. It never uses another project's or global memory instead.
+The indexer creates the mapping when it indexes an event.
+SessionEnd only requests learning from already indexed eligible records. It does not ingest or wait.
+A later startup, resume, clear, or compact can read the new mapping.
+A failed startup starts no timer. Prompt recall remains separate and conditional.
+`context_unavailable` identifies a context-generation failure whose exact detail was not retained.
+Real store, format, privacy, and configuration failures remain visible.
+A successful prompt hook does not prove that startup memory reached the conversation.

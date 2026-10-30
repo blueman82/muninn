@@ -235,12 +235,52 @@ class RenderTests(HookCase):
         self.assertTrue(all(handle.closed for handle in opened))
 
     def test_scope_label_and_unknown_scope_do_not_inherit_global(self) -> None:
-        ident = self.add()
+        ident = self.add(content="OTHER_PROJECT_CANARY")
         self.assertIn(
             "Project knowledge for repo:", self.body(self.start_hook())
         )
-        out = self.start_hook(cwd="/some/where/else")
-        self.assertEqual(
-            out["systemMessage"], "muninn: memory unavailable (error)"
+        self.assertIn(ident, self.body(self.start_hook()))
+        unknown = "/some/where/else"
+
+        def assert_empty(hidden: tuple[str, ...]) -> None:
+            before = list(self.conn.iterdump())
+            out = self.start_hook(cwd=unknown)
+            text = self.body(out)
+            self.assertEqual(
+                out["systemMessage"],
+                "muninn: memory loaded (no eligible knowledge displayed)",
+            )
+            self.assertIn(
+                "This project has no indexed project memory yet.", text
+            )
+            self.assertTrue(text.startswith(OPEN))
+            self.assertTrue(text.endswith(CLOSE))
+            self.assertEqual(len(TAG.findall(text)), 2)
+            self.assertLessEqual(len(text.encode()), hook.BLOCK_LIMIT)
+            self.assertNotIn("unavailable", text)
+            for value in hidden:
+                self.assertNotIn(value, text)
+            self.assertEqual(list(self.conn.iterdump()), before)
+            self.assertIsNone(
+                self.conn.execute(
+                    "SELECT id FROM scope WHERE key=?", (unknown,)
+                ).fetchone()
+            )
+
+        assert_empty((ident, "OTHER_PROJECT_CANARY"))
+        global_scope = self.global_scope()
+        global_id = self.add(
+            content="GLOBAL_CANARY", scope=global_scope.model_dump()
         )
-        self.assertNotIn(ident, self.body(out))
+        self.assertEqual(
+            [
+                view.id
+                for view in knowledge_read.current_knowledge(
+                    self.conn, global_scope, 20.0
+                )
+            ],
+            [global_id],
+        )
+        assert_empty(
+            (ident, "OTHER_PROJECT_CANARY", global_id, "GLOBAL_CANARY")
+        )

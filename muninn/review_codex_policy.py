@@ -51,15 +51,16 @@ def host_identity() -> str:
 
 def check_host(terms: CodexExperiment, home: Path) -> None:
     """Refuse activation on another host or under another data home."""
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        raise ValueError("codex_platform_changed")
+    if terms.host_identity != host_identity():
+        raise ValueError("codex_host_changed")
     if (
-        platform.system() != "Darwin"
-        or platform.machine() != "arm64"
-        or terms.host_identity != host_identity()
-        or terms.data_home != home
+        terms.data_home != home
         or not home.is_absolute()
         or home.resolve() != home
     ):
-        raise ValueError("codex_experimental_boundary")
+        raise ValueError("codex_data_home_changed")
 
 
 def check_activation(terms: CodexExperiment, home: Path) -> None:

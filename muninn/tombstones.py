@@ -13,9 +13,9 @@ import sqlite3
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Literal
 
 from muninn import platform_io
+from muninn.decision_erase_replay import expand_decision_intent
 from muninn.file_sync import sync_fd
 from muninn.knowledge_erase import (
     erase_attempt_material,
@@ -32,6 +32,7 @@ from muninn.tombstone_intent import (
 )
 from muninn.tombstone_key import KEYED_PREFIX, TOMBSTONE_FILE
 from muninn.tombstone_replay import plan_transcripts
+from muninn.tombstone_rows import tombstone_row as tombstone_row
 
 __all__ = [
     "TombstoneRow",
@@ -47,41 +48,6 @@ __all__ = [
     "role_digest",
     "tombstone_row",
 ]
-
-
-def tombstone_row(
-    provider: str,
-    level: Literal["session", "thread", "line"],
-    *,
-    session_root: str | None = None,
-    thread_id: str | None = None,
-    line: int | None = None,
-    line_sha256: str | None = None,
-) -> TombstoneRow:
-    """Build a tombstone from ids and hashes.
-
-    The row has a fixed set of fields, so no free-form field can be added.
-
-    Args:
-        provider: A supported transcript provider.
-        level: ``session``, ``thread`` or ``line``.
-        session_root: Session id, for a session tombstone.
-        thread_id: Thread id, for a thread or line tombstone.
-        line: 1-based transcript line, for a line tombstone.
-        line_sha256: Hash of that line, for a line tombstone.
-
-    Returns:
-        The row, stamped with the current time.
-    """
-    return TombstoneRow(
-        provider=provider,
-        level=level,
-        session_root=session_root,
-        thread_id=thread_id,
-        line=line,
-        line_sha256=line_sha256,
-        created_at=time.time(),
-    )
 
 
 def event_digests(
@@ -264,6 +230,12 @@ def reapply_tombstones(conn: sqlite3.Connection, home: Path) -> int:
         intent = read_intent(conn, home)
         target = plan_transcripts(conn, intent)
         support = plan_replay_support(conn, intent.rows)
+        expanded = expand_decision_intent(conn, intent, support)
+        if expanded:
+            append_tombstones(home, expanded)
+            intent = read_intent(conn, home)
+            support = plan_replay_support(conn, intent.rows)
+            target = plan_transcripts(conn, intent)
         conn.executemany(
             f"INSERT INTO tombstone({', '.join(KEY_FIELDS)}, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",

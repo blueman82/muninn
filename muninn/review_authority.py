@@ -60,7 +60,7 @@ def _reported(text: str) -> bool:
     return False
 
 
-def _injected(record: dict[str, Any]) -> bool:
+def injected(record: dict[str, Any]) -> bool:
     """Reject provider annotations that identify generated or relayed input."""
     flags = (
         "isMeta",
@@ -129,7 +129,7 @@ def direct_speech(
     """
     plain_context = _plain(context)
     if (
-        _injected(record)
+        injected(record)
         or plain_context is None
         or _UNCERTAIN.search(plain_context)
     ):

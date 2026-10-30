@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 from muninn import (
     review_history,
@@ -35,7 +36,20 @@ class LearningStateCopyTests(RequestCase):
     def test_older_store_remains_a_valid_copy_source(self) -> None:
         self.conn.execute("DROP TABLE learning_setup")
         self.conn.execute("DROP TABLE review_issue")
-        self.assertEqual(store_copy.validate_source(self.conn), 1)
+        with self.assertRaisesRegex(ValueError, "^cutover_source_mismatch$"):
+            store_copy.validate_source(self.conn)
+        old = sqlite3.connect(":memory:", isolation_level=None)
+        self.addCleanup(old.close)
+        fixture = (
+            Path(__file__).parent / "fixtures/installer/marked-v1-base.sql"
+        )
+        old.executescript(fixture.read_text())
+        self.assertEqual(old.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(
+            old.execute("SELECT * FROM store_meta").fetchall(),
+            [(1, "muninn-knowledge", 1)],
+        )
+        self.assertEqual(store_copy.validate_source(old), 1)
 
     def test_unknown_extension_shape_is_refused(self) -> None:
         self.conn.execute(

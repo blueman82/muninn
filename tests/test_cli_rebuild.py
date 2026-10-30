@@ -280,7 +280,23 @@ class GovernedRebuildTests(CommitCase):
             )
         }
         out = cli_rebuild._run(env, self.home, cli_rebuild._Status())
-        self.assertTrue(all(out["copied"][table] > 0 for table in tables))
+        empty_tables = (
+            "memory_candidate",
+            "memory_decision",
+            "memory_candidate_support",
+        )
+        populated_tables = tuple(t for t in tables if t not in empty_tables)
+        self.assertTrue(
+            all(out["copied"][table] > 0 for table in populated_tables)
+        )
+        self.assertEqual(
+            {table: out["copied"][table] for table in empty_tables},
+            {
+                "memory_candidate": 0,
+                "memory_decision": 0,
+                "memory_candidate_support": 0,
+            },
+        )
         with closing(store.connect_ro(store.db_path(self.home))) as conn:
             self.assertEqual(digest(conn, immutable), before)
             self.assertEqual(

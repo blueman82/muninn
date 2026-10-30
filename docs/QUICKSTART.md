@@ -165,7 +165,8 @@ Time estimates use whole worker batches.
 The installer separates first-attempt estimates from estimates with permitted retries.
 Estimates exclude setup waits and database delays.
 
-Muninn rechecks unavailable setup every 60 seconds.
+The running background program can recheck unavailable setup while learning is enabled.
+It waits at least 60 seconds. Reading a warning starts no timer.
 One rejected request does not stop unrelated requests under revision 3.
 If help is required, the next Codex session shows the cause and action.
 You do not need to run `doctor` to receive this message.
@@ -243,6 +244,36 @@ continues until that complete batch is acknowledged. See
 alone don't prove that answers improved.
 
 ## Read knowledge and request bounded learning
+
+A relevant memory question can need your choice.
+The agent prepares and shows the complete proposed change in conversation.
+That display includes exact approve and reject reply sentences for its proposal ID.
+Send the chosen sentence as a whole plain chat message.
+The agent verifies your original reply and handles all commands.
+
+Viewing a proposal gives no approval. A reply alone does not establish saved memory.
+For an edit, the agent prepares a new complete proposal with a new display and fresh approval.
+The agent reports saved only after Muninn returns the actual saved receipt.
+A checked decision can remain pending or blocked.
+Ordinary supported learning still saves without a new approval step.
+
+These commands are agent operations:
+
+    muninn know unresolved
+    muninn know decision stage --input /path/to/candidate.json
+    muninn know decision show D_ID
+    muninn know decision submit --input /path/to/intent.json
+    muninn know decision status D_ID --human
+    muninn know decision apply D_ID
+
+`D_ID` identifies one complete proposal. Use the real ID returned by stage.
+The agent sends the exact decoded show `text` as its whole final message.
+It adds no prose, Markdown fence, or newline outside that text.
+The saved policy limits the complete display, including its reply instructions.
+Muninn refuses a display that cannot fit. It does not show a shortened version for approval.
+See [the reference](REFERENCE.md#conversational-memory-decisions) for the checked input and output fields.
+
+Current supported knowledge can also be inspected:
 
     muninn know list
     muninn know search "project convention"
@@ -336,3 +367,10 @@ execution on this checkout remains unverified.
 | `~/.local/lib/muninn/install.log` | timestamped steps and exit codes, no transcript text |
 | `~/.local/share/muninn/` | the database, logs and heartbeat |
 | `~/.local/bin/muninn` | link to `current/bin/muninn` |
+
+A new project can initially have no indexed project memory.
+This is normal empty context, not proof of database damage.
+Indexing creates the project mapping when it indexes an event.
+SessionEnd requests learning from already indexed records. It does not ingest or wait.
+A later startup, resume, clear, or compact can read the new mapping.
+Prompt recall remains separate. Waiting alone does not refresh the current conversation's startup context.

@@ -50,6 +50,8 @@ class CliLearningCase(CommitCase):
             finally:
                 os.chdir(previous)
         raw = output.getvalue()
+        self.last_stdout = raw
+        self.last_stderr = errors.getvalue()
         return code, json.loads(raw) if raw else {}
 
     def propose(self, **updates: object) -> tuple[int, dict[str, Any]]:

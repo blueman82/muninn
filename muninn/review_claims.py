@@ -113,6 +113,8 @@ def _ready(
     proposal: bool,
 ) -> bool:
     """Keep operator retries distinct from automatic readiness limits."""
+    if proposal and row["candidate_id"] is not None:
+        raise ValueError("rejected_fenced")
     states = {"pending", "waiting"}
     if proposal:
         states |= {"running", "cancelled", "failed"}
@@ -129,7 +131,9 @@ def _ready(
     count: int = conn.execute(
         "SELECT count(*) FROM review_attempt WHERE request_id=?", (row["id"],)
     ).fetchone()[0]
-    operator = proposal or row["cancel_code"] == "operator_retry"
+    operator = row["candidate_id"] is None and (
+        proposal or row["cancel_code"] == "operator_retry"
+    )
     if count >= policy.max_attempts and not operator:
         raise ValueError("review_attempt_limit")
     return operator

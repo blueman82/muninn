@@ -8,12 +8,13 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from install import cutover, recovery_guidance
+from install import cutover, learning_scope, recovery_guidance
 from install.context import StepFailedError
 from install.record import Record
-from muninn import store, store_fingerprint
+from muninn import store, store_copy, store_fingerprint
 from tests.installer_support import World
 from tests.knowledge_cutover_support import legacy_schema
+from tests.policy_preview_support import states
 
 
 class StoreMigrationTests(unittest.TestCase):
@@ -77,14 +78,152 @@ class StoreMigrationTests(unittest.TestCase):
         self,
     ) -> None:
         """Let v3 stores reach their dedicated migration before recovery."""
+        original = states(self.ctx.data)
         with mock.patch.object(
             recovery_guidance.cli_recovery,
             "recover",
             side_effect=AssertionError("current-format recovery called"),
         ):
             recovery_guidance.recover_pause(self.ctx, self.record)
+        self.assertEqual(states(self.ctx.data), original)
         with cutover.prepared_store(self.ctx, self.record) as path:
             self.assertEqual(path, self.path)
+
+    def test_legacy_scope_choice_needs_no_current_writer_lock(self) -> None:
+        original = states(self.ctx.data)
+        learning_scope.choose(self.ctx, "now", lambda question: "yes")
+        self.assertEqual(self.ctx.learning_mode, "now")
+        self.assertEqual(states(self.ctx.data), original)
+
+    def test_early_legacy_route_refuses_unknown_or_marked_tables(self) -> None:
+        for table in ("surprise", "store_meta"):
+            with self.subTest(table=table):
+                with closing(sqlite3.connect(self.path)) as conn:
+                    conn.execute(f"CREATE TABLE {table}(value TEXT)")
+                original = states(self.ctx.data)
+                with self.assertRaisesRegex(
+                    StepFailedError, "cutover_source_mismatch"
+                ):
+                    recovery_guidance.recover_pause(self.ctx, self.record)
+                self.assertEqual(states(self.ctx.data), original)
+                self.assertFalse(self.record.get("store"))
+                with closing(sqlite3.connect(self.path)) as conn:
+                    conn.execute(f"DROP TABLE {table}")
+
+    def test_marked_one_without_lock_still_refuses_early_reads(self) -> None:
+        self.path.unlink()
+        fixture = (
+            Path(__file__).parent
+            / "fixtures"
+            / "installer"
+            / "marked-v1-base.sql"
+        )
+        with closing(sqlite3.connect(self.path)) as conn:
+            conn.executescript(fixture.read_text())
+        self.path.chmod(0o600)
+        original = states(self.ctx.data)
+        for action in (
+            lambda: recovery_guidance.recover_pause(self.ctx, self.record),
+            lambda: learning_scope.choose(
+                self.ctx, "now", lambda question: "yes"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                StepFailedError,
+                "review_policy_preview_unavailable: state_missing",
+            ):
+                action()
+            self.assertEqual(states(self.ctx.data), original)
+            self.assertFalse(self.record.get("store"))
+
+    def test_changed_marked_header_cannot_use_the_legacy_route(self) -> None:
+        self.path.unlink()
+        with (
+            store.writer_lock(self.ctx.data),
+            closing(store.connect_rw(self.path)) as conn,
+        ):
+            conn.execute("PRAGMA user_version=3")
+        original = states(self.ctx.data)
+        for action in (
+            lambda: recovery_guidance.recover_pause(self.ctx, self.record),
+            lambda: learning_scope.choose(
+                self.ctx, "now", lambda question: "yes"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                StepFailedError, "cutover_source_mismatch"
+            ):
+                action()
+            self.assertEqual(states(self.ctx.data), original)
+            self.assertFalse(self.record.get("store"))
+
+    def test_legacy_sidecars_never_gain_a_lockless_bypass(self) -> None:
+        for suffix in ("-journal", "-wal", "-shm"):
+            for linked in (False, True):
+                with self.subTest(suffix=suffix, linked=linked):
+                    sidecar = Path(f"{self.path}{suffix}")
+                    if linked:
+                        sidecar.symlink_to(self.ctx.data / "absent")
+                    else:
+                        sidecar.write_bytes(b"pending private state")
+                        sidecar.chmod(0o600)
+                    original = states(self.ctx.data)
+                    for action in (
+                        lambda: recovery_guidance.recover_pause(
+                            self.ctx, self.record
+                        ),
+                        lambda: learning_scope.choose(
+                            self.ctx, "now", lambda question: "yes"
+                        ),
+                    ):
+                        with self.assertRaisesRegex(
+                            StepFailedError, "cutover_source_mismatch"
+                        ):
+                            action()
+                        self.assertEqual(states(self.ctx.data), original)
+                        self.assertFalse(self.record.get("store"))
+                    sidecar.unlink()
+
+    def test_legacy_uncheckpointed_wal_is_not_a_settled_source(self) -> None:
+        with closing(sqlite3.connect(self.path)) as writer:
+            self.assertEqual(
+                writer.execute("PRAGMA journal_mode=WAL").fetchone()[0], "wal"
+            )
+            writer.execute("UPDATE knowledge SET text='pending old claim'")
+            writer.commit()
+            self.assertGreater(Path(f"{self.path}-wal").stat().st_size, 0)
+            original = states(self.ctx.data)
+            with self.assertRaisesRegex(
+                StepFailedError, "cutover_source_mismatch"
+            ):
+                recovery_guidance.recover_pause(self.ctx, self.record)
+            self.assertEqual(states(self.ctx.data), original)
+            self.assertFalse(self.record.get("store"))
+
+    def test_changed_legacy_file_is_refused_after_real_validation(
+        self,
+    ) -> None:
+        validate = store_copy.validate_source
+        observed: list[bytes] = []
+
+        def change_after_validation(conn: sqlite3.Connection) -> int:
+            result = validate(conn)
+            with self.path.open("ab") as handle:
+                handle.write(b"changed after real inspection")
+            observed.append(self.path.read_bytes())
+            return result
+
+        with (
+            mock.patch.object(
+                store_copy, "validate_source", change_after_validation
+            ),
+            self.assertRaisesRegex(StepFailedError, "cutover_source_mismatch"),
+        ):
+            recovery_guidance.recover_pause(self.ctx, self.record)
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(self.path.read_bytes(), observed[0])
+        self.assertFalse((self.ctx.data / "writer.lock").exists())
+        self.assertFalse(self.record.get("store"))
 
     def test_unknown_legacy_table_leaves_original_untouched(self) -> None:
         with closing(sqlite3.connect(self.path)) as conn:

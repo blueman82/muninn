@@ -18,7 +18,8 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 
 from muninn import store
-from muninn.knowledge_models import KnowledgeId, RequestId
+from muninn.decision_models import DecisionId
+from muninn.knowledge_models import KnowledgeId, RequestId, UnresolvedId
 
 __all__ = [
     "WRITER_WAIT_S",
@@ -131,3 +132,19 @@ def write_store[T](home: Path, work: Callable[[sqlite3.Connection], T]) -> T:
         closing(store.connect_rw(store.db_path(home))) as conn,
     ):
         return work(conn)
+
+
+def decision_argument(value: str) -> DecisionId:
+    """Require the exact opaque decision identity."""
+    try:
+        return TypeAdapter(DecisionId).validate_python(value, strict=True)
+    except ValidationError:
+        raise ArgumentTypeError("invalid_decision_id") from None
+
+
+def unresolved_argument(value: str) -> UnresolvedId:
+    """Require the exact opaque unresolved-question identity."""
+    try:
+        return TypeAdapter(UnresolvedId).validate_python(value, strict=True)
+    except ValidationError:
+        raise ArgumentTypeError("invalid_unresolved_id") from None

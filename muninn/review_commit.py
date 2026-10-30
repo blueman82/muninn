@@ -2,21 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from pathlib import Path
 
 from pydantic import ValidationError
 
-from muninn.knowledge_models import (
-    AttemptId,
-    Digest,
-    EvidenceId,
-    RequestId,
-    ReviewResult,
-    StrictModel,
-    UtcSeconds,
-)
+from muninn.decision_apply import finish_application, prepare_application
+from muninn.knowledge_models import ReviewResult
 from muninn.knowledge_write import (
     apply_change,
     json_value,
@@ -30,15 +21,25 @@ from muninn.review_candidates import (
     ProposalRejectedError,
     validate_batch,
 )
+from muninn.review_commit_state import (
+    EVIDENCE_ERRORS as EVIDENCE_ERRORS,
+)
+from muninn.review_commit_state import (
+    CommitContext as CommitContext,
+)
+from muninn.review_commit_state import (
+    checked_request_policy as checked_request_policy,
+)
+from muninn.review_commit_state import (
+    stored_receipt as stored_receipt,
+)
 from muninn.review_evidence import validate_evidence
-from muninn.review_evidence_models import EvidenceRecord, PositiveInt
+from muninn.review_evidence_models import EvidenceRecord
 from muninn.review_json import canonical_json, parse_result
 from muninn.review_models import Receipt, ReviewPolicy
 from muninn.review_progress import (
     advance_completed,
     check_window,
-    checked_policy,
-    digest,
     require_transaction,
 )
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
@@ -46,62 +47,6 @@ from muninn.review_recovery import clear as clear_issue
 from muninn.review_requests import fail_attempt, request_view
 from muninn.review_snapshot import snapshot
 from muninn.tombstones import require_current_tombstones
-
-
-class CommitContext(StrictModel):
-    """Carry only program-owned identities into the writer boundary."""
-
-    home: Path
-    request_id: RequestId
-    attempt_id: AttemptId
-    generation: PositiveInt
-    evidence_ids: tuple[EvidenceId, ...]
-    now: UtcSeconds
-    knowledge_digest: Digest | None = None
-
-
-_EVIDENCE_ERRORS = {
-    "evidence_erased": "rejected_erased",
-    "evidence_changed": "rejected_evidence",
-    "evidence_unavailable": "rejected_evidence",
-    "evidence_limit": "evidence_limit",
-    "evidence_policy": "rejected_validation",
-    "source_unavailable": "rejected_evidence",
-    "incomplete_window": "rejected_evidence",
-    "rejected_scope": "rejected_scope",
-    "original_unavailable": "rejected_evidence",
-    "ancestry_unavailable": "rejected_evidence",
-    "scope_unavailable": "rejected_scope",
-    "forbidden_selector": "rejected_evidence",
-    "invalid_span": "rejected_evidence",
-    "redacted_span": "rejected_evidence",
-    "empty_evidence": "rejected_evidence",
-}
-
-
-def _receipt(
-    conn: sqlite3.Connection, request_id: RequestId
-) -> Receipt | None:
-    """Reload the one durable success before consulting mutable state."""
-    row = conn.execute(
-        "SELECT * FROM review_receipt WHERE request_id=?", (request_id,)
-    ).fetchone()
-    if row is None:
-        return None
-    return Receipt.model_validate_json(
-        json_value(
-            {
-                "schema_version": 1,
-                "request_id": row["request_id"],
-                "attempt_id": row["attempt_id"],
-                "applied": json.loads(row["applied_json"]),
-                "unresolved_ids": json.loads(row["unresolved_json"]),
-                "committed_at": row["committed_at"],
-                "outcome": row["outcome"],
-                "no_change_reason": row["no_change_reason"],
-            }
-        )
-    )
 
 
 def _current(conn: sqlite3.Connection, context: CommitContext) -> sqlite3.Row:
@@ -119,34 +64,13 @@ def _current(conn: sqlite3.Connection, context: CommitContext) -> sqlite3.Row:
     return row
 
 
-def _policy(conn: sqlite3.Connection, row: sqlite3.Row) -> ReviewPolicy:
-    """Check immutable admission identities without calling admission reads."""
-    try:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(row["policy_json"])
-        )
-        control = conn.execute("SELECT * FROM review_control").fetchone()
-        if (
-            not control["admission"]
-            or row["policy_digest"] != digest(policy)
-            or control["policy_digest"] != digest(policy)
-            or control["policy_json"] is None
-            or canonical_json(
-                ReviewPolicy.model_validate_json(control["policy_json"])
-            )
-            != canonical_json(policy)
-        ):
-            raise CommitRejectedError("rejected_validation")
-    except ValueError:
-        raise CommitRejectedError("rejected_validation") from None
-    return policy
-
-
 def _evidence(
     conn: sqlite3.Connection,
     context: CommitContext,
     row: sqlite3.Row,
     policy: ReviewPolicy,
+    *,
+    budget: ReadBudget,
 ) -> tuple[EvidenceRecord, ...]:
     """Recheck every durable input through its original physical locator."""
     # Controlled reads persist admission before returning any content.
@@ -164,7 +88,6 @@ def _evidence(
         raise CommitRejectedError("rejected_evidence", "original evidence")
     view = request_view(row)
     try:
-        budget = ReadBudget(policy.max_input_bytes)
         source, _ = check_window(
             conn, view.window, view.scope, policy, budget=budget
         )
@@ -180,7 +103,7 @@ def _evidence(
     except EvidenceLimitError as exc:
         raise CommitRejectedError(exc.code, "original evidence") from None
     except ValueError as exc:
-        code = _EVIDENCE_ERRORS.get(str(exc))
+        code = EVIDENCE_ERRORS.get(str(exc))
         if code is None:
             raise
         raise CommitRejectedError(code, "original evidence") from None
@@ -291,12 +214,12 @@ def commit_review(
     context = CommitContext.model_validate_json(canonical_json(context))
     conn.execute("BEGIN IMMEDIATE")
     try:
-        receipt = _receipt(conn, context.request_id)
+        receipt = stored_receipt(conn, context.request_id)
         if receipt is None:
             require_current_tombstones(conn, context.home)
             require_transaction(conn, context.now)
             row = _current(conn, context)
-            policy = _policy(conn, row)
+            policy = checked_request_policy(conn, row)
             if (
                 context.knowledge_digest is not None
                 and context.knowledge_digest
@@ -315,7 +238,11 @@ def commit_review(
                 )
             except ValueError:
                 raise CommitRejectedError("rejected_validation") from None
-            evidence = _evidence(conn, context, row, policy)
+            budget = ReadBudget(policy.max_input_bytes)
+            evidence = _evidence(conn, context, row, policy, budget=budget)
+            fence = prepare_application(
+                conn, context, result, policy, evidence, budget
+            )
             validate_batch(
                 conn,
                 result,
@@ -324,6 +251,8 @@ def commit_review(
                 defer_candidate_failure=defer_candidate_failure,
             )
             receipt = _complete(conn, context, row, result)
+            if fence is not None:
+                finish_application(conn, fence, receipt, context.now)
         conn.commit()
         return receipt
     except BaseException as exc:

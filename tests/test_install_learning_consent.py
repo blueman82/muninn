@@ -11,7 +11,7 @@ from install import (
     review_policy_transition,
 )
 from install.context import Ctx, StepFailedError
-from muninn import review_history, review_requests
+from muninn import review_history, review_requests, store
 from muninn.review_budget import reserve_call
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext, ReviewPolicy
@@ -22,6 +22,28 @@ from tools.prepare_codex_policy import DEFAULT_POLICY_FILE, policy
 
 class LearningConsentTests(RequestCase):
     """Keep custom settings and owner pauses behind explicit approval."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        with store.writer_lock(self.home):
+            self.assertEqual(
+                self.conn.execute("PRAGMA user_version").fetchone()[0], 2
+            )
+
+    def test_missing_current_lock_refuses_without_changing_state(self) -> None:
+        self.legacy()
+        self.conn.execute("UPDATE review_control SET admission=0")
+        (self.home / "writer.lock").unlink()
+        before = store.db_path(self.home).read_bytes()
+        ctx = self.context()
+        ctx.enable_learning = True
+        with self.assertRaisesRegex(
+            StepFailedError, "review_policy_preview_unavailable: state_missing"
+        ):
+            learning_scope.choose(ctx, "now", lambda question: "yes")
+        self.assertEqual(store.db_path(self.home).read_bytes(), before)
+        self.assertFalse((self.home / "writer.lock").exists())
+        self.assertIsNone(ctx.learning_mode)
 
     def context(self) -> Ctx:
         """Use a disposable installer context without service operations."""

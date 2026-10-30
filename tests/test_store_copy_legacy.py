@@ -34,7 +34,7 @@ class LegacyCopyTests(unittest.TestCase):
         self.assertEqual(store_copy.validate_source(source), 3)
         store_copy.copy_governed_state(source, self.target)
         self.assertEqual(
-            self.target.execute("PRAGMA user_version").fetchone()[0], 1
+            self.target.execute("PRAGMA user_version").fetchone()[0], 2
         )
 
     def test_unknown_table_and_extra_column_refuse_copy(self) -> None:

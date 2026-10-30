@@ -7,7 +7,12 @@ import sys
 from typing import Any, NoReturn, Protocol
 
 from muninn import query
-from muninn.cli_core import knowledge_argument, request_argument
+from muninn.cli_core import (
+    decision_argument,
+    knowledge_argument,
+    request_argument,
+    unresolved_argument,
+)
 from muninn.cli_hook_contract import HOOK_EVENTS, PROVIDERS
 
 __all__ = ["HELP", "build_parser"]
@@ -215,6 +220,23 @@ def _add_knowledge(cmd: _Commands) -> None:
     p.add_argument("kid", type=knowledge_argument)
     p.add_argument("--expected-revision", type=int, required=True)
     p.add_argument("--reason", required=True)
+
+    p = know.add("unresolved")
+    p.add_argument("unresolved_id", nargs="?", type=unresolved_argument)
+    p.add_argument("--all-projects", action="store_true")
+    p.add_argument("--task")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--after", type=unresolved_argument)
+    p.add_argument("--human", action="store_true")
+    decisions = _Commands(know.add("decision"), "decision_cmd", required=True)
+    for name in ("stage", "submit"):
+        p = decisions.add(name)
+        p.add_argument("--input", required=True)
+    for name in ("show", "status", "apply"):
+        p = decisions.add(name)
+        p.add_argument("decision_id", type=decision_argument)
+        if name != "apply":
+            p.add_argument("--human", action="store_true")
 
 
 def _add_learning(cmd: _Commands) -> None:

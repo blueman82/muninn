@@ -42,6 +42,19 @@ def _texts(conn: sqlite3.Connection, target: Target) -> list[str]:
                 (ident,),
             )
         )
+    for table, column, ids in (
+        ("memory_candidate", "payload_json", target.review.candidates),
+        ("memory_decision", "locator_json", target.review.decisions),
+    ):
+        texts.extend(
+            row[0]
+            for ident in ids
+            for row in conn.execute(
+                f"SELECT j.atom FROM {table} c,json_tree(c.{column}) j "
+                "WHERE c.id=? AND j.type='text'",
+                (ident,),
+            )
+        )
     texts.extend(
         r[0]
         for ident in target.review.requests
@@ -116,6 +129,8 @@ def still_stored(conn: sqlite3.Connection, needle: bytes) -> bool:
     """
     for table, column in (
         ("event", "text"),
+        ("memory_candidate", "payload_json"),
+        ("memory_decision", "locator_json"),
         ("knowledge", "retracted_reason"),
         ("knowledge_version", "content_json"),
         ("knowledge_version", "reason"),

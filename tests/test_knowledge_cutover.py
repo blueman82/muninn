@@ -39,6 +39,9 @@ _GOVERNED = (
     "knowledge_support",
     "unresolved",
     "review_receipt",
+    "memory_candidate",
+    "memory_decision",
+    "memory_candidate_support",
 )
 
 
@@ -191,7 +194,13 @@ class KnowledgeCutoverTests(CommitCase):
         self.path.unlink()
         before = digest(self.conn, _BASE + _GOVERNED)
         counts = copy_governed_state(self.conn, self.target)
-        self.assertTrue(all(counts[table] > 0 for table in _BASE + _GOVERNED))
+        self.assertTrue(
+            all(
+                counts[table] > 0
+                for table in _BASE + _GOVERNED
+                if not table.startswith("memory_")
+            )
+        )
         self.assertEqual(digest(self.target, _BASE + _GOVERNED), before)
         self.assertEqual(digest(self.conn, _BASE + _GOVERNED), before)
         self.assertEqual(

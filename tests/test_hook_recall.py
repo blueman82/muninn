@@ -6,11 +6,21 @@ Nothing touches a live data dir or a provider root.
 
 from __future__ import annotations
 
+import io
 import json
 import time
+from contextlib import redirect_stdout
 from unittest import mock
 
-from muninn import classify, hook, hook_recall, hook_retrieval, obs, store
+from muninn import (
+    classify,
+    cli_hook,
+    hook,
+    hook_recall,
+    hook_retrieval,
+    obs,
+    store,
+)
 from tests import test_classify as tc
 from tests.hook_support import (
     AKIA,
@@ -302,11 +312,55 @@ class PromptFrameTests(RecallCase):
             self.ask(env={"MUNINN_HOME": str(bad)}),
             notice("store_unavailable", "UserPromptSubmit"),
         )
+        canary = "PRIVATE_BUILDER_EXCEPTION"
+        payload = self.payload(
+            hook_event_name="UserPromptSubmit",
+            prompt="alphaterm betaterm gammaterm",
+        )
+        trace: dict[str, object] = {}
         with mock.patch.object(
-            hook_recall.query, "search", side_effect=RuntimeError("boom")
+            hook_recall.query, "search", side_effect=RuntimeError(canary)
         ):
-            out = self.ask()
-        self.assertEqual(out, notice("error", "UserPromptSubmit"))
+            out = hook.prompt_submit(payload, "claude", self.env, trace=trace)
+            output = io.StringIO()
+            stdin = io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode()))
+            with mock.patch("sys.stdin", stdin), redirect_stdout(output):
+                self.assertEqual(
+                    cli_hook.hook_main(
+                        ["prompt", "--provider", "claude"], self.env
+                    ),
+                    0,
+                )
+        self.assertEqual(trace["error"], "context_unavailable")
+        self.assertEqual(
+            out["systemMessage"],
+            "muninn: memory unavailable (context_unavailable)",
+        )
+        self.assertIn(
+            "context unavailable. The exact detail is not recorded",
+            self.body(out),
+        )
+        self.assertNotIn("store unavailable", self.body(out))
+        raw = output.getvalue()
+        parsed = json.loads(raw)
+        self.assertEqual(raw, json.dumps(parsed, separators=(",", ":")) + "\n")
+        self.assertEqual(
+            parsed["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit"
+        )
+        self.assertEqual(
+            parsed["systemMessage"],
+            "muninn: memory unavailable (context_unavailable)",
+        )
+        self.assertIn("(context_unavailable)", self.body(parsed))
+        self.assertTrue(self.body(parsed).endswith(CLOSE))
+        self.assertEqual(len(TAG.findall(self.body(parsed))), 2)
+        calls = (self.home / "calls.jsonl").read_text()
+        self.assertEqual(
+            json.loads(calls.splitlines()[-1])["error"], "context_unavailable"
+        )
+        self.assertNotIn(
+            canary, raw + json.dumps(out) + json.dumps(trace) + calls
+        )
         self.assertEqual(self.ask(env={"MUNINN_HOOK_DISABLE": "1"}), {})
         # a skipped prompt stays silent even when the store is gone
         self.assertEqual(self.ask("hi", env=nowhere), {})

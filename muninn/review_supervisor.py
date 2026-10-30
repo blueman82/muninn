@@ -16,6 +16,7 @@ from muninn import (
     review_snapshot,
     store,
 )
+from muninn.decision_requests import continue_decisions
 from muninn.review_budget import reserve_call
 from muninn.review_launch_inputs import load_capability, load_prompt
 from muninn.review_models import (
@@ -128,6 +129,7 @@ class Supervisor:
             self._catchup = catch_up_due(
                 self.home, self.policy, now, self._catchup
             )
+            continue_decisions(self.home, self.generation, now)
             for pending in tuple(self._rounds.values()):
                 if not pending.spawned:
                     self._spawn(pending, now)
@@ -154,7 +156,9 @@ class Supervisor:
         """Preserve owner pauses while waiting for a bounded setup recheck."""
         with closing(store.connect_ro(store.db_path(self.home))) as conn:
             admitted = conn.execute(
-                "SELECT admission FROM review_control"
+                "SELECT admission=1 AND policy_digest=? AND generation=? "
+                "FROM review_control",
+                (digest(self.policy), self.generation),
             ).fetchone()[0]
         if not admitted or now < self._recheck_at:
             return False
@@ -195,8 +199,8 @@ class Supervisor:
         """Close claim ownership before root-owning initial admission reads."""
         with database(self.home) as conn:
             row = conn.execute(
-                "SELECT * FROM review_request "
-                "WHERE state IN ('pending','waiting') "
+                "SELECT * FROM review_request WHERE candidate_id IS NULL "
+                "AND state IN ('pending','waiting') "
                 "AND (retry_at IS NULL OR retry_at<=?) AND policy_digest=? "
                 "ORDER BY CASE WHEN trigger='history' THEN 1 ELSE 0 "
                 "END,created_at,id LIMIT 1",

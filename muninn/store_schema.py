@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from muninn.store_decision_schema import DECISION_SQL
 from muninn.store_knowledge_schema import KNOWLEDGE_SQL
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCOPE_SQL = r"""
 CREATE TABLE scope (id INTEGER PRIMARY KEY,
@@ -178,4 +179,6 @@ CREATE TRIGGER knowledge_log_no_delete BEFORE DELETE ON knowledge_log BEGIN
   SELECT RAISE(ABORT, 'append-only'); END;
 """
 
-SCHEMA_SQL = SCOPE_SQL + _SOURCES_SQL + _TOMBSTONE_SQL + KNOWLEDGE_SQL
+SCHEMA_SQL = (
+    SCOPE_SQL + _SOURCES_SQL + _TOMBSTONE_SQL + KNOWLEDGE_SQL + DECISION_SQL
+)

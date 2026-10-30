@@ -52,7 +52,7 @@ class SourceValidationTests(StoreCase):
         old.executescript(legacy_schema())
         legacy.chmod(0o600)
         old.close()
-        for path, version in ((self.db, 1), (legacy, 3)):
+        for path, version in ((self.db, 2), (legacy, 3)):
             with self.subTest(version=version):
                 conn = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
                 self.addCleanup(conn.close)
@@ -87,7 +87,7 @@ class SourceValidationTests(StoreCase):
     ) -> None:
         for sql, error in (
             ("CREATE TABLE unknown(value TEXT)", ValueError),
-            ("PRAGMA user_version=2", ValueError),
+            ("PRAGMA user_version=9", ValueError),
             ("DELETE FROM store_meta", store.StoreUnavailableError),
         ):
             self.conn.execute("BEGIN IMMEDIATE")
@@ -118,7 +118,7 @@ class SourceValidationTests(StoreCase):
     def test_copy_revalidates_its_own_snapshot_after_prior_validation(
         self,
     ) -> None:
-        self.assertEqual(self.validate(self.conn), 1)
+        self.assertEqual(self.validate(self.conn), 2)
         self.conn.execute("PRAGMA foreign_keys=OFF")
         self.conn.execute(
             "INSERT INTO scope_path VALUES('/missing',999,'git')"

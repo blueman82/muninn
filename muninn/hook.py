@@ -18,6 +18,7 @@ from muninn.hook_context import as_payload, env_for_provider, project_cwd
 from muninn.hook_frame import (
     BLOCK_LIMIT,
     RECALL_LIMIT,
+    USAGE,
     escape_delimiter,
     frame,
     render_block,
@@ -31,7 +32,14 @@ from muninn.hook_recall import (
     recall_block,
 )
 from muninn.hook_retrieval import RECALL_ADVISORY, advisory_output
-from muninn.hook_status import learning_status, printable, status_line
+from muninn.hook_status import failure_notice as _notice
+from muninn.hook_status import (
+    learning_status,
+    printable,
+    status_line,
+    store_reason,
+)
+from muninn.hook_status import scope_label as _label
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
 from muninn.review_recovery import startup_action
@@ -198,22 +206,6 @@ def _open(home: Path) -> sqlite3.Connection:
         return store.connect_ro(db)
 
 
-def _notice(code: str) -> str:
-    """The block a provider sees when the store cannot be read."""
-    return frame(' kind="notice"', [f"muninn: store unavailable ({code})"])
-
-
-def _label(conn: sqlite3.Connection, ids: list[int], cwd: str) -> str:
-    """Name the scope: its stored label, else the last path component."""
-    row = conn.execute(
-        "SELECT label FROM scope WHERE kind != 'global' AND id IN"
-        f" ({','.join('?' * len(ids))}) LIMIT 1",
-        ids,
-    ).fetchone()
-    # Not Path.name: a trailing slash must give the whole cwd.
-    return row[0] if row else cwd.rpartition("/")[2] or cwd
-
-
 def _build_text(
     build: Builder,
     payload: Mapping[str, object],
@@ -228,9 +220,11 @@ def _build_text(
     Returns:
         The block text, or a framed notice describing the failure.
     """
+    opened = False
     try:
         home = store.data_home(env)
         conn = _open(home)
+        opened = True
         try:
             return build(conn, home, payload, env, trace)
         finally:
@@ -240,19 +234,23 @@ def _build_text(
         return _notice("hot_journal")
     except store.StoreUnavailableError as exc:
         trace["error"] = "store_unavailable"
-        trace["detail"] = str(exc)[:80]
+        trace["detail"] = store_reason(str(exc))
+        return _notice("store_unavailable")
+    except sqlite3.DatabaseError:
+        trace["error"] = "store_unavailable"
         return _notice("store_unavailable")
     except ValueError as exc:
         code = (
             "review_policy_required"
             if str(exc) == "review_policy_required"
-            else "error"
+            else "context_unavailable" if opened else "store_unavailable"
         )
         trace["error"] = code
         return _notice(code)
     except Exception:  # fail open: never break the provider's session
-        trace["error"] = "error"
-        return _notice("error")
+        code = "context_unavailable" if opened else "store_unavailable"
+        trace["error"] = code
+        return _notice(code)
 
 
 def _respond(
@@ -325,7 +323,18 @@ def _start_block(
         label = _label(conn, ids, cwd)
         project = next(iter(knowledge_scopes(conn, ids, False)), None)
         if project is None:
-            raise ValueError("scope_unavailable")
+            trace["knowledge_ids"] = []
+            trace["shown"] = []
+            block = frame(
+                "",
+                [
+                    "This project has no indexed project memory yet.",
+                    "A later indexing pass can add its project mapping. "
+                    "A later startup, resume, clear, or compact can read it.",
+                    USAGE,
+                ],
+            )
+            return block if len(block.encode()) <= limit else ""
         context = knowledge_push.knowledge_context(
             conn, project, limit, time.time()
         )

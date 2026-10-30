@@ -361,7 +361,8 @@ def advance_completed(
     windows = conn.execute(
         "SELECT r.from_line,r.through_line FROM review_request r "
         "JOIN review_receipt c ON c.request_id=r.id WHERE r.provider=? "
-        "AND r.thread_id=? ORDER BY r.from_line,r.through_line",
+        "AND r.thread_id=? AND r.candidate_id IS NULL "
+        "ORDER BY r.from_line,r.through_line",
         (source.provider, source.thread_id),
     )
     for window in windows:
@@ -382,7 +383,8 @@ def unsuppressed_window(
     """Exclude cancelled intervals without dropping later eligible records."""
     last = conn.execute(
         "SELECT max(through_line) FROM review_request WHERE provider=? "
-        "AND thread_id=? AND state='cancelled' AND from_line<=? "
+        "AND thread_id=? AND candidate_id IS NULL "
+        "AND state='cancelled' AND from_line<=? "
         "AND through_line>=?",
         (
             window.source.provider,
