@@ -68,7 +68,8 @@ def _covered(
     """Keep completed, cancelled, active and exhausted work out of replay."""
     rows = conn.execute(
         "SELECT r.from_line,r.through_line FROM review_request r "
-        "WHERE r.provider=? AND r.thread_id=? AND ("
+        "WHERE r.provider=? AND r.thread_id=? AND r.candidate_id IS NULL "
+        "AND ("
         "r.state IN ('completed','running','pending','waiting') "
         "OR (r.state='cancelled' AND "
         "coalesce(r.cancel_code,'')!='policy_replaced') "
@@ -255,7 +256,8 @@ def replacements(
     sources: dict[int, sqlite3.Row] = {}
     ranges: dict[int, list[tuple[int, int]]] = defaultdict(list)
     rows = conn.execute(
-        "SELECT * FROM review_request WHERE policy_digest!=? AND "
+        "SELECT * FROM review_request WHERE policy_digest!=? "
+        "AND candidate_id IS NULL AND "
         "((state='cancelled' AND cancel_code='policy_replaced') "
         "OR state='failed')",
         (digest(policy),),
