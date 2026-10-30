@@ -37,6 +37,22 @@ else:
     from multiprocessing.connection import Connection
 
 
+def await_writer_start(home: Path, channel: Connection) -> None:
+    """Prove native contention before waiting for the parent's release."""
+    command = channel.recv()
+    if command not in ("go", "contend"):
+        raise ValueError("unexpected writer command")
+    channel.send("attempting")
+    if command == "contend":
+        try:
+            with store.writer_lock(home, wait_s=0):
+                raise AssertionError("writer did not contend")
+        except store.BusyError:
+            channel.send("contended")
+        if channel.recv() != "retry":
+            raise ValueError("unexpected writer command")
+
+
 def race_writer(
     home: str,
     action: str,
@@ -48,14 +64,14 @@ def race_writer(
     context = CommitContext.model_validate_json(context_json)
     intent = DecisionIntent.model_validate_json(intent_json)
     channel.send("ready")
-    channel.recv()
-    channel.send("attempting")
+    await_writer_start(Path(home), channel)
     with (
-        store.writer_lock(Path(home), wait_s=3.0),
+        store.writer_lock(Path(home), wait_s=0),
         closing(store.connect_rw(store.db_path(Path(home)))) as conn,
     ):
         channel.send("locked")
-        channel.recv()
+        if channel.recv() != "finish":
+            raise ValueError("unexpected writer command")
         error = None
         try:
             if action == "apply":
@@ -96,7 +112,7 @@ def race_writer(
             view.receipt.request_id if view.receipt else None,
             error,
         )
-    channel.send(result)
+    channel.send(("released", result))
     channel.close()
 
 
@@ -107,6 +123,14 @@ class DecisionRaceTests(ResolutionCase):
         """Bound each barrier so a broken lock cannot hang the test runner."""
         self.assertTrue(channel.poll(5), "writer barrier timed out")
         return channel.recv()
+
+    def receive_released(self, channel: Connection) -> object:
+        """Require resource release before returning a worker's result."""
+        message = self.receive(channel)
+        if not isinstance(message, tuple) or len(message) != 2:
+            self.fail("writer did not confirm release")
+        self.assertEqual(message[0], "released")
+        return message[1]
 
     def ordered_race(self, action: str, first: str) -> None:
         """Run competing apply and negative transactions in a forced order."""
@@ -153,13 +177,15 @@ class DecisionRaceTests(ResolutionCase):
         first_pipe.send("go")
         self.assertEqual(self.receive(first_pipe), "attempting")
         self.assertEqual(self.receive(first_pipe), "locked")
-        second_pipe.send("go")
+        second_pipe.send("contend")
         self.assertEqual(self.receive(second_pipe), "attempting")
+        self.assertEqual(self.receive(second_pipe), "contended")
         first_pipe.send("finish")
-        first_result = self.receive(first_pipe)
+        first_result = self.receive_released(first_pipe)
+        second_pipe.send("retry")
         self.assertEqual(self.receive(second_pipe), "locked")
         second_pipe.send("finish")
-        second_result = self.receive(second_pipe)
+        second_result = self.receive_released(second_pipe)
         for process, _ in children.values():
             process.join(5)
             self.assertEqual(process.exitcode, 0)
