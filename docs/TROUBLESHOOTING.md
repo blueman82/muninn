@@ -223,3 +223,21 @@ Real open, corruption, format, privacy, and nonregular-file refusals remain stor
 `context_unavailable` instead means context generation failed and the exact detail was not recorded.
 The agent can investigate with the normal read-only checks.
 It must not guess the cause of an older generic `error` record.
+
+### Changed Codex computer binding
+
+`codex_host_changed` means the saved computer identity differs from the current
+one. The cause of that change is unknown. The agent first checks format 2 and
+existing recovery state, then prepares the explicit host-only candidate and
+[non-writing preview](REFERENCE.md#renew-an-approved-codex-computer-binding).
+Reading the notice or possessing the digest grants no permission and starts no
+timer. Preserve an existing pause. A format-1 install must finish its ordinary
+checked upgrade before renewal.
+
+If the upgrade reports `host approval committed; upgrade incomplete`, the policy
+grant remains committed. Resume only the same approved operation. Keep its
+private receipt and archive. A missing, partial, oversized, changed or ambiguous
+receipt refuses automatic continuation. Do not restore the archive over current
+data, edit lock metadata or manufacture another approval. An unexplained lock
+acquisition metadata gap requires operator or maintainer review; no automatic
+continuation is supported for that gap.

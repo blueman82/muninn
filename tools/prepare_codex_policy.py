@@ -22,7 +22,7 @@ from muninn.review_json import (
 )
 from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_models import ReviewPolicy
-from muninn.review_rounds import round_schema
+from tools.codex_policy_artifacts import plan_artifacts, publish_artifacts
 
 DEFAULT_POLICY_FILE = Path(__file__).with_name("default_codex_policy.json")
 
@@ -328,8 +328,6 @@ def prepare(
     if tuple(cwd.iterdir()):
         raise ValueError("capability_changed")
     schema = home / "review-codex-schema.json"
-    _write(schema, review_codex_launch.wire_schema())
-    _write(home / "review-prompts" / (value.prompt_digest + ".json"), prompt)
     binding = review_codex_launch.ExperimentalBinding(
         requested=value.runner,
         host_identity=host_identity(),
@@ -339,30 +337,11 @@ def prepare(
         auth_home=auth_home,
         schema_path=schema,
     )
-    raw = canonical_json_value(binding.model_dump(mode="json")).encode()
-    proof = (
-        home
-        / "review-capabilities"
-        / (hashlib.sha256(raw).hexdigest() + ".json")
+    artifacts = plan_artifacts(
+        value, prompt, binding, review_codex_launch.fingerprint(binding)
     )
-    _write(proof, raw)
-    capability = review_runner.RunnerCapability(
-        **value.runner.model_dump(),
-        status="unverified",
-        proof_path=proof,
-        schema_digest=hashlib.sha256(
-            canonical_json_value(round_schema()).encode()
-        ).hexdigest(),
-        config_digest=review_codex_launch.fingerprint(binding),
-    )
+    publish_artifacts(home, artifacts)
     policy_raw = canonical_json(value).encode()
-    selected = (
-        home
-        / "review-capabilities"
-        / "selected"
-        / (hashlib.sha256(policy_raw).hexdigest() + ".json")
-    )
-    _write(selected, canonical_json(capability).encode())
     path = _policy_path(home, revision, repository_default, policy_raw)
     _write(path, policy_raw)
     return path

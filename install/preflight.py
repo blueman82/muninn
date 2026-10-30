@@ -20,7 +20,6 @@ from install.lifecycle import preflight_service
 from install.provider_apps import installed
 from install.provider_paths import codex_argv, cursor_commands, render_pinned
 from install.record import Record
-from install.snapshot import release_schema
 from install.transforms import (
     cursor_handlers,
     cursor_ours,
@@ -302,11 +301,14 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     files, fragment = check_repo(ctx, repo, sha)
     _check_machine(ctx)
     preflight_service(ctx)
-    ctx.cursor_hooks = installed(ctx, "cursor") and (
-        ctx.cursor_hooks or (ctx.upgrade and _managed_cursor(ctx))
-    )
+    if not ctx.renew_codex_host:
+        ctx.cursor_hooks = installed(ctx, "cursor") and (
+            ctx.cursor_hooks or (ctx.upgrade and _managed_cursor(ctx))
+        )
     _dry_apply(ctx, files, fragment, True)
     schema = release_schema(ctx, repo, sha) if ctx.upgrade else None
+    if ctx.renew_codex_host and schema != 2:
+        raise StepFailedError("host_renewal_format_required")
     selection = None
     if ctx.platform == "win32" and ctx.upgrade:
         selection = (ctx.lib / "selection.json").read_text()
@@ -339,3 +341,31 @@ def validate_resume_repo(ctx: Ctx, repo: Path, sha: str) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise StepFailedError("--sha must be a full 40-hex commit id")
     check_repo(ctx, repo, sha)
+
+
+SCHEMA_FILE = "muninn/store_schema.py"
+VERSION_PATTERN = re.compile(rb"^SCHEMA_VERSION\s*=\s*(\d+)\s*$", re.MULTILINE)
+
+
+def release_schema(ctx: Ctx, repo: Path, sha: str) -> int:
+    """Read the schema version a commit's store code writes.
+
+    It is read as text from git, not imported, so the installer never runs
+    the code it is about to install.
+
+    Args:
+        ctx: The run context.
+        repo: The source repository.
+        sha: The commit being installed.
+
+    Returns:
+        The ``SCHEMA_VERSION`` the commit defines.
+
+    Raises:
+        StepFailedError: If git cannot show the file or it names no version.
+    """
+    argv = ["git", "-C", repo, "show", f"{sha}:{SCHEMA_FILE}"]
+    found = VERSION_PATTERN.search(must(ctx, argv, env=GIT_ENV).stdout)
+    if found is None:
+        raise StepFailedError(f"no SCHEMA_VERSION in {SCHEMA_FILE} at --sha")
+    return int(found[1])

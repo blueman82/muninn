@@ -12,15 +12,18 @@ from pathlib import Path
 
 from install import (
     decision_migration,
+    host_renewal,
     legacy_cutover,
     legacy_recovery,
     legacy_state,
     lifecycle,
+    policy_records,
     record,
     review_policy,
     snapshot_io,
 )
 from install.context import Ctx, StepFailedError
+from install.host_renewal_bindings import clear_host_notice
 from install.record import Record, install_record, save
 from install.steps_config import record as record_config
 from install.steps_release import start_new
@@ -271,8 +274,7 @@ def _prepared(
 ) -> Generator[tuple[Path, q.MaintenanceOwner | None]]:
     """Retain maintenance ownership through the caller's activation work.
 
-    The writer region ends before yielding. The caller releases this scope
-    before starting a service or entering native rollback cleanup.
+    Release this owner before service start or native rollback cleanup.
 
     Args:
         ctx: Installer paths and explicit fresh or upgrade mode.
@@ -305,6 +307,15 @@ def _prepared(
                 else legacy_recovery.prepare
             )
             path = prepare(ctx, rec, owner, check)
+        elif "host_renewal" in rec:
+            if check is None:
+                raise StepFailedError("host_renewal_approval_required")
+            value = policy_records.host_renewal(rec["host_renewal"])
+            path = store.db_path(ctx.data)
+            if value.phase == "approved_intent":
+                host_renewal.after_owner(ctx, rec, owner, path, check)
+                path = _current(ctx, rec, owner)
+                host_renewal.contained(ctx, rec, owner, path, check)
         else:
             try:
                 path = _current(ctx, rec, owner)
@@ -348,8 +359,14 @@ def prepared_install_store(
             raise
         else:
             if owner is not None:
-                review_policy.ready(ctx, rec)
-                review_policy.activate(ctx, rec, owner, path, activation_check)
+                if "host_renewal" in rec:
+                    host_renewal.activate(ctx, rec, owner, path, check)
+                    clear_host_notice(ctx, owner, rec)
+                else:
+                    review_policy.ready(ctx, rec)
+                    review_policy.activate(
+                        ctx, rec, owner, path, activation_check
+                    )
                 if "legacy" in rec:
                     legacy_recovery.expose(ctx, rec, check)
 

@@ -96,7 +96,7 @@ def capture(
             raise StepFailedError("review_policy_unsupported")
         raw = read_policy(ctx.review_policy)
         selected = _policy(raw)
-        if selected.policy_source is not None:
+        if selected.policy_source is not None and not ctx.renew_codex_host:
             raise StepFailedError("review_policy_invalid")
         if selected.experimental_codex is not None:
             try:
@@ -173,7 +173,7 @@ def frozen(
 def preflight(ctx: Ctx, rec: Record) -> None:
     """Check installed policy before stopping the current runtime."""
     policy = frozen(ctx, rec)
-    if not ctx.upgrade or policy is None:
+    if ctx.renew_codex_host or not ctx.upgrade or policy is None:
         return
     policy_preview.validate(ctx, policy)
 

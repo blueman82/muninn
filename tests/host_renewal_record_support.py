@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from install.host_renewal_models import HostApproval
-from install.host_renewal_preview import preview
+from install.host_renewal_preview import capture_bindings, preview
 from install.record import Record
 from muninn import review_codex_launch
 from tests.host_renewal_support import HostFixture
@@ -30,7 +30,17 @@ class ReceiptFixture(HostFixture):
             "sha": self.sha,
             "plan": plan.model_dump(mode="json"),
             "approval": approval.model_dump(mode="json"),
+            "bindings": capture_bindings(self.ctx, plan).model_dump(
+                mode="json"
+            ),
+            "setup_notice": None,
+            "prior_summary": None,
+            "recognized_summary": None,
             "operation_identity": [1, 2],
+            "held_operation_lock": {
+                "stamp": [1, 2, 33152, 0, 1, 1],
+                "sha256": "a" * 64,
+            },
             "containment_started_at": 10.0,
         }
 

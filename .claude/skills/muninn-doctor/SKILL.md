@@ -123,3 +123,17 @@ Process deadlines do not limit database commit or cancellation delays.
 
 Report failed checks.
 Claim a repair only after a new doctor run passes.
+
+For `codex_host_changed`, check current-format 2 and outstanding recovery first.
+An installed format-1 store needs the ordinary checked upgrade before renewal;
+that prerequisite grants no host permission. Prepare a candidate changing only
+its saved host field, then use `bin/muninn-install --upgrade --review-policy PATH
+--renew-codex-host preview --check`. The preview is non-writing in every flag
+position. Request the owner's new affirmative installer answer for that exact
+plan before applying its digest. Disclose full upgrade/Codex hook checks,
+possible background learning before return, ongoing permission without an
+aggregate call or spending cap, and unknown provider billing/isolation. Keep
+pauses and old work. Reading a notice grants no permission and starts no timer.
+A committed grant survives later upgrade failure. Preserve its receipt/archive;
+resume only that exact operation. Missing evidence or an unexplained lock gap
+requires maintainer review, not receipt edits, archive restoration or a new grant.

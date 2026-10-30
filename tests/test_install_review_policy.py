@@ -13,7 +13,7 @@ from contextlib import closing
 from types import SimpleNamespace
 from unittest import mock
 
-from install import installer, legacy_baseline
+from install import entry, installer, legacy_baseline
 from install.context import StepFailedError
 from muninn import store
 from muninn.review_json import canonical_json
@@ -103,7 +103,7 @@ class InstallPolicyTests(unittest.TestCase):
     def test_parser_carries_explicit_path_without_automatic_discovery(
         self,
     ) -> None:
-        args = installer._parser().parse_args(
+        args = entry.parser().parse_args(
             [
                 "--repo",
                 ".",

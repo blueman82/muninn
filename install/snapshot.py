@@ -4,46 +4,22 @@ from __future__ import annotations
 
 import functools
 import os
-import re
 import sqlite3
 from collections.abc import Generator
 from contextlib import closing, contextmanager
 from pathlib import Path
 
 from install import lifecycle, snapshot_io
-from install.constants import GIT_ENV
 from install.context import Ctx, StepFailedError, job, must, wait
 from install.cutover import prepare_store
+from install.preflight import SCHEMA_FILE as SCHEMA_FILE
+from install.preflight import VERSION_PATTERN
+from install.preflight import release_schema as release_schema
 from install.record import Record
 from muninn import obs_linux_service
 from muninn.platform_paths import read_selection
 
-SCHEMA_FILE = "muninn/store_schema.py"
-_VERSION = re.compile(rb"^SCHEMA_VERSION\s*=\s*(\d+)\s*$", re.MULTILINE)
-
-
-def release_schema(ctx: Ctx, repo: Path, sha: str) -> int:
-    """Read the schema version a commit's store code writes.
-
-    It is read as text from git, not imported, so the installer never runs
-    the code it is about to install.
-
-    Args:
-        ctx: The run context.
-        repo: The source repository.
-        sha: The commit being installed.
-
-    Returns:
-        The ``SCHEMA_VERSION`` the commit defines.
-
-    Raises:
-        StepFailedError: If git cannot show the file or it names no version.
-    """
-    argv = ["git", "-C", repo, "show", f"{sha}:{SCHEMA_FILE}"]
-    found = _VERSION.search(must(ctx, argv, env=GIT_ENV).stdout)
-    if found is None:
-        raise StepFailedError(f"no SCHEMA_VERSION in {SCHEMA_FILE} at --sha")
-    return int(found[1])
+_VERSION = VERSION_PATTERN
 
 
 @contextmanager

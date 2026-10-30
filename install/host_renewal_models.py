@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import BeforeValidator, Field, TypeAdapter, model_validator
 
+from install.host_renewal_binding_models import BindingInputs
 from install.policy_record_models import (
     Control,
     FileState,
@@ -208,6 +208,13 @@ class HostApproval(StrictModel):
     confirmed: Annotated[Literal[True], BeforeValidator(_bool)]
 
 
+class SetupNotice(StrictModel):
+    """Bind the approved setup code and complete row fingerprint."""
+
+    code: Literal["codex_host_changed", "codex_experimental_boundary"]
+    row_digest: Digest
+
+
 class ReceiptBase(StrictModel):
     """Retain operation authority shared by every recoverable phase."""
 
@@ -219,6 +226,11 @@ class ReceiptBase(StrictModel):
     plan: HostPlan
     approval: HostApproval
     operation_identity: Identity
+    held_operation_lock: FileState
+    bindings: BindingInputs
+    setup_notice: SetupNotice | None
+    prior_summary: FileState | None
+    recognized_summary: FileState | None
     containment_started_at: Clock
 
     @model_validator(mode="after")
@@ -228,9 +240,16 @@ class ReceiptBase(StrictModel):
             (self.home, self.repo, self.sha)
             != (self.plan.home, self.plan.repo, self.plan.sha)
             or self.approval.plan_digest != self.plan.digest
+            or self.bindings.digest() != self.plan.bindings_digest
+            or self.held_operation_lock["stamp"][:2] != self.operation_identity
             or self.containment_started_at < self.approval.approved_at
         ):
             raise ValueError("host_renewal_authority_invalid")
+        if self.setup_notice is not None and (
+            self.setup_notice.row_digest
+            != self.plan.containment.setup_before_digest
+        ):
+            raise ValueError("host_renewal_setup_changed")
         return self
 
 
@@ -407,70 +426,3 @@ type RenewalReceipt = Annotated[
     Field(discriminator="phase"),
 ]
 RECEIPT = TypeAdapter(RenewalReceipt)
-
-
-type RetryLimits = tuple[int, tuple[float, ...]]
-
-
-def _job_match(
-    old: ContainmentJob,
-    new: ContainmentJob,
-    limits: Mapping[Digest, RetryLimits],
-) -> bool:
-    """Compare one no-call job using only its validated historical schedule."""
-    if (old.request.id, old.attempt.id, old.attempt_count) != (
-        new.request.id,
-        new.attempt.id,
-        new.attempt_count,
-    ):
-        return False
-    ended = new.attempt.ended_at
-    if ended is None:
-        return new == old
-    expected_attempt = old.attempt.model_copy(
-        update={
-            "ended_at": ended,
-            "progress_at": ended,
-            "outcome": "abandoned",
-        }
-    )
-    if new.attempt != expected_attempt or ended < old.attempt.progress_at:
-        return False
-    if old.request.state == "cancelled":
-        expected_request = old.request
-    else:
-        schedule = limits.get(old.request.policy_digest)
-        if schedule is None:
-            return False
-        maximum, backoffs = schedule
-        count = old.attempt_count
-        retry = ended + backoffs[count - 1] if count < maximum else None
-        expected_request = old.request.model_copy(
-            update={
-                "state": "waiting" if retry is not None else "failed",
-                "retry_at": retry,
-                "current_attempt_id": None,
-            }
-        )
-    return new.request == expected_request
-
-
-def jobs_match(
-    before: ContainmentPlan,
-    after: tuple[ContainmentJob, ...],
-    limits: Mapping[Digest, RetryLimits],
-) -> bool:
-    """Check exact named jobs against each immutable saved retry schedule.
-
-    Args:
-        before: Original named unfinished predecessor projection.
-        after: Current views for those same jobs.
-        limits: Only the selected snapshots' validated retry schedules.
-
-    Returns:
-        Whether all jobs are unchanged or have permitted abandoned shapes.
-    """
-    return len(before.jobs) == len(after) and all(
-        _job_match(old, new, limits)
-        for old, new in zip(before.jobs, after, strict=True)
-    )

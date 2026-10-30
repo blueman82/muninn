@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from muninn import file_sync, review_runner
 from muninn.review_codex_launch import (
     JSON_ONLY_INSTRUCTION,
     ExperimentalBinding,
@@ -132,9 +134,82 @@ def plan_artifacts(
             key=lambda item: item.relative_path.as_posix(),
         )
     )
+    return ArtifactPlan(files, policy_digest, recipe_digest(files))
+
+
+def recipe_digest(files: tuple[PreparedFile, ...]) -> str:
+    """Bind every ordered path and byte using the existing length framing."""
     digest = hashlib.sha256()
     for item in files:
         for raw in (item.relative_path.as_posix().encode(), item.raw):
             digest.update(len(raw).to_bytes(8, "big"))
             digest.update(raw)
-    return ArtifactPlan(files, policy_digest, digest.hexdigest())
+    return digest.hexdigest()
+
+
+def validate_artifacts(home: Path, plan: ArtifactPlan) -> None:
+    """Check the complete recipe before publication."""
+    if len(plan.files) != 4 or recipe_digest(plan.files) != plan.digest:
+        raise ValueError("preparation_artifact_invalid")
+    paths = [item.relative_path.as_posix() for item in plan.files]
+    if paths != sorted(set(paths)) or not re.fullmatch(
+        r"[0-9a-f]{64}", plan.policy_digest
+    ):
+        raise ValueError("preparation_artifact_invalid")
+    items = {item.relative_path.as_posix(): item.raw for item in plan.files}
+    selected = "review-capabilities/selected/" + plan.policy_digest + ".json"
+    if (
+        items.get("review-codex-schema.json") != wire_schema()
+        or selected not in items
+    ):
+        raise ValueError("preparation_artifact_invalid")
+    capability = RunnerCapability.model_validate_json(items[selected])
+    proof = capability.proof_path
+    if (
+        proof.parent != home / "review-capabilities"
+        or capability.status != "unverified"
+    ):
+        raise ValueError("preparation_artifact_invalid")
+    binding_raw = items.get("review-capabilities/" + proof.name)
+    if binding_raw is None or _digest(binding_raw) != proof.stem:
+        raise ValueError("preparation_artifact_invalid")
+    binding = ExperimentalBinding.model_validate_json(binding_raw)
+    if binding.schema_path != home / "review-codex-schema.json":
+        raise ValueError("preparation_artifact_invalid")
+    prompts = [
+        (name, raw)
+        for name, raw in items.items()
+        if name.startswith("review-prompts/")
+    ]
+    if (
+        len(prompts) != 1
+        or prompts[0][0]
+        != "review-prompts/" + _digest(prompts[0][1]) + ".json"
+    ):
+        raise ValueError("preparation_artifact_invalid")
+    for item in plan.files:
+        PreparedFile(item.relative_path, item.raw)
+
+
+def publish_artifacts(home: Path, plan: ArtifactPlan) -> None:
+    """Publish private artifacts or require exact existing bytes."""
+    review_runner.check_private_path(home, directory=True)
+    validate_artifacts(home, plan)
+    for item in plan.files:
+        PreparedFile(item.relative_path, item.raw)
+        path = home / item.relative_path
+        for parent in reversed(path.relative_to(home).parents):
+            directory = home / parent
+            directory.mkdir(mode=0o700, exist_ok=True)
+            review_runner.check_private_path(directory, directory=True)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            if review_runner.read_private_file(path, 1024 * 1024) != item.raw:
+                raise ValueError("preparation_artifact_changed") from None
+            continue
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(item.raw)
+            handle.flush()
+            file_sync.sync_fd(handle.fileno())
+        file_sync.sync_path(path.parent)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import shutil
@@ -12,13 +13,18 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from install import policy_preview
-from install.host_renewal_models import ContainmentPlan
+from pydantic import TypeAdapter
+
+from install import installer, policy_preview
+from install.host_renewal_models import ContainmentPlan, HostPlan
 from install.host_renewal_preview import StateScan, scan_state
+from install.policy_record_models import Control
+from install.record import Record, load_record
 from muninn import review_codex_policy, review_pause_state, store
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import bootstrap_policy, digest
+from tests import host_renewal_inventory
 from tests.installer_support import ROOT, World, git
 from tests.policy_preview_support import states as states
 from tools import prepare_codex_policy
@@ -134,18 +140,22 @@ class HostFixture(unittest.TestCase):
         *,
         candidate: bool = False,
         raw: str | None = None,
+        number: int = 1,
+        selected: ReviewPolicy | None = None,
     ) -> str:
         """Insert a canonical request independent of preview output."""
-        policy = self.candidate if candidate else self.old
-        ident = "R_" + "1" * 32
+        policy = selected or (self.candidate if candidate else self.old)
+        ident = "R_" + f"{number:x}" * 32
         self.sql(
             "INSERT INTO review_request(id,duplicate_key,provider,thread_id,"
             "session_root,from_line,through_line,boundary_hash,scope_json,"
             "policy_json,policy_digest,trigger,origin,state,created_at) "
-            "VALUES(?,?,'codex','fixture','fixture',1,1,?,?,?,?,'owner','review',?,1.0)",
+            "VALUES(?,?,'codex',?,?,1,1,?,?,?,?,'owner','review',?,1.0)",
             (
                 ident,
                 hashlib.sha256(ident.encode()).hexdigest(),
+                "fixture" if number == 1 else f"fixture-{number}",
+                "fixture" if number == 1 else f"fixture-{number}",
                 "a" * 64,
                 '{"project_id":"fixture","task":null}',
                 raw if raw is not None else canonical_json(policy),
@@ -155,9 +165,9 @@ class HostFixture(unittest.TestCase):
         )
         return ident
 
-    def attempt(self, request_id: str) -> str:
+    def attempt(self, request_id: str, *, number: int = 1) -> str:
         """Attach an unfinished attempt with its requested runner."""
-        ident = "A_" + "1" * 32
+        ident = "A_" + f"{number:x}" * 32
         self.sql(
             "INSERT INTO review_attempt(id,request_id,generation,"
             "requested_json,"
@@ -166,10 +176,8 @@ class HostFixture(unittest.TestCase):
                 ident,
                 request_id,
                 canonical_json(self.old.runner),
-                (
-                    '{"runner":null,"version":null,'
-                    '"model":null,"reasoning":null}'
-                ),
+                '{"runner":null,"version":null,'
+                '"model":null,"reasoning":null}',
             ),
         )
         self.sql(
@@ -189,220 +197,8 @@ class HostFixture(unittest.TestCase):
         )
 
     def seed_inventory(self) -> None:
-        """Populate every inventoried table without provider source bodies."""
-        request = self.request("completed")
-        attempt = self.attempt(request)
-        self.sql(
-            "UPDATE review_attempt SET ended_at=3.0,progress_at=3.0,"
-            "outcome='completed'"
-        )
-        self.sql(
-            "UPDATE review_request SET state='completed',"
-            "current_attempt_id=NULL"
-        )
-        self.insert(
-            "review_source",
-            {
-                "provider": "codex",
-                "thread_id": "fixture",
-                "activation_line": 0,
-                "examined_line": 1,
-                "eligible_line": 1,
-                "completed_line": 1,
-                "updated_at": 1.0,
-            },
-        )
-        self.insert(
-            "source",
-            {
-                "provider": "codex",
-                "thread_id": "fixture",
-                "session_root": "fixture",
-                "thread_class": "primary",
-                "class_reason": "synthetic",
-                "replay_mode": "none",
-                "root": "codex-sessions",
-                "path": "synthetic.jsonl",
-                "first_line_sha256": "a" * 64,
-                "ino": 1,
-                "size": 0,
-                "mtime_ns": 1,
-                "classifier_version": 1,
-                "first_seen": 1.0,
-                "last_seen": 1.0,
-            },
-        )
-        self.insert(
-            "tombstone",
-            {
-                "provider": "codex",
-                "level": "thread",
-                "thread_id": "erased-fixture",
-                "created_at": 1.0,
-            },
-        )
-        self.insert(
-            "learning_setup",
-            {"singleton": 1, "mode": "now", "selected_at": 1.0},
-        )
-        self.insert(
-            "review_issue",
-            {
-                "id": "fixture",
-                "code": "config",
-                "stage": "startup",
-                "cause": "safe",
-                "action": "safe",
-                "created_at": 1.0,
-            },
-        )
-        self.insert(
-            "review_call",
-            {
-                "attempt_id": attempt,
-                "round_index": 1,
-                "budget_account_id": "synthetic-account",
-                "policy_digest": digest(self.old),
-                "state": "completed",
-                "reserved_at": 2.0,
-                "requested_json": "{}",
-                "observed_json": "{}",
-            },
-        )
-        self.insert(
-            "review_receipt",
-            {
-                "request_id": request,
-                "attempt_id": attempt,
-                "applied_json": "[]",
-                "unresolved_json": "[]",
-                "committed_at": 3.0,
-                "outcome": "no_change",
-            },
-        )
-        self.seed_knowledge(request)
-
-    def seed_knowledge(self, request: str) -> None:
-        """Add linked synthetic evidence, knowledge and decision metadata."""
-        evidence, knowledge, candidate = (
-            "E_" + "1" * 32,
-            "K_" + "1" * 32,
-            "candidate",
-        )
-        self.insert(
-            "review_evidence",
-            {
-                "id": evidence,
-                "provider": "codex",
-                "thread_id": "fixture",
-                "session_root": "fixture",
-                "line": 1,
-                "part": 1,
-                "line_sha256": "a" * 64,
-                "source_version": "synthetic",
-                "projection_version": "permitted-fields-v2",
-                "original_locator_json": "{}",
-                "selector_json": "{}",
-                "selector_digest": "b" * 64,
-                "evidence_type": "message",
-                "authority": "owner",
-                "scope_json": "{}",
-                "state": "live",
-                "selected_at": 1.0,
-            },
-        )
-        self.insert(
-            "review_input", {"request_id": request, "evidence_id": evidence}
-        )
-        self.insert(
-            "knowledge",
-            {"id": knowledge, "current_revision": 1, "state": "active"},
-        )
-        self.insert(
-            "knowledge_version",
-            {
-                "knowledge_id": knowledge,
-                "revision": 1,
-                "request_id": request,
-                "form": "note",
-                "kind": "fact",
-                "scope_json": "{}",
-                "content_json": "{}",
-                "origin": "review",
-                "created_at": 3.0,
-            },
-        )
-        self.insert(
-            "knowledge_claim",
-            {
-                "knowledge_id": knowledge,
-                "revision": 1,
-                "claim_key": "claim",
-                "text": "synthetic",
-                "dependency_keys_json": "[]",
-                "state": "live",
-            },
-        )
-        self.insert(
-            "knowledge_support",
-            {
-                "knowledge_id": knowledge,
-                "revision": 1,
-                "claim_key": "claim",
-                "evidence_id": evidence,
-            },
-        )
-        self.insert(
-            "unresolved",
-            {
-                "id": "U_" + "1" * 32,
-                "request_id": request,
-                "item_json": "{}",
-                "affected_json": "[]",
-                "support_json": "[]",
-                "created_at": 3.0,
-                "state": "open",
-            },
-        )
-        self.seed_decisions(request, evidence, candidate)
-
-    def seed_decisions(
-        self, request: str, evidence: str, candidate: str
-    ) -> None:
-        """Add immutable synthetic candidates and their linked decisions."""
-        self.insert(
-            "memory_candidate",
-            {
-                "id": candidate,
-                "request_id": request,
-                "payload_json": "{}",
-                "digest": "c" * 64,
-                "normalization_version": 1,
-                "enrichment_version": 1,
-                "state": "waiting_verification",
-                "created_at": 3.0,
-            },
-        )
-        self.insert(
-            "memory_decision",
-            {
-                "id": "decision",
-                "candidate_id": candidate,
-                "candidate_digest": "c" * 64,
-                "intent_key": "intent",
-                "action": "reject",
-                "submitted_at": 4.0,
-                "state": "waiting_verification",
-            },
-        )
-        self.insert(
-            "memory_candidate_support",
-            {
-                "candidate_id": candidate,
-                "evidence_id": evidence,
-                "role": "original",
-            },
-        )
+        """Populate synthetic governed metadata through the shared fixture."""
+        host_renewal_inventory.seed_inventory(self)
 
     def scan(self, containment: ContainmentPlan | None = None) -> StateScan:
         """Read a fresh guarded temporary snapshot for containment tests."""
@@ -413,3 +209,49 @@ class HostFixture(unittest.TestCase):
                 candidate_digest=digest(self.candidate),
                 containment=containment,
             )
+
+    def read_control(self) -> Control:
+        """Read control independently of the renewal projection."""
+        with closing(store.connect_ro(self.path)) as conn:
+            return TypeAdapter(Control).validate_python(
+                dict(conn.execute("SELECT * FROM review_control").fetchone())
+            )
+
+    def request_snapshots(self) -> tuple[tuple[str, str, str], ...]:
+        """Read immutable request policy bytes and identities directly."""
+        with closing(store.connect_ro(self.path)) as conn:
+            return tuple(
+                tuple(row)
+                for row in conn.execute(
+                    "SELECT id,policy_json,policy_digest FROM review_request "
+                    "ORDER BY id"
+                )
+            )
+
+    def run_renewal(self, plan: HostPlan, *, approve: bool = True) -> Record:
+        """Call the real entry with a fake answer and actual receipt."""
+        ctx = dataclasses.replace(self.ctx, dry_run=False)
+        args = [
+            "--repo",
+            str(self.repo),
+            "--sha",
+            self.sha,
+            "--upgrade",
+            "--review-policy",
+            str(ctx.review_policy),
+            "--renew-codex-host",
+            plan.digest,
+        ]
+        with (
+            mock.patch.object(installer, "Ctx", return_value=ctx),
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch(
+                "builtins.input", return_value="yes" if approve else "no"
+            ),
+        ):
+            try:
+                result = installer.main(args)
+            except SystemExit as error:
+                result = error.code
+        self.assertEqual(result, 0, "actual renewal entry refused")
+        return load_record(ctx.rdir / "rollback-record.json")

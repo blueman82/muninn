@@ -37,7 +37,7 @@ TASK_ACTIONS = {
 }
 CALLSITES = {
     ("install.preflight", "_git"): 1,
-    ("install.snapshot", "release_schema"): 2,
+    ("install.preflight", "release_schema"): 2,
     ("install.snapshot", "start_again"): 3,
     ("install.legacy_exclusion", "stop_service"): 4,
     ("install.legacy_baseline", "candidate"): 5,

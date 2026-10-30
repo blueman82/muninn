@@ -3,36 +3,23 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import sqlite3
 from pathlib import Path
 from typing import cast
 
-from install import host_renewal_scan, policy_preview, preflight
+from install import host_renewal_scan, policy_preview
 from install import legacy_baseline as baseline
-from install.constants import GIT_ENV
-from install.context import Ctx, StepFailedError, must
+from install.context import Ctx, StepFailedError
+from install.host_renewal_bindings import BindingInputs, installation
 from install.host_renewal_files import lock_identity
 from install.host_renewal_models import ContainmentPlan, HostPlan
+from install.host_renewal_operation import HeldOperation
 from install.host_renewal_scan import StateScan as StateScan
 from install.legacy_state import OperationCheck
 from install.policy_record_models import Payload
-from install.preflight import check_repo as checked_repo
-from install.provider_apps import installed
-from install.provider_paths import cursor_commands
 from install.review_policy import read_policy
 from install.review_policy_parse import policy as parse_policy
-from install.review_policy_ready import selection
-from install.transforms import (
-    drop_trust,
-    edit_cursor_settings,
-    edit_settings,
-    enable,
-    repoint,
-    write_trust,
-)
-from install.trust import codex_hooks
 from muninn import review_codex_launch, review_runner, store, store_fingerprint
 from muninn.knowledge_models import Digest
 from muninn.review_codex_launch import checked_binding
@@ -118,7 +105,7 @@ def _policies(
     return old, candidate
 
 
-def _artifacts(
+def artifacts(
     ctx: Ctx, old: ReviewPolicy, candidate: ReviewPolicy
 ) -> tuple[ArtifactPlan, dict[str, object]]:
     """Check retained artifacts and build the recipe outside writers."""
@@ -188,119 +175,7 @@ def _artifacts(
     return artifacts, inputs
 
 
-def _configuration(ctx: Ctx, files: dict[str, bytes]) -> dict[str, object]:
-    """Bind initial identities and exact allowed pure upgrade transforms."""
-    result: dict[str, object] = {"cursor_hooks": ctx.cursor_hooks}
-    for name, path in (
-        ("claude", ctx.settings),
-        ("codex", ctx.config),
-        ("cursor", ctx.cursor_settings),
-    ):
-        present = os.path.lexists(path)
-        if not present and not (name == "cursor" and ctx.cursor_hooks):
-            result[name] = None
-            continue
-        before = baseline.file_state(path) if present else None
-        raw = (
-            baseline.read_bytes(path)
-            if present
-            else preflight.EMPTY_CURSOR_CONFIG
-        )
-        expected = [hashlib.sha256(raw).hexdigest()]
-        if name == "cursor" and ctx.cursor_hooks:
-            fragment = json.loads(files[preflight.CURSOR_HOOKS_FILE])["hooks"]
-            expected = [
-                hashlib.sha256(
-                    edit_cursor_settings(raw, cursor_commands(ctx), fragment)
-                ).hexdigest()
-            ]
-        elif installed(ctx, name):
-            if name == "claude":
-                fragment = json.loads(
-                    files["integrations/claude/settings-hooks.json"]
-                )["hooks"]
-                expected = [
-                    hashlib.sha256(edit_settings(raw, fragment)).hexdigest()
-                ]
-            elif name == "codex":
-                text = enable(
-                    repoint(
-                        drop_trust(raw.decode()),
-                        str(ctx.lib / "current/integrations/codex"),
-                    )
-                )
-                trusted = write_trust(
-                    text, codex_hooks(files[preflight.CODEX_HOOKS_FILE])
-                )
-                expected = sorted(
-                    {
-                        hashlib.sha256(value.encode()).hexdigest()
-                        for value in (text, trusted)
-                    }
-                )
-        after = baseline.file_state(path) if os.path.lexists(path) else None
-        if after != before:
-            raise StepFailedError("host_renewal_state_changed")
-        result[name] = {
-            "path": str(path),
-            "before": before,
-            "expected": expected,
-        }
-    return result
-
-
-def _installation(ctx: Ctx, repo: Path, sha: str) -> dict[str, object]:
-    """Bind runtime, target source and managed upgrade inputs."""
-    if (
-        repo.resolve(strict=True) != repo
-        or ctx.home.resolve(strict=True) != ctx.home
-    ):
-        raise StepFailedError("host_renewal_state_changed")
-    files, _ = checked_repo(ctx, repo, sha)
-    current = (ctx.lib / "current").resolve(strict=True)
-    python = (ctx.lib / "python").resolve(strict=True)
-    lock = ctx.lib / ".install-record.lock"
-    return {
-        "home": baseline.directory(ctx.home),
-        "repo": baseline.directory(repo),
-        "library": baseline.directory(ctx.lib, private=True),
-        "sha": sha,
-        "runtime": baseline.tree_state(current, links=True),
-        "selection": selection(ctx),
-        "python": baseline.file_state(python),
-        "service": baseline.file_state(ctx.plist),
-        "configuration": _configuration(ctx, files),
-        "target_contract": hashlib.sha256(
-            must(
-                ctx,
-                [
-                    "git",
-                    "-C",
-                    repo,
-                    "show",
-                    f"{sha}:muninn/review_codex_output.py",
-                ],
-                env=GIT_ENV,
-            ).stdout
-        ).hexdigest(),
-        "target_files": {
-            name: hashlib.sha256(raw).hexdigest()
-            for name, raw in files.items()
-        },
-        "expected_selection": {
-            "current": sha,
-            "launcher": str(ctx.lib / "current/bin/muninn"),
-            "python": str(python),
-        },
-        "operation_lock": (
-            baseline.file_state(lock, private=True)
-            if os.path.lexists(lock)
-            else None
-        ),
-    }
-
-
-def _protected_files(ctx: Ctx) -> tuple[object, ...]:
+def protected_files(ctx: Ctx) -> tuple[object, ...]:
     """Bind fixed external files across signature and configuration checks."""
     states = tuple(
         (
@@ -313,13 +188,16 @@ def _protected_files(ctx: Ctx) -> tuple[object, ...]:
     return (*states, lock_identity(ctx.data, lambda: None))
 
 
-def preview(ctx: Ctx, repo: Path, sha: str) -> HostPlan:
+def preview(
+    ctx: Ctx, repo: Path, sha: str, *, operation: HeldOperation | None = None
+) -> HostPlan:
     """Read and bind the exact current-format host-only proposal.
 
     Args:
         ctx: Existing installation and explicit candidate selection.
         repo: Canonical source repository for the exact target release.
         sha: Exact target commit, retained in the plan digest.
+        operation: Actual held installer operation for the one lock projection.
 
     Returns:
         A checked private proposal that grants no host authority.
@@ -346,15 +224,15 @@ def preview(ctx: Ctx, repo: Path, sha: str) -> HostPlan:
         ).hexdigest()
         with policy_preview.connection(path) as conn:
             before = store_fingerprint.capture_file(path)
-            protected = _protected_files(ctx)
+            protected = protected_files(ctx)
             scanned = scan_state(conn, path, candidate_digest=candidate_digest)
         old, candidate = _policies(
             raw, scanned.state.control["policy_json"], ctx
         )
-        artifacts, artifact_inputs = _artifacts(ctx, old, candidate)
-        installation = _installation(ctx, repo, sha)
+        recipe, artifact_inputs = artifacts(ctx, old, candidate)
+        captured = installation(ctx, repo, sha, operation)
         if (
-            installation["target_contract"]
+            captured["target_contract"]
             != cast(dict[str, object], artifact_inputs["binding"])[
                 "output_contract_digest"
             ]
@@ -370,25 +248,25 @@ def preview(ctx: Ctx, repo: Path, sha: str) -> HostPlan:
             "state": scanned.state.model_dump(mode="json"),
             "bindings_digest": _digest(
                 {
-                    "installation": installation,
+                    "installation": captured,
                     "artifacts": artifact_inputs,
                     "protected_files": protected,
                 }
             ),
-            "artifacts_digest": artifacts.digest,
-            "operation_lock": installation["operation_lock"],
+            "artifacts_digest": recipe.digest,
+            "operation_lock": captured["operation_lock"],
             "request_ids": scanned.request_ids,
             "attempt_ids": scanned.attempt_ids,
             "containment": scanned.containment.model_dump(mode="json"),
         }
-        if _artifacts(ctx, old, candidate) != (artifacts, artifact_inputs):
+        if artifacts(ctx, old, candidate) != (recipe, artifact_inputs):
             raise StepFailedError("host_renewal_state_changed")
-        if _installation(ctx, repo, sha) != installation:
+        if installation(ctx, repo, sha, operation) != captured:
             raise StepFailedError("host_renewal_state_changed")
         with policy_preview.connection(path):
             if (
                 store_fingerprint.capture_file(path) != before
-                or _protected_files(ctx) != protected
+                or protected_files(ctx) != protected
                 or read_policy(ctx.review_policy) != raw
             ):
                 raise StepFailedError("host_renewal_state_changed")
@@ -419,3 +297,28 @@ def summary(plan: HostPlan) -> dict[str, object]:
         "policy_change": "host_only",
         "artifacts_digest": plan.artifacts_digest,
     }
+
+
+def capture_bindings(
+    ctx: Ctx, plan: HostPlan, operation: HeldOperation | None = None
+) -> BindingInputs:
+    """Capture exact approved bindings outside database writers."""
+    old = parse_policy(plan.old["raw"])
+    candidate = parse_policy(plan.candidate["raw"])
+    if candidate.experimental_codex is None:
+        raise StepFailedError("host_renewal_delta")
+    check_host(candidate.experimental_codex, ctx.data)
+    recipe, inputs = artifacts(ctx, old, candidate)
+    if recipe.digest != plan.artifacts_digest:
+        raise StepFailedError("host_renewal_plan_changed")
+    return BindingInputs.model_validate_json(
+        canonical_json_value(
+            {
+                "installation": installation(
+                    ctx, Path(plan.repo), plan.sha, operation
+                ),
+                "artifacts": inputs,
+                "protected_files": protected_files(ctx),
+            }
+        )
+    )

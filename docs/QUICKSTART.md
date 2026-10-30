@@ -138,6 +138,10 @@ During first setup, the installer asks which records to review:
 - **All available history:** review verified older project records, then review new records.
 
 The installer keeps your choice for later upgrades.
+An ordinary upgrade with no new learning or policy request preserves the saved
+scope and its original boundary. It does not ask to review additional history
+or queue that history to complete the upgrade. An explicit scope or policy
+request still uses the normal review and consent checks.
 If you choose history, it shows eligible requests, excluded ranges, and a time estimate before confirmation.
 A capture gap does not equal a review request.
 Muninn excludes missing, erased, changed, or unverifiable source ranges.
@@ -374,3 +378,12 @@ Indexing creates the project mapping when it indexes an event.
 SessionEnd requests learning from already indexed records. It does not ingest or wait.
 A later startup, resume, clear, or compact can read the new mapping.
 Prompt recall remains separate. Waiting alone does not refresh the current conversation's startup context.
+
+If learning reports `codex_host_changed`, ask the agent to check store-format and
+recovery prerequisites, then prepare the non-writing host-renewal preview in
+[REFERENCE.md](REFERENCE.md#renew-an-approved-codex-computer-binding). An installed
+format-1 store needs an ordinary upgrade to format 2 first. That step grants no
+new host permission. The later renewal needs your affirmative answer for its
+exact displayed digest. A full upgrade can run Codex hook checks and start
+background learning before returning; ongoing approval has no total call or
+spending cap of its own.

@@ -7,7 +7,7 @@ import hashlib
 import json
 from unittest import mock
 
-from install import host_renewal_preview, preflight
+from install import host_renewal_bindings, preflight
 from install.context import StepFailedError
 from install.host_renewal_preview import preview, summary
 from install.provider_paths import cursor_commands
@@ -409,7 +409,7 @@ class HostRenewalPreviewTests(HostFixture):
             cursor_commands(self.ctx),
             json.loads(files[preflight.CURSOR_HOOKS_FILE])["hooks"],
         )
-        configuration = host_renewal_preview._configuration(self.ctx, files)
+        configuration = host_renewal_bindings.configuration(self.ctx, files)
         self.assertTrue(configuration["cursor_hooks"])
         self.assertEqual(
             configuration["cursor"],

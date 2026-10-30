@@ -15,12 +15,11 @@ from pydantic import TypeAdapter
 
 from install.context import StepFailedError
 from install.host_renewal_files import capture_files, requires_key
+from install.host_renewal_jobs import RetryLimits, jobs_match
 from install.host_renewal_models import (
     ContainmentJob,
     ContainmentPlan,
     HostState,
-    RetryLimits,
-    jobs_match,
 )
 from install.legacy_state import OperationCheck
 from install.policy_record_models import Control
@@ -49,7 +48,7 @@ class StateScan:
     containment: ContainmentPlan
 
 
-def _frame(value: object) -> bytes:
+def metadata_frame(value: object) -> bytes:
     """Length-frame scalar types and values with the existing copy encoding."""
     raw = json.dumps(value, separators=(",", ":"), ensure_ascii=True).encode()
     return len(raw).to_bytes(8, "big") + raw
@@ -57,7 +56,7 @@ def _frame(value: object) -> bytes:
 
 def _row(row: dict[str, object]) -> bytes:
     """Frame exact columns, scalar types and values for one complete row."""
-    return _frame(
+    return metadata_frame(
         [
             (
                 key,
@@ -195,7 +194,9 @@ class _Scan:
         elif table == "review_attempt" and data["id"] in self.named.values():
             excluded = {"ended_at", "progress_at", "outcome"}
         elif table == "review_issue" and data["id"] == "setup":
-            self.setup_digest = hashlib.sha256(_frame(data)).hexdigest()
+            self.setup_digest = hashlib.sha256(
+                metadata_frame(data)
+            ).hexdigest()
             safe = {
                 "id": "setup",
                 **review_recovery.explain(
@@ -229,7 +230,7 @@ class _Scan:
             if table != "review_control"
             else hashlib.sha256()
         )
-        header = _frame(
+        header = metadata_frame(
             (table, [row[1] for row in columns] if columns else "absent")
         )
         target.update(header)
@@ -287,10 +288,10 @@ class _Scan:
                 )
             pair = (
                 row["policy_digest"],
-                hashlib.sha256(_frame(tuple(row))).hexdigest(),
+                hashlib.sha256(metadata_frame(tuple(row))).hexdigest(),
             )
-            self.hashes["work"].update(_frame(pair))
-            self.hashes["invariant"].update(_frame(pair))
+            self.hashes["work"].update(metadata_frame(pair))
+            self.hashes["invariant"].update(metadata_frame(pair))
             self.tick()
         self.tick()
 
@@ -304,8 +305,8 @@ class _Scan:
             (TOMBSTONE_FILE, files.journal),
         ):
             fact = dataclasses.asdict(value) if value is not None else None
-            self.hashes["erasure"].update(_frame((name, fact)))
-            self.hashes["invariant"].update(_frame((name, fact)))
+            self.hashes["erasure"].update(metadata_frame((name, fact)))
+            self.hashes["invariant"].update(metadata_frame((name, fact)))
             self.tick()
         return files.witness
 
