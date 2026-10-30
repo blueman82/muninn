@@ -450,6 +450,10 @@ Record approval with `approved_by` and UTC `approved_at`.
 
 The installer asks for a record scope when no choice exists.
 It retains the choice during later upgrades.
+An ordinary upgrade with no new learning or policy request preserves the saved
+scope and its original boundary. It does not ask to review additional history
+or queue that history to complete the upgrade. An explicit scope or policy
+request still uses the normal review and consent checks.
 A retained From now choice keeps its original start time.
 After policy replacement, the installer confirms eligible replacement requests before queuing them.
 It does not silently discard an old queue.
@@ -1334,3 +1338,51 @@ new evidence; bounded compatibility observations are not native qualification.
 Repository scopes use local native filesystem paths. Foreign-platform absolute paths and
 Windows UNC paths resolve to `unknown` without probing the network; existing scope ids
 are retained. Copy network-hosted inputs locally before indexing.
+
+### Renew an approved Codex computer binding
+
+This route requires an installed current-format 2 store and macOS ARM64. First
+resolve any existing containment or erasure recovery. A marked format-1 install
+must complete its ordinary checked upgrade first, with no renewal or new policy
+flag. That prerequisite preserves the saved computer policy and grants no new
+computer permission. Do not combine migration and renewal.
+
+The agent prepares an explicit candidate from the saved policy. Only
+`experimental_codex.host_identity` can change. Keep the original policy source,
+account, authentication home, approval, projects and every limit. Preview it:
+
+```sh
+bin/muninn-install --upgrade --review-policy PATH --renew-codex-host preview --check
+```
+
+The preview writes nothing. `--check` works in any argument position and runs no
+runtime setup, Git-hook setup or approval prompt. Apply the exact displayed plan:
+
+```sh
+bin/muninn-install --upgrade --review-policy PATH --renew-codex-host PLAN_DIGEST
+```
+
+The installer requires a new interactive `yes` or `y` after its full disclosure.
+The digest alone, a previous conversation, or an enable-learning flag is not
+consent. A changed plan needs another preview and approval. Fresh installs,
+scope changes, enable-learning and unrelated policy changes are refused here.
+
+This is a full upgrade. It starts Codex app-server initialization and hooks/list
+checks, and background learning can start before it returns. Ongoing permission
+has no aggregate call or spending cap of its own. Existing policy limits remain;
+provider billing and full isolation are not qualified. Containment can refuse.
+
+The renewal retains old request identities and immutable policy snapshots,
+charges, receipts, source progress, scope and activation time. It does not replay
+old work or reopen paused learning. A separately approved history operation can
+select an old window later. Reusing a candidate digest found in any retained
+request, including a terminal request, is refused. Repeated computer changes can
+therefore require maintainer review rather than another renewal.
+
+Policy COMMIT is the grant boundary. A later restart or verification failure
+reports `host approval committed; upgrade incomplete`. Repeat only the same
+approved upgrade to resume its retained receipt. Do not restore an archive,
+rewrite a receipt, grant again or reopen admission to work around a refusal.
+An unexplained installer-lock metadata gap has no automatic continuation: the
+agent reports the exact refusal and preserves the record; an operator or
+maintainer must review the evidence before separately supported recovery.

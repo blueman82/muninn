@@ -22,11 +22,17 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install import legacy_state, legacy_transition, lifecycle, policy_records
+from install import (
+    host_renewal_recovery,
+    legacy_state,
+    legacy_transition,
+    lifecycle,
+    policy_records,
+)
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
 from install.provider_paths import cursor_commands
-from install.record import Record, load_record, save
+from install.record import Record, install_record, load_record, save
 from install.release_io import write_private
 from install.snapshot import start_again, undo_store
 from install.steps_release import PRUNING, relink
@@ -288,7 +294,8 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     policy_records.validate(rec)
     problems: list[str] = []
     if (
-        rec.get("recovery_required")
+        "host_renewal" in rec
+        or rec.get("recovery_required")
         or policy_records.activation_phase(rec) is not None
         or (
             rec.get("upgrade")
@@ -331,6 +338,8 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
 
 def rollback(ctx: Ctx, rec: Record) -> list[str]:
     """Serialize direct recovery before native or filesystem effects."""
+    if host_renewal_recovery.pending(ctx) is not None or "host_renewal" in rec:
+        raise ValueError("host_renewal_recovery_required")
     with legacy_state.operation(ctx) as check:
         pending = legacy_state.pending(ctx)
         if pending is not None or "legacy" in rec:
@@ -368,3 +377,38 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def failed_install(ctx: Ctx, rec: Record, step: str, exc: Exception) -> None:
+    """Record a failed step and undo the install.
+
+    Args:
+        ctx: The run context.
+        rec: The run record.
+        step: The step that failed.
+        exc: What it raised.
+    """
+    rec["failed"] = {
+        "step": step,
+        "error": type(exc).__name__,
+    }
+    save(ctx, rec)
+    detail = (
+        "host_renewal_recovery_required" if "host_renewal" in rec else str(exc)
+    )
+    ctx.say(f"install failed at {step}: {detail}; rolling back")
+    if "host_renewal" in rec:
+        value = policy_records.host_renewal(rec["host_renewal"])
+        if ctx.host_grant_observed or value.phase in {
+            "grant_committed",
+            "restart_pending",
+            "upgrade_verified",
+        }:
+            ctx.say("host approval committed; upgrade incomplete")
+    if step != "prepare_release":
+        for problem in rollback_owned(ctx, rec):
+            ctx.say(f"PROBLEM: {problem}")
+    outcome = (
+        "recovery_required" if rec.get("recovery_required") else "rolled_back"
+    )
+    install_record(ctx, rec, outcome)

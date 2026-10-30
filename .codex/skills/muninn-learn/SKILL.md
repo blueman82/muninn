@@ -27,6 +27,10 @@ Copy the returned `confirmation` value into `SCAN_DIGEST`.
 `--project PATH` limits automatic learning to one indexed project.
 From-now mode applies to all projects.
 The installer offers the same scope choice and retains it during upgrades.
+An ordinary upgrade with no new learning or policy request preserves the saved
+scope and its original boundary. It does not ask to review additional history
+or queue that history to complete the upgrade. An explicit scope or policy
+request still uses the normal review and consent checks.
 
 The preview reports eligible requests, excluded source ranges, causes, estimates, and sample confidence.
 Capture gaps are not model calls.

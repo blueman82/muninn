@@ -23,6 +23,8 @@ from install.constants import (
     PLIST,
     REMOVED_PREFIX,
 )
+from install.host_renewal_binding_models import HeldOperation
+from install.host_renewal_models import HostApproval, HostPlan
 from install.installer_log import Runner as Runner
 from install.installer_log import install_log as install_log
 from install.installer_log import run_real as run_real
@@ -103,6 +105,12 @@ class Ctx:
     learning_mode: Literal["now", "all"] | None = None
     learning_prompt: Callable[[str], str] | None = None
     review_policy: Path | None = None
+    renew_codex_host: str | None = None
+    host_approval: HostApproval | None = None
+    host_plan: HostPlan | None = None
+    host_operation: HeldOperation | None = None
+    host_final_steps: tuple[str, ...] = ()
+    host_grant_observed: bool = False
     log_path: Path | None = None
     dry_run: bool = False
     cursor_hooks: bool = False

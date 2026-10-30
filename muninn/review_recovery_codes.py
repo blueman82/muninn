@@ -182,6 +182,16 @@ EXPLANATIONS.update(
         for code, cause in _SETUP_FAILURES.items()
     }
 )
+EXPLANATIONS["codex_host_changed"] = (
+    _SETUP_FAILURES["codex_host_changed"],
+    "The agent checks current format 2 and recovery prerequisites, then "
+    "prepares a host-only candidate and a non-writing renewal preview: "
+    "bin/muninn-install --upgrade --review-policy PATH "
+    "--renew-codex-host preview --check. "
+    "The owner must approve that exact plan at the installer prompt. "
+    "A preview digest or reading this notice grants no permission. "
+    "Learning stays paused if it was paused. Reading starts no timer.",
+)
 SHARED = frozenset(
     {
         "auth",

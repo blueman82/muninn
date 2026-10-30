@@ -142,6 +142,29 @@ else
   mode=half
 fi
 
+renewal=0
+check_mode=
+previous=
+for argument in "$@"; do
+  case "$argument" in
+    --check | --dry-run) check_mode=--check ;;
+    --renew-codex-host) renewal=1 ;;
+    --renew-codex-host=*)
+      renewal=1
+      [ "$argument" != --renew-codex-host=preview ] || check_mode=--check
+      ;;
+  esac
+  if [ "$previous" = --renew-codex-host ] && [ "$argument" = preview ]; then
+    check_mode=--check
+  fi
+  previous=$argument
+done
+if [ "$renewal" -eq 1 ]; then
+  ensure_runtime --check
+  cd "$root"
+  exec "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "$@"
+fi
+
 case "${1:-}" in
   -h | --help)
     cat <<'HELP'
@@ -206,8 +229,10 @@ HELP
     ;;
   --check | "" | --learning-scope | --enable-learning) ;;
   *)
-    ensure_runtime
-    ensure_git_hooks
+    ensure_runtime "$check_mode"
+    if [ "$check_mode" != --check ]; then
+      ensure_git_hooks
+    fi
     cd "$root"
     exec "$py" -E -s -B -m install.installer "$@"
     ;;
@@ -219,8 +244,8 @@ if [ "$mode" = half ]; then
   exit 1
 fi
 
-ensure_runtime "${1:-}"
-if [ "${1:-}" != --check ]; then
+ensure_runtime "$check_mode"
+if [ "$check_mode" != --check ]; then
   ensure_git_hooks
 fi
 

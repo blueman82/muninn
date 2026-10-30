@@ -6,20 +6,21 @@ preserves actual data and its private recovery authority on failure.
 
 from __future__ import annotations
 
-import argparse
 import copy
-import os
-import sys
-import time
+import dataclasses
+import json
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 
-from install import configedit as ce
 from install import (
-    learning_scope,
+    entry,
+    host_renewal,
+    host_renewal_recovery,
+    legacy_baseline,
     legacy_state,
     legacy_transition,
+    policy_records,
 )
 from install.constants import (
     CLAUDE_EVENTS,
@@ -38,9 +39,7 @@ from install.constants import (
     PLIST,
     PLUGIN,
     PLUGIN_ID,
-    PRIVATE_UMASK,
     TRUST,
-    TS_FORMAT,
 )
 from install.context import (
     Ctx,
@@ -57,7 +56,9 @@ from install.cutover import (
     prepare_store,
     prepared_install_store,
 )
-from install.finish import complete
+from install.finish import finalize
+from install.host_renewal_operation import held_operation
+from install.host_renewal_preview import preview, summary
 from install.preflight import preflight
 from install.probe import codex_probe
 from install.record import (
@@ -69,11 +70,13 @@ from install.record import (
     save,
 )
 from install.recovery_guidance import recover_pause
-from install.rollback import rollback_owned
+from install.rollback import failed_install
 from install.runtime import prepare_runtime, verify_runtime
 from install.snapshot import snapshot_store
 from install.steps_config import (
-    choose_cursor_hooks,
+    choose_cursor_hooks as choose_cursor_hooks,
+)
+from install.steps_config import (
     claude,
     codex,
     cursor,
@@ -222,49 +225,24 @@ def steps(ctx: Ctx) -> tuple[Step, ...]:
     return UPGRADE_STEPS if ctx.upgrade else FRESH_STEPS
 
 
-def _roll_back(ctx: Ctx, rec: Record, step: Step, exc: Exception) -> None:
-    """Record a failed step and undo the install.
-
-    Args:
-        ctx: The run context.
-        rec: The run record.
-        step: The step that failed.
-        exc: What it raised.
-    """
-    rec["failed"] = {
-        "step": step.__name__,
-        "error": type(exc).__name__,
-    }
-    save(ctx, rec)
-    ctx.say(f"install failed at {step.__name__}: {exc}; rolling back")
-    if step is not prepare_release:
-        for problem in rollback_owned(ctx, rec):
-            ctx.say(f"PROBLEM: {problem}")
-    outcome = (
-        "recovery_required" if rec.get("recovery_required") else "rolled_back"
-    )
-    install_record(ctx, rec, outcome)
-
-
 def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
-    """Run the whole install, rolling back if any step fails.
+    """Run the prepared step sequence under one installer operation.
 
     Args:
-        ctx: The run context.
-        repo: The source repository, at a clean checkout of ``sha``.
-        sha: The full commit id to install.
+        ctx: Explicit installation paths and mode.
+        repo: Source repository with the exact target release.
+        sha: Full target commit identifier.
 
     Returns:
-        The final run record.
+        The final validated installer record.
 
     Raises:
-        StepFailedError: If a precondition fails in preflight or a step
-            fails; a failed step is re-raised after the rollback.
-        RefusedError: If a provider config has a layout the edits refuse.
-        RacedError: If a provider config changed while it was being edited.
-        Exception: Any other step exception, re-raised after the rollback (in
-            a dry run, re-raised without one).
+        StepFailedError: If current ownership or recovery state refuses.
     """
+    if ctx.renew_codex_host is not None:
+        return _renewal(ctx, Path(repo), sha)
+    if host_renewal_recovery.pending(ctx) is not None:
+        raise StepFailedError("host_renewal_recovery_required")
     if (
         ctx.upgrade
         and ctx.platform == "win32"
@@ -294,119 +272,132 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
         return _install(ctx, preflight(ctx, Path(repo), sha), check)
 
 
+def _renewal(ctx: Ctx, repo: Path, sha: str) -> Record:
+    """Route a checked renewal through the existing single step engine."""
+    if ctx.dry_run:
+        plan = preview(ctx, Path(repo), sha)
+        ctx.say(json.dumps(summary(plan)))
+        return {"host_preview": summary(plan)}
+    ctx.host_final_steps = tuple(step.__name__ for step in steps(ctx))
+    found = host_renewal_recovery.pending(ctx)
+    saved_file = None
+    if found is not None:
+        active, saved = found
+        receipt = policy_records.host_renewal(saved["host_renewal"])
+        saved_file = legacy_baseline.file_state(
+            active.rdir / "rollback-record.json", private=True
+        )
+        expected = receipt.held_operation_lock
+        plan = receipt.plan
+    else:
+        plan = ctx.host_plan
+        if plan is None:
+            raise StepFailedError("host_renewal_approval_required")
+        expected = plan.operation_lock
+    with held_operation(
+        ctx, approved=plan.operation_lock, expected_before=expected
+    ) as operation:
+        ctx.host_operation = operation
+        if found is not None:
+            active, saved = found
+            repeated = host_renewal_recovery.pending(ctx)
+            if (
+                repeated is None
+                or repeated[1] != saved
+                or legacy_baseline.file_state(
+                    active.rdir / "rollback-record.json", private=True
+                )
+                != saved_file
+            ):
+                raise StepFailedError("host_renewal_record_changed")
+            resumed = host_renewal_recovery.resume_install(
+                ctx, Path(repo), sha, operation.check
+            )
+            if resumed is None:
+                raise StepFailedError("host_renewal_record_changed")
+            active = dataclasses.replace(ctx, ts=resumed["ts"])
+            if resumed["host_renewal"]["phase"] == "upgrade_verified":
+                return host_renewal_recovery.finish_verified(
+                    active, resumed, operation.check
+                )
+            return _install(active, resumed, operation.check, resume=True)
+        return _install(ctx, preflight(ctx, Path(repo), sha), operation.check)
+
+
 def _install(
-    ctx: Ctx, rec: Record, check: legacy_state.OperationCheck
+    ctx: Ctx,
+    rec: Record,
+    check: legacy_state.OperationCheck,
+    *,
+    resume: bool = False,
 ) -> Record:
     """Run the ordinary route inside the caller's installer ownership."""
     log_path = ctx.log_path
     if log_path is not None and not ctx.dry_run:
         ctx = copy.copy(ctx)
         ctx.say, ctx.run = install_log(log_path, ctx.run)
-    record(ctx, rec)
+    if not resume:
+        record(ctx, rec)
+        if ctx.host_plan is not None:
+            host_renewal.stage(ctx, rec, ctx.host_plan, check)
     step: Step = record
     try:
         with ExitStack() as maintenance:
-            for step in steps(ctx):
-                check()
-                if step in (start_new, restart):
-                    maintenance.close()
-                    check()
-                if step is prepare_store:
-                    maintenance.enter_context(
-                        prepared_install_store(ctx, rec, check)
-                    )
-                else:
-                    step(ctx, rec)
-                if not ctx.dry_run:
-                    rec["steps"].append(step.__name__)
-                    # Recovery needs the last completed step after a crash.
-                    save(ctx, rec)
+            for step in _pending_steps(ctx, rec, resume):
+                _run_step(ctx, rec, step, maintenance, check)
     except Exception as exc:
         if ctx.dry_run:
             raise
         try:
             check()
-            _roll_back(ctx, rec, step, exc)
+            failed_install(ctx, rec, step.__name__, exc)
         except Exception:
             ctx.say("recovery_required: cleanup failed")
         raise
     check()
-    return complete(ctx, rec)
-
-
-def _parser() -> argparse.ArgumentParser:
-    """Build the command-line parser."""
-    ap = argparse.ArgumentParser(prog="install.installer")
-    ap.add_argument("--repo", type=Path, required=True)
-    ap.add_argument("--sha", required=True)
-    ap.add_argument("--dry-run", action="store_true")
-    mode = ap.add_mutually_exclusive_group(required=True)
-    mode.add_argument(
-        "--upgrade",
-        action="store_true",
-        help="already on muninn: re-pin this commit, restart, keep one"
-        " release",
-    )
-    mode.add_argument(
-        "--fresh",
-        action="store_true",
-        help="a new machine: no data, launchd job or release yet",
-    )
-    ap.add_argument("--home", type=Path)
-    ap.add_argument("--review-policy", type=Path)
-    ap.add_argument("--learning-scope", choices=("now", "all"))
-    ap.add_argument("--enable-learning", action="store_true")
-    return ap
+    return finalize(ctx, rec)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the installer from the command line.
+    """Delegate advanced CLI parsing to the shared native entry module."""
+    return entry.install_main(argv)
 
-    Args:
-        argv: Command-line arguments; defaults to ``sys.argv``.
 
-    Returns:
-        0 on success, 1 when the install failed or was refused.
-    """
-    ap = _parser()
-    args = ap.parse_args(argv)
-    default_home = args.home is None
-    args.home = args.home or Path.home()
-    if (
-        sys.platform == "darwin"
-        and args.home.resolve() != Path.home().resolve()
-        and not args.dry_run
-    ):
-        ap.error(
-            "--home is dry-run only: launchctl acts on the real gui domain"
-        )
-    # Files we create must not be readable by other users.
-    os.umask(PRIVATE_UMASK)
-    ts = time.strftime(TS_FORMAT, time.gmtime())
-    ctx = Ctx(
-        args.home,
-        run_real,
-        ts,
-        dry_run=args.dry_run,
-        probe=codex_probe,
-        say=print,
-        fresh=args.fresh,
-        upgrade=args.upgrade,
-        default_home=default_home,
-        review_policy=args.review_policy,
-        enable_learning=args.enable_learning,
+def _pending_steps(ctx: Ctx, rec: Record, resume: bool) -> tuple[Step, ...]:
+    """Select unfinished steps while always rechecking owner and restart."""
+    if not resume:
+        return steps(ctx)
+    return tuple(
+        step
+        for step in steps(ctx)
+        if step.__name__ not in rec["steps"]
+        or step in (prepare_store, restart, verify)
     )
-    ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
-    ctx.cursor_hooks = choose_cursor_hooks(ctx)
-    try:
-        learning_scope.choose(ctx, args.learning_scope, input)
-        result = install(ctx, args.repo.resolve(), args.sha)
-        if result.get("legacy_outcome"):
-            return 1
-    except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
-        print(f"FAILED: {exc}")
-        return 1
-    return 0
+
+
+def _run_step(
+    ctx: Ctx,
+    rec: Record,
+    step: Step,
+    maintenance: ExitStack,
+    check: legacy_state.OperationCheck,
+) -> None:
+    """Apply one existing step while retaining or releasing its owner scope."""
+    check()
+    if step in (start_new, restart):
+        maintenance.close()
+        if "host_renewal" in rec:
+            host_renewal.phase(ctx, rec, "restart_pending")
+        check()
+    if step is prepare_store:
+        maintenance.enter_context(prepared_install_store(ctx, rec, check))
+    else:
+        step(ctx, rec)
+    if not ctx.dry_run:
+        if step.__name__ not in rec["steps"]:
+            rec["steps"].append(step.__name__)
+        # Recovery needs the last completed step after a crash.
+        save(ctx, rec)
 
 
 if __name__ == "__main__":

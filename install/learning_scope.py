@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 
-from install import learning_policy_recovery, policy_preview
+from install import learning_policy_recovery, policy_preview, policy_records
 from install.context import Ctx, StepFailedError
 from install.policy_source_format import legacy_source, validate_policy_source
 from install.record import Record
@@ -229,6 +229,9 @@ def apply(ctx: Ctx, rec: Record, conn: sqlite3.Connection) -> None:
         return
     policy = ReviewPolicy.model_validate_json(control["policy_json"])
     previous = review_state.selection(conn)
+    if retain_unchanged(ctx, rec, previous):
+        ctx.say("Learning scope retained; no new history reviews requested.")
+        return
     project = (
         previous.project_id
         if previous is not None and ctx.retained_learning_scope
@@ -274,4 +277,24 @@ def apply(ctx: Ctx, rec: Record, conn: sqlite3.Connection) -> None:
     ctx.say(
         f"Learning scope saved: {ctx.learning_mode}. Routine "
         f"review recovery is automatic."
+    )
+
+
+def retain_unchanged(
+    ctx: Ctx, rec: Record, previous: review_state.LearningSelection | None
+) -> bool:
+    """Keep an ordinary upgrade outside any new learning-scope authority."""
+    if (
+        not ctx.upgrade
+        or not ctx.retained_learning_scope
+        or ctx.review_policy is not None
+        or ctx.enable_learning
+        or previous is None
+        or previous.mode != ctx.learning_mode
+        or "policy_input" not in rec
+    ):
+        return False
+    captured = policy_records.policy_input(rec["policy_input"])
+    return not captured.get("enable_learning", False) and not any(
+        key in captured for key in ("raw", "raw_digest", "canonical", "digest")
     )

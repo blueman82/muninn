@@ -93,14 +93,14 @@ class InstallLogTest(unittest.TestCase):
             Path("/synthetic/home"), co.run_real, "test", say=lambda text: None
         )
         with (
-            mock.patch.object(co, "save"),
-            mock.patch.object(co, "rollback_owned", return_value=[]),
-            mock.patch.object(co, "install_record"),
+            mock.patch.object(rb, "save"),
+            mock.patch.object(rb, "rollback_owned", return_value=[]),
+            mock.patch.object(rb, "install_record"),
         ):
-            co._roll_back(
+            rb.failed_install(
                 ctx,
                 rec,
-                co.pin,
+                "pin",
                 RuntimeError("external transcript and credential"),
             )
         self.assertEqual(
@@ -119,7 +119,7 @@ class CliTest(unittest.TestCase):
             for argv in (base, [*base, "--fresh", "--home", tmp]):
                 with self.subTest(argv=argv):
                     with (
-                        mock.patch.object(co.sys, "platform", "darwin"),
+                        mock.patch.object(sys, "platform", "darwin"),
                         contextlib.redirect_stderr(io.StringIO()),
                         self.assertRaises(SystemExit) as cm,
                     ):

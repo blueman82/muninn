@@ -108,6 +108,15 @@ def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
     if ctx.dry_run:
         return
     ctx.lib.mkdir(parents=True, exist_ok=True)
+    ce.atomic_write(
+        ctx.lib / INSTALL_RECORD,
+        json.dumps(install_summary(ctx, rec, outcome), indent=1).encode(),
+        0o600,
+    )
+
+
+def install_summary(ctx: Ctx, rec: Record, outcome: str) -> Record:
+    """Project the exact finite public installer status without writing."""
     keys = [
         ".".join(e["path"])
         for e in rec["claude"]["settings"]
@@ -126,6 +135,15 @@ def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
             key: rec["legacy"].get(key)
             for key in ("version", "baseline", "phase", "publication")
         }
+    if "host_renewal" in rec:
+        receipt = policy_records.host_renewal(rec["host_renewal"])
+        out["host_renewal_phase"] = receipt.phase
+        out["host_renewal_plan_digest"] = receipt.plan.digest
+        out["host_approval_committed"] = receipt.phase in {
+            "grant_committed",
+            "restart_pending",
+            "upgrade_verified",
+        }
     out |= {
         "outcome": outcome,
         "config_keys": keys,
@@ -135,8 +153,4 @@ def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
             else str(ctx.rdir / "rollback-record.json")
         ),
     }
-    ce.atomic_write(
-        ctx.lib / INSTALL_RECORD,
-        json.dumps(out, indent=1).encode(),
-        0o600,
-    )
+    return out

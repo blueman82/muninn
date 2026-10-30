@@ -242,3 +242,27 @@ class PausedLearningRenderingTests(CliLearningCase):
                         ),
                         message,
                     )
+
+    def test_host_notice_names_read_only_approval_route_without_consent(
+        self,
+    ) -> None:
+        self.conn.execute("BEGIN IMMEDIATE")
+        review_recovery.record(
+            self.conn, "setup", "codex_host_changed", "launch", 21.0
+        )
+        self.conn.execute("COMMIT")
+        before = tuple(self.conn.iterdump())
+        for admission in (1, 0):
+            self.conn.execute(
+                "UPDATE review_control SET admission=?", (admission,)
+            )
+            rows = tuple(self.conn.iterdump())
+            action = review_recovery.startup_action(self.conn)
+            assert action is not None
+            shown = learning_status(action)
+            self.assertIn("--renew-codex-host preview --check", shown)
+            self.assertIn("exact plan", shown)
+            self.assertIn("grants no permission", shown)
+            self.assertIn("no timer", shown)
+            self.assertEqual(tuple(self.conn.iterdump()), rows)
+        self.assertTrue(before)

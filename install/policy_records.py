@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 
 from install.context import Ctx, StepFailedError
+from install.host_renewal_models import RECEIPT, RenewalReceipt
 from install.policy_record_models import (
     Activation,
     DefaultSelection,
@@ -115,9 +116,12 @@ def validate(value: object) -> dict[str, object]:
         ("policy_input", policy_input),
         ("policy_activation", activation),
         ("policy_ready", ready),
+        ("host_renewal", host_renewal),
     ):
         if name in result:
             check(result[name])
+    if "host_renewal" in result:
+        check_renewal_size(result)
     return result
 
 
@@ -171,3 +175,24 @@ def learning_consent(rec: Mapping[str, object]) -> bool:
     if "policy_input" not in rec:
         return False
     return policy_input(rec["policy_input"]).get("enable_learning", False)
+
+
+def host_renewal(value: object) -> RenewalReceipt:
+    """Validate a JSON-shaped receipt through its single strict adapter."""
+    try:
+        return RECEIPT.validate_json(json.dumps(value), strict=True)
+    except (ValidationError, TypeError, ValueError):
+        raise StepFailedError("host_renewal_record_invalid") from None
+
+
+def check_renewal_size(value: object) -> None:
+    """Refuse a complete renewal envelope that recovery cannot read.
+
+    Args:
+        value: Exact prospective full record with JSON-shaped values.
+
+    Raises:
+        StepFailedError: If the serialized envelope exceeds recovery's bound.
+    """
+    if len(json.dumps(value, indent=1).encode()) > 4 * 1024 * 1024:
+        raise StepFailedError("host_renewal_limit")
