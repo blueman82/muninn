@@ -191,7 +191,9 @@ class ReviewRoundTests(unittest.TestCase):
         )
 
     def test_invalid_round_does_not_expose_response_text(self) -> None:
-        with self.assertRaisesRegex(ValueError, "^invalid_round$"):
+        with self.assertRaisesRegex(
+            review_rounds.RoundFormatError, "^model_format$"
+        ):
             self.parse({"op": "private invalid marker"})
 
     def test_json_conversion_and_recursion_failures_are_finite(self) -> None:

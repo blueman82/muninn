@@ -56,6 +56,22 @@ class ReviewObservabilityTests(ReviewReceiptCase):
         )
         return attempt.id
 
+    def test_prompt_limit_log_preserves_only_finite_failure(self) -> None:
+        self.assertTrue(
+            obs.log_call(
+                self.home,
+                {
+                    "event": "review_attempt_failed",
+                    "error_code": "prompt_limit",
+                    "correction_baseline": SECRET,
+                },
+            )
+        )
+        line = (self.home / "calls.jsonl").read_text().splitlines()[-1]
+        self.assertEqual(json.loads(line)["error_code"], "prompt_limit")
+        self.assertNotIn(SECRET, line)
+        self.assertNotIn("correction_baseline", line)
+
     def test_durable_counts_survive_log_rotation(self) -> None:
         self.reserve()
         before = self.snapshot()

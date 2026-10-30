@@ -50,7 +50,7 @@ Missing or invalid policy returns `review_policy_required`.
 Never invent runner settings, limits, approval, or evidence.
 
 List returns `requests` containing `RequestView` objects.
-Show returns `ReviewDetail` with attempts, calls, evidence, receipt, and `diagnostics`.
+Show returns `ReviewDetail` with attempts, calls, evidence, receipt, `correction_status`, and `diagnostics`.
 Diagnostics explain the failure stage, cause, and action.
 
 For an explanation in ordinary language, run `muninn learn explain R_ID --human`.
@@ -60,7 +60,7 @@ To display only the explanation, redirect JSON stdout:
 muninn learn explain R_ID --human >/dev/null
 ```
 
-Explain returns `request_id` and `explanation` as JSON.
+Explain returns `request_id`, `correction_status`, and `explanation` as JSON.
 `--human` also prints the final redacted explanation to stderr.
 Stdout still contains JSON. `--pretty` still changes only JSON indentation.
 
@@ -76,6 +76,21 @@ Only the commit receipt establishes saved changes.
 A rejected batch saves no partial knowledge changes.
 Missing model-launch records do not prove that no call occurred.
 Saved failure stages identify only the recorded phase.
+
+`correction_status` describes the latest attempt with a durable correction marker, ordered by start time and attempt ID.
+`requested` means a marker exists, but its exact next round has no recorded launch.
+`attempted` means that next round launched in the same attempt, but its correction result is unproved.
+`succeeded` requires a completed next round and a receipt from that same attempt.
+`exhausted` requires a completed next round and a terminal failure from that same attempt.
+Without a valid marker or enough retained evidence, the status is `unknown`.
+Two calls alone do not prove correction: they can be a read and a final result.
+A later ordinary success cannot prove that an earlier correction succeeded.
+Clearing a failure notice preserves correction markers.
+The receipt separately establishes saved changes or `no_change`.
+
+New result failures record one observed phase: `native output`, `model format`, `candidate validation`, `controlled read`, `original evidence`, or `commit`.
+Setup and launch checks retain their existing phase labels.
+Missing historical phases remain `not recorded`; Muninn does not infer them from codes or call counts.
 
 The explanation separates current admission and setup notices from historical request failures.
 Admission controls whether learning can accept work.
@@ -130,9 +145,33 @@ An unknown request returns `request_unavailable`.
 
 New failures after dismissal can create another notice.
 Upgrades preserve saved notices.
-At startup, setup notices take priority.
-Otherwise, Muninn selects the newest saved request notice.
-After you dismiss one request notice, an older notice can appear.
+At session start, `systemMessage` shows learning actions that require the owner.
+This also applies with `recall.off` or `recall.advisory`.
+Setup notices take priority over eligible request notices.
+Muninn then selects the newest eligible request notice.
+A newer contained failure cannot hide an older required action, even when admission is unsafe.
+If admission is unsafe and no required action remains, Muninn shows a contained issue with current pause guidance.
+
+With open admission and a valid stored policy and digest, contained request failures stay quiet at startup.
+These include rejected proposals, exhausted corrections, bounded retries, and deterministic source-read limits.
+The finite contained codes are `deadline`, `unavailable`, `rejected_revision`, `rejected_authority`, `rejected_validation`, `rejected_evidence`, `rejected_erased`, `rejected_scope`, `evidence_limit`, `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, and `evidence_selection_limit`.
+Sign-in, capability, binding, security, native tool events, uncertain processes, approval failures, and unknown codes remain visible.
+Setup notices remain visible.
+`prompt_limit` remains visible because the maintainer must inspect the prompt budget.
+The complete prompt, including any transient untrusted correction baseline, must fit the existing input cap.
+Muninn fails before another reservation or launch, without truncation, a limit increase, or an automatic retry.
+Do not retry the request unchanged.
+
+Closed admission remains visible even without a saved issue.
+An absent, invalid, or mismatched stored policy also produces a startup action.
+Muninn reads saved admission and validates the stored policy and digest for this decision.
+Saved action wording does not establish current admission.
+These checks do not prove live host, account, or worker health.
+Startup changes no saved issues, requests, admission, or history.
+It displays fixed program text, never question bodies, source text, or model output.
+`doctor` still reports `review_attention` for saved issues, including failures hidden at startup.
+Inspect contained failures with `muninn learn list --state failed`, `muninn learn show R_ID`, or `muninn learn explain R_ID --human`.
+After you dismiss one request notice, an older eligible notice can appear.
 Successful completion clears the request notice.
 
 You cannot dismiss a setup notice with a request ID.

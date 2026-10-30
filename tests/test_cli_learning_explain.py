@@ -244,3 +244,64 @@ class LearningExplanationTests(CliLearningCase):
         code, out = self.call("learn", "explain", "R_" + "a" * 32)
         self.assertEqual((code, out["error"]), (2, "request_unavailable"))
         self.assertEqual(self.call("learn", "explain", "setup")[0], 2)
+
+    def test_correction_field_is_unknown_for_unmarked_history(self) -> None:
+        ident = self.context.request_id
+        _, shown = self.call("learn", "show", ident)
+        _, explained = self.call("learn", "explain", ident)
+        self.assertEqual(shown.get("correction_status"), "unknown")
+        self.assertEqual(explained.get("correction_status"), "unknown")
+        self.assertIn("Correction status: unknown", explained["explanation"])
+        self.assertIn("does not prove", explained["explanation"])
+
+    def test_each_observed_failure_phase_has_a_human_description(self) -> None:
+        ident = self.save_failure("rejected_validation")
+        for stage, phrase in (
+            ("native output", "while checking the native runner output"),
+            ("model format", "while checking the model result format"),
+            ("candidate validation", "while validating proposed candidates"),
+            ("controlled read", "while performing a controlled read"),
+            ("original evidence", "while checking original source evidence"),
+            ("commit", "while committing the checked result"),
+        ):
+            with self.subTest(stage=stage):
+                self.conn.execute("UPDATE review_issue SET stage=?", (stage,))
+                _, out = self.call("learn", "explain", ident)
+                self.assertIn(phrase, out["explanation"])
+                self.assertNotIn(
+                    "stage that was not recorded", out["explanation"]
+                )
+
+    def test_successful_correction_survives_cleared_notice(self) -> None:
+        ident = self.context.request_id
+        for index, outcome in (
+            (1, "correction_format_requested"),
+            (2, "completed"),
+        ):
+            self.conn.execute(
+                (
+                    "INSERT INTO "
+                    "review_call(attempt_id,round_index,budget_account_id,"
+                    "policy_digest,state,reserved_at,launched_at,ended_at,"
+                    "requested_json,observed_json,outcome) "
+                    "VALUES(?,?,'test',?,'completed',12,12.5,13,'{}','{}',?)"
+                ),
+                (
+                    self.context.attempt_id,
+                    index,
+                    self.digest(self.policy),
+                    outcome,
+                ),
+            )
+        self.transaction(
+            lambda: review_recovery.record(
+                self.conn, ident, "rejected_validation", "model format", 12.5
+            )
+        )
+        self.save(self.result([]))
+        self.assertIsNone(review_recovery.notice(self.conn))
+        _, out = self.call("learn", "explain", ident)
+        self.assertEqual(out.get("correction_status"), "succeeded")
+        self.assertIn("Correction status: succeeded", out["explanation"])
+        self.assertIn("0 applied knowledge changes", out["explanation"])
+        self.assertIn("no_change", out["explanation"])

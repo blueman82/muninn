@@ -41,6 +41,7 @@ _ERRORS = _RETRYABLE | {
     "auth",
     "config",
     "evidence_limit",
+    "prompt_limit",
     "evidence_byte_limit",
     "evidence_record_limit",
     "evidence_work_limit",

@@ -21,6 +21,7 @@ from muninn.query.answers import BadArgumentError
 from muninn.query.filters import resolve_session
 from muninn.review_budget import call_view
 from muninn.review_commit import CommitContext, commit_review
+from muninn.review_diagnostics import correction_status
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
@@ -240,6 +241,7 @@ def _detail(conn: sqlite3.Connection, ident: RequestId) -> Out:
         ],
         receipt=_receipt(conn, ident),
         diagnostics=review_recovery.details(conn, ident),
+        correction_status=correction_status(conn, ident),
     ).model_dump(mode="json")
 
 

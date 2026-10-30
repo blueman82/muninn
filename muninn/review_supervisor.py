@@ -250,6 +250,7 @@ class Supervisor:
                 pending.initial,
                 pending.knowledge,
                 pending.history,
+                correction=pending.correction,
             )
             stage = "launch"
             assert self.capability is not None

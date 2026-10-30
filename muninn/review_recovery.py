@@ -6,6 +6,7 @@ import sqlite3
 
 from muninn import review_state
 from muninn.review_models import ReviewPolicy
+from muninn.review_policy_status import policy_status
 
 _EXPLANATIONS: dict[str, tuple[str, str]] = {
     "deadline": (
@@ -21,6 +22,11 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "The specific cause was not recorded.",
         "Run muninn doctor --pretty for current setup checks. "
         "Give unresolved safe diagnostics to the Muninn maintainer.",
+    ),
+    "prompt_limit": (
+        "The complete review prompt exceeded its input byte limit.",
+        "Do not retry this request unchanged. "
+        "Ask the Muninn maintainer to inspect its prompt budget.",
     ),
     "evidence_limit": (
         "Original-source verification exceeded its byte, record, "
@@ -175,6 +181,42 @@ _SHARED = frozenset(
     }
 ).union(_SETUP_FAILURES)
 
+_CONTAINED = frozenset(
+    {
+        "deadline",
+        "unavailable",
+        "rejected_revision",
+        "rejected_authority",
+        "rejected_validation",
+        "rejected_evidence",
+        "rejected_erased",
+        "rejected_scope",
+        "evidence_limit",
+        "evidence_byte_limit",
+        "evidence_record_limit",
+        "evidence_work_limit",
+        "evidence_selection_limit",
+    }
+)
+_STARTUP_STAGES = frozenset(
+    {
+        "native output",
+        "model format",
+        "candidate validation",
+        "controlled read",
+        "original evidence",
+        "commit",
+        "evidence",
+        "prompt",
+        "launch",
+        "review",
+        "runner",
+        "recovery",
+        "runner setup file",
+        "review instructions",
+    }
+)
+
 
 def enabled(policy: ReviewPolicy) -> bool:
     """Limit widened ongoing recovery authority to its approved revision."""
@@ -259,6 +301,69 @@ def notice(conn: sqlite3.Connection) -> dict[str, str] | None:
         return None
     return {
         key: row[key] for key in ("id", "code", "stage", "cause", "action")
+    }
+
+
+def startup_action(conn: sqlite3.Connection) -> dict[str, str] | None:
+    """Select an owner action using saved admission and verified policy state.
+
+    This read does not establish live host or account health and changes no
+    notices, requests or admission. Unknown codes remain eligible.
+
+    Args:
+        conn: Existing connection whose read snapshot is caller-owned.
+
+    Returns:
+        One fixed action notice, or None when no owner action is required.
+    """
+    status = policy_status(conn)
+    safe = status.enabled is True and status.policy_status == "valid"
+    pause = (
+        "Keep learning paused. Run muninn doctor --pretty for current checks."
+    )
+    if review_state.available(conn, "review_issue"):
+        rows = conn.execute(
+            "SELECT id,code,stage FROM review_issue "
+            "ORDER BY id='setup' DESC,created_at DESC"
+        )
+        issue: sqlite3.Row | None = None
+        for row in rows:
+            if row["id"] != "setup" and row["code"] in _CONTAINED:
+                if not safe and issue is None:
+                    issue = row
+                continue
+            issue = row
+            break
+        if issue is not None:
+            stage = (
+                issue["stage"]
+                if issue["stage"] in _STARTUP_STAGES
+                else "not recorded"
+            )
+            detail = {"id": issue["id"], **explain(issue["code"], stage)}
+            if not safe:
+                detail["action"] = (
+                    pause
+                    if issue["code"] in _CONTAINED
+                    else detail["action"] + " " + pause
+                )
+            return detail
+    if safe:
+        return None
+    return {
+        "id": "setup",
+        "code": (
+            "paused"
+            if status.policy_status == "valid"
+            else status.policy_status
+        ),
+        "stage": "admission",
+        "cause": (
+            "Learning admission is closed."
+            if status.enabled is False
+            else "Muninn cannot verify saved learning admission."
+        ),
+        "action": pause,
     }
 
 

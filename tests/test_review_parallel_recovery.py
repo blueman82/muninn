@@ -129,7 +129,7 @@ class ParallelReviewTests(SupervisorCase):
             pending: Round,
             outcome: ProcessOutcome,
             now: float,
-            fail: Callable[[ReviewContext, str, float], None],
+            fail: Callable[[ReviewContext, str, float, str], None],
         ) -> bool:
             if selected:
                 return real_execute(home, pending, outcome, now, fail)

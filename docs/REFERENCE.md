@@ -120,8 +120,8 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. `--task` binds the request to one task in the source project. |
 | `muninn learn setup --mode now\|all [--project PATH] [--confirm SCAN_DIGEST]` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
-| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, and safe `diagnostics`. Content is shown only when requested, never logged. |
-| `muninn learn explain R_ID [--human]` | Returns `request_id` and `explanation` as JSON. The explanation describes retained history, missing detail, saved changes, current admission, recovery, and dismissal. `--human` also prints the explanation to stderr. Stdout remains JSON. Muninn displays no transcript or proposal text. |
+| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, `correction_status`, and safe `diagnostics`. Content is shown only when requested, never logged. |
+| `muninn learn explain R_ID [--human]` | Returns `request_id`, `correction_status`, and `explanation` as JSON. The explanation describes retained history, missing detail, saved changes, current admission, recovery, and dismissal. `--human` also prints the explanation to stderr. Stdout remains JSON. Muninn displays no transcript or proposal text. |
 | `muninn learn dismiss R_ID` | `request_id` and `dismissed` (boolean). Remove only that request's saved failure notice. A repeated dismissal returns `false`; an unknown request returns `request_unavailable`. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
@@ -366,10 +366,32 @@ Capture-gap counts are never multiplied into a call or cost estimate.
 
 ### Learning failure messages
 
-At the next Codex session start, `systemMessage` shows a stored cause and action.
+At session start, `systemMessage` shows a learning action when the owner must act.
 This message also appears with `recall.off` or `recall.advisory`.
 Request notices include their request ID in commands to inspect and dismiss them.
-Setup notices take priority over request notices.
+Setup notices take priority over eligible request notices.
+Muninn then selects the newest eligible request notice.
+A newer contained failure cannot hide an older required action, even when admission is unsafe.
+If admission is unsafe and no required action remains, Muninn shows a contained issue with current pause guidance.
+
+With open admission and a valid stored policy and digest, contained request failures stay quiet at startup.
+These include rejected proposals, exhausted corrections, bounded retries, and deterministic source-read limits.
+The finite contained codes are `deadline`, `unavailable`, `rejected_revision`, `rejected_authority`, `rejected_validation`, `rejected_evidence`, `rejected_erased`, `rejected_scope`, and all five `evidence_*limit` codes below.
+Sign-in, capability, binding, security, native tool events, uncertain processes, approval failures, and unknown codes remain visible.
+Setup notices remain visible.
+`prompt_limit` remains visible because the maintainer must inspect the prompt budget.
+The complete prompt, including any transient untrusted correction baseline, must fit the existing input cap.
+Muninn fails before another reservation or launch, without truncation, a limit increase, or an automatic retry.
+Do not retry the request unchanged.
+
+Closed admission remains visible even without a saved issue.
+An absent, invalid, or mismatched stored policy also produces a startup action.
+Muninn reads saved admission and validates the stored policy and digest for this decision.
+Saved action wording does not establish current admission.
+These checks do not prove live host, account, or worker health.
+Run `muninn doctor --pretty` for current checks.
+Startup changes no saved issues, requests, admission, or history.
+It displays fixed program text, never question bodies, source text, or model output.
 You cannot dismiss a setup notice with a request ID.
 `muninn learn show R_ID` adds `diagnostics` with stage, cause, action, and code.
 To read an explanation in ordinary language, run:
@@ -397,6 +419,21 @@ A rejected batch saves no partial knowledge changes.
 Missing launch records do not prove that no model call occurred.
 Saved failure stages identify only the recorded phase.
 
+`correction_status` describes the latest attempt with a durable correction marker, ordered by start time and attempt ID.
+`requested` means a marker exists, but its exact next round has no recorded launch.
+`attempted` means that next round launched in the same attempt, but its correction result is unproved.
+`succeeded` requires a completed next round and a receipt from that same attempt.
+`exhausted` requires a completed next round and a terminal failure from that same attempt.
+Without a valid marker or enough retained evidence, the status is `unknown`.
+Two calls alone do not prove correction: they can be a read and a final result.
+A later ordinary success cannot prove that an earlier correction succeeded.
+Clearing a failure notice preserves correction markers.
+The receipt separately establishes saved changes or `no_change`.
+
+New result failures record one observed phase: `native output`, `model format`, `candidate validation`, `controlled read`, `original evidence`, or `commit`.
+Setup and launch checks retain their existing phase labels.
+Missing historical phases remain `not recorded`; Muninn does not infer them from codes or call counts.
+
 Muninn does not invent finer detail.
 The explanation separates current admission and setup notices from request history.
 Admission controls whether learning can accept work.
@@ -413,12 +450,12 @@ The stage is `not recorded`.
 The cause and action use their default text.
 A new failure after dismissal can create another notice for the same request.
 Upgrades preserve saved notices.
-At startup, setup notices take priority.
-Otherwise, Muninn selects the newest saved request notice.
-After you dismiss one request notice, an older notice can appear.
+Startup filters only the displayed action.
+Contained failures remain available through `learn list`, `learn show`, and `learn explain`.
+After you dismiss one request notice, an older eligible notice can appear.
 Successful completion clears the notice for that request.
 
-`doctor` adds `review_attention` when a stored issue needs attention.
+`doctor` still adds `review_attention` for a stored issue, including a contained failure hidden at startup.
 These fields contain fixed program text and identifiers.
 They contain no transcript or model output.
 
@@ -433,6 +470,7 @@ Muninn keeps no source text between operations.
 | `deadline` | The review exceeded its deadline. Muninn uses a remaining attempt. |
 | `unavailable` | The runner did not finish successfully. Muninn uses a remaining attempt. |
 | `config` | Muninn could not verify setup and did not record the specific cause. The old stage cannot recover it. Run `muninn doctor --pretty` for current checks. Give unresolved safe diagnostics to the maintainer. |
+| `prompt_limit` | The complete review prompt exceeded its input byte limit. Ask the maintainer to inspect its prompt budget. Do not retry unchanged. Configured limits stay unchanged. |
 | `evidence_limit` | Original-source verification exceeded its byte, record, or database-work limit. Do not retry the request unchanged. Ask the maintainer to inspect its source-read budget. A narrower window can still require a read of earlier records. Muninn fails the request without an automatic retry. Limits and learning admission stay unchanged. Older `config` records cannot recover a cause that Muninn did not retain. |
 | `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, `evidence_selection_limit` | Final diagnostics identify the allowance: physical bytes, physical records, database work, or accumulated selected content, respectively. These allowances limit source verification. They differ from memory storage capacity and model context size. Ask the maintainer to inspect the allowance. Do not retry unchanged. Without a historical record, Muninn cannot reconstruct configured limits or measured counters. |
 | `capability_changed` | The approved runner setup changed. Muninn waits for that approved setup to return. |
@@ -474,6 +512,19 @@ actions. The default profile records this limit. The finite pilot account is a
 separate control. It does not prove runner status or full C6 acceptance.
 See [Codex learning qualification](CODEX_LEARNING_QUALIFICATION.md) for the
 native probe, test evidence boundaries and remaining assessment requirements.
+
+The procedural evaluation tests cover five synthetic episodes: success under a
+condition, different wording of that condition, its absence, failure with an
+unknown cause, and repeated recalled advice. They exercise real capture,
+evidence, commit, and retrieval with a scripted child and isolated stores.
+Checks inspect applicability, pitfalls, original support IDs, and actual
+present/withheld exposure. Expected labels stay outside runner prompts.
+Separate frozen retrieval checks confirm that opening a guide adds no support
+edges. These tests establish contract coverage, not measured model benefit or
+semantic judgments. Project procedures can cite reported or untrusted evidence;
+the tests prove neither causal diagnosis nor universal prevention of repeated
+advice becoming new support.
+
 Windows legacy boot and termination proof, and native live qualification, are
 still separate requirements. During recovery, preserve the private operation
 record, source and archive, key, and journal. Manual restoration of the old

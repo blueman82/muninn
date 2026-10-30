@@ -20,6 +20,7 @@ from muninn.knowledge_models import (
     StrictModel,
     Text,
 )
+from muninn.review_correction import RoundFormatError
 from muninn.review_evidence import validate_evidence
 from muninn.review_evidence_models import (
     EvidenceLocator,
@@ -125,9 +126,17 @@ def parse_round(raw: bytes, context: ReviewContext) -> RoundRequest:
             )
         except (ValueError, RecursionError):
             raise ValueError("invalid_round") from None
-        request = _ADAPTER.validate_json(raw, strict=True)
     except (ValidationError, json.JSONDecodeError, UnicodeError):
         raise ValueError("invalid_round") from None
+    try:
+        request = _ADAPTER.validate_json(raw, strict=True)
+    except ValidationError as error:
+        if any(
+            item["type"] == "json_invalid"
+            for item in error.errors(include_input=False, include_url=False)
+        ):
+            raise ValueError("invalid_round") from None
+        raise RoundFormatError() from None
     _scope(request, context)
     return request
 

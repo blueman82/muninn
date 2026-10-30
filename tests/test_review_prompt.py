@@ -9,6 +9,8 @@ from unittest import mock
 
 from muninn import review_prompt, review_requests
 from muninn import review_supervisor_result as completion
+from muninn.knowledge_models import ReviewResult
+from muninn.review_correction import CorrectionFeedback, CorrectionState
 from muninn.review_models import ReviewContext
 from tests.ingest_support import line
 from tests.test_review_requests import RequestCase
@@ -79,6 +81,87 @@ class ReviewPromptTests(RequestCase):
                 {},
                 [({"op": "search"}, {"text": "z" * 2100})],
             )
+
+    def test_complete_correction_prompt_obeys_exact_utf8_cap(self) -> None:
+        context = self.context()
+        context = context.model_copy(
+            update={
+                "policy": context.policy.model_copy(
+                    update={"max_input_bytes": 12000}
+                )
+            }
+        )
+        artifact = (
+            b'{"schema_version":1,"assembly":"muninn-review-prompt-v1",'
+            b'"instructions":"trusted"}'
+        )
+        original = ReviewResult.model_validate(
+            {
+                "schema_version": 1,
+                "changes": [
+                    {
+                        "action": "add",
+                        "form": "note",
+                        "kind": "fact",
+                        "scope": self.scope.model_dump(),
+                        "content": "é" * 700,
+                        "conditions": [],
+                        "evidence_refs": ["E_" + "a" * 32],
+                        "reason": "Supported",
+                    }
+                ],
+                "unresolved": [],
+                "no_change_reason": None,
+            }
+        )
+        for state in (
+            CorrectionState(
+                CorrectionFeedback(
+                    kind="format",
+                    code="model_format",
+                    collection=None,
+                    index=None,
+                ),
+                None,
+            ),
+            CorrectionState(
+                CorrectionFeedback(
+                    kind="reduction",
+                    code="candidate_scope",
+                    collection="changes",
+                    index=0,
+                ),
+                original,
+            ),
+        ):
+            with self.subTest(kind=state.feedback.kind):
+                complete = review_prompt.assemble(
+                    artifact, context, {}, {}, [], correction=state
+                )
+                exact = context.model_copy(
+                    update={
+                        "policy": context.policy.model_copy(
+                            update={"max_input_bytes": len(complete)}
+                        )
+                    }
+                )
+                self.assertEqual(
+                    review_prompt.assemble(
+                        artifact, exact, {}, {}, [], correction=state
+                    ),
+                    complete,
+                )
+                too_small = exact.model_copy(
+                    update={
+                        "policy": exact.policy.model_copy(
+                            update={"max_input_bytes": len(complete) - 1}
+                        )
+                    }
+                )
+                with self.assertRaisesRegex(ValueError, "^prompt_limit$"):
+                    review_prompt.assemble(
+                        artifact, too_small, {}, {}, [], correction=state
+                    )
 
     def test_retrieved_instructions_remain_data(self) -> None:
         context = self.context()

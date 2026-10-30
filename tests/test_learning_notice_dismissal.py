@@ -123,6 +123,11 @@ class LearningNoticeDismissalTests(CliLearningCase):
 
     def test_dismissed_notice_leaves_the_next_session_hook(self) -> None:
         ident = self.failed_request()
+        self.transaction(
+            lambda: review_recovery.record(
+                self.conn, ident, "auth", "launch", 30.0
+            )
+        )
         payload = {"session_id": TID, "cwd": str(self.cwd)}
         env = {"MUNINN_HOME": str(self.home)}
         for mode in ("recall.off", "recall.advisory"):
