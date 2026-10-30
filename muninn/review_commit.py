@@ -9,25 +9,27 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from muninn.knowledge_models import (
-    AffectedRevision,
     AttemptId,
     Digest,
     EvidenceId,
     RequestId,
     ReviewResult,
-    Scope,
     StrictModel,
     UtcSeconds,
 )
 from muninn.knowledge_write import (
     apply_change,
-    body_of,
-    claims,
     json_value,
     save_unresolved,
-    target,
 )
 from muninn.redaction import redact
+from muninn.review_candidates import (
+    CommitRejectedError as CommitRejectedError,
+)
+from muninn.review_candidates import (
+    ProposalRejectedError,
+    validate_batch,
+)
 from muninn.review_evidence import validate_evidence
 from muninn.review_evidence_models import EvidenceRecord, PositiveInt
 from muninn.review_json import canonical_json, parse_result
@@ -56,10 +58,6 @@ class CommitContext(StrictModel):
     evidence_ids: tuple[EvidenceId, ...]
     now: UtcSeconds
     knowledge_digest: Digest | None = None
-
-
-class CommitRejectedError(ValueError):
-    """Expose a finite safe rejection code without governed validation text."""
 
 
 _EVIDENCE_ERRORS = {
@@ -187,75 +185,6 @@ def _evidence(
     return records
 
 
-def _target(
-    conn: sqlite3.Connection, ref: AffectedRevision, scope: Scope
-) -> sqlite3.Row:
-    """Convert expected target refusals without swallowing systemic errors."""
-    try:
-        return target(conn, ref, scope)
-    except ValueError as exc:
-        if str(exc) not in {"rejected_revision", "rejected_scope"}:
-            raise
-        raise CommitRejectedError(str(exc)) from None
-
-
-def _support(
-    refs: list[EvidenceId],
-    records: dict[EvidenceId, EvidenceRecord],
-    owner: bool,
-) -> None:
-    """Require admitted support and attributable authority where necessary."""
-    if not set(refs) <= records.keys():
-        raise CommitRejectedError("rejected_evidence")
-    if owner and not any(
-        records[r].authority == "direct_owner"
-        and records[r].evidence_type == "owner_statement"
-        for r in refs
-    ):
-        raise CommitRejectedError("rejected_authority")
-
-
-def _batch(
-    conn: sqlite3.Connection,
-    result: ReviewResult,
-    scope: Scope,
-    evidence: tuple[EvidenceRecord, ...],
-) -> None:
-    """Validate the whole batch before writing any governed content."""
-    records = {r.id: r for r in evidence}
-    replaced: set[str] = set()
-    for change in result.changes:
-        if change.scope != scope:
-            raise CommitRejectedError("rejected_scope")
-        owner = (
-            change.kind in {"preference", "decision"}
-            or scope.project_id is None
-        )
-        if change.action == "replace":
-            if change.knowledge_id in replaced:
-                raise CommitRejectedError("rejected_revision")
-            replaced.add(change.knowledge_id)
-            old = _target(
-                conn,
-                AffectedRevision(
-                    knowledge_id=change.knowledge_id,
-                    revision=change.expected_revision,
-                ),
-                scope,
-            )
-            owner = owner or old["kind"] in {"preference", "decision"}
-        for _, _, refs, _ in claims(body_of(change)):
-            _support(refs, records, owner)
-    for proposal in result.unresolved:
-        _support(proposal.evidence_refs, records, False)
-        seen: set[str] = set()
-        for affected in proposal.affected:
-            if affected.knowledge_id in replaced | seen:
-                raise CommitRejectedError("rejected_revision")
-            seen.add(affected.knowledge_id)
-            _target(conn, affected, scope)
-
-
 def _complete(
     conn: sqlite3.Connection,
     context: CommitContext,
@@ -334,7 +263,11 @@ def _failure(
 
 
 def commit_review(
-    conn: sqlite3.Connection, context: CommitContext, result: ReviewResult
+    conn: sqlite3.Connection,
+    context: CommitContext,
+    result: ReviewResult,
+    *,
+    defer_candidate_failure: bool = False,
 ) -> Receipt:
     """Commit an entire checked review under the caller's held writer lock.
 
@@ -342,6 +275,7 @@ def commit_review(
         conn: Connection under the caller's writer lock; no active transaction.
         context: Current attempt and admitted evidence identities.
         result: Proposed content, never lifecycle instructions.
+        defer_candidate_failure: Leave eligible candidate refusals unfinished.
 
     Returns:
         The single durable success receipt, including on a repeated call.
@@ -380,12 +314,20 @@ def commit_review(
             except ValueError:
                 raise CommitRejectedError("rejected_validation") from None
             evidence = _evidence(conn, context, row, policy)
-            _batch(conn, result, request_view(row).scope, evidence)
+            validate_batch(
+                conn,
+                result,
+                request_view(row).scope,
+                evidence,
+                defer_candidate_failure=defer_candidate_failure,
+            )
             receipt = _complete(conn, context, row, result)
         conn.commit()
         return receipt
     except BaseException as exc:
         conn.rollback()
+        if isinstance(exc, ProposalRejectedError) and defer_candidate_failure:
+            raise
         if isinstance(exc, CommitRejectedError):
             _failure(conn, context, str(exc))
         raise

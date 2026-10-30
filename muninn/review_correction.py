@@ -1,4 +1,4 @@
-"""Identify correctable schema failures without retaining model content."""
+"""Define finite correction feedback and verify exact candidate removals."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
-from muninn.knowledge_models import StrictModel
+from muninn.knowledge_models import ReviewResult, StrictModel
+from muninn.review_json import canonical_json
 
 
 class RoundFormatError(ValueError):
@@ -50,3 +51,36 @@ class CorrectionFeedback(StrictModel):
         ):
             raise ValueError("invalid_reduction_feedback")
         return self
+
+
+def _subsequence(original: list[str], corrected: list[str]) -> bool:
+    """Consume exact canonical items once each in their original order."""
+    remaining = iter(original)
+    return all(
+        any(item == candidate for candidate in remaining) for item in corrected
+    )
+
+
+def require_reduction(original: ReviewResult, corrected: ReviewResult) -> None:
+    """Require an exact ordered subset with at least one candidate removed."""
+    try:
+        corrected = ReviewResult.model_validate_json(canonical_json(corrected))
+    except ValueError:
+        raise ValueError("rejected_validation") from None
+    before = len(original.changes) + len(original.unresolved)
+    after = len(corrected.changes) + len(corrected.unresolved)
+    if after >= before or (
+        after == 0
+        and corrected.no_change_reason
+        != "No supported candidates remain after correction."
+    ):
+        raise ValueError("rejected_validation")
+    for previous, current in (
+        (original.changes, corrected.changes),
+        (original.unresolved, corrected.unresolved),
+    ):
+        if not _subsequence(
+            [canonical_json(item) for item in previous],
+            [canonical_json(item) for item in current],
+        ):
+            raise ValueError("rejected_validation")

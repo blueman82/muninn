@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from unittest import mock
 
-from muninn import review_commit, review_evidence, review_originals
+from muninn import (
+    review_candidates,
+    review_commit,
+    review_evidence,
+    review_originals,
+)
 from muninn.knowledge_models import AffectedRevision
 from muninn.review_json import canonical_json
 from tests.test_review_commit import CommitCase
@@ -203,3 +208,76 @@ class ReviewCommitAdmissionTests(CommitCase):
             self.row("SELECT count(*) FROM knowledge_version")[0], 2
         )
         self.assertEqual(self.row("SELECT revision FROM knowledge_fts")[0], 2)
+
+    def test_default_scope_and_owner_failures_precede_unknown_refs(
+        self,
+    ) -> None:
+        for fault in ("scope", "same_candidate", "owner"):
+            with self.subTest(fault=fault):
+                case = CommitCase()
+                case.setUp()
+                self.addCleanup(case.doCleanups)
+                bad = case.note(evidence_refs=["E_" + "f" * 32])
+                first = case.note(scope={"project_id": "other", "task": None})
+                code = "rejected_scope"
+                if fault == "owner":
+                    first = case.note(
+                        kind="preference", evidence_refs=[case.evidence[1].id]
+                    )
+                    code = "rejected_authority"
+                changes = [first, bad]
+                if fault == "same_candidate":
+                    changes = [
+                        {**first, "evidence_refs": bad["evidence_refs"]}
+                    ]
+                with self.assertRaisesRegex(ValueError, f"^{code}$"):
+                    case.save(case.result(changes))
+                self.assertEqual(
+                    case.row("SELECT ended_at,error_code FROM review_attempt")[
+                        :
+                    ],
+                    (13.0, code),
+                )
+                self.assertEqual(case.counts(), (0, 0, 0, 0, 0, 0, 0))
+
+    def test_default_duplicate_precedes_its_unknown_reference(self) -> None:
+        saved = self.admit_current_knowledge()
+        replacement = self.replacement(saved)
+        duplicate = {**replacement, "evidence_refs": ["E_" + "f" * 32]}
+        before = self.counts()
+        with self.assertRaisesRegex(ValueError, "^rejected_revision$"):
+            self.save(self.result([replacement, duplicate]))
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(
+            self.row(
+                "SELECT ended_at,error_code FROM review_attempt WHERE id=?",
+                (self.context.attempt_id,),
+            )[:],
+            (13.0, "rejected_revision"),
+        )
+
+    def test_default_overlap_precedes_its_target_lookup(self) -> None:
+        saved = self.admit_current_knowledge()
+        proposal = {
+            "claim": "Unknown",
+            "affected": [{"knowledge_id": saved.knowledge_id, "revision": 2}],
+            "evidence_refs": [],
+            "question": "Which evidence is missing?",
+        }
+        before = self.counts()
+        with (
+            mock.patch.object(
+                review_candidates, "target", wraps=review_candidates.target
+            ) as targets,
+            self.assertRaisesRegex(ValueError, "^rejected_revision$"),
+        ):
+            self.save(self.result([self.replacement(saved)], [proposal]))
+        self.assertEqual(targets.call_count, 1)
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(
+            self.row(
+                "SELECT ended_at,error_code FROM review_attempt WHERE id=?",
+                (self.context.attempt_id,),
+            )[:],
+            (13.0, "rejected_revision"),
+        )
