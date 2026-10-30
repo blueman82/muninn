@@ -21,6 +21,7 @@ sys.path.insert(0, sys.argv.pop(1))
 from install import installer, learning_scope, provider_apps
 from muninn import review_codex_policy
 from tests.installer_support import Fake
+from tools import prepare_codex_policy
 fake = Fake(Path.home())
 original = installer.Ctx
 
@@ -59,6 +60,8 @@ with (
     mock.patch("platform.system", return_value="Darwin"),
     mock.patch("platform.machine", return_value="arm64"),
     mock.patch.object(review_codex_policy, "host_identity",
+                      return_value=os.environ["V1_HOST_ID"]),
+    mock.patch.object(prepare_codex_policy, "host_identity",
                       return_value=os.environ["V1_HOST_ID"]),
     mock.patch("muninn.review_codex_launch.selected_auth_home",
                return_value=Path.home() / ".codex"),

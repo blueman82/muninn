@@ -20,6 +20,7 @@ from muninn.obs_service import parse_process, process_command, service_status
 from tests import (
     lifecycle_native_doctor,
     lifecycle_native_entry,
+    lifecycle_native_failure,
     lifecycle_native_linux,
     lifecycle_native_records,
     lifecycle_native_rollback,
@@ -243,6 +244,7 @@ def _child(parent: Path) -> int:
             "doctor_error_length": doctor[3],
             "doctor_error_words": doctor[4],
             "step_failure_id": zlib.crc32(str(exc).encode()) & 0x7FFFFFFF,
+            **lifecycle_native_failure.failure_codes(exc),
         }
         write("lifecycle", None, error=exc, metrics=failed)
         result = {

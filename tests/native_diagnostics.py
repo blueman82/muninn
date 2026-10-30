@@ -10,6 +10,7 @@ from pathlib import Path
 
 from muninn.file_sync import sync_fd
 from muninn.platform_io import ensure_private_dir, open_private, open_regular
+from tests.lifecycle_native_failure import FAILURE_BOUNDS
 from tests.native_diagnostic_metrics import (
     METRIC_BOUNDS,
     TIMING_METRICS,
@@ -214,7 +215,7 @@ _PROBE_METRICS = (
     )
     | frozenset(f"probe_v{variant}_error" for variant in (1, 2, 3))
 )
-_METRICS = _METRICS | _PROBE_METRICS | TIMING_METRICS
+_METRICS = _METRICS | _PROBE_METRICS | TIMING_METRICS | FAILURE_BOUNDS.keys()
 
 _SECURITY_CODES = frozenset(
     (
@@ -250,7 +251,7 @@ def _previous(path: Path) -> dict[str, str | int]:
 def _safe_field(key: str, value: object) -> bool:
     """Accept only explicit scalar fields when exporting a child artifact."""
     if key in _METRICS | _CODES:
-        bounds = METRIC_BOUNDS.get(key)
+        bounds = METRIC_BOUNDS.get(key, FAILURE_BOUNDS.get(key))
         return isinstance(value, int) and (
             bounds is None
             or (type(value) is int and bounds[0] <= value <= bounds[1])
