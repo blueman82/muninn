@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+from unittest import mock
+
 from muninn import classify, decision_requests, review_commit, review_requests
 from muninn.decision_apply import enrich_support
 from muninn.decision_candidates import candidate_view
@@ -15,12 +19,21 @@ from muninn.review_evidence_models import (
 )
 from tests.classify_claude_support import claude_rec
 from tests.decision_support import DecisionCase
-from tests.ingest_support import line, rollout
+from tests.ingest_support import line, primary, rollout
 from tests.test_decision_apply import ApplicationCase
 
 
 class DecisionPresentationTests(DecisionCase):
     """Check actual originals through acceptance and application."""
+
+    def setUp(self) -> None:
+        project = tempfile.TemporaryDirectory()
+        self.addCleanup(project.cleanup)
+        with mock.patch(
+            "tests.test_review_requests.primary",
+            return_value=primary(cwd=str(Path(project.name).resolve())),
+        ):
+            super().setUp()
 
     def presentation(
         self, ident: str, provider: str, content: object, index: int = 0
@@ -43,9 +56,12 @@ class DecisionPresentationTests(DecisionCase):
                     )
                 }
             )
+        candidate = candidate_view(self.conn, ident).candidate
+        assert candidate is not None
+        project = candidate.scope.project_id
         rows = [
-            claude_rec("assistant", content),
-            claude_rec("user", f"Please approve memory {ident}."),
+            claude_rec("assistant", content, cwd=project),
+            claude_rec("user", f"Please approve memory {ident}.", cwd=project),
         ]
         self.write("project/sess-1.jsonl", rows, "claude-projects")
         self.run_ingest()

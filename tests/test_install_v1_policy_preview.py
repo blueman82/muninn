@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 from unittest import mock
 
@@ -126,7 +126,11 @@ class V1PolicyPreviewTests(V1PreviewFixture):
             self.lock.unlink()
         elif condition == "held":
             descriptor = os.open(self.lock, os.O_RDWR)
-            platform_lock.try_lock(descriptor)
+            try:
+                platform_lock.try_lock(descriptor)
+            except BaseException:
+                os.close(descriptor)
+                raise
             return descriptor
         elif condition == "public":
             self.lock.chmod(0o644)
@@ -163,19 +167,71 @@ class V1PolicyPreviewTests(V1PreviewFixture):
                             continue
                         if condition == "incompatible" and not explicit:
                             continue
-                        descriptor = self.damage(condition)
-                        before, rows = states(self.home), self.rows()
-                        try:
-                            with self.assertRaises(StepFailedError):
-                                if explicit:
-                                    review_policy.preflight(self.ctx, self.rec)
-                                else:
-                                    review_policy_default._configured(self.ctx)
-                            self.assertEqual(states(self.home), before)
-                            self.assertEqual(self.rows(), rows)
-                        finally:
-                            if descriptor is not None:
-                                os.close(descriptor)
+                        self.refuse_unchanged(condition, explicit)
+
+    def refuse_unchanged(self, condition: str, explicit: bool) -> None:
+        """Require native refusal without changing source bytes or rows."""
+        # Windows excludes reads of the byte locked by another descriptor.
+        before, rows = states(self.home), self.rows()
+        identity = self.lock.stat() if condition == "held" else None
+        descriptor = self.damage(condition)
+        try:
+            if descriptor is None:
+                before, rows = states(self.home), self.rows()
+            with self.assertRaises(StepFailedError):
+                if explicit:
+                    review_policy.preflight(self.ctx, self.rec)
+                else:
+                    review_policy_default._configured(self.ctx)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        self.assertEqual(states(self.home), before)
+        self.assertEqual(self.rows(), rows)
+        if identity is not None:
+            current = self.lock.stat()
+            self.assertEqual(
+                (current.st_dev, current.st_ino),
+                (identity.st_dev, identity.st_ino),
+            )
+
+    def test_snapshot_failure_releases_held_descriptor(self) -> None:
+        self.old("state")
+        descriptors: list[int] = []
+        damage, snapshot = self.damage, states
+
+        def remember(condition: str) -> int | None:
+            descriptor = damage(condition)
+            if descriptor is not None:
+                descriptors.append(descriptor)
+            return descriptor
+
+        def fail_after_lock(root: Path) -> object:
+            if descriptors:
+                raise PermissionError("snapshot unavailable")
+            return snapshot(root)
+
+        try:
+            with (
+                mock.patch.object(self, "damage", side_effect=remember),
+                mock.patch(
+                    "tests.test_install_v1_policy_preview.states",
+                    side_effect=fail_after_lock,
+                ),
+                self.assertRaisesRegex(
+                    PermissionError, "snapshot unavailable"
+                ),
+            ):
+                self.refuse_unchanged("held", False)
+            self.assertEqual(len(descriptors), 1)
+            with self.assertRaises(OSError):
+                os.fstat(descriptors[0])
+            descriptor = platform_lock.acquire(self.lock)
+            os.close(descriptor)
+        finally:
+            for descriptor in descriptors:
+                with suppress(OSError):
+                    os.close(descriptor)
 
     def test_old_saved_now_and_all_scope_are_retained_without_reselection(
         self,

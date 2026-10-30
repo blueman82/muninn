@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import tempfile
+from functools import partial
+from pathlib import Path
 from unittest import mock
 
-from muninn import classify, erase
+from muninn import classify, decision_requests, erase
+from muninn.decision_candidates import candidate_view
 from muninn.decision_models import DecisionIntent, VerifiedDecision
 from muninn.decision_proof import verify_decision
+from muninn.decision_write import submit_intent
 from muninn.review_evidence import select_evidence
 from muninn.review_evidence_models import (
     EvidenceLocator,
@@ -18,12 +23,21 @@ from muninn.review_progress import source_row
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from tests.classify_claude_support import claude_rec
 from tests.decision_support import DecisionCase
-from tests.ingest_support import line, rollout
+from tests.ingest_support import line, primary, rollout
 from tests.test_classify import reply, user_msg
 
 
 class DecisionProofTests(DecisionCase):
     """Require independent presentation, intent and provenance predicates."""
+
+    def setUp(self) -> None:
+        project = tempfile.TemporaryDirectory()
+        self.addCleanup(project.cleanup)
+        with mock.patch(
+            "tests.test_review_requests.primary",
+            return_value=primary(cwd=str(Path(project.name).resolve())),
+        ):
+            super().setUp()
 
     def test_whole_field_intent_is_independent_of_authority(self) -> None:
         draft = self.stage()
@@ -205,9 +219,30 @@ class DecisionProofTests(DecisionCase):
         self,
     ) -> None:
         draft = self.stage()
+        self.assertEqual(
+            self.verify(self.claude_intent(draft.id)).candidate_digest,
+            draft.digest,
+        )
+
+    def claude_intent(
+        self, ident: str, *, foreign: str | None = None
+    ) -> DecisionIntent:
+        """Index same-project originals or one deliberate scope mismatch."""
+        candidate = candidate_view(self.conn, ident).candidate
+        assert candidate is not None
+        project = candidate.scope.project_id
+        other = str(self.tmp / "foreign project")
         rows = [
-            claude_rec("assistant", self.display(draft.id)),
-            claude_rec("user", f"Please approve memory {draft.id}."),
+            claude_rec(
+                "assistant",
+                self.display(ident),
+                cwd=other if foreign == "display" else project,
+            ),
+            claude_rec(
+                "user",
+                f"Please approve memory {ident}.",
+                cwd=other if foreign == "owner" else project,
+            ),
         ]
         self.write("project/sess-1.jsonl", rows, "claude-projects")
         self.run_ingest()
@@ -215,8 +250,8 @@ class DecisionProofTests(DecisionCase):
         selector = EvidenceSelector(
             json_pointer="/message/content", start=None, end=None
         )
-        intent = DecisionIntent(
-            candidate_id=draft.id,
+        return DecisionIntent(
+            candidate_id=ident,
             action="approve",
             replacement_id=None,
             owner_locator=EvidenceLocator(
@@ -234,7 +269,47 @@ class DecisionProofTests(DecisionCase):
             owner_selector=selector,
             display_selector=selector,
         )
-        self.assertEqual(self.verify(intent).candidate_digest, draft.digest)
+
+    def test_foreign_claude_project_cannot_accept_or_apply(self) -> None:
+        for foreign in ("owner", "display"):
+            with self.subTest(foreign=foreign):
+                draft = self.stage()
+                intent = self.claude_intent(draft.id, foreign=foreign)
+                before = self.projection()
+                with self.assertRaisesRegex(ValueError, "^rejected_scope$"):
+                    self.approve(intent)
+                self.assertEqual(self.projection(), before)
+                self.transaction(
+                    partial(submit_intent, self.conn, intent, 20.0)
+                )
+                view = decision_requests.request_application(
+                    self.home, draft.id, 21.0
+                )
+                self.assertEqual(
+                    (view.code, view.revision), ("rejected_scope", 0)
+                )
+                self.assertIsNone(view.receipt)
+                for name, rows in before.items():
+                    if name.startswith("knowledge") or name in (
+                        "review_evidence",
+                        "review_request",
+                        "review_receipt",
+                    ):
+                        self.assertEqual(self.projection()[name], rows, name)
+                decision = self.row(
+                    "SELECT accepted_revision,owner_evidence_id,"
+                    "display_evidence_id FROM memory_decision "
+                    "WHERE candidate_id=?",
+                    (draft.id,),
+                )
+                self.assertEqual(tuple(decision), (None, None, None))
+                self.assertIsNone(
+                    self.row(
+                        "SELECT application_request_id "
+                        "FROM memory_candidate WHERE id=?",
+                        (draft.id,),
+                    )[0]
+                )
 
     def test_authority_alone_does_not_establish_affirmative_intent(
         self,
