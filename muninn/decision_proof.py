@@ -18,6 +18,7 @@ from muninn.decision_models import (
     VerifiedDecision,
 )
 from muninn.decision_words import choice_words
+from muninn.event_model import as_list, as_record
 from muninn.knowledge_scope import scope_applies
 from muninn.review_authority import injected
 from muninn.review_commit_state import EVIDENCE_ERRORS
@@ -56,6 +57,7 @@ def _original(
     selector: EvidenceSelector,
     budget: ReadBudget,
     limit: int,
+    display_text: str | None = None,
 ) -> EvidenceRecord:
     """Recover a checked primary original and require a complete field."""
     try:
@@ -70,6 +72,20 @@ def _original(
         conn, source, locator.line, locator.line, limit, budget=budget
     )[0]
     record = decode(raw)
+    if display_text is not None:
+        message = as_record(
+            record.get(
+                "payload" if locator.source.provider == "codex" else "message"
+            )
+        )
+        content = message.get("content") if message else record.get("text")
+        blocks = as_list(content)
+        if blocks is not None and len(blocks) == 1:
+            block = as_record(blocks[0])
+            content = block.get("text") if block else None
+        # Projection and redaction cannot make a different display exact.
+        if content != display_text or injected(record):
+            raise ValueError("display_proof")
     context = fields(locator.source.provider, record)
     field, _ = selected(context, locator.part, selector)
     if (
@@ -340,12 +356,9 @@ def _verify(
         intent.display_selector,
         budget,
         _remaining(policy, start, budget),
+        show_candidate(conn, target.id, policy.context_bytes).text,
     )
-    if (
-        display.evidence_type != "assistant_report"
-        or display.excerpt
-        != show_candidate(conn, target.id, policy.context_bytes).text
-    ):
+    if display.evidence_type != "assistant_report":
         raise ValueError("display_proof")
     if not all(
         scope_applies(record.scope, view.candidate.scope)

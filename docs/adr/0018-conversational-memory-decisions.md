@@ -3,10 +3,8 @@
 ## Status
 
 ACCEPTED by the owner on 2026-10-29.
-Implemented in the private source tree, including commands, checked application, maintenance, and erasure.
-Focused checks are recorded in the Task 6 report.
-Fresh review and the final full gate remain pending.
-Publication, installation, and live verification are separate delivery checks.
+The source implements the commands, checked application, maintenance, and erasure.
+A source change does not establish the selected release, local installation, or live verification.
 Owner authorization: “all above is approved what questions would you ask”.
 This approval authorizes implementation.
 It does not prove an owner's decision about any runtime memory proposal.
@@ -136,7 +134,7 @@ Give the digest a label specific to this record type.
 The software calls this domain separation.
 The digest connects the proposal ID to the exact stored content.
 
-Use `knowledge_write._redacted_body` and `redact_parts` consistently for storage, display, and application.
+Use `knowledge_write.redacted_body` and `redact_parts` consistently for storage, display, and application.
 Normalize the proposal before its fields become fixed.
 Save the complete normalized proposal before display.
 Derive displayed content from that stored data and verify its digest.

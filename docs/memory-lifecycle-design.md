@@ -1,9 +1,8 @@
 # Improve how Muninn checks and saves memory
 
 Status: APPROVED by the owner on 2026-10-29.
-Implemented in the private source tree.
-Fresh review and the final full gate remain pending.
-Publication, installation, and live verification are separate delivery checks.
+The source implements the commands, checked application, maintenance, and erasure.
+A source change does not establish the selected release, local installation, or live verification.
 Owner authorization: “all above is approved what questions would you ask”.
 This approval gives authority to implement the design.
 It does not prove an owner's decision about any runtime memory proposal.
@@ -55,11 +54,10 @@ It is implemented in source.
 Unit 1 was merged in PR #77 at `5fa95b51e5628ca52082da846d2746473cbc961b`.
 Installation and live verification remain separate delivery checks.
 Section D and ADR 0018 form unit 2.
-That unit is implemented in the private source tree.
+That unit is implemented in source.
 Its commands connect exact complete displays and original owner replies to checked application and receipts.
 Maintenance and erasure include its governed records.
-Fresh review and the final full gate remain pending. Unit 2 is not published or installed by this source work.
-A source change alone does not establish a release or an installed result.
+A source change does not establish the selected release, local installation, or live verification.
 
 The Hermes reference is commit `fcc26fbd9f1641755e49793d7ed608f3b7214c3d`, inspected on 29 October 2026.
 The HyperSkill reference is a clean checkout at `a34978aa7439d2eff7ccc3d2ad5372b34d285bd5`.
@@ -574,7 +572,7 @@ Give the digest a label specific to this record type.
 The software calls this domain separation.
 The digest connects the proposal ID to the exact stored content.
 
-Use `knowledge_write._redacted_body` and `redact_parts` consistently for storage, display, and application.
+Use `knowledge_write.redacted_body` and `redact_parts` consistently for storage, display, and application.
 Normalize the proposal before its fields become fixed.
 Save the complete normalized proposal before display.
 Derive displayed content from that stored data and verify its digest.
