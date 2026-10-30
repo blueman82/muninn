@@ -9,7 +9,7 @@ allow_implicit_invocation: false
     muninn erase --session S | --event REF | --match TEXT            # dry run (default)
     muninn erase --session S | --event REF | --match TEXT --yes      # actually erase
 
-Erasure is permanent. It secure-deletes rows and full-text entries and writes tombstones (ids and hashes only) to prevent reimport, including from fork copies. `--match` searches event text and governed knowledge, reasons, expiry conditions, claims, evidence and unresolved content. Erasure closes over prior revisions and support/read associations, withdraws affected guides and fences review requests.
+Erasure is permanent. It secure-deletes rows and full-text entries and writes tombstones (ids and hashes only) to prevent reimport, including from fork copies. `--match` searches event text and governed knowledge, reasons, expiry conditions, claims, evidence and unresolved content. Erasure closes over prior revisions and support/read associations, withdraws affected guides and fences review requests. It also clears candidate payloads and every affected decision locator, including pending intents before evidence admission. Accepted revision metadata and historical receipts remain; they cannot restore an erased body. Existing evidence keeps valid source-path and selector metadata. Do not claim that every possible provenance string is content-free.
 
 ## Procedure
 

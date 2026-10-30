@@ -12,7 +12,13 @@ from contextlib import ExitStack, closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from muninn import platform_windows, store
+from muninn import (
+    decision_erase,
+    knowledge_erase_links,
+    platform_windows,
+    store,
+)
+from muninn.knowledge_erase_state import SupportClosure
 from muninn.knowledge_models import AttemptId, EvidenceId
 from muninn.tombstone_intent import IntentRow
 
@@ -53,6 +59,7 @@ def erase_support_closure(
             "WHERE id=? AND state!='erased'",
             (ident,),
         ).rowcount
+    decision_erase.scrub(conn, plan, now)
     versions = _scrub_versions(conn, plan, now)
     _fence_requests(conn, plan, now)
     unresolved = 0
@@ -67,95 +74,6 @@ def erase_support_closure(
     )
 
 
-@dataclass
-class SupportClosure:
-    """Hold structural identities for the complete governed erasure plan."""
-
-    evidence: set[str]
-    versions: set[tuple[str, int]]
-    requests: set[str]
-    unresolved: set[str]
-
-
-def _evidence_links(conn: sqlite3.Connection, plan: SupportClosure) -> None:
-    """Reach admitted inputs, direct assertions and unresolved supports."""
-    for ident in plan.evidence:
-        plan.requests.update(
-            r[0]
-            for r in conn.execute(
-                "SELECT request_id FROM review_input WHERE evidence_id=?",
-                (ident,),
-            )
-        )
-        plan.versions.update(
-            (r[0], r[1])
-            for r in conn.execute(
-                "SELECT knowledge_id,revision FROM knowledge_support WHERE "
-                "evidence_id=?",
-                (ident,),
-            )
-        )
-        plan.versions.update(
-            (r[0], r[1])
-            for r in conn.execute(
-                "SELECT v.knowledge_id,v.revision FROM knowledge_version v,"
-                "json_each(v.expiry_json,'$.evidence_refs') e WHERE e.value=?",
-                (ident,),
-            )
-        )
-        plan.unresolved.update(
-            r[0]
-            for r in conn.execute(
-                "SELECT u.id FROM unresolved u,json_each(u.support_json) s "
-                "WHERE s.value=?",
-                (ident,),
-            )
-        )
-
-
-def _version_links(conn: sqlite3.Connection, plan: SupportClosure) -> None:
-    """Reach every explanation and conservative knowledge-read association."""
-    for ident, revision in tuple(plan.versions):
-        plan.requests.update(
-            r[0]
-            for r in conn.execute(
-                "SELECT request_id FROM knowledge_version WHERE "
-                "knowledge_id=? AND revision=?",
-                (ident, revision),
-            )
-        )
-        plan.requests.update(
-            r[0]
-            for r in conn.execute(
-                "SELECT i.request_id FROM review_input i JOIN "
-                "knowledge_support s "
-                "ON s.evidence_id=i.evidence_id WHERE s.knowledge_id=? AND "
-                "s.revision=?",
-                (ident, revision),
-            )
-        )
-        plan.requests.update(
-            r[0]
-            for r in conn.execute(
-                "SELECT i.request_id FROM knowledge_version v,"
-                "json_each(v.expiry_json,'$.evidence_refs') e JOIN "
-                "review_input i "
-                "ON i.evidence_id=e.value WHERE v.knowledge_id=? AND "
-                "v.revision=?",
-                (ident, revision),
-            )
-        )
-        plan.unresolved.update(
-            r[0]
-            for r in conn.execute(
-                "SELECT u.id FROM unresolved u,json_each(u.affected_json) a "
-                "WHERE json_extract(a.value,'$.knowledge_id')=? "
-                "AND json_extract(a.value,'$.revision')=?",
-                (ident, revision),
-            )
-        )
-
-
 def support_closure(
     conn: sqlite3.Connection,
     evidence_ids: tuple[EvidenceId, ...],
@@ -163,51 +81,23 @@ def support_closure(
     request_ids: tuple[str, ...] = (),
     versions: tuple[tuple[str, int], ...] = (),
     unresolved_ids: tuple[str, ...] = (),
+    candidate_ids: tuple[str, ...] = (),
+    decision_ids: tuple[str, ...] = (),
 ) -> SupportClosure:
     """Collect transitive associations without changing the store."""
     plan = SupportClosure(
-        set(evidence_ids), set(versions), set(request_ids), set(unresolved_ids)
+        set(evidence_ids),
+        set(versions),
+        set(request_ids),
+        set(unresolved_ids),
+        set(candidate_ids),
+        set(decision_ids),
     )
-    _evidence_links(conn, plan)
     while True:
-        before = (len(plan.versions), len(plan.requests), len(plan.unresolved))
-        _version_links(conn, plan)
-        for ident in tuple(plan.requests):
-            plan.versions.update(
-                (r[0], r[1])
-                for r in conn.execute(
-                    "SELECT knowledge_id,revision FROM knowledge_version "
-                    "WHERE request_id=?",
-                    (ident,),
-                )
-            )
-            plan.unresolved.update(
-                r[0]
-                for r in conn.execute(
-                    "SELECT id FROM unresolved WHERE request_id=?", (ident,)
-                )
-            )
-        for ident in tuple(plan.unresolved):
-            plan.requests.update(
-                r[0]
-                for r in conn.execute(
-                    "SELECT request_id FROM unresolved WHERE id=?", (ident,)
-                )
-            )
-            plan.versions.update(
-                (r[0], r[1])
-                for r in conn.execute(
-                    "SELECT json_extract(a.value,'$.knowledge_id'),"
-                    "json_extract(a.value,'$.revision') FROM unresolved u,"
-                    "json_each(u.affected_json) a WHERE u.id=?",
-                    (ident,),
-                )
-            )
-        if before == (
-            len(plan.versions),
-            len(plan.requests),
-            len(plan.unresolved),
-        ):
+        before = plan.sizes()
+        knowledge_erase_links.collect_links(conn, plan)
+        decision_erase.collect_links(conn, plan)
+        if before == plan.sizes():
             return plan
 
 
@@ -225,14 +115,18 @@ def _scrub_versions(
         ).rowcount
         conn.execute(
             "UPDATE knowledge_claim SET text=NULL,dependency_keys_json='[]',"
-            "state='erased' WHERE knowledge_id=? AND revision=?",
+            "state='erased' WHERE knowledge_id=? AND revision=? "
+            "AND (state!='erased' OR text IS NOT NULL OR "
+            "dependency_keys_json!='[]')",
             (ident, revision),
         )
         conn.execute(
             "UPDATE knowledge SET state=CASE WHEN current_revision=? THEN "
             "'erased' "
-            "ELSE state END,retracted_reason=NULL WHERE id=?",
-            (revision, ident),
+            "ELSE state END,retracted_reason=NULL WHERE id=? "
+            "AND (retracted_reason IS NOT NULL OR (current_revision=? AND "
+            "state!='erased'))",
+            (revision, ident, revision),
         )
         conn.execute(
             "DELETE FROM knowledge_fts WHERE knowledge_id=? AND revision=?",
@@ -248,7 +142,10 @@ def _fence_requests(
     for ident in sorted(plan.requests):
         conn.execute(
             "UPDATE review_request SET state='cancelled',retry_at=NULL,"
-            "current_attempt_id=NULL,cancel_code='evidence_erased' WHERE id=?",
+            "current_attempt_id=NULL,cancel_code='evidence_erased' WHERE id=? "
+            "AND (state!='cancelled' OR retry_at IS NOT NULL OR "
+            "current_attempt_id "
+            "IS NOT NULL OR cancel_code IS NOT 'evidence_erased')",
             (ident,),
         )
         conn.execute(
@@ -267,7 +164,7 @@ def _fence_requests(
         )
         conn.execute(
             "UPDATE review_receipt SET no_change_reason=NULL WHERE "
-            "request_id=?",
+            "request_id=? AND no_change_reason IS NOT NULL",
             (ident,),
         )
 
@@ -365,46 +262,14 @@ def plan_replay_support(
     conn: sqlite3.Connection, rows: tuple[IntentRow, ...]
 ) -> SupportClosure:
     """Collect governed targets from the complete pre-insertion intent."""
-    evidence: set[str] = set()
-    requests: set[str] = set()
-    for row in rows:
-        values = (
-            row.provider,
-            row.level,
-            row.session_root,
-            row.thread_id,
-            row.line,
-            row.line_sha256,
-        )
-        intent = (
-            "WITH t(provider,level,session_root,thread_id,line,line_sha256) "
-            "AS (VALUES(?,?,?,?,?,?)) "
-        )
-        evidence.update(
-            r[0]
-            for r in conn.execute(
-                intent + "SELECT e.id FROM review_evidence e JOIN t "
-                "ON t.provider=e.provider WHERE "
-                "(t.level='session' AND t.session_root=e.session_root) OR "
-                "(t.level='thread' AND t.thread_id=e.thread_id) OR "
-                "(t.level='line' AND t.thread_id=e.thread_id AND "
-                "(t.line=e.line OR t.line_sha256=e.line_sha256))",
-                values,
-            )
-        )
-        requests.update(
-            r[0]
-            for r in conn.execute(
-                intent + "SELECT r.id FROM review_request r JOIN t "
-                "ON t.provider=r.provider WHERE "
-                "(t.level='session' AND t.session_root=r.session_root) OR "
-                "(t.level='thread' AND t.thread_id=r.thread_id) OR "
-                "(t.level='line' AND t.thread_id=r.thread_id "
-                "AND t.line BETWEEN r.from_line AND r.through_line)",
-                values,
-            )
-        )
-    return support_closure(conn, tuple(evidence), request_ids=tuple(requests))
+    plan = knowledge_erase_links.intent_plan(conn, rows)
+    decision_erase.collect_intents(conn, plan, rows)
+    return support_closure(
+        conn,
+        tuple(plan.evidence),
+        request_ids=tuple(plan.requests),
+        decision_ids=tuple(plan.decisions),
+    )
 
 
 def replay_support(conn: sqlite3.Connection, now: float) -> SupportClosure:

@@ -11,6 +11,7 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from install import (
+    decision_migration,
     legacy_cutover,
     legacy_recovery,
     legacy_state,
@@ -18,7 +19,6 @@ from install import (
     record,
     review_policy,
     snapshot_io,
-    store_migration,
 )
 from install.context import Ctx, StepFailedError
 from install.record import Record, install_record, save
@@ -311,7 +311,7 @@ def _prepared(
             except StepFailedError as exc:
                 if str(exc) != "cutover_required":
                     raise
-                path = store_migration.prepare(ctx, rec, owner)
+                path = decision_migration.prepare_historical(ctx, rec, owner)
         rec["policy_store_identity"] = list(
             rec["legacy"]["publication_binding"]["candidate"]["identity"]
             if "legacy" in rec

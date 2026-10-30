@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from contextlib import closing
 
-from install import learning_policy_recovery
+from install import learning_policy_recovery, policy_preview
 from install.context import Ctx, StepFailedError
+from install.policy_source_format import legacy_source, validate_policy_source
 from install.record import Record
 from muninn import review_history, review_state, store
 from muninn.review_models import ReviewPolicy
@@ -77,39 +77,47 @@ def _existing(
     """Preserve pauses unless the person approves checked recovery."""
     if not store.db_path(ctx.data).is_file():
         return None, False
-    try:
-        with closing(store.connect_ro(store.db_path(ctx.data))) as conn:
-            saved = review_state.selection(conn)
-            control = conn.execute(
-                "SELECT admission,policy_json FROM review_control"
-            ).fetchone()
-            if control is None or control["policy_json"] is None:
-                return saved, False
-            installed = ReviewPolicy.model_validate_json(
-                control["policy_json"]
-            )
-            allowed = (
-                learning_policy_recovery.eligible(installed)
-                or ctx.review_policy is not None
-            )
-            if ctx.enable_learning and not allowed:
-                raise StepFailedError(
-                    "learning_custom_policy: supply a newly "
-                    "approved policy file"
-                )
-            if not control["admission"]:
-                if not allowed:
-                    ctx.say("Learning remains paused under its custom policy.")
-                    return saved, True
-                if not ctx.enable_learning:
-                    ctx.enable_learning = _consent(ctx, prompt)
-                    if not ctx.enable_learning:
-                        return saved, True
-            if ctx.enable_learning:
-                learning_policy_recovery.require_finished(conn)
-            return saved, False
-    except store.StoreUnavailableError:
+    if legacy_source(store.db_path(ctx.data)):
         return None, False
+    try:
+        with policy_preview.connection(store.db_path(ctx.data)) as conn:
+            conn.row_factory = sqlite3.Row
+            validate_policy_source(conn)
+            return _saved_scope(ctx, prompt, conn)
+    except (sqlite3.Error, store.StoreUnavailableError) as exc:
+        raise StepFailedError("review_policy_state_invalid") from exc
+
+
+def _saved_scope(
+    ctx: Ctx, prompt: Callable[[str], str], conn: sqlite3.Connection
+) -> tuple[review_state.LearningSelection | None, bool]:
+    """Retain actual paused policy and selection from one guarded snapshot."""
+    saved = review_state.selection(conn)
+    control = conn.execute(
+        "SELECT admission,policy_json FROM review_control"
+    ).fetchone()
+    if control is None or control["policy_json"] is None:
+        return saved, False
+    installed = ReviewPolicy.model_validate_json(control["policy_json"])
+    allowed = (
+        learning_policy_recovery.eligible(installed)
+        or ctx.review_policy is not None
+    )
+    if ctx.enable_learning and not allowed:
+        raise StepFailedError(
+            "learning_custom_policy: supply a newly " "approved policy file"
+        )
+    if not control["admission"]:
+        if not allowed:
+            ctx.say("Learning remains paused under its custom policy.")
+            return saved, True
+        if not ctx.enable_learning:
+            ctx.enable_learning = _consent(ctx, prompt)
+            if not ctx.enable_learning:
+                return saved, True
+    if ctx.enable_learning:
+        learning_policy_recovery.require_finished(conn)
+    return saved, False
 
 
 def _consent(ctx: Ctx, prompt: Callable[[str], str]) -> bool:

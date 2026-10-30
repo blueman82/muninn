@@ -748,6 +748,16 @@ all matching ancestor events, and only the replayed leading run of descendants o
 siblings. A historical erasure lacking a content tag can still suppress a byte-for-
 byte line copy; a differing copy is not recognized by that line tombstone.
 
+Erasure also traverses memory candidates, every accepted decision revision,
+locator-only pending decisions, replacement dependencies and application requests.
+It clears candidate payloads, decision locators and affected evidence excerpts.
+An erased candidate cannot be displayed or applied. Historical receipts and
+structural IDs, revisions, digests and accepted timestamps remain for audit.
+Existing evidence retains valid provenance metadata, including source paths and
+selectors; those open strings are not a universal content-free guarantee.
+Provider transcripts and retained archives stay unchanged. Replay and restore
+refusals prevent those archives from silently restoring erased governed bodies.
+
 The `review` counts include removed working files and `retained_archives`.
 Only program-owned `review-work/<AttemptId>` material is removed after containment;
 symlink targets, unrelated siblings and provider transcripts are preserved.

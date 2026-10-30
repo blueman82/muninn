@@ -19,6 +19,7 @@ from install import (
 )
 from install.context import Ctx, StepFailedError
 from install.policy_record_models import DefaultSelection
+from install.policy_source_format import validate_policy_source
 from install.record import Record
 from muninn import review_codex_launch, store
 from muninn.review_json import canonical_json
@@ -214,7 +215,7 @@ def _configured(ctx: Ctx) -> tuple[bool, ReviewPolicy | None]:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version == 3:
                 return False, None
-            store.assert_store_format(conn)
+            validate_policy_source(conn)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT admission,policy_json FROM review_control "
