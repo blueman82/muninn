@@ -47,6 +47,9 @@ type RequestState = Literal[
     "pending", "running", "waiting", "completed", "failed", "cancelled"
 ]
 type CallState = Literal["reserved", "launched", "completed", "unknown"]
+type CorrectionStatus = Literal[
+    "requested", "attempted", "succeeded", "exhausted", "unknown"
+]
 
 
 class Usage(StrictModel):
@@ -308,6 +311,7 @@ class ReviewDetail(StrictModel):
     calls: list[CallView]
     evidence: list[EvidenceRecord]
     receipt: Receipt | None
+    correction_status: CorrectionStatus = "unknown"
     diagnostics: list[dict[str, str]] = Field(
         default_factory=list[dict[str, str]]
     )

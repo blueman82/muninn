@@ -8,7 +8,7 @@ from pathlib import Path
 
 from muninn import review_prompt
 from muninn.knowledge_models import ReviewResult
-from muninn.review_candidates import ProposalRejectedError
+from muninn.review_candidates import CommitRejectedError, ProposalRejectedError
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_correction import (
     CorrectionFeedback,
@@ -16,6 +16,7 @@ from muninn.review_correction import (
     RoundFormatError,
     require_reduction,
 )
+from muninn.review_diagnostics import FailurePhase
 from muninn.review_models import ReviewContext
 from muninn.review_process import ProcessOutcome
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
@@ -29,7 +30,17 @@ def failure_code(error: ValueError | OSError, fallback: str) -> str:
     cause = error.code if isinstance(error, EvidenceLimitError) else str(error)
     return (
         cause
-        if cause.startswith("rejected_") or cause in EVIDENCE_LIMIT_CODES
+        if cause
+        in {
+            "rejected_authority",
+            "rejected_evidence",
+            "rejected_erased",
+            "rejected_fenced",
+            "rejected_revision",
+            "rejected_scope",
+            "rejected_validation",
+        }
+        or cause in EVIDENCE_LIMIT_CODES
         else fallback
     )
 
@@ -99,7 +110,7 @@ def execute(
     fail: Callable[[ReviewContext, str, float, str], None],
 ) -> bool:
     """Commit a final result or retain one checked read or correction round."""
-    stage = "runner"
+    stage: FailurePhase = "native output"
     original = None
     try:
         try:
@@ -120,12 +131,12 @@ def execute(
                     stage,
                 )
                 return False
-            stage = "evidence"
+            stage = "original evidence"
             pending.context = review_prompt.refresh(home, pending.context)
-            stage = "result format"
+            stage = "model format"
             request = parse_round(outcome.stdout, pending.context)
             if pending.correction is not None:
-                stage = "correction"
+                stage = "candidate validation"
                 if not isinstance(request, FinalRequest):
                     raise ValueError("rejected_validation")
                 if pending.correction.original is not None:
@@ -133,12 +144,13 @@ def execute(
                         pending.correction.original, request.result
                     )
             if isinstance(request, FinalRequest):
-                stage = "candidate validation"
+                stage = "commit"
                 original = request.result
                 _commit(home, pending, original, now)
                 return False
-            stage = "read"
+            stage = "controlled read"
             result = execute_read(home, request, pending.context)
+            stage = "original evidence"
             context = review_prompt.refresh(home, pending.context)
             pending.history.append(
                 (request.model_dump(mode="json"), json.loads(result))
@@ -152,7 +164,7 @@ def execute(
                 >= pending.context.policy.max_rounds
             ):
                 raise
-            stage = "correction"
+            stage = "commit"
             _correct(home, pending, exc, original)
             return True
     except ValueError as exc:
@@ -160,6 +172,6 @@ def execute(
             pending.context,
             failure_code(exc, "rejected_validation"),
             now,
-            stage,
+            exc.phase if isinstance(exc, CommitRejectedError) else stage,
         )
     return False

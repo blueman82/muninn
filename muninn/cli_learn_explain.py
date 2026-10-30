@@ -7,10 +7,18 @@ import sqlite3
 
 from muninn import review_recovery, review_state
 from muninn.knowledge_models import RequestId
+from muninn.review_diagnostics import correction_status
+from muninn.review_models import CorrectionStatus
 from muninn.review_policy_status import policy_status
 from muninn.review_request_views import request_row, request_view
 
 _STAGES = {
+    "native output": "while checking the native runner output",
+    "model format": "while checking the model result format",
+    "candidate validation": "while validating proposed candidates",
+    "controlled read": "while performing a controlled read",
+    "original evidence": "while checking original source evidence",
+    "commit": "while committing the checked result",
     "evidence": "while preparing and checking source evidence",
     "prompt": "while preparing the model input",
     "launch": "while preparing to launch the model",
@@ -79,7 +87,7 @@ def _failure(conn: sqlite3.Connection, ident: str) -> tuple[str, str]:
 def _impact(conn: sqlite3.Connection, ident: str) -> str:
     """Use the atomic receipt rather than infer partial proposal writes."""
     receipt = conn.execute(
-        "SELECT applied_json,unresolved_json FROM review_receipt "
+        "SELECT applied_json,unresolved_json,outcome FROM review_receipt "
         "WHERE request_id=?",
         (ident,),
     ).fetchone()
@@ -93,7 +101,8 @@ def _impact(conn: sqlite3.Connection, ident: str) -> str:
     unresolved = len(json.loads(receipt[1]))
     return (
         f"The commit receipt records {applied} applied knowledge changes "
-        f"and {unresolved} unresolved items. This is the recorded commit "
+        f"and {unresolved} unresolved items. Receipt outcome: {receipt[2]}. "
+        "This is the recorded commit "
         "outcome; later changes or erasure can affect current knowledge."
     )
 
@@ -131,6 +140,40 @@ def _calls(conn: sqlite3.Connection, ident: str) -> str:
     return (
         "No model launch is recorded for this request. "
         "Missing launch records do not prove that no model call occurred."
+    )
+
+
+def _correction(status: CorrectionStatus) -> str:
+    """Describe correction evidence separately from the saved commit impact."""
+    meanings = {
+        "unknown": (
+            "Retained history does not prove a correction was requested."
+        ),
+        "requested": (
+            "A correction was requested; no exact successor launch is "
+            "recorded."
+        ),
+        "attempted": (
+            "The exact successor launched, but no correction result is "
+            "established."
+        ),
+        "succeeded": (
+            "The completed successor has a receipt from the same attempt."
+        ),
+        "exhausted": (
+            "The completed successor ended in a failure of the same "
+            "attempt."
+        ),
+    }
+    return (
+        f"Correction status: {status}. {meanings[status]} "
+        "This status describes the latest attempt with a "
+        "correction marker. "
+        "A later ordinary success does not prove an earlier "
+        "correction succeeded. "
+        "The receipt separately records saved changes or no change. "
+        "Clearing a failure notice preserves durable correction "
+        "markers."
     )
 
 
@@ -215,10 +258,12 @@ def explain(conn: sqlite3.Connection, ident: RequestId) -> dict[str, str]:
     """Return ordinary-language inspection using only retained metadata."""
     request = request_view(request_row(conn, ident))
     code, failure = _failure(conn, ident)
+    correction = correction_status(conn, ident)
     paragraphs = [
         f"Learning request {ident} is currently {request.state}.",
         _evidence(conn, ident),
         failure,
+        _correction(correction),
         _impact(conn, ident),
         _calls(conn, ident),
         _learning(conn),
@@ -232,4 +277,8 @@ def explain(conn: sqlite3.Connection, ident: RequestId) -> dict[str, str]:
         "Successful completion clears this request's notice. "
         "A later failure can create another notice.",
     ]
-    return {"request_id": ident, "explanation": "\n\n".join(paragraphs)}
+    return {
+        "request_id": ident,
+        "correction_status": correction,
+        "explanation": "\n\n".join(paragraphs),
+    }

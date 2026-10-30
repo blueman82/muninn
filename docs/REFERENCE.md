@@ -120,8 +120,8 @@ this JSON object's root alongside the common notice/freshness/logging metadata.
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded request; paired bounds or activation/uncompleted boundary through the latest complete record. `--task` binds the request to one task in the source project. |
 | `muninn learn setup --mode now\|all [--project PATH] [--confirm SCAN_DIGEST]` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`; state is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
-| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, and safe `diagnostics`. Content is shown only when requested, never logged. |
-| `muninn learn explain R_ID [--human]` | Returns `request_id` and `explanation` as JSON. The explanation describes retained history, missing detail, saved changes, current admission, recovery, and dismissal. `--human` also prints the explanation to stderr. Stdout remains JSON. Muninn displays no transcript or proposal text. |
+| `muninn learn show R_ID` | `ReviewDetail`: request, attempts, durable calls, governed evidence, receipt/null, `correction_status`, and safe `diagnostics`. Content is shown only when requested, never logged. |
+| `muninn learn explain R_ID [--human]` | Returns `request_id`, `correction_status`, and `explanation` as JSON. The explanation describes retained history, missing detail, saved changes, current admission, recovery, and dismissal. `--human` also prints the explanation to stderr. Stdout remains JSON. Muninn displays no transcript or proposal text. |
 | `muninn learn dismiss R_ID` | `request_id` and `dismissed` (boolean). Remove only that request's saved failure notice. A repeated dismissal returns `false`; an unknown request returns `request_unavailable`. |
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same request, including cancelled requests when current guards permit. Completed requests retain their receipt/state without another commit. |
@@ -396,6 +396,21 @@ Only the commit receipt establishes saved changes.
 A rejected batch saves no partial knowledge changes.
 Missing launch records do not prove that no model call occurred.
 Saved failure stages identify only the recorded phase.
+
+`correction_status` describes the latest attempt with a durable correction marker, ordered by start time and attempt ID.
+`requested` means a marker exists, but its exact next round has no recorded launch.
+`attempted` means that next round launched in the same attempt, but its correction result is unproved.
+`succeeded` requires a completed next round and a receipt from that same attempt.
+`exhausted` requires a completed next round and a terminal failure from that same attempt.
+Without a valid marker or enough retained evidence, the status is `unknown`.
+Two calls alone do not prove correction: they can be a read and a final result.
+A later ordinary success cannot prove that an earlier correction succeeded.
+Clearing a failure notice preserves correction markers.
+The receipt separately establishes saved changes or `no_change`.
+
+New result failures record one observed phase: `native output`, `model format`, `candidate validation`, `controlled read`, `original evidence`, or `commit`.
+Setup and launch checks retain their existing phase labels.
+Missing historical phases remain `not recorded`; Muninn does not infer them from codes or call counts.
 
 Muninn does not invent finer detail.
 The explanation separates current admission and setup notices from request history.

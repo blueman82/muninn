@@ -161,7 +161,7 @@ def _evidence(
     if set(ids) != set(context.evidence_ids) or len(ids) != len(
         context.evidence_ids
     ):
-        raise CommitRejectedError("rejected_evidence")
+        raise CommitRejectedError("rejected_evidence", "original evidence")
     view = request_view(row)
     try:
         budget = ReadBudget(policy.max_input_bytes)
@@ -169,19 +169,21 @@ def _evidence(
             conn, view.window, view.scope, policy, budget=budget
         )
         if source["session_root"] != row["session_root"]:
-            raise CommitRejectedError("rejected_evidence")
+            raise CommitRejectedError("rejected_evidence", "original evidence")
         records = validate_evidence(
             conn, context.home, ids, view.scope, policy, budget=budget
         )
     except ValidationError:
-        raise CommitRejectedError("rejected_evidence") from None
+        raise CommitRejectedError(
+            "rejected_evidence", "original evidence"
+        ) from None
     except EvidenceLimitError as exc:
-        raise CommitRejectedError(exc.code) from None
+        raise CommitRejectedError(exc.code, "original evidence") from None
     except ValueError as exc:
         code = _EVIDENCE_ERRORS.get(str(exc))
         if code is None:
             raise
-        raise CommitRejectedError(code) from None
+        raise CommitRejectedError(code, "original evidence") from None
     return records
 
 

@@ -433,5 +433,5 @@ class ReviewSupervisorCorrectionTests(SupervisorCase):
             self.scalar("SELECT state FROM review_request"), "failed"
         )
         self.assertEqual(
-            self.scalar("SELECT stage FROM review_issue"), "runner"
+            self.scalar("SELECT stage FROM review_issue"), "native output"
         )
