@@ -37,9 +37,15 @@ GOVERNED_TABLES = (
     "knowledge_support",
     "unresolved",
     "review_receipt",
+    "memory_candidate",
+    "memory_decision",
+    "memory_candidate_support",
 )
 # The marked current format keeps an exact DDL identity.
 _SHAPES = {
+    2: frozenset(
+        {"ec7fd6d4a91b3ac65fe10b54ecdd36372213a0427cb6cab0d4e2400f613be1e9"}
+    ),
     1: frozenset(
         {
             "535cd228a984e4d5cd6f98787a33c657359bf780753c73ec33885a2ed62ddc3c",
@@ -101,6 +107,10 @@ def _shape(conn: sqlite3.Connection) -> int:
     if fingerprint not in _SHAPES.get(version, frozenset()):
         raise ValueError("cutover_source_mismatch")
     if version == 1:
+        marker = conn.execute("SELECT * FROM store_meta").fetchall()
+        if [tuple(row) for row in marker] != [(1, "muninn-knowledge", 1)]:
+            raise store.StoreUnavailableError("cutover_required")
+    elif version == 2:
         store.assert_store_format(conn)
     return version
 
@@ -112,12 +122,16 @@ def _columns(conn: sqlite3.Connection, table: str) -> str:
     )
 
 
-def _digest(conn: sqlite3.Connection, table: str) -> tuple[int, str]:
+def _digest(
+    conn: sqlite3.Connection, table: str, columns: str | None = None
+) -> tuple[int, str]:
     """Hash framed scalar types and values in stable column order."""
-    columns = _columns(conn, table)
+    columns = columns or _columns(conn, table)
     digest = hashlib.sha256()
     count = 0
-    for row in conn.execute(f'SELECT * FROM "{table}" ORDER BY {columns}'):
+    for row in conn.execute(
+        f'SELECT {columns} FROM "{table}" ORDER BY {columns}'
+    ):
         values = [
             (
                 type(value).__name__,
@@ -136,7 +150,7 @@ def _digest(conn: sqlite3.Connection, table: str) -> tuple[int, str]:
 
 def _empty(conn: sqlite3.Connection) -> None:
     """Accept only untouched current bootstrap rows and no governed content."""
-    if _shape(conn) != 1:
+    if _shape(conn) != 2:
         raise ValueError("cutover_target_mismatch")
     optional = tuple(
         name
@@ -159,25 +173,62 @@ def _copy(
     source: sqlite3.Connection,
     target: sqlite3.Connection,
     tables: Sequence[str],
+    source_version: int,
 ) -> dict[str, int]:
     """Copy each complete row and check independently read target checksums."""
     result: dict[str, int] = {}
     for table in tables:
         columns = _columns(source, table)
-        if columns != _columns(target, table):
+        projected = source_version == 1 and table == "review_request"
+        if columns != _columns(target, table) and not (
+            projected
+            and _columns(target, table)
+            == columns + ',"candidate_id","decision_revision"'
+        ):
             raise ValueError("cutover_source_mismatch")
+        if source_version == 1 and table == "store_meta":
+            target.execute("UPDATE store_meta SET version=2 WHERE singleton=1")
+            if [
+                tuple(row)
+                for row in target.execute("SELECT * FROM store_meta")
+            ] != [(1, "muninn-knowledge", 2)]:
+                raise ValueError("cutover_checksum_mismatch")
+            result[table] = 1
+            continue
         if table in ("store_meta", "review_control"):
             target.execute(f'DELETE FROM "{table}"')
         marks = ",".join("?" for _ in columns.split(","))
+        waiting = source_version == 2 and table == "review_request"
+        where = " WHERE candidate_id IS NULL" if waiting else ""
         target.executemany(
-            f'INSERT INTO "{table}" VALUES({marks})',
-            source.execute(f'SELECT * FROM "{table}"'),
+            f'INSERT INTO "{table}" ({columns}) VALUES({marks})',
+            source.execute(f'SELECT * FROM "{table}"{where}'),
         )
+        if waiting:
+            continue
         before = _digest(source, table)
-        if before != _digest(target, table):
+        if before != _digest(target, table, columns):
             raise ValueError("cutover_checksum_mismatch")
         result[table] = before[0]
     return result
+
+
+def _application_requests(
+    source: sqlite3.Connection, target: sqlite3.Connection
+) -> int:
+    """Copy bound requests after their accepted decisions satisfy triggers."""
+    columns = _columns(source, "review_request")
+    marks = ",".join("?" for _ in columns.split(","))
+    target.executemany(
+        f"INSERT INTO review_request ({columns}) VALUES({marks})",
+        source.execute(
+            "SELECT * FROM review_request WHERE candidate_id IS NOT NULL"
+        ),
+    )
+    before = _digest(source, "review_request")
+    if before != _digest(target, "review_request"):
+        raise ValueError("cutover_checksum_mismatch")
+    return before[0]
 
 
 def rebuild_indexes(conn: sqlite3.Connection) -> None:
@@ -231,7 +282,7 @@ def validate_source(conn: sqlite3.Connection) -> int:
         conn: Caller-owned readable connection to a supported source.
 
     Returns:
-        Three for the legacy table contract or one for marked current format.
+        Three for legacy, one for marked-v1, or two for current format.
 
     Raises:
         ValueError: If source shape, foreign keys or integrity are invalid.
@@ -277,14 +328,23 @@ def copy_governed_state(
         target.execute("BEGIN IMMEDIATE")
         try:
             target.execute("PRAGMA defer_foreign_keys=ON")
-            tables = BASE_TABLES + (GOVERNED_TABLES if version == 1 else ())
-            if version == 1:
+            governed = tuple(
+                table
+                for table in GOVERNED_TABLES
+                if version == 2 or not table.startswith("memory_")
+            )
+            tables = BASE_TABLES + (governed if version in (1, 2) else ())
+            if version in (1, 2):
                 tables += tuple(
                     name
                     for name in ("learning_setup", "review_issue")
                     if review_state.available(source, name)
                 )
-            result = _copy(source, target, tables)
+            result = _copy(source, target, tables, version)
+            if version == 2:
+                result["review_request"] = _application_requests(
+                    source, target
+                )
             rebuild_indexes(target)
             _validate(target)
             target.execute("COMMIT")

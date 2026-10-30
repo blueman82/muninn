@@ -289,7 +289,7 @@ class RollbackTests(SnapshotCase):
         configs: list[bytes] = []
 
         def new_write(ctx: co.Ctx, rec: co.Record) -> None:
-            marked_store(ctx.data, 1, "newer")
+            marked_store(ctx.data, 2, "newer")
             configs.append(ctx.config.read_bytes())
             raise co.StepFailedError("verification failed after exposure")
 
@@ -314,7 +314,7 @@ class RollbackTests(SnapshotCase):
         journal = self.data / "muninn.sqlite-journal"
 
         def interrupted(ctx: co.Ctx, rec: co.Record) -> None:
-            marked_store(ctx.data, 1, "newer")
+            marked_store(ctx.data, 2, "newer")
             written.append(self.store.read_bytes())
             fd = platform_io.open_private(
                 journal, os.O_CREAT | os.O_EXCL | os.O_WRONLY

@@ -61,7 +61,7 @@ class NativeMutationTests(unittest.TestCase):
             initialize(conn)
             store.assert_store_format(conn)
             self.assertEqual(
-                conn.execute("PRAGMA user_version").fetchone()[0], 1
+                conn.execute("PRAGMA user_version").fetchone()[0], 2
             )
             self.assertEqual(
                 conn.execute(

@@ -46,7 +46,7 @@ def body_of(change: Change) -> NoteBody | GuideBody:
     return model.model_validate(data)
 
 
-def _redacted_body(body: Body) -> Body:
+def redacted_body(body: Body) -> Body:
     """Sanitize only governed text after admission, preserving references."""
     data = body.model_dump()
     data["reason"] = redact(body.reason)[0]
@@ -136,7 +136,7 @@ def apply_change(
     conn: sqlite3.Connection, change: Change, request: sqlite3.Row, now: float
 ) -> AffectedRevision:
     """Write an already checked body, its support, and its active FTS row."""
-    body = _redacted_body(body_of(change))
+    body = redacted_body(body_of(change))
     if change.action == "add":
         ident, revision = f"K_{uuid4().hex}", 1
         conn.execute(

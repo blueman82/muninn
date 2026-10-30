@@ -23,12 +23,12 @@ from tests.store_support import (
 
 
 class SchemaTests(StoreCase):
-    """Marked schema 1 layout, pragmas, constraints and FTS triggers."""
+    """Marked schema 2 layout, pragmas, constraints and FTS triggers."""
 
-    def test_connect_rw_creates_marked_schema_1(self) -> None:
+    def test_connect_rw_creates_marked_schema_2(self) -> None:
         conn = self.rw()
-        self.assertEqual(store.SCHEMA_VERSION, 1)
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(store.SCHEMA_VERSION, 2)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
         found = {
             (r["type"], r["name"])
             for r in conn.execute(
@@ -58,6 +58,9 @@ class SchemaTests(StoreCase):
             "knowledge_support",
             "unresolved",
             "review_receipt",
+            "memory_candidate",
+            "memory_decision",
+            "memory_candidate_support",
             "tombstone",
         }
         indexes = {
@@ -65,7 +68,12 @@ class SchemaTests(StoreCase):
             "event_scope_ts",
             "event_cwd",
             "review_request_ready",
+            "review_request_ordinary",
             "review_request_source",
+            "memory_candidate_request",
+            "memory_candidate_unresolved",
+            "memory_decision_candidate",
+            "memory_candidate_support_evidence",
             "review_attempt_request",
             "review_call_budget",
             "review_evidence_source",
@@ -81,6 +89,11 @@ class SchemaTests(StoreCase):
             "event_ad",
             "event_immutable",
             "review_request_policy_immutable",
+            "memory_candidate_immutable",
+            "memory_decision_immutable",
+            "memory_decision_history",
+            "review_request_application_immutable",
+            "review_request_application_accepted",
         }
         self.assertLessEqual({("table", t) for t in tables}, found)
         self.assertEqual({n for t, n in found if t == "index"}, indexes)
@@ -91,7 +104,7 @@ class SchemaTests(StoreCase):
         insert_scope(first, "/keep")
         first.close()
         again = self.rw()
-        self.assertEqual(again.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(again.execute("PRAGMA user_version").fetchone()[0], 2)
         keys = [r["key"] for r in again.execute("SELECT key FROM scope")]
         self.assertEqual(keys, ["/keep"])
 
@@ -367,62 +380,6 @@ class SchemaTests(StoreCase):
         self.assertEqual(hits("event_fts", "alpha"), [])
         self.assertEqual(hits("event_fts", "gamma"), [e2])
         check("event_fts")
-
-
-class IngestSchemaTests(StoreCase):
-    """Columns and tables that ingest relies on."""
-
-    def test_source_parse_state_column(self) -> None:
-        conn = self.rw()
-        col = {r["name"]: r for r in conn.execute("PRAGMA table_info(source)")}
-        state = col["parse_state"]
-        self.assertEqual((state["type"], state["notnull"]), ("TEXT", 0))
-        self.assertIsNone(state["dflt_value"])
-        src = insert_source(conn)
-        row = conn.execute(
-            "SELECT parse_state FROM source WHERE id = ?", (src,)
-        )
-        self.assertIsNone(row.fetchone()["parse_state"])
-
-    def test_usage_table_counts_per_source_and_cascades(self) -> None:
-        conn = self.rw()
-        cols = [
-            (r["name"], r["type"], r["notnull"], r["pk"])
-            for r in conn.execute("PRAGMA table_info(usage)")
-        ]
-        self.assertEqual(
-            cols,
-            [
-                ("source_id", "INTEGER", 0, 1),
-                ("provider", "TEXT", 1, 0),
-                ("session_root", "TEXT", 1, 0),
-                ("calls", "INTEGER", 1, 0),
-                ("errors", "INTEGER", 1, 0),
-                ("last_ts", "TEXT", 0, 0),
-            ],
-        )
-        src, other = insert_source(conn, "t1"), insert_source(conn, "t2")
-        conn.execute(
-            "INSERT INTO usage(source_id, provider, session_root)"
-            " VALUES (?, 'codex', 't1')",
-            (src,),
-        )
-        row = conn.execute("SELECT calls, errors, last_ts FROM usage")
-        self.assertEqual(tuple(row.fetchone()), (0, 0, None))
-        with self.assertRaises(sqlite3.IntegrityError):  # provider CHECK
-            conn.execute(
-                "INSERT INTO usage(source_id, provider, session_root)"
-                " VALUES (?, 'gpt', 't2')",
-                (other,),
-            )
-        with self.assertRaises(sqlite3.IntegrityError):  # needs a source
-            conn.execute(
-                "INSERT INTO usage(source_id, provider, session_root)"
-                " VALUES (999, 'codex', 'x')"
-            )
-        conn.execute("DELETE FROM source WHERE id = ?", (src,))
-        left = conn.execute("SELECT count(*) FROM usage").fetchone()[0]
-        self.assertEqual(left, 0)  # erasing a source row drops its counts
 
 
 if __name__ == "__main__":

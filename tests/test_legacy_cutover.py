@@ -50,7 +50,7 @@ class LegacyCutoverTests(LegacyCase):
             result = self.resume()
         with closing(sqlite3.connect(self.ctx.data / "muninn.sqlite")) as conn:
             self.assertEqual(
-                conn.execute("PRAGMA user_version").fetchone()[0], 1
+                conn.execute("PRAGMA user_version").fetchone()[0], 2
             )
             self.assertEqual(
                 conn.execute("SELECT text FROM event").fetchall(),

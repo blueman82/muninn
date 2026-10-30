@@ -60,7 +60,7 @@ class CommitContext(StrictModel):
     knowledge_digest: Digest | None = None
 
 
-_EVIDENCE_ERRORS = {
+EVIDENCE_ERRORS = {
     "evidence_erased": "rejected_erased",
     "evidence_changed": "rejected_evidence",
     "evidence_unavailable": "rejected_evidence",
@@ -79,7 +79,7 @@ _EVIDENCE_ERRORS = {
 }
 
 
-def _receipt(
+def stored_receipt(
     conn: sqlite3.Connection, request_id: RequestId
 ) -> Receipt | None:
     """Reload the one durable success before consulting mutable state."""
@@ -119,7 +119,9 @@ def _current(conn: sqlite3.Connection, context: CommitContext) -> sqlite3.Row:
     return row
 
 
-def _policy(conn: sqlite3.Connection, row: sqlite3.Row) -> ReviewPolicy:
+def checked_request_policy(
+    conn: sqlite3.Connection, row: sqlite3.Row
+) -> ReviewPolicy:
     """Check immutable admission identities without calling admission reads."""
     try:
         policy = checked_policy(
@@ -180,7 +182,7 @@ def _evidence(
     except EvidenceLimitError as exc:
         raise CommitRejectedError(exc.code, "original evidence") from None
     except ValueError as exc:
-        code = _EVIDENCE_ERRORS.get(str(exc))
+        code = EVIDENCE_ERRORS.get(str(exc))
         if code is None:
             raise
         raise CommitRejectedError(code, "original evidence") from None
@@ -291,12 +293,12 @@ def commit_review(
     context = CommitContext.model_validate_json(canonical_json(context))
     conn.execute("BEGIN IMMEDIATE")
     try:
-        receipt = _receipt(conn, context.request_id)
+        receipt = stored_receipt(conn, context.request_id)
         if receipt is None:
             require_current_tombstones(conn, context.home)
             require_transaction(conn, context.now)
             row = _current(conn, context)
-            policy = _policy(conn, row)
+            policy = checked_request_policy(conn, row)
             if (
                 context.knowledge_digest is not None
                 and context.knowledge_digest

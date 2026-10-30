@@ -62,7 +62,7 @@ class LegacyPublicationTests(LegacyCase):
             self.assertRaisesRegex(OSError, "after rename"),
         ):
             self.resume()
-        self.assertEqual(self.version(), 1)
+        self.assertEqual(self.version(), 2)
         self.assertEqual(
             self.ctx.muninn.resolve(), self.ctx.rdir / "maintenance"
         )
@@ -95,7 +95,7 @@ class LegacyPublicationTests(LegacyCase):
         residue = set(self.ctx.data.glob("muninn.sqlite.recovery-*"))
         self.assertEqual(len(residue), 1)
         self.resume()
-        self.assertEqual(self.version(), 1)
+        self.assertEqual(self.version(), 2)
         self.assertTrue(all(path.exists() for path in residue))
 
     def test_configuration_failure_never_restores_or_replays_plugin_mutation(
@@ -110,7 +110,7 @@ class LegacyPublicationTests(LegacyCase):
             self.assertRaisesRegex(OSError, "config failure"),
         ):
             self.resume()
-        self.assertEqual(self.version(), 1)
+        self.assertEqual(self.version(), 2)
         self.assertEqual(
             self.ctx.muninn.resolve(), self.ctx.rdir / "maintenance"
         )
@@ -135,7 +135,7 @@ class LegacyPublicationTests(LegacyCase):
             self.assertRaisesRegex(OSError, "witness failure"),
         ):
             self.resume()
-        self.assertEqual(self.version(), 1)
+        self.assertEqual(self.version(), 2)
         before = self.data_state()["muninn.sqlite"][:2]
         self.resume()
         self.assertEqual(self.data_state()["muninn.sqlite"][:2], before)

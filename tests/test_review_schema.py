@@ -143,10 +143,10 @@ class ReviewSchemaTests(StoreCase):
 
     def test_marker_and_user_version_required(self) -> None:
         conn = self.rw()
-        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
+        self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
         self.assertEqual(
             tuple(conn.execute("SELECT * FROM store_meta").fetchone()),
-            (1, "muninn-knowledge", 1),
+            (1, "muninn-knowledge", 2),
         )
         self.assertEqual(
             tuple(conn.execute("SELECT * FROM review_control").fetchone()),
@@ -162,7 +162,7 @@ class ReviewSchemaTests(StoreCase):
                 contextlib.closing(opener(self.db)),
             ):
                 pass
-        conn.execute("PRAGMA user_version=1")
+        conn.execute("PRAGMA user_version=2")
         conn.execute("DELETE FROM store_meta")
         for opener in (store.connect_ro, store.connect_rw):
             with (
@@ -201,7 +201,7 @@ class ReviewSchemaTests(StoreCase):
 
     def test_wrong_marker_refused_without_ddl(self) -> None:
         store.ensure_private_dir(self.home)
-        for marker, version in (("historical", 1), ("muninn-knowledge", 2)):
+        for marker, version in (("historical", 2), ("muninn-knowledge", 1)):
             with self.subTest(marker=marker, version=version):
                 self.db.unlink(missing_ok=True)
                 with contextlib.closing(sqlite3.connect(self.db)) as old:
@@ -212,7 +212,7 @@ class ReviewSchemaTests(StoreCase):
                         "INSERT INTO store_meta VALUES (1,?,?)",
                         (marker, version),
                     )
-                    old.execute("PRAGMA user_version=1")
+                    old.execute("PRAGMA user_version=2")
                     old.commit()
                 original = self.db.read_bytes()
                 for opener in (store.connect_ro, store.connect_rw):

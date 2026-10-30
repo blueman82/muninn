@@ -1,4 +1,4 @@
-"""Durable review and revisioned knowledge tables for marked schema 1."""
+"""Durable review and revisioned knowledge tables for marked schema 2."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ KNOWLEDGE_SQL = r"""
 CREATE TABLE store_meta (
   singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
   format TEXT NOT NULL CHECK(format='muninn-knowledge'),
-  version INTEGER NOT NULL CHECK(version=1));
-INSERT INTO store_meta VALUES (1,'muninn-knowledge',1);
+  version INTEGER NOT NULL CHECK(version=2));
+INSERT INTO store_meta VALUES (1,'muninn-knowledge',2);
 CREATE TABLE review_control (
   singleton INTEGER PRIMARY KEY NOT NULL CHECK(singleton=1),
   generation INTEGER NOT NULL CHECK(generation>=0),
@@ -40,8 +40,16 @@ CREATE TABLE review_request (
     ('pending','running','waiting','completed','failed','cancelled')),
   current_attempt_id TEXT, created_at REAL NOT NULL,
   retry_at REAL, cancel_code TEXT,
-  UNIQUE(provider,thread_id,from_line,through_line,boundary_hash,
-    scope_json,policy_digest));
+  candidate_id TEXT, decision_revision INTEGER,
+  CHECK((candidate_id IS NULL AND decision_revision IS NULL) OR
+    (candidate_id IS NOT NULL AND decision_revision IS NOT NULL
+      AND typeof(decision_revision)='integer' AND decision_revision>0)),
+  FOREIGN KEY(candidate_id,decision_revision)
+    REFERENCES memory_decision(candidate_id,accepted_revision),
+  UNIQUE(candidate_id,decision_revision));
+CREATE UNIQUE INDEX review_request_ordinary ON review_request(
+  provider,thread_id,from_line,through_line,boundary_hash,scope_json,policy_digest)
+  WHERE candidate_id IS NULL;
 CREATE TRIGGER review_request_policy_immutable
   BEFORE UPDATE OF policy_json,policy_digest ON review_request
   WHEN new.policy_json IS NOT old.policy_json

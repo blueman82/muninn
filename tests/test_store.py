@@ -289,7 +289,7 @@ class InitializationTests(StoreCase):
             futures = [pool.submit(initialize) for _ in range(2)]
             self.assertEqual(
                 [f.result(timeout=10) for f in futures],
-                [(1, "muninn-knowledge", 1), (1, "muninn-knowledge", 1)],
+                [(1, "muninn-knowledge", 2), (1, "muninn-knowledge", 2)],
             )
         with contextlib.closing(sqlite3.connect(self.db)) as conn:
             self.assertEqual(

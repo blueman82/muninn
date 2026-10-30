@@ -155,7 +155,9 @@ def assert_store_format(conn: sqlite3.Connection) -> None:
         if exc.sqlite_errorcode != sqlite3.SQLITE_ERROR:
             raise
         raise StoreUnavailableError("cutover_required") from exc
-    if [tuple(row) for row in rows] != [(1, "muninn-knowledge", 1)]:
+    if [tuple(row) for row in rows] != [
+        (1, "muninn-knowledge", SCHEMA_VERSION)
+    ]:
         raise StoreUnavailableError("cutover_required")
 
 
