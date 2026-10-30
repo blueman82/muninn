@@ -32,6 +32,10 @@ def ensure_private_dir(path: Path) -> None:
 def open_private(path: Path, flags: int) -> int:
     """Open regular private state without writing before permission checks.
 
+    On POSIX, preserve an effective-user-owned exact-0600 descriptor when
+    no BSD flags are observable. Other modes, owners and flagged or unknown
+    BSD flag values retain permission normalization through fchmod.
+
     Args:
         path: State file beneath a private data directory.
         flags: os.open flags; do not include O_TRUNC before validation.
@@ -50,9 +54,17 @@ def open_private(path: Path, flags: int) -> int:
     flags |= os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(path, flags, 0o600)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        found = os.fstat(fd)
+        if not stat.S_ISREG(found.st_mode):
             raise OSError("state is not a regular file")
-        os.fchmod(fd, 0o600)
+        bsd_flags: object = getattr(found, "st_flags", 0)
+        if (
+            stat.S_IMODE(found.st_mode) != 0o600
+            or found.st_uid != os.geteuid()
+            or type(bsd_flags) is not int
+            or bsd_flags != 0
+        ):
+            os.fchmod(fd, 0o600)
     except BaseException:
         os.close(fd)
         raise
