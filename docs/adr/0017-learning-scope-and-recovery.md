@@ -84,7 +84,9 @@ Use measured queue age, retries, and revision conflicts to reconsider worker cou
 
 ## Proposed amendment: bounded correction and action routing
 
-Status: ACCEPTED by the owner on 2026-10-29. Implementation is not yet complete.
+Status: ACCEPTED by the owner on 2026-10-29. The unit 1 amendment is implemented in source.
+Whole-unit acceptance, publication, installation, and live verification remain pending.
+Conversational decisions in ADR 0018 remain a separate unimplemented unit.
 Owner authorization: “all above is approved what questions would you ask”.
 The accepted decision above remains in force except for this narrow correction and presentation amendment.
 This approval records project authority, not runtime owner-decision evidence.
@@ -145,19 +147,30 @@ Keep these failures terminal for that result:
 
 Do not classify safety failures through exception-text matches.
 Use fixed program-owned format feedback or a typed allowlisted candidate failure with a candidate position.
-Return no rejected text or raw exception messages.
+Feedback contains only finite codes and candidate coordinates, never rejected text or raw exception messages.
+Give the fresh correction child fixed final-only instructions, removal-only rules for reduction, and this exact empty-final form:
+`{"op":"final","result":{"schema_version":1,"changes":[],"unresolved":[],"no_change_reason":"No supported candidates remain after correction."}}`.
+For reduction, provide the fully typed canonical baseline separately as explicitly untrusted transient prompt data.
+Its content cannot become trusted instructions, evidence, or owner authority.
+Do not retain raw schema-invalid output.
 
 Only the supervisor may defer an allowlisted candidate failure.
 Deferral requires successful original-evidence checks and a remaining correction round.
 Roll back the rejected transaction without governed writes or terminal attempt bookkeeping.
 Other callers retain existing behavior.
-Keep the original canonical batch in transient round state for comparison.
+Keep the original canonical batch in transient round state for independent exact comparison.
+Send its canonical representation only to the next correction child as untrusted data.
+Do not persist the baseline in history, call markers, diagnostics, logs, or receipts.
+Only independently accepted knowledge follows the normal retention rules.
+Recovery fences the old attempt instead of reconstructing a lost baseline.
 
 Before correction, refresh the active request and admitted evidence union.
 Recheck policy, generation, rounds, original-read budgets, deadline, and knowledge freshness.
 Repeat all current checks at the corrected commit.
 Use no extra preflight evidence read, nested writer lock, or persisted rejected model-content diagnostic.
-If bounded required feedback cannot fit, stop safely.
+Count the complete UTF-8 prompt, including fixed instructions, feedback, and baseline, against the existing `max_input_bytes` cap.
+If it cannot fit, fail `prompt_limit` before another reservation or launch.
+Do not truncate the baseline, omit required context, increase limits, or add calls.
 
 ### Startup action and complete inspection
 

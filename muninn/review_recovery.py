@@ -23,6 +23,11 @@ _EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Run muninn doctor --pretty for current setup checks. "
         "Give unresolved safe diagnostics to the Muninn maintainer.",
     ),
+    "prompt_limit": (
+        "The complete review prompt exceeded its input byte limit.",
+        "Do not retry this request unchanged. "
+        "Ask the Muninn maintainer to inspect its prompt budget.",
+    ),
     "evidence_limit": (
         "Original-source verification exceeded its byte, record, "
         "or database-work limit.",

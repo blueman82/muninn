@@ -99,3 +99,9 @@ class LearningMessageTests(RequestCase):
         self.assertNotIn("\x1b", message)
         self.assertNotIn("\n", message)
         self.assertNotIn("</muninn-memory>", message)
+
+    def test_prompt_limit_has_fixed_no_retry_guidance(self) -> None:
+        issue = review_recovery.explain("prompt_limit", "prompt")
+        self.assertEqual(issue["code"], "prompt_limit")
+        self.assertIn("prompt", issue["cause"])
+        self.assertIn("Do not retry this request unchanged", issue["action"])

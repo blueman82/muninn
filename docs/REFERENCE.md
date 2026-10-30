@@ -379,6 +379,10 @@ These include rejected proposals, exhausted corrections, bounded retries, and de
 The finite contained codes are `deadline`, `unavailable`, `rejected_revision`, `rejected_authority`, `rejected_validation`, `rejected_evidence`, `rejected_erased`, `rejected_scope`, and all five `evidence_*limit` codes below.
 Sign-in, capability, binding, security, native tool events, uncertain processes, approval failures, and unknown codes remain visible.
 Setup notices remain visible.
+`prompt_limit` remains visible because the maintainer must inspect the prompt budget.
+The complete prompt, including any transient untrusted correction baseline, must fit the existing input cap.
+Muninn fails before another reservation or launch, without truncation, a limit increase, or an automatic retry.
+Do not retry the request unchanged.
 
 Closed admission remains visible even without a saved issue.
 An absent, invalid, or mismatched stored policy also produces a startup action.
@@ -466,6 +470,7 @@ Muninn keeps no source text between operations.
 | `deadline` | The review exceeded its deadline. Muninn uses a remaining attempt. |
 | `unavailable` | The runner did not finish successfully. Muninn uses a remaining attempt. |
 | `config` | Muninn could not verify setup and did not record the specific cause. The old stage cannot recover it. Run `muninn doctor --pretty` for current checks. Give unresolved safe diagnostics to the maintainer. |
+| `prompt_limit` | The complete review prompt exceeded its input byte limit. Ask the maintainer to inspect its prompt budget. Do not retry unchanged. Configured limits stay unchanged. |
 | `evidence_limit` | Original-source verification exceeded its byte, record, or database-work limit. Do not retry the request unchanged. Ask the maintainer to inspect its source-read budget. A narrower window can still require a read of earlier records. Muninn fails the request without an automatic retry. Limits and learning admission stay unchanged. Older `config` records cannot recover a cause that Muninn did not retain. |
 | `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, `evidence_selection_limit` | Final diagnostics identify the allowance: physical bytes, physical records, database work, or accumulated selected content, respectively. These allowances limit source verification. They differ from memory storage capacity and model context size. Ask the maintainer to inspect the allowance. Do not retry unchanged. Without a historical record, Muninn cannot reconstruct configured limits or measured counters. |
 | `capability_changed` | The approved runner setup changed. Muninn waits for that approved setup to return. |

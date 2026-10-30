@@ -98,6 +98,7 @@ class LearningStartupActionTests(CliLearningCase):
             "capability_executable_provenance",
             "effective_host_changed",
             "config",
+            "prompt_limit",
             "approval_required",
             "policy_invalid",
             "owner_pause",

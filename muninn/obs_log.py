@@ -99,6 +99,7 @@ _REVIEW_ERRORS = frozenset(
         "auth",
         "config",
         "evidence_limit",
+        "prompt_limit",
         "evidence_byte_limit",
         "evidence_record_limit",
         "evidence_work_limit",

@@ -10,6 +10,8 @@ from pydantic import Field, model_validator
 from muninn.knowledge_models import ReviewResult, StrictModel
 from muninn.review_json import canonical_json
 
+EMPTY_CORRECTION_REASON = "No supported candidates remain after correction."
+
 
 class RoundFormatError(ValueError):
     """Identify a schema failure after bounded strict JSON decoding."""
@@ -79,9 +81,7 @@ def require_reduction(original: ReviewResult, corrected: ReviewResult) -> None:
     before = len(original.changes) + len(original.unresolved)
     after = len(corrected.changes) + len(corrected.unresolved)
     if after >= before or (
-        after == 0
-        and corrected.no_change_reason
-        != "No supported candidates remain after correction."
+        after == 0 and corrected.no_change_reason != EMPTY_CORRECTION_REASON
     ):
         raise ValueError("rejected_validation")
     for previous, current in (

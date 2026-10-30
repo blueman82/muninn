@@ -11,7 +11,9 @@ This prose revision preserves the accepted ADR 0017 decision. Its wording has ch
 
 Implementation baseline: Muninn `a5ff0733a5ba5ec37febacd5445e4c10fc59b684`,
 including the reviewed PR #76 context fix. Initial research used `56d1977`.
-These proposed lifecycle changes are not implemented.
+Unit 1 (sections A–C and the synthetic procedure contract coverage) is implemented in source.
+Whole-unit acceptance, publication, installation, and live verification remain pending.
+Section D and ADR 0018 remain approved but unimplemented as unit 2.
 
 Upstream reference: Hermes Agent
 `fcc26fbd9f1641755e49793d7ed608f3b7214c3d`, inspected on 29 October 2026.
@@ -184,7 +186,12 @@ Remove at least one candidate. Keep the original order and exact canonical form 
 Apply the same restriction to both changes and unresolved items, or permit an empty result with a fixed no-change reason.
 
 Return a typed candidate position and a fixed failure code. Never return arbitrary exception text.
-Do not echo rejected model text into instructions or logs.
+Do not echo rejected model text into trusted instructions or logs.
+Give the fresh correction child fixed program-owned final-only instructions and the exact empty-final form:
+`{"op":"final","result":{"schema_version":1,"changes":[],"unresolved":[],"no_change_reason":"No supported candidates remain after correction."}}`.
+For reduction, also send the fully typed canonical baseline as separate, explicitly untrusted transient prompt data.
+It is comparison material, never evidence, owner authority, or instructions.
+Embedded instructions in candidate text remain data; they cannot change the correction rules.
 
 Allow correction only for these candidate failures:
 
@@ -207,8 +214,11 @@ Roll back the rejected transaction without governed writes or terminal attempt b
 All other callers and errors retain their existing behavior.
 Unknown evidence references, invalid targets, stale target revisions, policy changes, and generation fences remain terminal.
 
-Keep the original candidate batch in temporary `Round` state for the exact subset check.
-Do not persist rejected model content as a diagnostic or treat it as evidence.
+Keep the original candidate batch in temporary `Round` state for the independent exact subset check.
+Send its canonical representation only to the next correction child as untrusted data.
+Do not retain raw schema-invalid output or persist the baseline in history, call markers, diagnostics, logs, or receipts.
+Only independently accepted knowledge follows the normal retention rules.
+A restart fences the old attempt; it does not reconstruct a lost baseline.
 
 The corrected commit repeats all current checks against durable state and original bytes.
 Use no extra preflight evidence read. Do not acquire a nested writer lock.
@@ -221,8 +231,9 @@ Never use exception-string matches to convert a controlled-read or commit safety
 Before every correction call, refresh the active request and admitted evidence union.
 Recheck policy, generation, round allowance, original-read budgets, deadline, and existing knowledge freshness rules.
 Retain the same permit and attempt accounting.
-If prompt assembly cannot include bounded correction feedback, stop safely.
-Do not silently omit required context.
+The existing `max_input_bytes` cap covers the complete UTF-8 prompt, including fixed instructions, feedback, and the transient baseline.
+If the full prompt cannot fit, stop with `prompt_limit` before another reservation or launch.
+Do not truncate the baseline, omit required context, increase limits, or add calls.
 
 ### B. Owner-action selection
 

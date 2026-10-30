@@ -39,6 +39,7 @@ def failure_code(error: ValueError | OSError, fallback: str) -> str:
             "rejected_revision",
             "rejected_scope",
             "rejected_validation",
+            "prompt_limit",
         }
         or cause in EVIDENCE_LIMIT_CODES
         else fallback

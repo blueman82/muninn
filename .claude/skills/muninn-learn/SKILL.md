@@ -157,6 +157,10 @@ These include rejected proposals, exhausted corrections, bounded retries, and de
 The finite contained codes are `deadline`, `unavailable`, `rejected_revision`, `rejected_authority`, `rejected_validation`, `rejected_evidence`, `rejected_erased`, `rejected_scope`, `evidence_limit`, `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, and `evidence_selection_limit`.
 Sign-in, capability, binding, security, native tool events, uncertain processes, approval failures, and unknown codes remain visible.
 Setup notices remain visible.
+`prompt_limit` remains visible because the maintainer must inspect the prompt budget.
+The complete prompt, including any transient untrusted correction baseline, must fit the existing input cap.
+Muninn fails before another reservation or launch, without truncation, a limit increase, or an automatic retry.
+Do not retry the request unchanged.
 
 Closed admission remains visible even without a saved issue.
 An absent, invalid, or mismatched stored policy also produces a startup action.

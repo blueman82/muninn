@@ -161,6 +161,7 @@ class ReviewSupervisorCorrectionTests(SupervisorCase):
                 "index": None,
             },
         )
+        self.assertNotIn("correction_baseline", second)
         self.assertNotIn("DO-NOT-RETAIN", json.dumps(second))
         self.assertNotIn("DO-NOT-RETAIN", "\n".join(self.conn.iterdump()))
         calls = self.conn.execute(
@@ -222,7 +223,8 @@ class ReviewSupervisorCorrectionTests(SupervisorCase):
             },
         )
         self.assertEqual(self.prompt(2)["history"], [])
-        self.assertNotIn("Keep this fact.", json.dumps(self.prompt(2)))
+        baseline = self.prompt(2)["correction_baseline"]["result"]
+        self.assertEqual(baseline["changes"][0]["content"], "Keep this fact.")
 
     def test_corrective_read_and_second_correction_are_refused(self) -> None:
         self.runner(
