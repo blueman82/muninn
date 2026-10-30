@@ -5,12 +5,12 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import shlex
 import shutil
 import sqlite3
 import sys
 import unittest
 from contextlib import closing
-from pathlib import Path
 from unittest import mock
 
 from pydantic import TypeAdapter
@@ -49,7 +49,11 @@ class HostFixture(unittest.TestCase):
         actual = review_codex_policy.host_identity()
         self.old_host = "1" * 64 if actual != "1" * 64 else "2" * 64
         self.current_host = "3" * 64
-        self.executable = Path(sys.executable).resolve()
+        self.executable = self.home / "fixture-python"
+        self.executable.write_text(
+            f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"\n'
+        )
+        self.executable.chmod(0o700)
         for site in (
             "muninn.review_codex_policy.host_identity",
             "muninn.review_codex_launch.host_identity",
