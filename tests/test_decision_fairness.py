@@ -114,6 +114,11 @@ class DecisionFairnessTests(DecisionCase):
         self,
     ) -> None:
         a, b = self.waiting_pair()
+        self.transaction(
+            lambda: review_requests.cancel_request(
+                self.conn, self.context.request_id, 24.0
+            )
+        )
         canonical = [
             tuple(row)
             for row in self.conn.execute(
@@ -149,9 +154,7 @@ class DecisionFairnessTests(DecisionCase):
         late = self.intent(a)
         self.transaction(lambda: submit_intent(self.conn, late, 30.0))
         views = decision_requests.continue_decisions(self.home, 1, 31.0)
-        self.assertEqual(
-            (views[0].id, views[0].state), (a, "approved_pending")
-        )
+        self.assertEqual((views[0].id, views[0].state), (a, "saved"))
         self.assertEqual(
             tuple(
                 self.row(
@@ -161,10 +164,10 @@ class DecisionFairnessTests(DecisionCase):
             earlier,
         )
         self.assertEqual(
-            self.row("SELECT count(*) FROM review_attempt")[0], attempts
+            self.row("SELECT count(*) FROM review_attempt")[0], attempts + 2
         )
         self.assertEqual(self.row("SELECT count(*) FROM review_call")[0], 0)
-        self.assertEqual(self.row("SELECT count(*) FROM review_receipt")[0], 0)
+        self.assertEqual(self.row("SELECT count(*) FROM review_receipt")[0], 2)
 
     def test_blocked_approval_yields_and_already_queued_work_is_skipped(
         self,
@@ -212,9 +215,7 @@ class DecisionFairnessTests(DecisionCase):
             (first[0].id, first[0].code), (a.id, "rejected_revision")
         )
         second = decision_requests.continue_decisions(self.home, 1, 26.0)
-        self.assertEqual(
-            (second[0].id, second[0].state), (b.id, "approved_pending")
-        )
+        self.assertEqual((second[0].id, second[0].state), (b.id, "saved"))
         third = decision_requests.continue_decisions(self.home, 1, 27.0)
         self.assertEqual(
             (third[0].id, third[0].code), (a.id, "rejected_revision")
@@ -262,9 +263,7 @@ class DecisionFairnessTests(DecisionCase):
                 self.home, 1, 25.0, limit=2
             )
         self.assertEqual(len({view.id for view in views}), 2)
-        self.assertTrue(
-            all(view.state == "approved_pending" for view in views)
-        )
+        self.assertTrue(all(view.state == "saved" for view in views))
         self.assertEqual(verify.call_count, 2)
         self.assertIs(
             verify.call_args_list[0].args[-1],
@@ -384,4 +383,4 @@ with mock.patch.object(Supervisor, '_inputs', return_value=True), mock.patch(
             )[0]
         )
         self.assertEqual(self.row("SELECT count(*) FROM review_call")[0], 0)
-        self.assertEqual(self.row("SELECT count(*) FROM review_receipt")[0], 0)
+        self.assertEqual(self.row("SELECT count(*) FROM review_receipt")[0], 1)

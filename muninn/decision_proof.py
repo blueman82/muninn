@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 
@@ -18,13 +19,14 @@ from muninn.decision_models import (
 )
 from muninn.knowledge_scope import scope_applies
 from muninn.review_authority import injected
-from muninn.review_commit import EVIDENCE_ERRORS
+from muninn.review_commit_state import EVIDENCE_ERRORS
 from muninn.review_evidence import validate_evidence
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceRecord,
     EvidenceSelector,
     EvidenceWindow,
+    SourceRef,
 )
 from muninn.review_json import canonical_json, canonical_json_value
 from muninn.review_models import ReviewPolicy
@@ -95,11 +97,7 @@ def _original(
 def _persist(conn: sqlite3.Connection, record: EvidenceRecord) -> str:
     """Retain the verified selection using a stable governed identity."""
     data = record.model_dump(mode="json")
-    identity = record.model_dump(exclude={"id", "selected_at"}, mode="json")
-    digest = hashlib.sha256(
-        canonical_json_value(identity).encode()
-    ).hexdigest()
-    ident = f"E_{digest[:32]}"
+    ident = _stable_id(record)
     data["id"] = ident
     for key in ("scope", "selector", "original_locator"):
         data[f"{key}_json"] = canonical_json_value(data.pop(key))
@@ -174,12 +172,95 @@ def _supports(
         )
 
 
+def _stable_id(record: EvidenceRecord) -> str:
+    """Derive the exact persisted identity without writing evidence."""
+    identity = record.model_dump(exclude={"id", "selected_at"}, mode="json")
+    digest = hashlib.sha256(
+        canonical_json_value(identity).encode()
+    ).hexdigest()
+    return f"E_{digest[:32]}"
+
+
+def _retained(conn: sqlite3.Connection, record: EvidenceRecord) -> None:
+    """Require reused metadata to remain the exact retained live selection."""
+    row = conn.execute(
+        "SELECT * FROM review_evidence WHERE id=?", (record.id,)
+    ).fetchone()
+    data = record.model_dump(mode="json")
+    if row is None:
+        raise ValueError("owner_proof")
+    retained = dict(row)
+    for key in ("scope", "selector", "original_locator"):
+        retained[key] = json.loads(retained.pop(f"{key}_json"))
+    if any(
+        retained[key] != value
+        for key, value in data.items()
+        if key != "selected_at"
+    ):
+        raise ValueError("owner_proof")
+
+
+def _reuse(
+    conn: sqlite3.Connection,
+    evidence: tuple[EvidenceRecord, ...],
+    candidates: tuple[Candidate, ...],
+    owner: EvidenceRecord,
+    display: EvidenceRecord,
+) -> None:
+    """Bind fresh admitted records to complete proof and original supports."""
+    records = {record.id: record for record in evidence}
+    required = {
+        ref
+        for candidate in candidates
+        for ref in candidate.original_evidence_ids
+    } | {_stable_id(owner), _stable_id(display)}
+    if (
+        len(records) != len(evidence)
+        or set(records) != required
+        or any(record.state != "live" for record in evidence)
+    ):
+        raise ValueError("owner_proof")
+    for record in evidence:
+        _retained(conn, record)
+        source_row(
+            conn,
+            SourceRef(provider=record.provider, thread_id=record.thread_id),
+        )
+    for fresh in (owner, display):
+        retained = records[_stable_id(fresh)]
+        if fresh.model_dump(
+            exclude={"id", "selected_at"}
+        ) != retained.model_dump(exclude={"id", "selected_at"}):
+            raise ValueError("owner_proof")
+
+
+def _checked_supports(
+    conn: sqlite3.Connection,
+    home: Path,
+    candidates: tuple[Candidate, ...],
+    policy: ReviewPolicy,
+    budget: ReadBudget,
+    start: int,
+    selections: tuple[
+        tuple[EvidenceRecord, ...] | None, EvidenceRecord, EvidenceRecord
+    ],
+) -> None:
+    """Reuse commit records or physically validate standalone supports."""
+    evidence, owner, display = selections
+    if evidence is None:
+        _supports(conn, home, candidates, policy, budget, start)
+    else:
+        _reuse(conn, evidence, candidates, owner, display)
+
+
 def verify_decision(
     conn: sqlite3.Connection,
     home: Path,
     intent: DecisionIntent,
     policy: ReviewPolicy,
     budget: ReadBudget,
+    *,
+    from_evidence: tuple[EvidenceRecord, ...] | None = None,
 ) -> VerifiedDecision:
     """Verify originals and retain actual evidence in the caller transaction.
 
@@ -189,6 +270,7 @@ def verify_decision(
         intent: Locator-only action, revalidated without trusting caller flags.
         policy: Operation projection, scope and total input bounds.
         budget: The single operation allowance, including remaining charges.
+        from_evidence: Actual records freshly revalidated by the commit owner.
 
     Returns:
         Internal proof referencing actual persisted original selections.
@@ -201,7 +283,9 @@ def verify_decision(
     back the transaction on failure. No decision or candidate state is changed.
     """
     try:
-        return _verify(conn, home, intent, policy, budget)
+        return _verify(
+            conn, home, intent, policy, budget, from_evidence=from_evidence
+        )
     except EvidenceLimitError:
         raise
     except ValueError as exc:
@@ -221,6 +305,8 @@ def _verify(
     intent: DecisionIntent,
     policy: ReviewPolicy,
     budget: ReadBudget,
+    *,
+    from_evidence: tuple[EvidenceRecord, ...] | None = None,
 ) -> VerifiedDecision:
     """Check all proof predicates before retaining governed selections."""
     if not conn.in_transaction:
@@ -271,7 +357,15 @@ def _verify(
     candidates = (view.candidate,)
     if intent.replacement_id is not None and target.candidate is not None:
         candidates += (target.candidate,)
-    _supports(conn, home, candidates, policy, budget, start)
+    _checked_supports(
+        conn,
+        home,
+        candidates,
+        policy,
+        budget,
+        start,
+        (from_evidence, owner, display),
+    )
     return VerifiedDecision(
         candidate_id=view.id,
         candidate_digest=view.digest,

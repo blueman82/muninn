@@ -180,3 +180,13 @@ class VerifiedDecision(StrictModel):
         ):
             raise ValueError("decision_invalid")
         return self
+
+
+class DecisionFence(StrictModel):
+    """Bind an exact derived application to its accepted approval revision."""
+
+    candidate_id: DecisionId
+    candidate_digest: Digest
+    revision: DecisionRevision
+    owner_evidence_id: EvidenceId
+    derived_digest: Digest

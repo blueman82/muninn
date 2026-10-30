@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
 from pydantic import TypeAdapter
 
+from muninn.decision_execution import execute_application
+from muninn.decision_execution import saved_view as _saved
+from muninn.decision_identity import application_key as _application_key
 from muninn.decision_models import (
     DecisionCode,
     DecisionId,
@@ -20,11 +22,10 @@ from muninn.decision_proof import verify_decision
 from muninn.decision_write import (
     accept_decision,
     decision_view,
-    submit_intent,
 )
 from muninn.knowledge_write import target
-from muninn.review_commit import EVIDENCE_ERRORS
-from muninn.review_json import canonical_json, canonical_json_value
+from muninn.review_commit_state import EVIDENCE_ERRORS
+from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewPolicy
 from muninn.review_progress import (
     check_window,
@@ -35,22 +36,6 @@ from muninn.review_progress import (
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_request_views import request_row, request_view
 from muninn.review_supervisor_store import database
-
-
-def _application_key(ident: DecisionId, frozen: str, revision: int) -> str:
-    """Hash only the frozen candidate and accepted revision in a new domain."""
-    payload = canonical_json_value(
-        {
-            "candidate_id": ident,
-            "candidate_digest": frozen,
-            "decision_revision": revision,
-        }
-    ).encode()
-    result = hashlib.sha256()
-    for part in (b"muninn-memory-application-v1", payload):
-        result.update(len(part).to_bytes(8, "big"))
-        result.update(part)
-    return result.hexdigest()
 
 
 def _policy(conn: sqlite3.Connection) -> ReviewPolicy:
@@ -310,25 +295,6 @@ def _verify_pending(
         conn.execute("RELEASE memory_proof")
 
 
-def _saved(
-    conn: sqlite3.Connection, view: DecisionView, now: float
-) -> DecisionView:
-    """Return the receipt and retire losing intent without acceptance."""
-    if view.receipt is None:
-        raise ValueError("decision_invalid")
-    row = conn.execute(
-        "SELECT locator_json FROM memory_decision WHERE candidate_id=? "
-        "AND accepted_revision IS NULL AND state='waiting_verification' "
-        "ORDER BY submitted_at DESC,id DESC LIMIT 1",
-        (view.id,),
-    ).fetchone()
-    if row is not None:
-        return submit_intent(
-            conn, DecisionIntent.model_validate_json(row[0]), now
-        )
-    return view
-
-
 def _step(
     conn: sqlite3.Connection,
     home: Path,
@@ -374,9 +340,17 @@ def request_application(
         if view.state == "saved":
             return _saved(conn, view, now)
         policy = _policy(conn)
-        return _step(
+        generation = conn.execute(
+            "SELECT generation FROM review_control"
+        ).fetchone()[0]
+        view = _step(
             conn, home, ident, now, policy, ReadBudget(policy.max_input_bytes)
         )
+    return (
+        execute_application(home, ident, now, generation)
+        if view.state == "approved_pending"
+        else view
+    )
 
 
 def continue_decisions(
@@ -409,8 +383,10 @@ def continue_decisions(
             "d.candidate_id=c.id "
             "AND d.accepted_revision IS NULL AND "
             "d.state='waiting_verification') "
-            "OR (c.state='approved_pending' AND c.application_request_id IS "
-            "NULL)) "
+            "OR (c.state='approved_pending' AND (c.application_request_id IS "
+            "NULL OR EXISTS(SELECT 1 FROM review_request r WHERE "
+            "r.id=c.application_request_id AND "
+            "r.state IN ('pending','waiting'))))) "
             "ORDER BY c.rowid LIMIT ?",
             (limit,),
         ).fetchall()
@@ -426,4 +402,11 @@ def continue_decisions(
                 "(SELECT max(rowid)+1 FROM memory_candidate) WHERE id=?",
                 (row[0],),
             )
-        return tuple(output)
+    return tuple(
+        (
+            execute_application(home, view.id, now, generation)
+            if view.state == "approved_pending"
+            else view
+        )
+        for view in output
+    )

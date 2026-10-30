@@ -7,7 +7,12 @@ from contextlib import suppress
 from copy import deepcopy
 
 from muninn import classify, ingest, review_requests
-from muninn.decision_candidates import show_candidate, stage_candidate
+from muninn.decision_apply import enrich_support
+from muninn.decision_candidates import (
+    candidate_view,
+    show_candidate,
+    stage_candidate,
+)
 from muninn.decision_models import (
     CandidateInput,
     DecisionIntent,
@@ -15,6 +20,7 @@ from muninn.decision_models import (
     VerifiedDecision,
 )
 from muninn.decision_proof import verify_decision
+from muninn.decision_requests import admit_application
 from muninn.decision_write import accept_decision, submit_intent
 from muninn.knowledge_models import ReviewResult
 from muninn.review_commit import CommitContext
@@ -184,52 +190,43 @@ class DecisionCase(CommitCase):
         return intent.model_copy(update={"display_locator": locator})
 
     def saved_fixture(self, ident: str) -> Receipt:
-        """Associate a real checked write receipt with a saved fixture.
-
-        This fixture finalizes only the candidate association. It does not
-        emulate the future atomic decision application or its writer races.
-        """
+        """Commit through exact application without forcing candidate state."""
         self.transaction(
             lambda: review_requests.cancel_request(
                 self.conn, self.context.request_id, 20.0
             )
         )
-        request = "R_" + "f" * 32
-        self.conn.execute(
-            "INSERT INTO review_request(id,duplicate_key,provider,thread_id,"
-            "session_root,from_line,through_line,boundary_hash,scope_json,"
-            "policy_json,policy_digest,trigger,origin,state,created_at,"
-            "candidate_id,decision_revision) SELECT ?,?,provider,thread_id,"
-            "session_root,from_line,through_line,boundary_hash,scope_json,"
-            "policy_json,policy_digest,'explicit','proposal','pending',"
-            "21.0,?,1 FROM review_request WHERE id=?",
-            (request, request, ident, self.context.request_id),
-        )
-        ids = self.context.evidence_ids
-        self.conn.executemany(
-            "INSERT INTO review_input VALUES(?,?)",
-            [(request, evidence) for evidence in ids],
+        request = self.transaction(
+            lambda: admit_application(self.conn, self.home, ident, 1, 21.0)
         )
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(self.conn, request, 1, 22.0)
+            lambda: review_requests.claim_attempt(
+                self.conn, request.id, 1, 22.0
+            )
+        )
+        ids = tuple(
+            row[0]
+            for row in self.conn.execute(
+                "SELECT evidence_id FROM review_input WHERE request_id=?",
+                (request.id,),
+            )
         )
         self.context = CommitContext(
             home=self.home,
-            request_id=request,
+            request_id=request.id,
             attempt_id=attempt.id,
             generation=1,
             evidence_ids=ids,
             now=23.0,
         )
-        receipt = self.save(self.result([self.note()]))
-        self.transaction(
-            lambda: self.conn.execute(
-                "UPDATE memory_candidate SET state='saved',"
-                "application_request_id=? WHERE id=?",
-                (request, ident),
-            )
-        )
-        return receipt
+        view = candidate_view(self.conn, ident)
+        assert view.candidate is not None
+        owner = self.conn.execute(
+            "SELECT owner_evidence_id FROM memory_decision "
+            "WHERE candidate_id=? AND accepted_revision=?",
+            (ident, view.revision),
+        ).fetchone()[0]
+        return self.save(enrich_support(view.candidate, owner))
 
     def fork_intent(
         self, ident: str, *, pending: bool = True

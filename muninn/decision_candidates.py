@@ -28,7 +28,7 @@ from muninn.knowledge_models import (
 from muninn.knowledge_write import body_of, claims, redacted_body, target
 from muninn.redaction import redact, redact_parts
 from muninn.review_candidates import validate_batch
-from muninn.review_commit import (
+from muninn.review_commit_state import (
     EVIDENCE_ERRORS,
     checked_request_policy,
     stored_receipt,

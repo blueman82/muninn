@@ -338,9 +338,8 @@ with store.writer_lock(home, wait_s=0):
         ):
             supervisor.tick(25.0)
         view = decision_requests.decision_view(self.conn, candidate.id)
-        self.assertEqual(
-            (view.state, view.receipt), ("approved_pending", None)
-        )
+        self.assertEqual(view.state, "saved")
+        self.assertIsNotNone(view.receipt)
         self.assertIsNotNone(
             self.row(
                 "SELECT application_request_id FROM memory_candidate WHERE "

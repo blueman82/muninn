@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from functools import partial
+from unittest import mock
 
-from muninn import decision_requests, review_requests
+from muninn import decision_requests, review_originals, review_requests
+from muninn.decision_candidates import candidate_view
 from muninn.decision_write import submit_intent
+from muninn.review_json import canonical_json
 from muninn.review_supervisor import Supervisor
 from tests.decision_support import DecisionCase
 
@@ -85,8 +88,12 @@ class DecisionRequestLimitTests(DecisionCase):
     ) -> None:
         self.bounded_policy()
         candidate = self.stage()
-        self.submit(candidate.id)
-        decision_requests.request_application(self.home, candidate.id, 25.0)
+        self.approve(self.intent(candidate.id))
+        self.transaction(
+            lambda: decision_requests.admit_application(
+                self.conn, self.home, candidate.id, 1, 25.0
+            )
+        )
         application = self.row(
             "SELECT application_request_id FROM memory_candidate WHERE id=?",
             (candidate.id,),
@@ -121,8 +128,8 @@ class DecisionRequestLimitTests(DecisionCase):
         )
         supervisor = Supervisor(self.home, self.policy)
         supervisor.generation = 2
-        self.assertIsNone(supervisor._claim(33.0))
-        decision_requests.continue_decisions(self.home, 2, 33.0)
+        self.assertIsNone(supervisor._claim(31.0))
+        decision_requests.continue_decisions(self.home, 2, 31.0)
         self.assertEqual(
             self.row(
                 "SELECT count(*) FROM review_attempt WHERE request_id=?",
@@ -138,8 +145,12 @@ class DecisionRequestLimitTests(DecisionCase):
     ) -> None:
         self.bounded_policy()
         candidate = self.stage()
-        self.submit(candidate.id)
-        decision_requests.request_application(self.home, candidate.id, 25.0)
+        self.approve(self.intent(candidate.id))
+        self.transaction(
+            lambda: decision_requests.admit_application(
+                self.conn, self.home, candidate.id, 1, 25.0
+            )
+        )
         application = self.row(
             "SELECT application_request_id FROM memory_candidate WHERE id=?",
             (candidate.id,),
@@ -195,4 +206,124 @@ class DecisionRequestLimitTests(DecisionCase):
                 (application,),
             )[0],
             3,
+        )
+
+    def test_real_driver_budget_refusal_releases_capacity_same_generation(
+        self,
+    ) -> None:
+        self.transaction(
+            lambda: review_requests.cancel_request(
+                self.conn, self.context.request_id, 14.0
+            )
+        )
+        self.policy = self.policy.model_copy(update={"max_input_bytes": 8000})
+        self.conn.execute(
+            "UPDATE review_control SET policy_json=?,policy_digest=?",
+            (canonical_json(self.policy), self.digest(self.policy)),
+        )
+        self.context = self.start()
+        blocked, ready = self.stage(), self.stage()
+        proof = self.approve(self.intent(blocked.id))
+        self.transaction(
+            lambda: review_requests.cancel_request(
+                self.conn, self.context.request_id, 20.0
+            )
+        )
+        original = tuple(
+            self.row(
+                "SELECT * FROM review_request WHERE id=?",
+                (self.context.request_id,),
+            )
+        )
+        accepted = tuple(
+            self.row(
+                "SELECT * FROM memory_decision WHERE candidate_id=?",
+                (blocked.id,),
+            )
+        )
+        evidence = [
+            tuple(row)
+            for row in self.conn.execute("SELECT * FROM review_evidence")
+        ]
+        with mock.patch.object(
+            review_originals, "_jsonl", wraps=review_originals._jsonl
+        ) as reads:
+            view = decision_requests.request_application(
+                self.home, blocked.id, 25.0
+            )
+        self.assertEqual(
+            (view.state, view.code, view.receipt),
+            ("approved_pending", "evidence_byte_limit", None),
+        )
+        self.assert_failed_application(blocked.id)
+        self.assertEqual(
+            [
+                tuple(row)
+                for row in self.conn.execute("SELECT * FROM review_evidence")
+            ],
+            evidence,
+        )
+        self.assertEqual(
+            tuple(
+                self.row(
+                    "SELECT * FROM memory_decision WHERE candidate_id=?",
+                    (blocked.id,),
+                )
+            ),
+            accepted,
+        )
+        self.assertEqual(
+            proof.owner_evidence_id,
+            self.row(
+                "SELECT owner_evidence_id FROM memory_decision "
+                "WHERE candidate_id=?",
+                (blocked.id,),
+            )[0],
+        )
+        self.assertIsNotNone(reads.call_args.kwargs["budget"])
+        self.approve(self.fork_intent(ready.id, pending=False))
+        later = decision_requests.continue_decisions(self.home, 1, 100000.0)
+        self.assertEqual(
+            [(item.id, item.state) for item in later], [(ready.id, "saved")]
+        )
+        self.assertEqual(
+            self.row(
+                "SELECT count(*) FROM review_request WHERE state='running'"
+            )[0],
+            0,
+        )
+        self.assertEqual(self.row("SELECT count(*) FROM review_call")[0], 0)
+        self.assertEqual(
+            tuple(
+                self.row(
+                    "SELECT * FROM review_request WHERE id=?",
+                    (self.context.request_id,),
+                )
+            ),
+            original,
+        )
+        self.assertEqual(candidate_view(self.conn, blocked.id).revision, 1)
+        self.assertEqual(
+            candidate_view(self.conn, blocked.id).state, "approved_pending"
+        )
+
+    def assert_failed_application(self, ident: str) -> None:
+        """Require refusal to close the attempt and release shared capacity."""
+        self.assertEqual(self.row("SELECT count(*) FROM knowledge")[0], 0)
+        self.assertEqual(self.row("SELECT count(*) FROM review_receipt")[0], 0)
+        request = self.row(
+            "SELECT r.* FROM review_request r JOIN memory_candidate c "
+            "ON c.application_request_id=r.id WHERE c.id=?",
+            (ident,),
+        )
+        self.assertNotEqual(request["state"], "running")
+        self.assertEqual(
+            tuple(
+                self.row(
+                    "SELECT ended_at,error_code FROM review_attempt "
+                    "WHERE request_id=?",
+                    (request["id"],),
+                )
+            ),
+            (25.0, "evidence_byte_limit"),
         )
