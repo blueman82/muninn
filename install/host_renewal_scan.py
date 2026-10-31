@@ -15,6 +15,7 @@ from pydantic import TypeAdapter
 
 from install.context import StepFailedError
 from install.host_renewal_files import capture_files, requires_key
+from install.host_renewal_history import CompletedHistory, attempt_view
 from install.host_renewal_jobs import RetryLimits, jobs_match
 from install.host_renewal_models import (
     ContainmentJob,
@@ -92,6 +93,7 @@ class _Scan:
         self.learning: LearningSelection | None = None
         self.requests: dict[str, RequestView] = {}
         self.attempts: dict[str, AttemptView] = {}
+        self.completed = CompletedHistory()
         self.counts: dict[str, int] = {}
         self.request_ids: list[RequestId] = []
         self.attempt_ids: list[AttemptId] = []
@@ -157,30 +159,25 @@ class _Scan:
         if row["policy_digest"] == self.candidate:
             raise StepFailedError("host_renewal_digest_reused")
         self.request_ids.append(TypeAdapter(RequestId).validate_python(ident))
-        if self.before is None and row["current_attempt_id"] is not None:
-            self.named[ident] = cast(str, row["current_attempt_id"])
+        historical = ident not in self.named and self.completed.add(row)
+        pointer = cast(str | None, row["current_attempt_id"])
+        if self.before is None and pointer is not None and not historical:
+            self.named[ident] = pointer
         if ident in self.named:
             self.requests[ident] = request_view(row)
             self.counts[ident] = 0
 
     def attempt(self, row: sqlite3.Row) -> None:
         """Count all attempts while projecting only named predecessors."""
-        data = dict(row)
         ident, request = cast(str, row["id"]), cast(str, row["request_id"])
         self.attempt_ids.append(TypeAdapter(AttemptId).validate_python(ident))
+        self.completed.resolve(row)
         if request in self.named:
             self.counts[request] = self.counts.get(request, 0) + 1
         if row["ended_at"] is None and self.named.get(request) != ident:
             raise ValueError("host_renewal_job_invalid")
         if self.named.get(request) == ident:
-            for key in ("requested", "observed", "usage"):
-                raw = data.pop(key + "_json")
-                data[key] = (
-                    json.loads(cast(str, raw)) if raw is not None else None
-                )
-            self.attempts[ident] = AttemptView.model_validate_json(
-                json.dumps({"schema_version": 1, **data})
-            )
+            self.attempts[ident] = attempt_view(row)
 
     def invariant(
         self, table: str, data: dict[str, object]
@@ -314,6 +311,7 @@ class _Scan:
         """Require complete linkage before returning scan results."""
         if (
             self.control is None
+            or self.completed.references
             or set(self.requests) != set(self.named)
             or set(self.attempts) != set(self.named.values())
         ):
