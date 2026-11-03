@@ -352,6 +352,8 @@ def _tombstone_key(home: Path) -> CheckResult:
 
 def _launchd_job() -> CheckResult:
     """Check whether launchd's positive PID is visible as a live process."""
+    if sys.platform == "win32":
+        return _result("launchd_job", False, "native scheduler pending")
     try:
         job = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
     except OSError:
@@ -371,21 +373,18 @@ def _launchd_job() -> CheckResult:
         process = run(["ps", "-o", "pid=", "-p", pid])
     except OSError:
         return _result("launchd_job", None, "process_inspection_unavailable")
-    if process.returncode:
-        detail = {
-            127: "process_inspection_unavailable",
-            124: "process_inspection_timeout",
-        }
-        return _result(
-            "launchd_job",
-            None,
-            detail.get(process.returncode, "process_inspection_failed"),
-        )
-    verified = process.stdout.strip() == pid.encode()
+    verified = (
+        process.returncode == 0 and process.stdout.strip() == pid.encode()
+    )
+    detail = {
+        0: pid if verified else "process_pid_unverified",
+        127: "process_inspection_unavailable",
+        124: "process_inspection_timeout",
+    }
     return _result(
         "launchd_job",
         True if verified else None,
-        pid if verified else "process_pid_unverified",
+        detail.get(process.returncode, "process_inspection_failed"),
     )
 
 
