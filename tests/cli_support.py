@@ -96,7 +96,7 @@ def fake_run(
 
     Args:
         pid: Pid ``launchctl print`` reports; ``None`` means job not found.
-        cmd: Command line ``ps -p`` reports for that pid.
+        cmd: Command line ``ps -ww`` reports for that pid.
         ps: Output of any other command.
 
     Returns:
@@ -113,6 +113,9 @@ def fake_run(
             return subprocess.CompletedProcess(
                 args, 0, f"\tstate = running\n\tpid = {pid}\n".encode(), b""
             )
+        if args[:3] == ["ps", "-o", "pid="] and "-p" in args:
+            output = "" if pid is None else f"{pid}\n"
+            return subprocess.CompletedProcess(args, 0, output.encode(), b"")
         if args[:2] == ["ps", "-ww"] and "-p" in args:
             return subprocess.CompletedProcess(
                 args, 0, (cmd or "").encode(), b""

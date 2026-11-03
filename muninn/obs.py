@@ -81,13 +81,6 @@ class DoctorReport(TypedDict):
     recovery_guidance: NotRequired[RecoveryGuidance]
 
 
-class JobInfo(TypedDict):
-    """The launchd job: its process id (if running) and command line."""
-
-    pid: int | None
-    cmd: str
-
-
 def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
     """Run launchctl or ps for doctor.
 
@@ -136,23 +129,6 @@ def _lock_free(home: Path) -> bool:
             return True
     except (store.BusyError, OSError):
         return False
-
-
-def _job() -> JobInfo | None:
-    """Return the launchd job's pid and command, or None if not loaded."""
-    if sys.platform == "win32":
-        return None
-    r = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
-    if r.returncode:
-        return None
-    found = re.search(rb"^\s*pid = (\d+)\s*$", r.stdout, re.MULTILINE)
-    if not found:
-        return {"pid": None, "cmd": ""}
-    ps = run(["ps", "-ww", "-o", "command=", "-p", found[1].decode()])
-    return {
-        "pid": int(found[1]),
-        "cmd": ps.stdout.decode(errors="replace").strip(),
-    }
 
 
 def _data_dir_mode(home: Path) -> CheckResult:
@@ -375,15 +351,42 @@ def _tombstone_key(home: Path) -> CheckResult:
 
 
 def _launchd_job() -> CheckResult:
-    """The launchd job is loaded and running."""
-    if sys.platform == "win32":
-        return _result("launchd_job", False, "native scheduler pending")
-    job = _job()
-    if job is None:
-        return _result("launchd_job", False, None)
-    # Loaded but with no pid yet is "unknown" (ok=None), not a failure.
-    pid = job["pid"]
-    return _result("launchd_job", None if pid is None else bool(pid), pid)
+    """Check whether launchd's positive PID is visible as a live process."""
+    try:
+        job = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
+    except OSError:
+        return _result("launchd_job", None, "launchctl_unavailable")
+    if job.returncode:
+        detail = {127: "launchctl_unavailable", 124: "launchctl_timeout"}
+        return _result(
+            "launchd_job",
+            None if job.returncode == 127 else False,
+            detail.get(job.returncode, "launchctl_failed"),
+        )
+    found = re.findall(rb"^\s*pid = (\d+)\s*$", job.stdout, re.MULTILINE)
+    if len(found) != 1 or int(found[0]) <= 0:
+        return _result("launchd_job", None, "launchctl_pid_unavailable")
+    pid = str(int(found[0]))
+    try:
+        process = run(["ps", "-o", "pid=", "-p", pid])
+    except OSError:
+        return _result("launchd_job", None, "process_inspection_unavailable")
+    if process.returncode:
+        detail = {
+            127: "process_inspection_unavailable",
+            124: "process_inspection_timeout",
+        }
+        return _result(
+            "launchd_job",
+            None,
+            detail.get(process.returncode, "process_inspection_failed"),
+        )
+    verified = process.stdout.strip() == pid.encode()
+    return _result(
+        "launchd_job",
+        True if verified else None,
+        pid if verified else "process_pid_unverified",
+    )
 
 
 def _roots_readable(env: Mapping[str, str]) -> CheckResult:
