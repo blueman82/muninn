@@ -29,6 +29,9 @@ from muninn.review_runner import (
     config_fingerprint,
     file_digest,
 )
+from muninn.review_runtime_models import (
+    require_legacy_runner,
+)
 from tools.learning_eval.account import Account
 from tools.learning_eval.cases import digest, strict_json
 from tools.learning_eval.models import Assessment, TrialAuthorization
@@ -205,7 +208,7 @@ def create_binding(
         canonical_schema(protocol),
         1024 * 1024,
     )
-    requested = assessment.policies[0].runner
+    requested = require_legacy_runner(assessment.policies[0].runner)
     environment = {
         "HOME": str(home),
         "CODEX_HOME": str(auth_home),

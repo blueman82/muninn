@@ -9,7 +9,6 @@ import struct
 import subprocess
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Literal
 
 from muninn.knowledge_models import AttemptId
@@ -18,90 +17,39 @@ from muninn.review_models import (
     ObservedConfig,
     ProcessIdentity,
     ReviewPolicy,
-    Usage,
 )
 from muninn.review_output import decode_claude_output
+from muninn.review_process_events import (
+    ProcessEvent as ProcessEvent,
+)
+from muninn.review_process_events import (
+    ProcessOutcome as ProcessOutcome,
+)
+from muninn.review_process_events import (
+    ProcessSlot as _Slot,
+)
+from muninn.review_process_events import (
+    RunningProcess as RunningProcess,
+)
+from muninn.review_process_events import (
+    WorkerLaunched as WorkerLaunched,
+)
+from muninn.review_process_events import (
+    WorkerPrestartRefused as WorkerPrestartRefused,
+)
+from muninn.review_process_events import (
+    WorkerReady as WorkerReady,
+)
 from muninn.review_process_identity import identify, sole_zombie
 from muninn.review_process_protocol import (
     CONTROL_HEADER_MAX,
     LaunchNotice,
+    PrestartRefusalNotice,
     TerminalNotice,
-    load,
+    decode_control,
+    object_packet,
 )
 from muninn.review_process_quiescence import group_quiescent
-
-
-@dataclass(frozen=True)
-class RunningProcess:
-    """Retain one unreaped wrapper and its established native identity."""
-
-    attempt_id: AttemptId
-    round_index: int
-    wrapper: subprocess.Popen[bytes]
-    identity: ProcessIdentity
-    deadline: float
-    output_limit: int
-
-
-@dataclass(frozen=True)
-class WorkerReady:
-    """Report a verified wrapper before durable identity and activation."""
-
-    attempt_id: AttemptId
-    round_index: int
-    identity: ProcessIdentity
-    kind: Literal["ready"] = "ready"
-
-
-@dataclass(frozen=True)
-class WorkerLaunched:
-    """Report actual CLI creation separately from parent activation."""
-
-    attempt_id: AttemptId
-    round_index: int
-    launched_at: float
-    cli_identity: ProcessIdentity
-    kind: Literal["launched"] = "launched"
-
-
-@dataclass(frozen=True)
-class ProcessOutcome:
-    """Return bounded decoded bytes only after wrapper containment and reap."""
-
-    attempt_id: AttemptId
-    round_index: int
-    stdout: bytes
-    exit_code: int | None
-    error_code: str | None
-    elapsed_seconds: float
-    observed: ObservedConfig
-    usage: Usage | None
-    kind: Literal["outcome"] = "outcome"
-
-
-type ProcessEvent = WorkerReady | WorkerLaunched | ProcessOutcome
-
-
-@dataclass
-class _Slot:
-    """Retain at most one event per phase and bounded pipe state."""
-
-    handle: RunningProcess
-    began: float = field(default_factory=time.monotonic)
-    ready: WorkerReady | None = None
-    launched: WorkerLaunched | None = None
-    terminal: ProcessOutcome | None = None
-    activation: bytes | None = None
-    configured: bool = False
-    activated: bool = False
-    error: str | None = None
-    phase: int = 0
-    buffer: bytearray = field(default_factory=bytearray)
-    output: bytearray = field(default_factory=bytearray)
-    output_count: int = 0
-    write_at: int = 0
-    exit_code: int | None = None
-    finished: bool = False
 
 
 def contain(handle: RunningProcess) -> int:
@@ -181,6 +129,7 @@ class ProcessMonitor:
         """Transfer one bounded frame for monitor-owned nonblocking writes."""
         if len(frame) > 12 + CONTROL_HEADER_MAX + self.limits.max_input_bytes:
             raise ValueError("activation_limit")
+        control, _ = decode_control(frame, self.limits.max_input_bytes)
         with self.lock:
             slot = self.slots.get((attempt_id, round_index))
             if (
@@ -190,8 +139,12 @@ class ProcessMonitor:
                 or slot.terminal is not None
             ):
                 raise ValueError("invalid_worker_phase")
+            if control.replacement != slot.replacement:
+                raise ValueError("invalid_worker_phase")
+            slot.managed = control.execution is not None
             slot.activation = frame
             slot.activated = True
+            slot.write_at = 0
 
     def drain(self) -> tuple[ProcessEvent, ...]:
         """Transfer ordered ready, launched and cleaned terminal references."""
@@ -200,10 +153,16 @@ class ProcessMonitor:
             for key, slot in tuple(self.slots.items()):
                 events.extend(
                     event
-                    for event in (slot.ready, slot.launched, slot.terminal)
+                    for event in (
+                        slot.ready,
+                        slot.refused,
+                        slot.launched,
+                        slot.terminal,
+                    )
                     if event is not None
                 )
                 slot.ready = slot.launched = None
+                slot.refused = None
                 if slot.terminal is not None:
                     del self.slots[key]
         return tuple(events)
@@ -321,9 +280,7 @@ class ProcessMonitor:
         if tag in (b"O", b"E"):
             self._output(slot, tag, body)
             return
-        value = load(body)
-        if not isinstance(value, dict):
-            raise ValueError("invalid_worker_protocol")
+        value = object_packet(body)
         if tag == b"R" and slot.phase == 0:
             ready = ProcessIdentity.model_validate(value)
             if ready != handle.identity or ready != identify(
@@ -344,15 +301,36 @@ class ProcessMonitor:
                 handle.round_index,
                 notice.launched_at,
                 notice.identity,
+                identity_digest=notice.identity_digest,
             )
             with self.lock:
                 slot.launched, slot.phase = launched, 2
+        elif tag == b"P":
+            self._prestart(slot, body)
         elif tag == b"T" and slot.phase == 2:
             notice = TerminalNotice.model_validate_json(body)
             slot.exit_code, slot.finished = notice.exit_code, True
             slot.error = "worker_failed" if slot.exit_code else None
         else:
             raise ValueError("invalid_worker_phase")
+
+    def _prestart(self, slot: _Slot, body: bytes) -> None:
+        """Accept only a managed positive refusal before any native launch."""
+        if slot.phase != 1 or not slot.activated or not slot.managed:
+            raise ValueError("invalid_worker_phase")
+        notice = PrestartRefusalNotice.model_validate_json(body)
+        event = WorkerPrestartRefused(
+            slot.handle.attempt_id,
+            slot.handle.round_index,
+            notice.identity_digest,
+            notice.code,
+        )
+        with self.lock:
+            slot.refused = event
+            if slot.replacement:
+                slot.error, slot.finished = "runtime_race_exhausted", True
+            else:
+                slot.activated, slot.replacement = False, True
 
     def _finish(self, slot: _Slot, error: str | None) -> None:
         """Contain before publishing the single retained terminal outcome."""

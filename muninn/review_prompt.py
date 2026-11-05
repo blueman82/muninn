@@ -16,13 +16,13 @@ from muninn.review_evidence import initial_evidence
 from muninn.review_evidence_models import EvidenceLocator, SourceRef
 from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_models import ReviewContext
-from muninn.review_progress import digest
 from muninn.review_rounds import (
     EvidenceRequest,
     check_round,
     execute_read,
     prepare_context,
 )
+from muninn.review_runtime_bridge import effective_policy
 
 
 def refresh(home: Path, context: ReviewContext) -> ReviewContext:
@@ -47,11 +47,7 @@ def refresh(home: Path, context: ReviewContext) -> ReviewContext:
             or row["active_generation"] != context.generation
         ):
             raise ValueError("rejected_fenced")
-        if (
-            not row["admission"]
-            or row["active_policy"] != digest(context.policy)
-            or row["policy_digest"] != digest(context.policy)
-        ):
+        if effective_policy(conn, row) != context.policy:
             raise ValueError("review_policy_required")
         ids = tuple(
             row[0]

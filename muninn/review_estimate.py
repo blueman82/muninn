@@ -8,34 +8,31 @@ from math import ceil
 from statistics import median
 
 from muninn.review_models import ReviewPolicy, Usage
+from muninn.review_runtime_models import (
+    ManagedCodexSelection,
+    RunnerConfig,
+    RuntimeIdentity,
+)
 
 
 def estimate(
-    conn: sqlite3.Connection, policy: ReviewPolicy, requests: int
+    conn: sqlite3.Connection,
+    policy: ReviewPolicy,
+    requests: int,
+    *,
+    execution: RuntimeIdentity | None = None,
 ) -> dict[str, str | int | float | None]:
     """Keep unsupported cost and allowance unknown."""
+    predicate, arguments = _runtime_predicate(policy, execution)
     rows = conn.execute(
-        "SELECT ended_at-coalesce(launched_at,reserved_at) AS "
-        "seconds,usage_json "
+        "SELECT ended_at-coalesce(launched_at,reserved_at) AS seconds,usage_j"
+        "son "
         "FROM review_call WHERE state='completed' AND ended_at IS NOT NULL "
-        "AND json_extract(requested_json,'$.runner')=? "
-        "AND json_extract(requested_json,'$.executable')=? "
-        "AND json_extract(requested_json,'$.version')=? "
-        "AND json_extract(requested_json,'$.model')=? "
-        "AND json_extract(requested_json,'$.reasoning')=? "
+        f"AND ({predicate}) "
         "AND coalesce(outcome,'')!='not_launched' "
         "AND ended_at>coalesce(launched_at,reserved_at) "
         "ORDER BY ended_at DESC LIMIT 50",
-        tuple(
-            getattr(policy.runner, key)
-            for key in (
-                "runner",
-                "executable",
-                "version",
-                "model",
-                "reasoning",
-            )
-        ),
+        arguments,
     ).fetchall()
     durations = [float(row["seconds"]) for row in rows]
     value: dict[str, str | int | float | None] = {
@@ -52,6 +49,10 @@ def estimate(
         "subscription_allowance": None,
         "cost_note": "The remaining subscription allowance is unknown.",
     }
+    if isinstance(policy.runner, ManagedCodexSelection):
+        value["runtime_status"] = (
+            "checked" if execution is not None else "unknown"
+        )
     if durations:
         batches = ceil(requests / policy.concurrency)
         seconds = batches * median(durations)
@@ -95,3 +96,41 @@ def estimate(
             ),
         )
     return value
+
+
+def _runtime_predicate(
+    policy: ReviewPolicy, execution: RuntimeIdentity | None
+) -> tuple[str, tuple[str, ...]]:
+    """Compare explicit launched facts or retain an unknown managed runtime."""
+    requested = policy.runner
+    keys = ("runner", "executable", "version", "model", "reasoning")
+    if isinstance(requested, RunnerConfig):
+        return " AND ".join(
+            f"json_extract(requested_json,'$.{key}')=?" for key in keys
+        ), tuple(getattr(requested, key) for key in keys)
+    if execution is None or (
+        execution.requested.model,
+        execution.requested.reasoning,
+    ) != (requested.model, requested.reasoning):
+        return "0", ()
+    return (
+        "json_extract(requested_json,'$.record')='codex-managed-call-v1' "
+        "AND json_extract(requested_json,'$.selection.manager_root')=? "
+        "AND json_extract(requested_json,'$.selection.model')=? "
+        "AND json_extract(requested_json,'$.selection.reasoning')=? "
+        "AND json_extract(requested_json,'$.launched_identity')=? "
+        "AND EXISTS (SELECT 1 FROM json_each(requested_json,'$.candidates') c"
+        "andidate "
+        "WHERE json_extract(candidate.value,'$.capability_key')=? "
+        "AND json_extract(candidate.value,'$.requested.executable')=? "
+        "AND json_extract(candidate.value,'$.requested.version')=?)",
+        (
+            str(requested.manager_root),
+            requested.model,
+            requested.reasoning,
+            execution.digest,
+            execution.capability_key,
+            execution.requested.executable,
+            execution.requested.version,
+        ),
+    )

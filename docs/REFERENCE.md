@@ -1386,3 +1386,102 @@ rewrite a receipt, grant again or reopen admission to work around a refusal.
 An unexplained installer-lock metadata gap has no automatic continuation: the
 agent reports the exact refusal and preserves the record; an operator or
 maintainer must review the evidence before separately supported recovery.
+### Follow the current trusted Codex installation
+
+The managed interface mode follows the local Codex manager on Apple silicon macOS.
+It uses `~/.codex/packages/standalone/current` and confines the target to `releases`.
+It checks the complete package, the main Apple signature and the advertised JSON
+review arguments. It does not choose a program from `PATH` or a project folder.
+Compatible Codex updates keep the same policy digest, account, scope and limits.
+Versions and hashes identify each actual call. They do not grant permission.
+
+An old exact runner approval remains exact. A different executable hash refuses,
+even when its Apple signature is valid. The installer has one explicit route to
+replace that old selection with a stable interface contract:
+
+```sh
+bin/muninn-install --upgrade --codex-interface preview --check
+bin/muninn-install --upgrade --codex-interface PLAN_DIGEST
+```
+
+The preview writes nothing. It checks the saved old approval, auth directory and
+schema even when the old executable is gone. It checks the current interface
+with only `--version`, `--help` and `exec --help`. These checks use a fixed Darwin
+sandbox, a read-only environment with no auth configuration, and no model job.
+Missing or denied isolation refuses. There is no uncontained fallback.
+
+The apply command requires a fresh `yes` or `y` for the exact displayed UPDATE
+RULE. A preview, digest or source review is not that consent. Ordinary upgrades
+do not enroll this rule. Do not combine it with fresh install, host renewal,
+`--enable-learning`, new history/scope or another policy input.
+
+The rule trusts the owner's local manager. Local metadata and hashes do not prove
+publisher origin for every helper or resource. Same-user compromise and unknown
+billing details remain limits. The rule preserves the existing auth home, model,
+reasoning, budget account, permissions, projects, history, consumed attempts and
+charges. It introduces no API or billing route. Generic Linux, Windows and Claude
+runner behavior is unchanged.
+
+The initial operation checks the complete eligible old queue before commit. Its
+one finite capsule retains immutable request snapshots and original inputs. It
+refuses unsupported pending decision work or a changed queue. It does not cancel
+or recreate old requests. New inputs still require the normal source, scope and
+erasure checks. Future compatible Codex updates need no capsule or new approval.
+
+Each managed attempt records its stable `codex_managed_interface_v1` selection.
+Each call's `requested` is a `codex-managed-call-v1` record. It contains that
+selection, up to two checked candidates, activation offers/refusals, one refresh
+count and a write-once `launched_identity`. An offer does not prove a launch.
+Native `observed` fields stay null when Codex did not report them. Completed
+rounds retain their own actual versions and hashes after a later update.
+
+Before native execution, one proved manager race can replace a candidate under
+the same call reservation. It cannot create another charge or model job. A
+second race stops with `runtime_race_exhausted`, without an automatic extra
+attempt. Started or uncertain calls are contained through the existing rules.
+An absent output or a resource error after execution does not authorize relaunch.
+
+Observation caches under `review-capabilities/managed-cache` are disposable
+metadata. Their key binds real package/file identity, hashes, recipe, schema and
+validator revision. Deletion or safe invalid content requires fresh isolated
+qualification, not new consent. Unsafe or unstable cache storage refuses. A
+preview never repairs a cache. Authority and bridge loss cannot reconstruct
+consent. History estimates report `runtime_status: unknown` without a checked
+current runtime. Only actually launched comparable identities contribute samples.
+
+Codex-only structural bounds are 384 MiB per file, 512 MiB per package, 256
+inventory paths and depth eight. Cache and initial bridge files are at most
+256 KiB. The initial bridge contains at most 1,024 unique request IDs. These
+bounds do not change model input/output, time, read, worker or attempt limits.
+Generic executable verification retains its 256 MiB bound.
+
+The installer retains a typed `codex-managed-interface-receipt-v1` with a minimum
+runtime requirement. It records approval, inert artifacts, exact commit intent,
+the committed grant and completion. A crash before the commit keeps old selected
+state. A crash after SQL commit recognizes only the exact successor, without
+replaying the commit. After the durable committed phase, normal generation and
+progress changes do not invalidate permanent bridge authority. A later failure
+keeps the new grant and an explicit pause for checked recovery. Resume the same
+command and preserve its private receipt. Recovery retains a later admission
+pause. It does not restore an old archive or restart old code against managed
+JSON. No SQLite table, column, marker or schema version changes for this mode.
+
+If SQL commits before the commit receipt can be written, cleanup checks the
+exact saved successor. It records the committed phase before it changes
+admission or generation. If that record write also fails, the service stays
+stopped and the exact SQL state stays unchanged. Admission can remain enabled
+while the service is stopped. Repair the record storage fault, then repeat the
+same command. Do not start the service by hand or change the saved generation.
+
+Distinct setup causes are `runtime_selection_unavailable`,
+`runtime_selection_unsafe`, `runtime_interface_unsupported`,
+`runtime_probe_unavailable` and `runtime_structure_limit`. Background checks can
+run only while the service runs and learning is enabled. Reading a notice starts
+no timer. A successful source test is separate from installing or activating the
+rule, native compatibility, model quality and actual account/billing acceptance.
+
+After enrollment, an explicit ordinary `--enable-learning` restart checks and
+reuses the same managed grant. It preserves the saved scope, old queue, approval
+time and budget account. It does not build a new default policy or cancel the
+initial carried requests. Unfinished or uncertain calls still refuse restart.
+The complete private installer recovery record is bounded to 4 MiB.

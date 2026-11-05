@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
-from muninn import platform_windows
+from muninn import file_sync, platform_windows
 
 
 def ensure_private_dir(path: Path) -> None:
@@ -137,3 +138,30 @@ def assert_private_fd(fd: int) -> None:
     """Check an opened Windows temp file before private writes."""
     if sys.platform == "win32":
         platform_windows.private_fd(fd)
+
+
+def publish_private_file(path: Path, raw: bytes) -> bool:
+    """Publish complete immutable private bytes without replacing a prior file.
+
+    Args:
+        path: Final leaf inside an already checked private directory.
+        raw: Bounded metadata bytes already validated by the caller.
+
+    Returns:
+        Whether this caller published the file rather than finding a prior one.
+    """
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=".publish-")
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            file_sync.sync_fd(stream.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+        file_sync.sync_path(path.parent)
+        return True
+    finally:
+        temporary.unlink(missing_ok=True)

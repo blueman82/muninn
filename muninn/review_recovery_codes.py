@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+RUNTIME_SETUP_CODES = frozenset(
+    {
+        "runtime_selection_unavailable",
+        "runtime_selection_unsafe",
+        "runtime_interface_unsupported",
+        "runtime_probe_unavailable",
+        "runtime_structure_limit",
+    }
+)
+RUNTIME_CODES = RUNTIME_SETUP_CODES | {"runtime_race_exhausted"}
+
 EXPLANATIONS: dict[str, tuple[str, str]] = {
     "deadline": (
         "The review exceeded its time limit.",
@@ -168,6 +179,32 @@ _SETUP_FAILURES = {
         "The selected runner has no supported launch method."
     ),
 }
+_SETUP_FAILURES.update(
+    {
+        "runtime_selection_unavailable": (
+            "The trusted current Codex " "installation is unavailable."
+        ),
+        "runtime_selection_unsafe": (
+            "The current Codex manager " "or storage fails its safety checks."
+        ),
+        "runtime_interface_unsupported": (
+            "Current Codex does not "
+            "advertise the required review interface."
+        ),
+        "runtime_probe_unavailable": (
+            "The fixed isolated Codex " "interface checks did not complete."
+        ),
+        "runtime_structure_limit": (
+            "The current Codex package " "exceeds a fixed structural limit."
+        ),
+    }
+)
+EXPLANATIONS["runtime_race_exhausted"] = (
+    "Current Codex changed again before native execution could start.",
+    "This call stopped within its original reservation. Muninn will not creat"
+    "e an extra attempt or refund its charge.",
+)
+
 EXPLANATIONS.update(
     {
         code: (
@@ -219,6 +256,7 @@ for _code in SHARED:
 
 CONTAINED = frozenset(
     {
+        "runtime_race_exhausted",
         "deadline",
         "unavailable",
         "rejected_revision",

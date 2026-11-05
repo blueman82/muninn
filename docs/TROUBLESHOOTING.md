@@ -241,3 +241,23 @@ receipt refuses automatic continuation. Do not restore the archive over current
 data, edit lock metadata or manufacture another approval. An unexplained lock
 acquisition metadata gap requires operator or maintainer review; no automatic
 continuation is supported for that gap.
+
+### Current Codex installation changed
+
+A missing old executable is not permission to broaden its saved grant. Prepare
+[the managed interface preview](REFERENCE.md#follow-the-current-trusted-codex-installation).
+It checks the original approval and the current trusted manager. The owner must
+approve the exact initial rule in the installer. Compatible later updates keep
+that grant without another version question.
+
+A missing selection, unsafe storage, unsupported interface, unavailable isolated
+probe and structural limit have separate safe codes. An unsafe cache remains a
+refusal. Safe invalid cache content requires all fixed isolated checks again.
+`runtime_race_exhausted` stops that call after its one allowed pre-exec refresh.
+It does not refund the reservation or add an automatic attempt.
+
+If installation fails after the grant commits, keep its private receipt and the
+new grant paused. Resume the same checked operation. Do not restore an archive,
+edit the grant or restart older code against the managed JSON format. A recovered
+installation can retain an admission pause; installation success does not prove
+that learning resumed or that a model used the expected billed account.

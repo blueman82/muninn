@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+from install.codex_interface_models import InterfacePlan
 from install.constants import (
     LABEL,
     MKT_NAME,
@@ -105,6 +106,9 @@ class Ctx:
     learning_mode: Literal["now", "all"] | None = None
     learning_prompt: Callable[[str], str] | None = None
     review_policy: Path | None = None
+    codex_interface: str | None = None
+    interface_plan: InterfacePlan | None = None
+    interface_operation: Callable[[], tuple[int, int]] | None = None
     renew_codex_host: str | None = None
     host_approval: HostApproval | None = None
     host_plan: HostPlan | None = None

@@ -18,6 +18,7 @@ from install.context import StepFailedError
 from muninn import store
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import digest
+from muninn.review_runtime_models import require_legacy_runner
 from tests.installer_provider_env import fixture_provider_env
 from tests.installer_support import World, git
 
@@ -165,7 +166,9 @@ class DefaultPolicySafetyTests(unittest.TestCase):
             ).fetchone()
         selected = ReviewPolicy.model_validate_json(row["policy_json"])
         self.assertEqual(row["admission"], 1)
-        self.assertEqual(selected.runner.executable, str(original))
+        self.assertEqual(
+            require_legacy_runner(selected.runner).executable, str(original)
+        )
         self.assertEqual(selected.max_rounds, 1)
         capability_path = (
             ctx.data

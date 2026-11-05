@@ -11,7 +11,12 @@ from pathlib import Path
 from muninn import review_prompt, store
 from muninn.review_budget import call_view, reserve_call
 from muninn.review_models import CallView, ReviewContext
-from muninn.review_process import ProcessEvent, WorkerLaunched, WorkerReady
+from muninn.review_process import (
+    ProcessEvent,
+    WorkerLaunched,
+    WorkerReady,
+)
+from muninn.review_process_events import legacy_event
 from muninn.review_supervisor_store import database, persist_event
 from tools.learning_eval.cases import digest
 from tools.learning_eval.pilot_evidence import immutable
@@ -86,6 +91,7 @@ class LearnerBridge:
             self.schedule.round_index,
         ):
             raise ValueError("call_binding_mismatch")
+        event = legacy_event(event)
         before = self.current()
         if isinstance(event, WorkerReady):
             review_prompt.refresh(self.home, self.context)

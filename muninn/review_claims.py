@@ -18,11 +18,11 @@ from muninn.review_models import (
 from muninn.review_progress import (
     check_window,
     checked_policy,
-    digest,
     require_transaction,
 )
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_request_views import attempt_view, request_row, request_view
+from muninn.review_runtime_bridge import effective_policy
 from muninn.tombstones import require_current_tombstones
 
 UNKNOWN_CONFIG = ObservedConfig(
@@ -49,22 +49,7 @@ def _admitted_policy(
     conn: sqlite3.Connection, row: sqlite3.Row
 ) -> ReviewPolicy:
     """Require the immutable snapshot to match active admission policy."""
-    policy = checked_policy(
-        ReviewPolicy.model_validate_json(row["policy_json"])
-    )
-    control = conn.execute("SELECT * FROM review_control").fetchone()
-    if (
-        not control["admission"]
-        or control["policy_digest"] != digest(policy)
-        or row["policy_digest"] != digest(policy)
-        or control["policy_json"] is None
-        or canonical_json(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        != row["policy_json"]
-    ):
-        raise ValueError("review_policy_required")
-    return policy
+    return effective_policy(conn, row)
 
 
 def _sources(

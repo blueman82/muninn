@@ -22,6 +22,9 @@ from muninn.review_json import (
 )
 from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_models import ReviewPolicy
+from muninn.review_runtime_models import (
+    require_legacy_runner,
+)
 from tools.codex_policy_artifacts import plan_artifacts, publish_artifacts
 
 DEFAULT_POLICY_FILE = Path(__file__).with_name("default_codex_policy.json")
@@ -329,7 +332,7 @@ def prepare(
         raise ValueError("capability_changed")
     schema = home / "review-codex-schema.json"
     binding = review_codex_launch.ExperimentalBinding(
-        requested=value.runner,
+        requested=require_legacy_runner(value.runner),
         host_identity=host_identity(),
         executable_sha256=initial_digest,
         output_contract_digest=output_contract_digest(),

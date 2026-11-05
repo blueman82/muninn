@@ -135,6 +135,11 @@ def install_summary(ctx: Ctx, rec: Record, outcome: str) -> Record:
             key: rec["legacy"].get(key)
             for key in ("version", "baseline", "phase", "publication")
         }
+    if "codex_interface" in rec:
+        interface = policy_records.codex_interface(rec["codex_interface"])
+        out["codex_interface_phase"] = interface.phase
+        out["codex_interface_plan_digest"] = interface.plan.digest
+        out["codex_interface_minimum_runtime"] = interface.minimum_runtime
     if "host_renewal" in rec:
         receipt = policy_records.host_renewal(rec["host_renewal"])
         out["host_renewal_phase"] = receipt.phase

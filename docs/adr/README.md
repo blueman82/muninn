@@ -22,3 +22,4 @@ Recorded dates identify acceptance. Each exception or deferred decision has an e
 | [0016](0016-confirm-legacy-macos-recovery.md) | Ask before repairing a matching older macOS record without a disk ID |
 | [0017](0017-learning-scope-and-recovery.md) | Choose learning scope and recover bounded review failures. Narrow correction amendment accepted 2026-10-29 and merged in PR #77 at `5fa95b51`; installation and live verification remain separate checks. |
 | [0018](0018-conversational-memory-decisions.md) | Bind owner decisions to exact memory candidates. Accepted 2026-10-29 and implemented in private source. Fresh review, final full gate, publication, installation, and live verification pending. |
+| [0019](0019-current-codex-interface.md) | Follow the current trusted Codex interface under one initial checked rule. Compatible versions keep the same grant. Activation and live acceptance remain separate. |

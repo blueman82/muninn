@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import sqlite3
 import time
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from install import (
+    codex_interface,
     decision_migration,
     host_renewal,
     legacy_cutover,
@@ -23,6 +23,7 @@ from install import (
     snapshot_io,
 )
 from install.context import Ctx, StepFailedError
+from install.current_store import prepare_current as _current
 from install.host_renewal_bindings import clear_host_notice
 from install.record import Record, install_record, save
 from install.steps_config import record as record_config
@@ -35,14 +36,11 @@ from muninn import (
     file_sync,
     ingest,
     platform_io,
-    review_requests,
     scope,
     store,
 )
 from muninn import review_pause as q
 from muninn import review_pause_state as state
-from muninn.review_models import ReviewPolicy
-from muninn.review_progress import checked_policy, digest
 from muninn.store_copy import copy_governed_state as copy_governed_state
 
 
@@ -142,24 +140,6 @@ def _ingest_fresh(
             record.save(ctx, rec)
 
 
-def _fence_current(conn: sqlite3.Connection) -> sqlite3.Row:
-    """Commit the stopped admission and fence all abandoned attempts."""
-    control = conn.execute("SELECT * FROM review_control").fetchone()
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        conn.execute(
-            "UPDATE review_control SET admission=0,generation=generation+1"
-        )
-        review_requests.recover_attempts(
-            conn, control["generation"] + 1, time.time()
-        )
-        conn.execute("COMMIT")
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
-    return control
-
-
 def ingest_transcripts(
     ctx: Ctx, owner: q.MaintenanceOwner
 ) -> ingest.PassStats:
@@ -217,54 +197,21 @@ def ingest_transcripts(
                 return total
 
 
-def _restore_admission(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
-    """Validate current data and restore only the prior permitted policy."""
-    if conn.execute("PRAGMA foreign_key_check").fetchone() is not None or (
-        [row[0] for row in conn.execute("PRAGMA quick_check")] != ["ok"]
-    ):
-        raise StepFailedError("current_store_invalid")
-    if not control["admission"]:
-        return
-    try:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        if control["policy_digest"] != digest(policy):
-            raise ValueError("policy_digest_mismatch")
-    except ValueError:
-        raise ValueError("review_policy_required") from None
-    conn.execute("UPDATE review_control SET admission=1")
-
-
-def _current(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
-    """Maintain a verified current file without replacing its pathname."""
+def _host_store(
+    ctx: Ctx,
+    rec: Record,
+    owner: q.MaintenanceOwner,
+    check: legacy_state.OperationCheck | None,
+) -> Path:
+    """Retain the existing host-only preparation and its operation guard."""
+    if check is None:
+        raise StepFailedError("host_renewal_approval_required")
+    value = policy_records.host_renewal(rec["host_renewal"])
     path = store.db_path(ctx.data)
-    with (
-        q.maintenance_writer(owner),
-        snapshot_io.validated(path) as revalidate,
-    ):
-        try:
-            with closing(store.connect_ro(path)) as conn:
-                revalidate()
-                store.assert_store_format(conn)
-        except store.StoreUnavailableError as exc:
-            raise StepFailedError(str(exc)) from exc
-        rec["store"] = {
-            "phase": "current_mutation_possible",
-            "path": str(path),
-            "file_identity": [path.stat().st_dev, path.stat().st_ino],
-        }
-        record.save(ctx, rec)
-        with closing(store.connect_rw(path)) as conn:
-            revalidate()
-            q.verify_current(owner, conn)
-            control = _fence_current(conn)
-            _restore_admission(conn, control)
-            revalidate()
-        file_sync.sync_path(path)
-        revalidate()
-        rec["store"]["phase"] = "current_prepared"
-        record.save(ctx, rec)
+    if value.phase == "approved_intent":
+        host_renewal.after_owner(ctx, rec, owner, path, check)
+        path = _current(ctx, rec, owner)
+        host_renewal.contained(ctx, rec, owner, path, check)
     return path
 
 
@@ -307,15 +254,10 @@ def _prepared(
                 else legacy_recovery.prepare
             )
             path = prepare(ctx, rec, owner, check)
+        elif "codex_interface" in rec:
+            path = codex_interface.prepare(ctx, rec, owner, _current)
         elif "host_renewal" in rec:
-            if check is None:
-                raise StepFailedError("host_renewal_approval_required")
-            value = policy_records.host_renewal(rec["host_renewal"])
-            path = store.db_path(ctx.data)
-            if value.phase == "approved_intent":
-                host_renewal.after_owner(ctx, rec, owner, path, check)
-                path = _current(ctx, rec, owner)
-                host_renewal.contained(ctx, rec, owner, path, check)
+            path = _host_store(ctx, rec, owner, check)
         else:
             try:
                 path = _current(ctx, rec, owner)
@@ -359,7 +301,9 @@ def prepared_install_store(
             raise
         else:
             if owner is not None:
-                if "host_renewal" in rec:
+                if "codex_interface" in rec:
+                    codex_interface.activate(ctx, rec, owner, path)
+                elif "host_renewal" in rec:
                     host_renewal.activate(ctx, rec, owner, path, check)
                     clear_host_notice(ctx, owner, rec)
                 else:

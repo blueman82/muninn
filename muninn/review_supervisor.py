@@ -13,7 +13,8 @@ from muninn import (
     review_pause_state,
     review_prompt,
     review_recovery,
-    review_snapshot,
+    review_round_launch,
+    review_runtime_bridge,
     store,
 )
 from muninn.decision_requests import continue_decisions
@@ -28,14 +29,14 @@ from muninn.review_models import (
 from muninn.review_process import (
     ProcessEvent,
     ProcessMonitor,
-    ProcessOutcome,
     WorkerLaunched,
+    WorkerPrestartRefused,
     WorkerReady,
     cancel_registered,
 )
 from muninn.review_process_identity import recover_group
-from muninn.review_process_protocol import activation
 from muninn.review_progress import checked_policy, digest
+from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_request_views import request_view
 from muninn.review_requests import (
     claim_or_refuse_attempt,
@@ -44,7 +45,10 @@ from muninn.review_requests import (
 )
 from muninn.review_round_state import Round as _Round
 from muninn.review_runner import RunnerCapability, prepare_launch
-from muninn.review_spawn import create_wrapper
+from muninn.review_runtime_models import (
+    ManagedCapability,
+    ManagedCodexSelection,
+)
 from muninn.review_supervisor_result import execute as execute_result
 from muninn.review_supervisor_result import failure_code
 from muninn.review_supervisor_store import (
@@ -73,10 +77,9 @@ class Supervisor:
         self._rounds: dict[tuple[str, int], _Round] = {}
         self._pending: list[ProcessEvent] = []
         self._next: list[_Round] = []
-        self.capability: RunnerCapability | None = None
+        self.capability: RunnerCapability | ManagedCapability | None = None
         self.artifact = b""
-        self._recheck_at = 0.0
-        self._catchup = (0, 0.0)
+        self._recheck_at, self._catchup = 0.0, (0, 0.0)
         self.monitor: ProcessMonitor
 
     def start(self, now: float) -> None:
@@ -166,12 +169,7 @@ class Supervisor:
             return False
         if self._recheck_at:
             for pending in self._rounds.values():
-                pending.context = pending.context.model_copy(
-                    update={
-                        "deadline": time.monotonic()
-                        + self.policy.deadline_seconds
-                    }
-                )
+                review_round_launch.resume_setup(pending)
             self._recheck_at = 0.0
         return True
 
@@ -198,13 +196,16 @@ class Supervisor:
     def _claim(self, now: float) -> _Round | None:
         """Close claim ownership before root-owning initial admission reads."""
         with database(self.home) as conn:
+            carried = review_runtime_bridge.eligible_ids(conn, self.policy)
+            placeholders = ",".join("?" for _ in carried) or "NULL"
             row = conn.execute(
                 "SELECT * FROM review_request WHERE candidate_id IS NULL "
                 "AND state IN ('pending','waiting') "
-                "AND (retry_at IS NULL OR retry_at<=?) AND policy_digest=? "
-                "ORDER BY CASE WHEN trigger='history' THEN 1 ELSE 0 "
-                "END,created_at,id LIMIT 1",
-                (now, digest(self.policy)),
+                "AND (retry_at IS NULL OR retry_at<=?) AND (policy_digest=? "
+                f"OR id IN ({placeholders})) "
+                "ORDER BY CASE WHEN trigger='history' "
+                "THEN 1 ELSE 0 END,created_at,id LIMIT 1",
+                (now, digest(self.policy), *carried),
             ).fetchone()
             if row is None:
                 return None
@@ -235,37 +236,20 @@ class Supervisor:
             raise ValueError("duplicate_round")
         stage = "evidence"
         try:
-            if not pending.initialized:
-                version = review_snapshot.read(self.home, context.scope)
-                pending.context, pending.initial, pending.knowledge = (
-                    review_prompt.initialize(self.home, context)
-                )
-                if version != review_snapshot.read(self.home, context.scope):
-                    raise ValueError("rejected_revision")
-                pending.context = pending.context.model_copy(
-                    update={"knowledge_digest": version}
-                )
-                pending.initialized = True
-            pending.context = review_prompt.refresh(self.home, pending.context)
-            stage = "prompt"
-            pending.prompt = review_prompt.assemble(
-                self.artifact,
-                pending.context,
-                pending.initial,
-                pending.knowledge,
-                pending.history,
-                correction=pending.correction,
-            )
+            review_round_launch.initialize(self.home, pending, self.artifact)
             stage = "launch"
             assert self.capability is not None
-            pending.launch = prepare_launch(
-                pending.context, self.capability, pending.prompt
-            )
+            self._prepare(pending, now)
             with database(self.home) as conn:
-                reserve_call(conn, pending.context, now)
-            pending.launch = prepare_launch(
-                pending.context, self.capability, pending.prompt
-            )
+                reserve_call(
+                    conn,
+                    pending.context,
+                    now,
+                    execution=pending.first_execution
+                    or (pending.launch.execution if pending.launch else None),
+                    refresh_count=pending.refresh_count,
+                )
+            self._prepare(pending, now)
             self._create(pending)
             with database(self.home) as conn:
                 review_recovery.clear(conn, "setup")
@@ -276,12 +260,7 @@ class Supervisor:
                 str(exc)
             ):
                 self._recheck_at = now + 60.0
-                pending.context = pending.context.model_copy(
-                    update={
-                        "deadline": time.monotonic()
-                        + self.policy.deadline_seconds
-                    }
-                )
+                review_round_launch.resume_setup(pending)
                 with database(self.home) as conn:
                     review_recovery.record(
                         conn, "setup", str(exc), "launch", now
@@ -291,18 +270,10 @@ class Supervisor:
             del self._rounds[key]
 
     def _create(self, pending: _Round) -> None:
-        """Create only the fixed idle wrapper outside every writer root."""
-        _main()
-        spec = pending.launch
-        assert spec is not None
-        pending.handle = create_wrapper(
-            spec,
-            self.monitor,
-            pending.context.attempt_id,
-            pending.context.round_index,
-            self.policy.max_output_bytes,
+        """Create the idle wrapper on the owner thread outside writer roots."""
+        review_round_launch.create(
+            pending, self.monitor, self.policy.max_output_bytes
         )
-        pending.spawned = True
 
     def _event(self, event: ProcessEvent, now: float) -> None:
         """Retain the permit and event through durable reconciliation."""
@@ -315,28 +286,57 @@ class Supervisor:
                     self.home, pending.context
                 )
                 assert self.capability is not None
-                fresh = prepare_launch(
-                    pending.context, self.capability, pending.prompt
+                self._prepare(pending, now)
+                review_round_launch.activate(
+                    self.home, pending, self.policy, self.monitor, now
                 )
-                pending.context = review_prompt.refresh(
-                    self.home, pending.context
+            except ValueError as exc:
+                code = (
+                    str(exc)
+                    if str(exc) in RUNTIME_CODES
+                    else "activation_refused"
                 )
-                frame = activation(
-                    fresh.cli_argv,
-                    fresh.cli_cwd,
-                    fresh.cli_env,
-                    fresh.prompt,
-                    self.policy.max_input_bytes,
+                cancel_registered(self.monitor, *key, code)
+        elif isinstance(event, WorkerPrestartRefused):
+            try:
+                assert self.capability is not None
+                review_round_launch.refused(
+                    self.home,
+                    pending,
+                    event,
+                    self.capability,
+                    self.monitor,
+                    now,
                 )
-                self.monitor.activate(*key, frame)
-            except ValueError:
-                cancel_registered(self.monitor, *key, "activation_refused")
+            except ValueError as exc:
+                cancel_registered(
+                    self.monitor, *key, failure_code(exc, "config")
+                )
         elif isinstance(event, WorkerLaunched):
-            self._persist(event, now)
+            try:
+                review_round_launch.launched(self.home, pending, event, now)
+                self._persist(event, now)
+            except ValueError:
+                cancel_registered(
+                    self.monitor, *key, "process_identity_unverified"
+                )
         else:
             self._persist(event, now)
-            self._result(pending, event, now)
+            if execute_result(self.home, pending, event, now, self._fail):
+                self._next.append(pending)
             del self._rounds[key]
+
+    def _prepare(self, pending: _Round, now: float) -> None:
+        """Keep legacy injectable preparation and managed snapshot checks."""
+        assert self.capability is not None
+        if isinstance(self.capability, ManagedCapability):
+            review_round_launch.prepare(
+                pending, self.capability, home=self.home, now=now
+            )
+        else:
+            pending.launch = prepare_launch(
+                pending.context, self.capability, pending.prompt
+            )
 
     def _persist(self, event: ProcessEvent, now: float) -> None:
         """Check live readiness before the helper's writer transaction."""
@@ -346,13 +346,6 @@ class Supervisor:
                 self._rounds[event.attempt_id, event.round_index].context,
             )
         persist_event(self.home, event, now)
-
-    def _result(
-        self, pending: _Round, outcome: ProcessOutcome, now: float
-    ) -> None:
-        """Retain only reads that passed durable outcome reconciliation."""
-        if execute_result(self.home, pending, outcome, now, self._fail):
-            self._next.append(pending)
 
     def _fail(
         self,
@@ -381,9 +374,17 @@ class Supervisor:
         if self._owner is None:
             return
         self.monitor.stop_all()
-        if review_recovery.enabled(self.policy):
-            for event in self.monitor.drain():
-                persist_event(self.home, event, now)
+        if review_recovery.enabled(self.policy) or isinstance(
+            self.policy.runner, ManagedCodexSelection
+        ):
+            for event in (*self._pending, *self.monitor.drain()):
+                key = (event.attempt_id, event.round_index)
+                if isinstance(event, WorkerLaunched) and key in self._rounds:
+                    review_round_launch.launched(
+                        self.home, self._rounds[key], event, now
+                    )
+                if not isinstance(event, WorkerPrestartRefused):
+                    persist_event(self.home, event, now)
         with database(self.home) as conn:
             if review_recovery.enabled(self.policy):
                 retire_unlaunched(
@@ -409,8 +410,7 @@ class Supervisor:
         self._rounds.clear()
         self._pending.clear()
         self._next.clear()
-        self.artifact = b""
-        self.capability = None
+        self.artifact, self.capability = b"", None
         assert self.stop_generation is not None
         review_pause_state.complete_owner(
             self.home, self._owner, self.stop_generation

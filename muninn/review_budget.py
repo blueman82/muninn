@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from typing import Literal
 
 from muninn.review_charge import Charge, aggregate, limits
 from muninn.review_json import canonical_json
@@ -16,6 +17,12 @@ from muninn.review_models import (
 from muninn.review_progress import check_window, digest, require_transaction
 from muninn.review_read_budget import ReadBudget
 from muninn.review_requests import UNKNOWN_CONFIG, request_row, request_view
+from muninn.review_runtime_bridge import effective_policy
+from muninn.review_runtime_models import (
+    ManagedCallRecord,
+    ManagedCodexSelection,
+    RuntimeIdentity,
+)
 
 
 def call_view(row: sqlite3.Row) -> CallView:
@@ -27,7 +34,7 @@ def call_view(row: sqlite3.Row) -> CallView:
     return CallView.model_validate_json(json.dumps(data))
 
 
-def _context(
+def check_context(
     conn: sqlite3.Connection, context: ReviewContext, *, budget: ReadBudget
 ) -> None:
     """Require the current running attempt and exact admitted policy/window."""
@@ -46,18 +53,7 @@ def _context(
         or control["generation"] != context.generation
     ):
         raise ValueError("rejected_fenced")
-    policy_digest = digest(context.policy)
-    if (
-        not control["admission"]
-        or control["policy_digest"] != policy_digest
-        or row["policy_digest"] != policy_digest
-        or canonical_json(context.policy) != row["policy_json"]
-        or control["policy_json"] is None
-        or canonical_json(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        != row["policy_json"]
-    ):
+    if effective_policy(conn, row) != context.policy:
         raise ValueError("review_policy_required")
     view = request_view(row)
     if context.scope != view.scope or context.admitted_windows != (
@@ -87,11 +83,16 @@ def reserve_call(
     conn: sqlite3.Connection,
     context: ReviewContext,
     now: float,
+    *,
+    execution: RuntimeIdentity | None = None,
+    refresh_count: Literal[0, 1] = 0,
 ) -> CallView:
     """Persist one idempotent reservation before any wrapper launch."""
     require_transaction(conn, now)
     context = ReviewContext.model_validate_json(canonical_json(context))
-    _context(conn, context, budget=ReadBudget(context.policy.max_input_bytes))
+    check_context(
+        conn, context, budget=ReadBudget(context.policy.max_input_bytes)
+    )
     existing = conn.execute(
         "SELECT * FROM review_call WHERE attempt_id=? AND round_index=?",
         (context.attempt_id, context.round_index),
@@ -129,6 +130,19 @@ def reserve_call(
         raise ValueError("unfinished_round")
     if context.round_index != (previous[0] + 1 if previous else 1):
         raise ValueError("invalid_round_index")
+    requested = context.policy.runner
+    if isinstance(requested, ManagedCodexSelection):
+        if execution is None or (
+            execution.requested.model != requested.model
+            or execution.requested.reasoning != requested.reasoning
+        ):
+            raise ValueError("runtime_interface_unsupported")
+        requested = ManagedCallRecord(
+            record="codex-managed-call-v1",
+            selection=requested,
+            candidates=(execution,),
+            refresh_count=refresh_count,
+        )
     call = CallView(
         attempt_id=context.attempt_id,
         round_index=context.round_index,
@@ -138,7 +152,7 @@ def reserve_call(
         reserved_at=now,
         launched_at=None,
         ended_at=None,
-        requested=context.policy.runner,
+        requested=requested,
         observed=UNKNOWN_CONFIG,
         usage=None,
         cost_reservation_decimal=charge,

@@ -20,6 +20,7 @@ from muninn.review_diagnostics import FailurePhase
 from muninn.review_models import ReviewContext
 from muninn.review_process import ProcessOutcome
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
+from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_round_state import Round
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
 from muninn.review_supervisor_store import database, mark_correction
@@ -42,6 +43,7 @@ def failure_code(error: ValueError | OSError, fallback: str) -> str:
             "prompt_limit",
         }
         or cause in EVIDENCE_LIMIT_CODES
+        or cause in RUNTIME_CODES
         else fallback
     )
 
@@ -55,6 +57,9 @@ def _advance(pending: Round, context: ReviewContext) -> None:
     pending.handle = None
     pending.launch = None
     pending.prompt = b""
+    pending.refresh_count = 0
+    pending.first_execution = None
+    pending.prepared_prompt = b""
 
 
 def _correct(
@@ -119,13 +124,17 @@ def execute(
                 fail(
                     pending.context,
                     (
-                        "deadline"
-                        if outcome.error_code == "deadline"
+                        outcome.error_code
+                        if outcome.error_code in RUNTIME_CODES
                         else (
-                            "rejected_validation"
-                            if outcome.error_code
-                            in {"invalid_native_output", "output_limit"}
-                            else "unavailable"
+                            "deadline"
+                            if outcome.error_code == "deadline"
+                            else (
+                                "rejected_validation"
+                                if outcome.error_code
+                                in {"invalid_native_output", "output_limit"}
+                                else "unavailable"
+                            )
                         )
                     ),
                     now,

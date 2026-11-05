@@ -33,10 +33,11 @@ from muninn.review_json import (
     reject_constant,
     unique_object,
 )
-from muninn.review_models import ReviewContext, ReviewPolicy
-from muninn.review_progress import check_window, digest
+from muninn.review_models import ReviewContext
+from muninn.review_progress import check_window
 from muninn.review_read_budget import ReadBudget
 from muninn.review_request_views import request_row, request_view
+from muninn.review_runtime_bridge import effective_policy
 from muninn.review_selectors import build_record
 
 
@@ -163,18 +164,7 @@ def _current(
         or control["generation"] != context.generation
     ):
         raise ValueError("rejected_fenced")
-    policy = canonical_json(context.policy)
-    if (
-        not control["admission"]
-        or row["policy_json"] != policy
-        or control["policy_json"] is None
-        or canonical_json(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        != policy
-        or row["policy_digest"] != digest(context.policy)
-        or control["policy_digest"] != digest(context.policy)
-    ):
+    if effective_policy(conn, row) != context.policy:
         raise ValueError("review_policy_required")
     view = request_view(row)
     if context.scope != view.scope or context.admitted_windows != (

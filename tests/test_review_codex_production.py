@@ -18,6 +18,7 @@ from muninn.review_models import (
     ReviewPolicy,
     require_pilot_budget,
 )
+from muninn.review_runtime_models import require_legacy_runner
 from tests.test_learning_eval_contracts import assessment_data
 from tests.test_review_shared_models import policy_data
 from tools.learning_eval.models import Assessment
@@ -108,7 +109,9 @@ class CodexProductionPolicyTests(unittest.TestCase):
             with self.subTest(version=version):
                 data["runner"]["version"] = version
                 selected = ReviewPolicy.model_validate_json(json.dumps(data))
-                self.assertEqual(selected.runner.version, version)
+                self.assertEqual(
+                    require_legacy_runner(selected.runner).version, version
+                )
 
     def test_revised_raw_read_limit_keeps_other_call_bounds(self) -> None:
         data = self.policy.model_dump(mode="json")

@@ -12,6 +12,9 @@ from pathlib import Path
 
 from muninn.review_json import canonical_json
 from muninn.review_runner import check_private_path, read_private_file
+from muninn.review_runtime_models import (
+    require_legacy_runner,
+)
 from tools.learning_eval.account import Account
 from tools.learning_eval.capability import validate_pilot_manifest
 from tools.learning_eval.cases import digest
@@ -80,7 +83,7 @@ def _load(
         or pilot.origin != "native_codex_trial"
         or result.origin != pilot.origin
         or (
-            policy.runner.version,
+            require_legacy_runner(policy.runner).version,
             policy.runner.model,
             policy.runner.reasoning,
         )
