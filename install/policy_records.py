@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import TypeAdapter, ValidationError
 
+from install.codex_interface_models import InterfaceReceipt
 from install.context import Ctx, StepFailedError
 from install.host_renewal_models import RECEIPT, RenewalReceipt
 from install.policy_record_models import (
@@ -117,11 +118,17 @@ def validate(value: object) -> dict[str, object]:
         ("policy_activation", activation),
         ("policy_ready", ready),
         ("host_renewal", host_renewal),
+        ("codex_interface", codex_interface),
     ):
         if name in result:
             check(result[name])
     if "host_renewal" in result:
         check_renewal_size(result)
+    if (
+        "codex_interface" in result
+        and len(json.dumps(result, indent=1).encode()) > 4 * 1024 * 1024
+    ):
+        raise StepFailedError("codex_interface_limit")
     return result
 
 
@@ -196,3 +203,14 @@ def check_renewal_size(value: object) -> None:
     """
     if len(json.dumps(value, indent=1).encode()) > 4 * 1024 * 1024:
         raise StepFailedError("host_renewal_limit")
+
+
+def codex_interface(value: object) -> InterfaceReceipt:
+    """Require the exact typed managed-interface recovery envelope."""
+    try:
+        raw = json.dumps(value)
+        if len(raw.encode()) > 4 * 1024 * 1024:
+            raise ValueError("codex_interface_limit")
+        return InterfaceReceipt.model_validate_json(raw)
+    except (ValidationError, TypeError, ValueError):
+        raise StepFailedError("codex_interface_record_invalid") from None

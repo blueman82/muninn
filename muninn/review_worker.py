@@ -10,15 +10,20 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import Literal
 
+from muninn import review_managed_files
 from muninn.review_json import canonical_json_value
 from muninn.review_process_identity import identify
 from muninn.review_process_protocol import (
     activation_size,
-    decode_activation,
+    decode_control,
     packet,
 )
 from muninn.review_process_windows import NativeChild, launch
+from muninn.review_runtime_models import RuntimeIdentity
+from muninn.review_runtime_records import identity_digest
 
 
 class _Worker:
@@ -49,6 +54,9 @@ class _Worker:
         self.closed: set[int] = set()
         self.output_count = 0
         self.completed = False
+        self.refused = False
+        self.refresh_used = False
+        self.execution: RuntimeIdentity | None = None
         os.set_blocking(0, False)
         os.set_blocking(1, False)
 
@@ -81,14 +89,51 @@ class _Worker:
 
     def _launch(self) -> None:
         """Start the sole parent-selected CLI without inherited control FDs."""
-        argv, cwd, env, self.prompt = decode_activation(
+        control, self.prompt = decode_control(
             bytes(self.incoming), self.input_limit
         )
+        if control.replacement != self.refused or (
+            self.refused and self.refresh_used
+        ):
+            raise ValueError("invalid_worker_phase")
+        if control.replacement and control.refresh_count != 1:
+            raise ValueError("invalid_worker_phase")
+        self.refresh_used = bool(control.refresh_count)
+        self.execution = control.execution
+        argv, cwd, env = control.argv, control.cwd, control.env
         with contextlib.suppress(BlockingIOError):
             # EOF or a second frame invalidates the first before creation.
             os.read(0, 1)
             self.abort()
         self.incoming.clear()
+        if self.execution is not None and not review_managed_files.matches(
+            self.execution
+        ):
+            self._refuse("runtime_changed")
+            return
+        try:
+            self._create(argv, cwd, env)
+        except FileNotFoundError:
+            if self.execution is None:
+                raise
+            self._refuse("exec_enoent")
+            return
+        assert self.cli is not None
+        for pipe in (self.cli.stdin, self.cli.stdout, self.cli.stderr):
+            assert pipe is not None
+            os.set_blocking(pipe.fileno(), False)
+        data: dict[str, object] = {
+            "launched_at": time.time(),
+            "identity": identify(self.cli.pid).model_dump(),
+        }
+        if self.execution is not None:
+            data["identity_digest"] = identity_digest(self.execution)
+        self.outgoing.extend(packet(b"L", canonical_json_value(data).encode()))
+
+    def _create(
+        self, argv: tuple[str, ...], cwd: Path, env: dict[str, str]
+    ) -> None:
+        """Keep native creation separate from proved pre-exec refusal."""
         self.cli = (
             launch(argv, cwd, env)
             if os.name == "nt"
@@ -102,16 +147,20 @@ class _Worker:
                 stderr=subprocess.PIPE,
             )
         )
-        for pipe in (self.cli.stdin, self.cli.stdout, self.cli.stderr):
-            assert pipe is not None
-            os.set_blocking(pipe.fileno(), False)
+
+    def _refuse(self, code: Literal["runtime_changed", "exec_enoent"]) -> None:
+        """Acknowledge no native creation before awaiting one replacement."""
+        assert self.execution is not None and self.cli is None
+        self.refused = True
+        self.expected = 12
+        self.prompt = b""
         self.outgoing.extend(
             packet(
-                b"L",
+                b"P",
                 canonical_json_value(
                     {
-                        "launched_at": time.time(),
-                        "identity": identify(self.cli.pid).model_dump(),
+                        "identity_digest": identity_digest(self.execution),
+                        "code": code,
                     }
                 ).encode(),
             )

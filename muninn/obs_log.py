@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import cast
 
 from muninn import platform_io
+from muninn.review_recovery_codes import RUNTIME_CODES
 
 ROTATE_BYTES = 1024 * 1024
 LINE_BYTES = 1024
@@ -87,7 +88,7 @@ _REVIEW_EVENTS = frozenset(
         "review_commit_rejected",
     }
 )
-_REVIEW_ERRORS = frozenset(
+_REVIEW_ERRORS = RUNTIME_CODES | frozenset(
     {
         "rejected_validation",
         "rejected_evidence",

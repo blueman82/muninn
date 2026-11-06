@@ -19,6 +19,10 @@ from muninn.review_runner import (
     check_private_path,
     read_private_file,
 )
+from muninn.review_runtime_models import (
+    ManagedCapability,
+    ManagedCodexSelection,
+)
 from muninn.store import data_home
 
 
@@ -57,7 +61,9 @@ def _load(home: Path, path: Path, limit: int) -> bytes:
     return raw
 
 
-def load_capability(home: Path, policy: ReviewPolicy) -> RunnerCapability:
+def load_capability(
+    home: Path, policy: ReviewPolicy
+) -> RunnerCapability | ManagedCapability:
     """Read exactly the complete policy's explicit capability selection."""
     try:
         policy = ReviewPolicy.model_validate_json(policy.model_dump_json())
@@ -69,6 +75,11 @@ def load_capability(home: Path, policy: ReviewPolicy) -> RunnerCapability:
             / (digest(policy) + ".json"),
             1024 * 1024,
         )
+        if isinstance(policy.runner, ManagedCodexSelection):
+            managed = ManagedCapability.model_validate_json(raw)
+            if managed.requested != policy.runner:
+                raise ValueError("launch_input_binding")
+            return managed
         capability = RunnerCapability.model_validate_json(raw)
         if any(
             getattr(capability, key) != value

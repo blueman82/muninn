@@ -9,6 +9,7 @@ from pathlib import Path
 
 from muninn.review_models import ReviewContext, RunnerConfig
 from muninn.review_rounds import round_schema
+from muninn.review_runtime_models import RuntimeIdentity
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,7 @@ class LaunchSpec:
     cli_env: dict[str, str]
     prompt: bytes
     deadline: float
+    execution: RuntimeIdentity | None = None
 
 
 def cli_argv(
@@ -127,15 +129,18 @@ def launch_spec(
     schema: dict[str, object] | None = None,
     *,
     schema_path: Path | None = None,
+    requested: RunnerConfig | None = None,
 ) -> LaunchSpec:
     """Build the fixed idle wrapper and explicit isolated CLI environment."""
-    if context.policy.runner.runner == "codex_cli" and schema_path is None:
+    selected = context.policy.runner if requested is None else requested
+    if not isinstance(selected, RunnerConfig):
+        raise ValueError("runtime_interface_unsupported")
+    if selected.runner == "codex_cli" and schema_path is None:
         raise ValueError("native_schema_required")
     argv = (
-        codex_cli_argv(context.policy.runner, cwd, schema_path)
-        if context.policy.runner.runner == "codex_cli"
-        and schema_path is not None
-        else cli_argv(context.policy.runner, schema)
+        codex_cli_argv(selected, cwd, schema_path)
+        if selected.runner == "codex_cli" and schema_path is not None
+        else cli_argv(selected, schema)
     )
     wrapper, wrapper_env = worker_launch(
         context.deadline,

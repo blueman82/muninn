@@ -21,14 +21,15 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from install import configedit as ce
 from install import (
+    codex_interface_recovery,
     host_renewal_recovery,
     legacy_state,
     legacy_transition,
     lifecycle,
     policy_records,
 )
+from install import configedit as ce
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
 from install.provider_paths import cursor_commands
@@ -295,6 +296,7 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     problems: list[str] = []
     if (
         "host_renewal" in rec
+        or "codex_interface" in rec
         or rec.get("recovery_required")
         or policy_records.activation_phase(rec) is not None
         or (
@@ -338,6 +340,11 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
 
 def rollback(ctx: Ctx, rec: Record) -> list[str]:
     """Serialize direct recovery before native or filesystem effects."""
+    if (
+        codex_interface_recovery.pending(ctx) is not None
+        or "codex_interface" in rec
+    ):
+        raise ValueError("codex_interface_recovery_required")
     if host_renewal_recovery.pending(ctx) is not None or "host_renewal" in rec:
         raise ValueError("host_renewal_recovery_required")
     with legacy_state.operation(ctx) as check:
@@ -393,6 +400,8 @@ def failed_install(ctx: Ctx, rec: Record, step: str, exc: Exception) -> None:
         "error": type(exc).__name__,
     }
     save(ctx, rec)
+    if "codex_interface" in rec:
+        codex_interface_recovery.pause_failed(ctx, rec)
     detail = (
         "host_renewal_recovery_required" if "host_renewal" in rec else str(exc)
     )

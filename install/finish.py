@@ -7,6 +7,7 @@ import shutil
 from pydantic import TypeAdapter, ValidationError
 
 from install import (
+    codex_interface,
     host_renewal_receipts,
     legacy_state,
     policy_records,
@@ -63,9 +64,12 @@ def complete(ctx: Ctx, rec: Record) -> Record:
         and not ctx.dry_run
         and policy_records.activation_phase(rec) is None
         and "host_renewal" not in rec
+        and "codex_interface" not in rec
     ):
         shutil.rmtree(ctx.rdir)
         rec["record_removed"] = True
+    if "codex_interface" in rec:
+        codex_interface.phase(ctx, rec, "complete")
     rec["install_complete"] = True
     if "host_renewal" in rec:
         policy_records.check_renewal_size(rec)

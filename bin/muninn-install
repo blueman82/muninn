@@ -148,15 +148,17 @@ previous=
 for argument in "$@"; do
   case "$argument" in
     --check | --dry-run) check_mode=--check ;;
-    --renew-codex-host) renewal=1 ;;
-    --renew-codex-host=*)
+    --renew-codex-host | --codex-interface) renewal=1 ;;
+    --renew-codex-host=* | --codex-interface=*)
       renewal=1
-      [ "$argument" != --renew-codex-host=preview ] || check_mode=--check
+      case "$argument" in
+        --renew-codex-host=preview | --codex-interface=preview) check_mode=--check ;;
+      esac
       ;;
   esac
-  if [ "$previous" = --renew-codex-host ] && [ "$argument" = preview ]; then
-    check_mode=--check
-  fi
+  case "$previous:$argument" in
+    --renew-codex-host:preview | --codex-interface:preview) check_mode=--check ;;
+  esac
   previous=$argument
 done
 if [ "$renewal" -eq 1 ]; then

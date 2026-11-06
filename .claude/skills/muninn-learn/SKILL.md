@@ -249,3 +249,59 @@ A failed startup starts no timer. Prompt recall remains separate and conditional
 `context_unavailable` identifies a context-generation failure whose exact detail was not retained.
 Real store, format, privacy, and configuration failures remain visible.
 A successful prompt hook does not prove that startup memory reached the conversation.
+
+
+For a removed old Codex executable on Darwin/arm64, prepare the managed interface
+rule with `bin/muninn-install --upgrade --codex-interface preview --check`.
+This writes nothing and runs only fixed isolated model-free checks.
+Apply only its exact digest with `--codex-interface PLAN_DIGEST`.
+The installer requires fresh yes/y consent to that initial UPDATE RULE.
+A preview or source review is not activation approval.
+
+This one approval also enrolls the physical computer. The old name-based digest
+does not prove physical continuity. Preview reports that continuity as unverified.
+Keep its observed_legacy_host value as a preview diagnostic only. A later
+computer-name change on the same physical target does not require new approval.
+
+The new target has kind darwin-ioplatformuuid-v1 and a digest. Muninn reads the
+public Darwin ID once, with a positive native wait of at most 50 ms. It keeps
+no raw ID or name. The wait does not limit all operating-system delay.
+A different physical ID stops with codex_host_changed. An unavailable checked
+ID stops with codex_host_identity_unavailable. Do not substitute another ID.
+
+The selected runtime must declare codex-managed-host-enrollment-v1 and parse
+ongoing-mac-codex-managed-v1 terms before grant commit or restart. An old
+selection marker cannot pass. A runtime downgrade after commit keeps the new
+grant stopped for checked recovery. Repeat the same operation with compatible
+code. Do not restore the old grant or start the service by hand.
+Ordinary upgrades do not enroll it. Do not combine it with host renewal,
+`--enable-learning`, a fresh install, new scope/history or another policy input.
+
+The rule follows only `~/.codex/packages/standalone/current` within `releases`.
+Compatible updates keep the same policy, account, auth home, model/reasoning,
+permissions, scope, history, attempts, charges and limits. They need no version
+question. Local manager trust does not prove every helper's publisher origin.
+No arbitrary PATH/project selection, copied old runtime or new billing route exists.
+
+Managed attempts expose stable selection. Managed calls expose a versioned
+`codex-managed-call-v1` requested record with up to two candidates, offers/refusals,
+refresh count and write-once actual `launched_identity`. An offer is not a launch.
+Native observed facts stay unknown when unreported. Each round keeps its own facts.
+One proved pre-exec race can refresh the same reservation. A second race stops
+with `runtime_race_exhausted`; it creates no extra attempt or refunded charge.
+Started or uncertain execution never authorizes automatic relaunch.
+
+Distinct setup codes are `runtime_selection_unavailable`, `runtime_selection_unsafe`,
+`runtime_interface_unsupported`, `runtime_probe_unavailable` and `runtime_structure_limit`.
+A missing or safe invalid disposable cache requires the same isolated checks again.
+Unsafe/unstable cache storage refuses. Preview never repairs it.
+A missing approval or initial bridge cannot reconstruct consent.
+Managed estimates report unknown runtime without a checked current identity.
+
+Preserve the private typed installer receipt after a failed activation operation.
+Checked recovery recognizes the exact committed successor and retains a later pause.
+Do not restore an archive or run old code against managed JSON. No DDL changed.
+Source tests do not establish installation, activation, native/model or billing acceptance.
+An ordinary `--enable-learning` restart after managed enrollment checks and
+reuses the same grant. Keep its scope, queue, approval time, account and limits.
+Unfinished or uncertain calls still refuse restart.

@@ -24,6 +24,10 @@ from install.record import Record
 from muninn import review_codex_launch, store
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
+from muninn.review_runtime_models import (
+    ManagedCodexSelection,
+    require_legacy_runner,
+)
 from tools import prepare_codex_policy
 
 
@@ -43,7 +47,7 @@ def select(
     if configured:
         return None
     found = (
-        installed.runner.executable
+        require_legacy_runner(installed.runner).executable
         if installed is not None
         else shutil.which("codex")
     )
@@ -145,7 +149,7 @@ def prepare(ctx: Ctx, rec: Record, policy: ReviewPolicy) -> None:
         prepare_codex_policy.profile_digest(profile_raw)
     ):
         raise StepFailedError("review_policy_default_changed")
-    executable = Path(policy.runner.executable)
+    executable = Path(require_legacy_runner(policy.runner).executable)
     stable_executable = Path(source["default_executable"])
     executable_target = Path(source["default_executable_target"])
     auth_home = Path(source["default_auth_home"])
@@ -228,6 +232,8 @@ def _configured(ctx: Ctx) -> tuple[bool, ReviewPolicy | None]:
             if row["policy_json"] is None:
                 return False, None
             installed = ReviewPolicy.model_validate_json(row["policy_json"])
+            if isinstance(installed.runner, ManagedCodexSelection):
+                return True, None
             if ctx.enable_learning:
                 learning_policy_recovery.require_finished(conn)
             permitted = row["admission"] == 1 or ctx.enable_learning

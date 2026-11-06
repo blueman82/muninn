@@ -10,10 +10,9 @@ from collections.abc import Callable, Generator
 from contextlib import closing, contextmanager, nullcontext, suppress
 from pathlib import Path
 
-from install import snapshot_io
+from install import review_policy_transition, snapshot_io
 from install.context import Ctx, StepFailedError
 from install.policy_source_format import validate_policy_source
-from install.review_policy_transition import compatible
 from muninn import platform_io, platform_lock, platform_windows, store
 from muninn.review_models import ReviewPolicy
 
@@ -225,5 +224,5 @@ def validate(ctx: Ctx, policy: ReviewPolicy) -> None:
             return
         conn.row_factory = sqlite3.Row
         validate_policy_source(conn)
-        compatible(conn, policy)
+        review_policy_transition.compatible(conn, policy)
         check()

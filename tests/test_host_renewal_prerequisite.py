@@ -14,7 +14,13 @@ from install import decision_migration, installer, lifecycle
 from install.context import Ctx
 from install.record import Record
 from muninn import review_pause as q
-from muninn import review_recovery, review_requests, review_supervisor, store
+from muninn import (
+    review_recovery,
+    review_requests,
+    review_round_launch,
+    review_supervisor,
+    store,
+)
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from tests.host_renewal_inventory import IndexedSource
@@ -103,7 +109,7 @@ class HostRenewalPrerequisiteTests(PrerequisiteFixture):
                 side_effect=AssertionError("reserved"),
             ) as reserve,
             mock.patch.object(
-                review_supervisor,
+                review_round_launch,
                 "create_wrapper",
                 side_effect=AssertionError("launched"),
             ) as launch,

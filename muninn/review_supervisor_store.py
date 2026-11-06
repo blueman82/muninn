@@ -20,6 +20,7 @@ from muninn.review_process import (
     WorkerReady,
 )
 from muninn.review_progress import digest
+from muninn.review_runtime_bridge import effective_policy
 
 
 def is_contention(error: sqlite3.OperationalError) -> bool:
@@ -122,7 +123,7 @@ def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
                 "AND state='reserved'",
                 (event.launched_at, event.attempt_id, event.round_index),
             )
-        else:
+        elif isinstance(event, ProcessOutcome):
             conn.execute(
                 "UPDATE review_call SET state=?,ended_at=?,observed_json=?,"
                 "usage_json=?,outcome=? WHERE attempt_id=? AND round_index=? "
@@ -142,6 +143,8 @@ def persist_event(home: Path, event: ProcessEvent, now: float) -> None:
                     event.round_index,
                 ),
             )
+        else:
+            raise ValueError("invalid_worker_protocol")
         if (
             policy.experimental_codex is not None
             and isinstance(event, ProcessOutcome)
@@ -198,15 +201,15 @@ def mark_correction(
     """Mark one completed call under the caller's fenced transaction."""
     if not conn.in_transaction:
         raise ValueError("transaction_required")
-    policy = canonical_json(context.policy)
-    active = conn.execute("SELECT policy_json FROM review_control").fetchone()
-    if (
-        active is None
-        or active[0] is None
-        or canonical_json(ReviewPolicy.model_validate_json(active[0]))
-        != policy
-    ):
-        raise ValueError("rejected_fenced")
+    row = conn.execute(
+        "SELECT * FROM review_request WHERE id=?", (context.request_id,)
+    ).fetchone()
+    try:
+        if row is None or effective_policy(conn, row) != context.policy:
+            raise ValueError("rejected_fenced")
+    except (ValueError, OSError):
+        raise ValueError("rejected_fenced") from None
+    policy = row["policy_json"]
     changed = conn.execute(
         "UPDATE review_call SET outcome=? WHERE attempt_id=? "
         "AND round_index=? AND state='completed' AND ended_at IS NOT NULL "
@@ -216,8 +219,8 @@ def mark_correction(
         "WHERE r.id=? AND a.id=review_call.attempt_id AND a.request_id=r.id "
         "AND r.state='running' AND a.ended_at IS NULL "
         "AND a.generation=? AND c.generation=a.generation "
-        "AND c.admission=1 AND r.policy_digest=review_call.policy_digest "
-        "AND c.policy_digest=r.policy_digest "
+        "AND c.admission=1 AND r.policy_digest=? "
+        "AND c.policy_digest=? "
         "AND r.policy_json=?)",
         (
             f"correction_{kind}_requested",
@@ -226,6 +229,8 @@ def mark_correction(
             digest(context.policy),
             context.request_id,
             context.generation,
+            row["policy_digest"],
+            digest(context.policy),
             policy,
         ),
     ).rowcount

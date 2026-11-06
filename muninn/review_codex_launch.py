@@ -11,6 +11,7 @@ import platform
 import stat
 import subprocess
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -27,6 +28,7 @@ from muninn.review_json import (
 from muninn.review_launch_spec import LaunchSpec, codex_cli_argv, launch_spec
 from muninn.review_models import ReviewContext, ReviewPolicy, RunnerConfig
 from muninn.review_rounds import round_schema
+from muninn.review_runtime_authority import wire_schema as wire_schema
 
 JSON_ONLY_INSTRUCTION = (
     "Return only the required JSON object. Do not invoke tools, commands, "
@@ -88,6 +90,11 @@ def _has_acl(path: Path) -> bool:
     return granted
 
 
+def has_write_acl(path: Path) -> bool:
+    """Check ACL grants through the same verifier used by legacy launches."""
+    return _has_acl(path)
+
+
 def _check_executable_storage(executable: Path) -> None:
     """Require an executable path that a separate local user cannot replace."""
     if sys.platform == "win32":
@@ -104,7 +111,12 @@ def _check_executable_storage(executable: Path) -> None:
             raise ValueError("capability_executable_storage")
 
 
-def verify_codex_executable(executable: Path) -> tuple[Path, str]:
+def verify_codex_executable(
+    executable: Path,
+    *,
+    limit: int = 256 * 1024 * 1024,
+    deadline: float | None = None,
+) -> tuple[Path, str]:
     """Return the signed canonical target and digest of a Codex CLI path."""
     if not executable.is_absolute():
         raise ValueError("capability_path")
@@ -112,10 +124,15 @@ def verify_codex_executable(executable: Path) -> tuple[Path, str]:
         target = executable.resolve(strict=True)
     except RuntimeError:
         raise ValueError("capability_path") from None
-    before, _ = review_runner.file_digest(target, 256 * 1024 * 1024)
+    before, _ = review_runner.file_digest(target, limit, deadline=deadline)
     _check_executable_storage(target)
     if not os.access(target, os.X_OK):
         raise ValueError("capability_changed")
+    timeout = (
+        10.0 if deadline is None else min(10.0, deadline - time.monotonic())
+    )
+    if timeout <= 0:
+        raise ValueError("runtime_probe_unavailable")
     try:
         result = subprocess.run(
             (
@@ -128,13 +145,13 @@ def verify_codex_executable(executable: Path) -> tuple[Path, str]:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
-            timeout=10,
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired):
         raise ValueError("capability_executable_provenance") from None
     if result.returncode != 0:
         raise ValueError("capability_executable_provenance")
-    after, _ = review_runner.file_digest(target, 256 * 1024 * 1024)
+    after, _ = review_runner.file_digest(target, limit, deadline=deadline)
     if after != before:
         raise ValueError("capability_changed")
     return target, after
@@ -150,18 +167,6 @@ class ExperimentalBinding(StrictModel):
     cli_cwd: Path
     auth_home: Path
     schema_path: Path
-
-
-def wire_schema() -> bytes:
-    """Use the same strict object envelope as the measured native trial."""
-    return canonical_json_value(
-        {
-            "type": "object",
-            "properties": {"payload_json": {"type": "string"}},
-            "required": ["payload_json"],
-            "additionalProperties": False,
-        }
-    ).encode()
 
 
 def fingerprint(binding: ExperimentalBinding) -> str:
@@ -185,10 +190,10 @@ def fingerprint(binding: ExperimentalBinding) -> str:
     ).hexdigest()
 
 
-def checked_binding(
+def stored_binding(
     home: Path, capability: review_runner.RunnerCapability
-) -> tuple[ExperimentalBinding, Path]:
-    """Load a content-addressed private explicit experimental selection."""
+) -> ExperimentalBinding:
+    """Read saved binding integrity without the executable."""
     path = capability.proof_path
     if path.parent != home / "review-capabilities" or path.suffix != ".json":
         raise ValueError("capability_storage")
@@ -217,8 +222,18 @@ def checked_binding(
         != wire_schema()
     ):
         raise ValueError("capability_changed")
+    return binding
+
+
+def checked_binding(
+    home: Path, capability: review_runner.RunnerCapability
+) -> tuple[ExperimentalBinding, Path]:
+    """Load a content-addressed private explicit experimental selection."""
+    binding = stored_binding(home, capability)
     executable = Path(binding.requested.executable)
-    target, _ = verify_codex_executable(executable)
+    target, hashed = verify_codex_executable(executable)
+    if hashed != binding.executable_sha256:
+        raise ValueError("capability_changed")
     return binding, target
 
 
@@ -310,20 +325,7 @@ def prepare(
         ).hexdigest()
     ):
         raise ValueError("capability_changed")
-    data = cast(dict[str, object], json.loads(prompt))
-    instructions = data.get("instructions")
-    if (
-        not isinstance(instructions, str)
-        or JSON_ONLY_INSTRUCTION not in instructions
-    ):
-        raise ValueError("native_prompt_instruction")
-    if "payload_schema" in data:
-        raise ValueError("native_prompt_instruction")
-    data["instructions"] = instructions + " " + WIRE_INSTRUCTION
-    data["payload_schema"] = round_schema()
-    native = canonical_json_value(data).encode()
-    if len(native) > policy.max_input_bytes:
-        raise ValueError("invalid_prompt_size")
+    native = native_prompt(context, prompt)
     spec = launch_spec(
         context,
         binding.cli_cwd,
@@ -336,3 +338,22 @@ def prepare(
         schema_path=binding.schema_path,
     )
     return replace(spec, cli_argv=(str(executable), *spec.cli_argv[1:]))
+
+
+def native_prompt(context: ReviewContext, prompt: bytes) -> bytes:
+    """Apply the fixed JSON envelope without changing semantic validation."""
+    data = cast(dict[str, object], json.loads(prompt))
+    instructions = data.get("instructions")
+    if (
+        not isinstance(instructions, str)
+        or JSON_ONLY_INSTRUCTION not in instructions
+    ):
+        raise ValueError("native_prompt_instruction")
+    if "payload_schema" in data:
+        raise ValueError("native_prompt_instruction")
+    data["instructions"] = instructions + " " + WIRE_INSTRUCTION
+    data["payload_schema"] = round_schema()
+    native = canonical_json_value(data).encode()
+    if len(native) > context.policy.max_input_bytes:
+        raise ValueError("invalid_prompt_size")
+    return native

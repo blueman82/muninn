@@ -28,6 +28,9 @@ from muninn.review_json import canonical_json, canonical_json_value
 from muninn.review_models import ReviewPolicy
 from muninn.review_pause_state import WITNESS
 from muninn.review_rounds import round_schema
+from muninn.review_runtime_models import (
+    require_legacy_runner,
+)
 from muninn.tombstone_key import KEY_FILE, TOMBSTONE_FILE
 from tools.codex_policy_artifacts import ArtifactPlan, plan_artifacts
 
@@ -129,7 +132,7 @@ def artifacts(
     terms = old.experimental_codex
     assert terms is not None
     _, executable_digest = review_codex_launch.verify_codex_executable(
-        Path(old.runner.executable)
+        Path(require_legacy_runner(old.runner).executable)
     )
     if (
         binding.requested != old.runner

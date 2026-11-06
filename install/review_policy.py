@@ -12,6 +12,7 @@ from contextlib import closing, suppress
 from pathlib import Path
 
 from install import (
+    learning_policy_recovery,
     learning_scope,
     legacy_state,
     policy_preview,
@@ -89,8 +90,10 @@ def capture(
         "sha": sha,
         "enable_learning": ctx.enable_learning,
     }
-    selected: ReviewPolicy | None = None
-    raw: str | None = None
+    if ctx.codex_interface is not None:
+        return policy_records.policy_input(result)
+    selected = learning_policy_recovery.managed_restart(ctx)
+    raw: str | None = canonical_json(selected) if selected else None
     if ctx.review_policy is not None:
         if ctx.platform not in {"darwin", "linux"}:
             raise StepFailedError("review_policy_unsupported")
@@ -103,14 +106,13 @@ def capture(
                 check_host(selected.experimental_codex, ctx.data)
             except ValueError:
                 raise StepFailedError("review_policy_unsupported") from None
-    else:
+    elif selected is None:
         default = default_policy.select(ctx, profile_raw)
         if default is not None:
             selected, source = default
             return policy_records.policy_input({**result, **source})
     if selected is not None:
-        if raw is None:
-            raw = canonical_json(selected)
+        assert raw is not None
         return policy_records.policy_input(
             {
                 **result,

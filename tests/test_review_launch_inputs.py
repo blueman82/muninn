@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import review_launch_inputs
+from muninn import review_launch_inputs, review_runner
 from muninn.review_progress import digest
 from tests import test_review_runner as runner_tests
 
@@ -77,7 +77,8 @@ class ReviewLaunchInputTests(unittest.TestCase):
         for raw in (
             b"{}",
             b'{"schema_version":1,"assembly":"wrong","instructions":"x"}',
-            b'{"schema_version":1,"assembly":"muninn-review-prompt-v1","instructions":"x","extra":1}',
+            b'{"schema_version":1,"assembly":"muninn-review-prompt-v1","instr'
+            b'uctions":"x","extra":1}',
             b'{"x":1,"x":2}',
             b"\xff",
             b"1" * 5000,
@@ -157,12 +158,9 @@ class ReviewLaunchInputTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 review_launch_inputs.load_capability(self.home, self.policy)
         self.write(path, json.dumps({**data, "status": "unverified"}).encode())
-        self.assertEqual(
-            review_launch_inputs.load_capability(
-                self.home, self.policy
-            ).status,
-            "unverified",
-        )
+        selected = review_launch_inputs.load_capability(self.home, self.policy)
+        assert isinstance(selected, review_runner.RunnerCapability)
+        self.assertEqual(selected.status, "unverified")
         self.selected.chmod(0o755)
         with self.assertRaises(ValueError):
             review_launch_inputs.load_capability(self.home, self.policy)

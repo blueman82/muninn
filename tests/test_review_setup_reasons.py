@@ -261,6 +261,8 @@ class PausedLearningRenderingTests(CliLearningCase):
             assert action is not None
             shown = learning_status(action)
             self.assertIn("--renew-codex-host preview --check", shown)
+            self.assertIn("For a managed grant, keep learning paused", shown)
+            self.assertIn("For a legacy exact-runtime grant", shown)
             self.assertIn("exact plan", shown)
             self.assertIn("grants no permission", shown)
             self.assertIn("no timer", shown)

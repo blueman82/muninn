@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from muninn import file_sync, review_runner
+from muninn import platform_io, review_runner
 from muninn.review_codex_launch import (
     JSON_ONLY_INSTRUCTION,
     ExperimentalBinding,
@@ -24,6 +23,9 @@ from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_models import ReviewPolicy
 from muninn.review_rounds import round_schema
 from muninn.review_runner import RunnerCapability
+from muninn.review_runtime_models import (
+    require_legacy_runner,
+)
 
 _OUTPUT_CONTRACT_DIGEST = output_contract_digest()
 
@@ -40,7 +42,9 @@ class PreparedFile:
         path = self.relative_path.as_posix()
         if type(self.raw) is not bytes or not re.fullmatch(
             r"review-codex-schema\.json|review-prompts/[0-9a-f]{64}\.json|"
-            r"review-capabilities/(selected/)?[0-9a-f]{64}\.json",
+            r"review-capabilities/(?:(?:selected|managed-bridges|managed-appro"
+            r"vals)/)?"
+            r"[0-9a-f]{64}\.json",
             path,
         ):
             raise ValueError("preparation_artifact_invalid")
@@ -94,7 +98,9 @@ def plan_artifacts(
         or ".." in binding.auth_home.parts
         or binding.auth_home == home
         or home in binding.auth_home.parents
-        or not Path(policy.runner.executable).is_absolute()
+        or not Path(
+            require_legacy_runner(policy.runner).executable
+        ).is_absolute()
         or binding.requested != policy.runner
         or binding.host_identity != terms.host_identity
         or binding.output_contract_digest != _OUTPUT_CONTRACT_DIGEST
@@ -195,21 +201,20 @@ def publish_artifacts(home: Path, plan: ArtifactPlan) -> None:
     """Publish private artifacts or require exact existing bytes."""
     review_runner.check_private_path(home, directory=True)
     validate_artifacts(home, plan)
-    for item in plan.files:
+    publish_files(home, plan.files)
+
+
+def publish_files(home: Path, files: tuple[PreparedFile, ...]) -> None:
+    """Publish immutable private metadata or require exact old bytes."""
+    review_runner.check_private_path(home, directory=True)
+    for item in files:
         PreparedFile(item.relative_path, item.raw)
         path = home / item.relative_path
         for parent in reversed(path.relative_to(home).parents):
             directory = home / parent
             directory.mkdir(mode=0o700, exist_ok=True)
             review_runner.check_private_path(directory, directory=True)
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            if review_runner.read_private_file(path, 1024 * 1024) != item.raw:
-                raise ValueError("preparation_artifact_changed") from None
-            continue
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(item.raw)
-            handle.flush()
-            file_sync.sync_fd(handle.fileno())
-        file_sync.sync_path(path.parent)
+        if not platform_io.publish_private_file(path, item.raw) and (
+            review_runner.read_private_file(path, 1024 * 1024) != item.raw
+        ):
+            raise ValueError("preparation_artifact_changed")

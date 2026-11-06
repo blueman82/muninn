@@ -387,3 +387,20 @@ new host permission. The later renewal needs your affirmative answer for its
 exact displayed digest. A full upgrade can run Codex hook checks and start
 background learning before returning; ongoing approval has no total call or
 spending cap of its own.
+
+### Keep learning on the current managed Codex
+
+A saved executable path can disappear after Codex updates. On Apple silicon
+macOS, prepare the explicit stable interface rule with:
+
+```sh
+bin/muninn-install --upgrade --codex-interface preview --check
+```
+
+The preview writes nothing and creates no model request. It can check the saved
+approval when the old executable is missing. Apply its exact digest with
+`bin/muninn-install --upgrade --codex-interface PLAN_DIGEST`. The installer asks
+for a fresh `yes` or `y` to that rule. It preserves account, model, scope, history,
+limits and existing work. Compatible later Codex updates need no new approval.
+This trusts the fixed local manager, not an arbitrary program on `PATH`. See
+[the full contract](REFERENCE.md#follow-the-current-trusted-codex-installation).

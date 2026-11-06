@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import suppress
+from pathlib import Path
 
 from install import learning_policy_recovery
 from install.context import StepFailedError
@@ -11,6 +12,7 @@ from install.review_policy_parse import policy as parse_policy
 from muninn.review_json import canonical_json
 from muninn.review_models import OngoingBudget, ReviewPolicy
 from muninn.review_progress import checked_policy, digest
+from muninn.review_runtime_models import ManagedCodexSelection
 
 
 def compatible(conn: sqlite3.Connection, policy: ReviewPolicy | None) -> None:
@@ -201,7 +203,10 @@ def apply(
         if current is None or current["policy_json"] is None:
             raise StepFailedError("review_policy_transition_required")
         _validate_activation(conn, current, selected, enable_admission)
-        if selected.policy_id == "muninn-codex-ongoing-production-v3":
+        if (
+            selected.policy_id == "muninn-codex-ongoing-production-v3"
+            and not isinstance(selected.runner, ManagedCodexSelection)
+        ):
             conn.execute(
                 "UPDATE review_request SET "
                 "state='cancelled',retry_at=NULL,"
@@ -235,6 +240,14 @@ def _validate_activation(
     if current["policy_digest"] != digest(selected):
         check(conn, installed, selected)
     if enable_admission:
+        if isinstance(selected.runner, ManagedCodexSelection):
+            if installed != selected:
+                raise StepFailedError("learning_recovery_policy_required")
+            home = Path(
+                conn.execute("PRAGMA database_list").fetchone()[2]
+            ).parent
+            learning_policy_recovery.check_managed(conn, home, selected)
+            return
         if selected.policy_id != "muninn-codex-ongoing-production-v3":
             raise StepFailedError("learning_recovery_policy_required")
         learning_policy_recovery.require_finished(conn)

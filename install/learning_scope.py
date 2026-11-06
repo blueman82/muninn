@@ -11,6 +11,7 @@ from install.policy_source_format import legacy_source, validate_policy_source
 from install.record import Record
 from muninn import review_history, review_state, store
 from muninn.review_models import ReviewPolicy
+from muninn.review_runtime_models import ManagedCodexSelection
 
 
 def choose(
@@ -116,17 +117,17 @@ def _saved_scope(
             if not ctx.enable_learning:
                 return saved, True
     if ctx.enable_learning:
-        learning_policy_recovery.require_finished(conn)
+        if isinstance(installed.runner, ManagedCodexSelection):
+            learning_policy_recovery.check_managed(conn, ctx.data, installed)
+        else:
+            learning_policy_recovery.require_finished(conn)
     return saved, False
 
 
 def _consent(ctx: Ctx, prompt: Callable[[str], str]) -> bool:
     """Ask separately before changing an existing learning pause."""
     ctx.say("Learning is paused under the existing policy.")
-    ctx.say(
-        "You can keep this pause or approve a checked restart "
-        "with the new policy."
-    )
+    ctx.say("You can keep this pause or approve a checked restart.")
     try:
         answer = prompt(
             "Enable learning after verifying that earlier calls "

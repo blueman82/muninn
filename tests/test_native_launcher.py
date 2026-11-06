@@ -117,6 +117,7 @@ if sys.platform == "win32":
             for name in (
                 "platform_paths",
                 "platform_io",
+                "file_sync",
                 "platform_windows",
                 "platform_windows_security",
             ):

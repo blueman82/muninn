@@ -15,6 +15,7 @@ from muninn.review_process import (
     WorkerReady,
     cancel_registered,
 )
+from muninn.review_process_events import legacy_event
 from muninn.review_process_protocol import activation
 from muninn.review_runner import RunnerCapability
 from muninn.review_spawn import create_wrapper
@@ -176,7 +177,8 @@ def _wait(
     """Persist readiness, freshly revalidate, then spend activation once."""
     schedule, learner = binding
     while True:
-        for event in monitor.drain():
+        for observed in monitor.drain():
+            event = legacy_event(observed)
             if (event.attempt_id, event.round_index) != (
                 schedule.id,
                 schedule.round_index,

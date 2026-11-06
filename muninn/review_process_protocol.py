@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import struct
 from pathlib import Path
+from typing import Literal, cast
 
 from pydantic import ValidationError
 
@@ -16,6 +17,7 @@ from muninn.review_json import (
     unique_object,
 )
 from muninn.review_models import ProcessIdentity
+from muninn.review_runtime_models import ActivationRuntime, RuntimeIdentity
 
 CONTROL_HEADER_MAX = 1024 * 1024
 
@@ -26,6 +28,9 @@ class Control(StrictModel):
     argv: tuple[str, ...]
     cwd: Path
     env: dict[str, str]
+    execution: RuntimeIdentity | None = None
+    refresh_count: Literal[0, 1] = 0
+    replacement: bool = False
 
 
 class LaunchNotice(StrictModel):
@@ -33,6 +38,14 @@ class LaunchNotice(StrictModel):
 
     launched_at: UtcSeconds
     identity: ProcessIdentity
+    identity_digest: str | None = None
+
+
+class PrestartRefusalNotice(StrictModel):
+    """Acknowledge that this owned wrapper created no native client."""
+
+    identity_digest: str
+    code: Literal["runtime_changed", "exec_enoent"]
 
 
 class TerminalNotice(StrictModel):
@@ -53,17 +66,28 @@ def load(raw: bytes) -> object:
     )
 
 
+def object_packet(raw: bytes) -> dict[str, object]:
+    """Require a bounded unique-key wrapper control object."""
+    value = load(raw)
+    if not isinstance(value, dict):
+        raise ValueError("invalid_worker_protocol")
+    return cast(dict[str, object], value)
+
+
 def activation(
     argv: tuple[str, ...],
     cwd: Path,
     env: dict[str, str],
     prompt: bytes,
     limit: int,
+    *,
+    runtime: ActivationRuntime | None = None,
 ) -> bytes:
     """Keep raw prompt length separate from escaped launch metadata."""
-    header = canonical_json_value(
-        {"argv": argv, "cwd": str(cwd), "env": env}
-    ).encode()
+    data: dict[str, object] = {"argv": argv, "cwd": str(cwd), "env": env}
+    if runtime is not None:
+        data.update(runtime.model_dump(mode="json"))
+    header = canonical_json_value(data).encode()
     if len(header) > CONTROL_HEADER_MAX or len(prompt) > limit:
         raise ValueError("activation_limit")
     total = 4 + len(header) + len(prompt)
@@ -87,9 +111,7 @@ def activation_size(prefix: bytes | bytearray, limit: int) -> int:
     return total + 8
 
 
-def decode_activation(
-    raw: bytes, limit: int
-) -> tuple[tuple[str, ...], Path, dict[str, str], bytes]:
+def decode_control(raw: bytes, limit: int) -> tuple[Control, bytes]:
     """Validate one complete activation and refuse extra activation bytes."""
     if len(raw) != activation_size(raw, limit):
         raise ValueError("activation_incomplete")
@@ -107,11 +129,28 @@ def decode_activation(
         or any("\0" in k + v or "=" in k for k, v in control.env.items())
     ):
         raise ValueError("activation_invalid")
-    return control.argv, control.cwd, control.env, raw[12 + header :]
+    if (
+        control.execution is not None
+        and control.argv[0] != control.execution.requested.executable
+    ):
+        raise ValueError("activation_invalid")
+    if control.execution is None and (
+        control.refresh_count or control.replacement
+    ):
+        raise ValueError("activation_invalid")
+    return control, raw[12 + header :]
+
+
+def decode_activation(
+    raw: bytes, limit: int
+) -> tuple[tuple[str, ...], Path, dict[str, str], bytes]:
+    """Retain the exact legacy public activation decoder projection."""
+    control, prompt = decode_control(raw, limit)
+    return control.argv, control.cwd, control.env, prompt
 
 
 def packet(tag: bytes, raw: bytes) -> bytes:
     """Prefix transport bytes without letting native output forge events."""
-    if tag not in (b"R", b"L", b"T", b"O", b"E"):
+    if tag not in (b"R", b"L", b"T", b"O", b"E", b"P"):
         raise ValueError("invalid_worker_protocol")
     return tag + struct.pack("!I", len(raw)) + raw

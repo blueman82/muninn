@@ -21,12 +21,22 @@ from muninn.knowledge_models import (
     UnresolvedId,
     UtcSeconds,
 )
-from muninn.review_codex_policy import CodexExperiment
+from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
     NonnegativeInt,
     PositiveInt,
+)
+from muninn.review_runtime_models import (
+    ManagedCallRecord,
+    RunnerSelection,
+)
+from muninn.review_runtime_models import (
+    ManagedCodexSelection as ManagedCodexSelection,
+)
+from muninn.review_runtime_models import (
+    RunnerConfig as RunnerConfig,
 )
 
 
@@ -60,16 +70,6 @@ class Usage(StrictModel):
     cached_tokens: NonnegativeInt | None
     cost_decimal: CostDecimal | None
     currency: Text | None
-
-
-class RunnerConfig(StrictModel):
-    """Require every requested runner setting explicitly."""
-
-    runner: Literal["claude_cli", "codex_cli"]
-    executable: Text
-    version: Text
-    model: Text
-    reasoning: Text
 
 
 class ObservedConfig(StrictModel):
@@ -133,7 +133,7 @@ class ReviewPolicy(StrictModel):
     prompt_digest: Digest
     projection_version: Text
     result_schema_digest: Digest
-    runner: RunnerConfig
+    runner: RunnerSelection
     max_rounds: PositiveInt
     max_input_bytes: PositiveInt
     max_output_bytes: PositiveInt
@@ -145,8 +145,8 @@ class ReviewPolicy(StrictModel):
     hook_wait_seconds: UtcSeconds
     allow_global: bool
     budget: PilotBudget | OngoingBudget
-    experimental_codex: CodexExperiment | None = Field(
-        default=None, exclude_if=lambda value: value is None
+    experimental_codex: CodexExperiment | ManagedCodexExperiment | None = (
+        Field(default=None, exclude_if=lambda value: value is None)
     )
 
     @model_validator(mode="after")
@@ -162,9 +162,15 @@ class ReviewPolicy(StrictModel):
         if self.policy_source is not None and self.experimental_codex is None:
             raise ValueError("review_policy_source")
         if self.experimental_codex is None:
+            if isinstance(self.runner, ManagedCodexSelection):
+                raise ValueError("codex_approval_required")
             if isinstance(self.budget, OngoingBudget):
                 raise ValueError("ongoing_policy_required")
             return
+        if isinstance(self.runner, ManagedCodexSelection) != isinstance(
+            self.experimental_codex, ManagedCodexExperiment
+        ):
+            raise ValueError("codex_experimental_policy")
         input_ceiling = {
             "muninn-codex-ongoing-production": 65536,
             "muninn-codex-ongoing-production-v2": 1_048_576,
@@ -219,7 +225,7 @@ class AttemptView(StrictModel):
     id: AttemptId
     request_id: RequestId
     generation: PositiveInt
-    requested: RunnerConfig | None
+    requested: RunnerSelection | None
     observed: ObservedConfig
     started_at: UtcSeconds
     progress_at: UtcSeconds
@@ -249,7 +255,7 @@ class CallView(StrictModel):
     reserved_at: UtcSeconds
     launched_at: UtcSeconds | None
     ended_at: UtcSeconds | None
-    requested: RunnerConfig
+    requested: RunnerConfig | ManagedCallRecord
     observed: ObservedConfig
     usage: Usage | None
     cost_reservation_decimal: CostDecimal | None

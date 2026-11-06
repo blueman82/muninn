@@ -77,7 +77,7 @@ class DecisionFairnessTests(DecisionCase):
         with (
             mock.patch.object(supervisor, "_inputs", return_value=True),
             mock.patch(
-                "muninn.review_supervisor.create_wrapper",
+                "muninn.review_round_launch.create_wrapper",
                 side_effect=AssertionError,
             ),
         ):
@@ -345,7 +345,8 @@ with closing(store.connect_ro(store.db_path(home))) as conn:
     policy = ReviewPolicy.model_validate_json(conn.execute(
         'SELECT policy_json FROM review_control').fetchone()[0])
 with mock.patch.object(Supervisor, '_inputs', return_value=True), mock.patch(
-        'muninn.review_supervisor.create_wrapper', side_effect=AssertionError):
+        'muninn.review_round_launch.create_wrapper',
+        side_effect=AssertionError):
     supervisor = Supervisor(home, policy)
     supervisor.start(now)
     try:

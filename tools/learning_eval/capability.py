@@ -23,6 +23,9 @@ from muninn.review_runner import (
     file_digest,
     read_private_file,
 )
+from muninn.review_runtime_models import (
+    require_legacy_runner,
+)
 from tools.learning_eval.cases import digest, strict_json
 from tools.learning_eval.models import TrialAuthorization
 from tools.learning_eval.native_codex import (
@@ -124,7 +127,7 @@ def prepare_capability_trial(
     )
     if candidate.kind == "native_codex_trial":
         schema = wire_schema()
-    requested = context.policy.runner
+    requested = require_legacy_runner(context.policy.runner)
     if (
         candidate.protocol != protocol
         or candidate.requested != requested
@@ -181,6 +184,7 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
     if manifest.account_path == manifest.artifact_path:
         raise ValueError("pilot_path_binding")
     policy = assessment.policies[0]
+    require_legacy_runner(policy.runner)
     if any(
         r.context_bytes > policy.context_bytes
         or r.guide_bytes > policy.max_input_bytes
@@ -228,7 +232,8 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
                 != candidate_config_digest(candidate)
                 or candidate.executable_sha256
                 != file_digest(
-                    Path(policy.runner.executable), 256 * 1024 * 1024
+                    Path(require_legacy_runner(policy.runner).executable),
+                    256 * 1024 * 1024,
                 )[0]
                 or any(
                     getattr(capability, key) != value

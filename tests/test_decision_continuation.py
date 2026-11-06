@@ -28,7 +28,7 @@ class DecisionContinuationTests(DecisionCase):
         with (
             mock.patch.object(Supervisor, "start", side_effect=AssertionError),
             mock.patch(
-                "muninn.review_supervisor.create_wrapper",
+                "muninn.review_round_launch.create_wrapper",
                 side_effect=AssertionError,
             ),
         ):
@@ -332,7 +332,7 @@ with store.writer_lock(home, wait_s=0):
         with (
             mock.patch.object(supervisor, "_inputs", return_value=True),
             mock.patch(
-                "muninn.review_supervisor.create_wrapper",
+                "muninn.review_round_launch.create_wrapper",
                 side_effect=AssertionError,
             ),
         ):

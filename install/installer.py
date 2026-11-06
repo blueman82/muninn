@@ -14,6 +14,8 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from install import (
+    codex_interface,
+    codex_interface_recovery,
     entry,
     host_renewal,
     host_renewal_recovery,
@@ -239,8 +241,11 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     Raises:
         StepFailedError: If current ownership or recovery state refuses.
     """
-    if ctx.renew_codex_host is not None:
-        return _renewal(ctx, Path(repo), sha)
+    special = codex_interface_recovery.dispatch(
+        ctx, Path(repo), sha, _interface, _renewal
+    )
+    if special is not None:
+        return special
     if host_renewal_recovery.pending(ctx) is not None:
         raise StepFailedError("host_renewal_recovery_required")
     if (
@@ -270,6 +275,22 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     platform_io.ensure_private_dir(ctx.lib)
     with legacy_state.operation(ctx) as check:
         return _install(ctx, preflight(ctx, Path(repo), sha), check)
+
+
+def _interface(ctx: Ctx, repo: Path, sha: str) -> Record:
+    """Run the interface route through the same checked installer engine."""
+
+    def engine(
+        active: Ctx,
+        rec: Record,
+        check: legacy_state.OperationCheck,
+        resume: bool,
+    ) -> Record:
+        return _install(active, rec, check, resume=resume)
+
+    return codex_interface_recovery.install_owned(
+        ctx, repo, sha, engine, preflight
+    )
 
 
 def _renewal(ctx: Ctx, repo: Path, sha: str) -> Record:
@@ -338,6 +359,8 @@ def _install(
         ctx.say, ctx.run = install_log(log_path, ctx.run)
     if not resume:
         record(ctx, rec)
+        if ctx.interface_plan is not None:
+            codex_interface.run(ctx, rec, ctx.interface_plan)
         if ctx.host_plan is not None:
             host_renewal.stage(ctx, rec, ctx.host_plan, check)
     step: Step = record

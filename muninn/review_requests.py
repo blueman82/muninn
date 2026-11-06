@@ -33,29 +33,34 @@ from muninn.review_progress import (
     unsuppressed_window,
 )
 from muninn.review_read_budget import ReadBudget
+from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_request_views import attempt_view, request_row, request_view
 from muninn.review_state import selection
 
 _RETRYABLE = frozenset({"deadline", "unavailable", "rejected_revision"})
-_ERRORS = _RETRYABLE | {
-    "auth",
-    "config",
-    "evidence_limit",
-    "prompt_limit",
-    "evidence_byte_limit",
-    "evidence_record_limit",
-    "evidence_work_limit",
-    "evidence_selection_limit",
-    "budget",
-    "review_policy_required",
-    "rejected_validation",
-    "rejected_evidence",
-    "rejected_scope",
-    "rejected_authority",
-    "rejected_revision",
-    "rejected_erased",
-    "rejected_fenced",
-}
+_ERRORS = (
+    _RETRYABLE
+    | RUNTIME_CODES
+    | {
+        "auth",
+        "config",
+        "evidence_limit",
+        "prompt_limit",
+        "evidence_byte_limit",
+        "evidence_record_limit",
+        "evidence_work_limit",
+        "evidence_selection_limit",
+        "budget",
+        "review_policy_required",
+        "rejected_validation",
+        "rejected_evidence",
+        "rejected_scope",
+        "rejected_authority",
+        "rejected_revision",
+        "rejected_erased",
+        "rejected_fenced",
+    }
+)
 
 
 def enqueue_review(

@@ -241,3 +241,46 @@ receipt refuses automatic continuation. Do not restore the archive over current
 data, edit lock metadata or manufacture another approval. An unexplained lock
 acquisition metadata gap requires operator or maintainer review; no automatic
 continuation is supported for that gap.
+
+### Current Codex installation changed
+
+A missing old executable is not permission to broaden its saved grant. Prepare
+[the managed interface preview](REFERENCE.md#follow-the-current-trusted-codex-installation).
+It checks the original approval and the current trusted manager. The owner must
+approve the exact initial rule in the installer. Compatible later updates keep
+that grant without another version question.
+
+A missing selection, unsafe storage, unsupported interface, unavailable isolated
+probe and structural limit have separate safe codes. An unsafe cache remains a
+refusal. Safe invalid cache content requires all fixed isolated checks again.
+`runtime_race_exhausted` stops that call after its one allowed pre-exec refresh.
+It does not refund the reservation or add an automatic attempt.
+
+If installation fails after the grant commits, keep its private receipt and the
+new grant paused. Resume the same checked operation. Do not restore an archive,
+edit the grant or restart older code against the managed JSON format. A recovered
+installation can retain an admission pause; installation success does not prove
+that learning resumed or that a model used the expected billed account.
+# Physical computer enrollment for managed Codex
+
+If the old Codex executable is gone and the old computer digest differs,
+use the managed interface preview. The old digest includes the computer name.
+Its change does not prove a change of physical computer.
+
+```sh
+bin/muninn-install --upgrade --codex-interface preview --check
+```
+
+The preview writes nothing. It checks the old approval files and shows a new
+physical target. One fresh yes/y approval authorizes that target and the stable
+Codex runner rule. Old physical continuity stays unverified.
+
+If Muninn reports `codex_host_identity_unavailable`, it cannot read a checked
+physical ID. If it reports `codex_host_changed`, a checked physical ID differs.
+Do not change the approval files or substitute another identity source.
+Keep the service stopped and give the finite code to the maintainer.
+
+If Muninn reports `codex_interface_runtime_required`, use a release that can
+parse the new managed host terms. The old runner-selection marker cannot pass.
+After a grant commits, repeat the same checked operation with compatible code.
+Do not start the service by hand or restore an old grant.

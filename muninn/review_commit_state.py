@@ -17,9 +17,8 @@ from muninn.knowledge_models import (
 from muninn.knowledge_write import json_value
 from muninn.review_candidates import CommitRejectedError
 from muninn.review_evidence_models import PositiveInt
-from muninn.review_json import canonical_json
 from muninn.review_models import Receipt, ReviewPolicy
-from muninn.review_progress import checked_policy, digest
+from muninn.review_runtime_bridge import effective_policy
 
 
 class CommitContext(StrictModel):
@@ -83,21 +82,6 @@ def checked_request_policy(
 ) -> ReviewPolicy:
     """Check immutable admission identities without calling admission reads."""
     try:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(row["policy_json"])
-        )
-        control = conn.execute("SELECT * FROM review_control").fetchone()
-        if (
-            not control["admission"]
-            or row["policy_digest"] != digest(policy)
-            or control["policy_digest"] != digest(policy)
-            or control["policy_json"] is None
-            or canonical_json(
-                ReviewPolicy.model_validate_json(control["policy_json"])
-            )
-            != canonical_json(policy)
-        ):
-            raise CommitRejectedError("rejected_validation")
-    except ValueError:
+        return effective_policy(conn, row)
+    except (ValueError, OSError):
         raise CommitRejectedError("rejected_validation") from None
-    return policy

@@ -16,6 +16,7 @@ from muninn.knowledge_models import Scope
 from muninn.review_codex_output import output_contract_digest
 from muninn.review_json import canonical_json_value, result_schema
 from muninn.review_rounds import round_schema
+from muninn.review_runtime_models import require_legacy_runner
 from tests.ingest_support import IngestCase
 from tests.test_review_codex_production import experimental_policy
 from tests.test_review_rounds import context
@@ -63,7 +64,7 @@ class CodexProductionLaunchTests(IngestCase):
         schema.write_bytes(launch.wire_schema())
         schema.chmod(0o600)
         self.binding = launch.ExperimentalBinding(
-            requested=self.policy.runner,
+            requested=require_legacy_runner(self.policy.runner),
             host_identity="1" * 64,
             executable_sha256=self.executable_hash,
             output_contract_digest=output_contract_digest(),
@@ -150,14 +151,14 @@ class CodexProductionLaunchTests(IngestCase):
     ) -> None:
         path = prepare_codex_policy.prepare(
             self.home,
-            Path(self.policy.runner.executable),
+            Path(require_legacy_runner(self.policy.runner).executable),
             self.binding.auth_home,
             "synthetic-fixture-owner",
             10.0,
         )
         revised = prepare_codex_policy.prepare(
             self.home,
-            Path(self.policy.runner.executable),
+            Path(require_legacy_runner(self.policy.runner).executable),
             self.binding.auth_home,
             "synthetic-fixture-owner",
             11.0,
@@ -210,16 +211,19 @@ class CodexProductionLaunchTests(IngestCase):
         review_runner.prepare_launch(
             self.context, self.capability, self.prompt
         )
-        Path(self.policy.runner.executable).write_text("new executable bytes")
-        spec = review_runner.prepare_launch(
-            self.context, self.capability, self.prompt
+        Path(require_legacy_runner(self.policy.runner).executable).write_text(
+            "new executable bytes"
         )
-        self.assertEqual(spec.cli_argv[0], self.policy.runner.executable)
-        self.assertIn("read-only", spec.cli_argv)
+        with self.assertRaisesRegex(ValueError, "capability_changed"):
+            review_runner.prepare_launch(
+                self.context, self.capability, self.prompt
+            )
 
-    def test_existing_policy_survives_codex_upgrade(self) -> None:
-        """Keep old installed policy artifacts usable after the CLI changes."""
-        runner = self.policy.runner.model_copy(update={"version": "0.163.0"})
+    def test_legacy_policy_refuses_changed_executable(self) -> None:
+        """Keep exact legacy approval bound to its actual executable hash."""
+        runner = require_legacy_runner(self.policy.runner).model_copy(
+            update={"version": "0.163.0"}
+        )
         policy = self.policy.model_copy(update={"runner": runner})
         binding = self.binding.model_copy(update={"requested": runner})
         raw = canonical_json_value(binding.model_dump(mode="json")).encode()
@@ -240,15 +244,15 @@ class CodexProductionLaunchTests(IngestCase):
         context = self.context.model_copy(update={"policy": policy})
         review_runner.prepare_launch(context, capability, self.prompt)
         Path(runner.executable).write_text("upgraded Codex executable")
-        spec = review_runner.prepare_launch(context, capability, self.prompt)
-        self.assertEqual(spec.cli_argv[0], runner.executable)
+        with self.assertRaisesRegex(ValueError, "capability_changed"):
+            review_runner.prepare_launch(context, capability, self.prompt)
 
     def test_stable_symlink_launches_verified_upgrade_target(self) -> None:
-        """Use each signed target while keeping one approved CLI path."""
-        original = Path(self.policy.runner.executable)
+        """Refuse a changed signed target under an exact legacy grant."""
+        original = Path(require_legacy_runner(self.policy.runner).executable)
         stable = self.home / "codex-current"
         stable.symlink_to(original)
-        runner = self.policy.runner.model_copy(
+        runner = require_legacy_runner(self.policy.runner).model_copy(
             update={"executable": str(stable)}
         )
         policy = self.policy.model_copy(update={"runner": runner})
@@ -276,10 +280,8 @@ class CodexProductionLaunchTests(IngestCase):
         upgraded.chmod(0o700)
         stable.unlink()
         stable.symlink_to(upgraded)
-        second = review_runner.prepare_launch(
-            selected, capability, self.prompt
-        )
-        self.assertEqual(second.cli_argv[0], str(upgraded))
+        with self.assertRaisesRegex(ValueError, "capability_changed"):
+            review_runner.prepare_launch(selected, capability, self.prompt)
 
     def test_substituted_executable_is_refused_before_launch(self) -> None:
         """A runnable file at the approved path cannot inherit Codex auth."""
@@ -314,7 +316,7 @@ class CodexProductionLaunchTests(IngestCase):
                 '--test-requirement==identifier "codex" '
                 "and anchor apple generic "
                 'and certificate leaf[subject.OU] = "2DC432GLL2"',
-                str(self.policy.runner.executable),
+                str(require_legacy_runner(self.policy.runner).executable),
             ),
         )
 
@@ -344,7 +346,7 @@ class CodexProductionLaunchTests(IngestCase):
         ):
             prepare_codex_policy.prepare(
                 self.home,
-                Path(self.policy.runner.executable),
+                Path(require_legacy_runner(self.policy.runner).executable),
                 self.binding.auth_home,
                 "synthetic-fixture-owner",
                 10.0,

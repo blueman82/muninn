@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+RUNTIME_SETUP_CODES = frozenset(
+    {
+        "runtime_selection_unavailable",
+        "runtime_selection_unsafe",
+        "runtime_interface_unsupported",
+        "runtime_probe_unavailable",
+        "runtime_structure_limit",
+        "codex_host_changed",
+        "codex_host_identity_unavailable",
+    }
+)
+RUNTIME_CODES = RUNTIME_SETUP_CODES | {"runtime_race_exhausted"}
+
 EXPLANATIONS: dict[str, tuple[str, str]] = {
     "deadline": (
         "The review exceeded its time limit.",
@@ -154,6 +167,9 @@ _SETUP_FAILURES = {
         "The saved computer ID does not match this computer. Why it"
         " changed is unknown."
     ),
+    "codex_host_identity_unavailable": (
+        "Muninn cannot read a checked physical computer ID."
+    ),
     "codex_project_required": "This review has no project binding.",
     "native_prompt_instruction": (
         "The review instructions do not match the required Codex format."
@@ -168,6 +184,32 @@ _SETUP_FAILURES = {
         "The selected runner has no supported launch method."
     ),
 }
+_SETUP_FAILURES.update(
+    {
+        "runtime_selection_unavailable": (
+            "The trusted current Codex " "installation is unavailable."
+        ),
+        "runtime_selection_unsafe": (
+            "The current Codex manager " "or storage fails its safety checks."
+        ),
+        "runtime_interface_unsupported": (
+            "Current Codex does not "
+            "advertise the required review interface."
+        ),
+        "runtime_probe_unavailable": (
+            "The fixed isolated Codex " "interface checks did not complete."
+        ),
+        "runtime_structure_limit": (
+            "The current Codex package " "exceeds a fixed structural limit."
+        ),
+    }
+)
+EXPLANATIONS["runtime_race_exhausted"] = (
+    "Current Codex changed again before native execution could start.",
+    "This call stopped within its original reservation. Muninn will not creat"
+    "e an extra attempt or refund its charge.",
+)
+
 EXPLANATIONS.update(
     {
         code: (
@@ -184,7 +226,10 @@ EXPLANATIONS.update(
 )
 EXPLANATIONS["codex_host_changed"] = (
     _SETUP_FAILURES["codex_host_changed"],
-    "The agent checks current format 2 and recovery prerequisites, then "
+    "For a managed grant, keep learning paused. The maintainer checks "
+    "the physical ID. Do not change its approval files. "
+    "For a legacy exact-runtime grant, the agent checks current format 2 "
+    "and recovery prerequisites, then "
     "prepares a host-only candidate and a non-writing renewal preview: "
     "bin/muninn-install --upgrade --review-policy PATH "
     "--renew-codex-host preview --check. "
@@ -219,6 +264,7 @@ for _code in SHARED:
 
 CONTAINED = frozenset(
     {
+        "runtime_race_exhausted",
         "deadline",
         "unavailable",
         "rejected_revision",

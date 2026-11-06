@@ -7,14 +7,15 @@ import json
 import os
 import re
 import stat
-import sys
+import sys as sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
 from pydantic import ValidationError, field_validator
 
-from muninn import review_codex_launch
+from muninn import review_codex_launch, review_managed_launch
 from muninn.knowledge_models import Digest, SchemaVersion, StrictModel, Text
 from muninn.platform_io import open_regular
 from muninn.review_json import (
@@ -33,6 +34,22 @@ from muninn.review_models import (
 from muninn.review_output import output_contract_digest
 from muninn.review_output import reported_metadata as reported_metadata
 from muninn.review_rounds import check_round, round_schema
+from muninn.review_runtime_authority import (
+    canonical_path as _canonical,
+)
+from muninn.review_runtime_authority import (
+    check_private_path as check_private_path,
+)
+from muninn.review_runtime_authority import (
+    file_identity as _identity,
+)
+from muninn.review_runtime_authority import (
+    read_private_file as read_private_file,
+)
+from muninn.review_runtime_models import (
+    ManagedCapability,
+    require_legacy_runner,
+)
 from muninn.store import data_home
 
 _RECIPE = "claude-static-posix-v1"
@@ -88,72 +105,12 @@ def _digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _canonical(path: Path) -> None:
-    """Reject relative, aliased and symlink-containing paths."""
-    if not path.is_absolute() or path.resolve() != path:
-        raise ValueError("capability_path")
-
-
-def check_private_path(path: Path, *, directory: bool) -> None:
-    """Verify private same-user POSIX ownership at a trusted boundary."""
-    if sys.platform == "win32":
-        raise ValueError("capability_platform")
-    _canonical(path)
-    info = path.lstat()
-    kind = stat.S_ISDIR if directory else stat.S_ISREG
-    if (
-        info.st_uid != os.getuid()
-        or info.st_mode & 0o077
-        or not kind(info.st_mode)
-    ):
-        raise ValueError("capability_storage")
-
-
-def _identity(info: os.stat_result) -> tuple[int, ...]:
-    """Compare content identity without the access time changed by reading."""
-    return (
-        info.st_dev,
-        info.st_ino,
-        info.st_size,
-        info.st_mtime_ns,
-        info.st_ctime_ns,
-        info.st_mode,
-        info.st_uid,
-        info.st_gid,
-    )
-
-
-def read_private_file(path: Path, limit: int) -> bytes:
-    """Read a bounded regular proof without following a final symlink."""
-    if sys.platform == "win32":
-        raise ValueError("capability_platform")
-    before_path = path.lstat()
-    with os.fdopen(
-        os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK),
-        "rb",
-        buffering=0,
-    ) as stream:
-        before = os.fstat(stream.fileno())
-        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
-            raise ValueError("capability_limit")
-        if (
-            before.st_uid != os.getuid()
-            or before.st_mode & 0o077
-            or _identity(before) != _identity(before_path)
-        ):
-            raise ValueError("capability_storage")
-        raw = stream.read(before.st_size)
-        if len(raw) != before.st_size or _identity(
-            os.fstat(stream.fileno())
-        ) != _identity(before):
-            raise ValueError("capability_changed")
-    if _identity(path.lstat()) != _identity(before):
-        raise ValueError("capability_changed")
-    return raw
-
-
-def file_digest(path: Path, limit: int) -> tuple[str, int]:
+def file_digest(
+    path: Path, limit: int, *, deadline: float | None = None
+) -> tuple[str, int]:
     """Stream a bounded file and refuse observable concurrent changes."""
+    if deadline is not None and time.monotonic() >= deadline:
+        raise ValueError("runtime_probe_unavailable")
     _canonical(path)
     with (
         open_regular(path) as checked,
@@ -165,6 +122,8 @@ def file_digest(path: Path, limit: int) -> tuple[str, int]:
         remaining = before.st_size
         digest = hashlib.sha256()
         while remaining:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ValueError("runtime_probe_unavailable")
             block = stream.read(min(remaining, 65536))
             if not block:
                 raise ValueError("capability_changed")
@@ -312,12 +271,14 @@ def _configuration(
 
 
 def prepare_launch(
-    context: ReviewContext, capability: RunnerCapability, prompt: bytes
+    context: ReviewContext,
+    capability: RunnerCapability | ManagedCapability,
+    prompt: bytes,
 ) -> LaunchSpec:
     """Prepare fixed data after fresh checks, without reserving or spawning."""
     try:
         context = ReviewContext.model_validate_json(context.model_dump_json())
-        capability = RunnerCapability.model_validate_json(
+        capability = type(capability).model_validate_json(
             capability.model_dump_json()
         )
         check_round(context)
@@ -326,6 +287,10 @@ def prepare_launch(
             or len(prompt) > context.policy.max_input_bytes
         ):
             raise ValueError("invalid_prompt_size")
+        if isinstance(capability, ManagedCapability):
+            return review_managed_launch.prepare_managed(
+                context, capability, prompt
+            )
         if (
             capability.runner == "codex_cli"
             and context.policy.experimental_codex is not None
@@ -335,7 +300,7 @@ def prepare_launch(
             raise ValueError("runner_unsupported")
         if capability.status != "verified":
             raise ValueError("capability_unverified")
-        requested = context.policy.runner
+        requested = require_legacy_runner(context.policy.runner)
         if any(
             getattr(capability, key) != value
             for key, value in requested.model_dump().items()

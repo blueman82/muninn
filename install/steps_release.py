@@ -11,9 +11,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
+from install import codex_interface_checks, lifecycle, policy_records
 from install import configedit as ce
-from install import legacy_baseline as baseline
-from install import lifecycle, policy_records
 from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
 from install.context import (
     Ctx,
@@ -112,8 +111,7 @@ def prepare_release(ctx: Ctx, rec: Record) -> None:
     python = prepare_runtime(ctx, dest)
     rec["python"]["path"] = str(python)
     rec["runtime_prepared"] = True
-    if ctx.review_policy or policy_records.input_raw(rec):
-        rec["prepared_runtime"] = baseline.tree_state(dest, links=True)
+    codex_interface_checks.capture_runtime(ctx, rec, dest)
 
 
 def pin(ctx: Ctx, rec: Record) -> None:
@@ -264,6 +262,7 @@ def restart(ctx: Ctx, rec: Record, *, registered: bool = False) -> None:
     """Kickstart the running job so it runs the re-pinned release."""
     if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
+    codex_interface_checks.before_start(ctx, rec)
     started = ctx.now()
     if ctx.platform != "darwin":
         lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
@@ -390,6 +389,7 @@ def start_new(ctx: Ctx, rec: Record) -> None:
     src = ctx.lib / PLIST_SOURCE
     if dry(ctx, f"would install the launchd job {ctx.plist} and start it"):
         return
+    codex_interface_checks.before_start(ctx, rec)
     status = ctx.data / "status.json"
     previous = status.stat().st_mtime_ns if status.exists() else None
     if ctx.platform != "darwin":
