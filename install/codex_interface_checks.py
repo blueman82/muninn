@@ -68,7 +68,11 @@ def _source(path: Path, expected: object) -> ast.Module:
 
 def capture_runtime(ctx: Ctx, rec: Record, destination: Path) -> None:
     """Bind prepared source without requiring an already migrated store."""
-    if ctx.upgrade or ctx.review_policy or policy_records.input_raw(rec):
+    if (
+        (ctx.platform == "darwin" and ctx.upgrade)
+        or ctx.review_policy
+        or policy_records.input_raw(rec)
+    ):
         rec["prepared_runtime"] = baseline.tree_state(destination, links=True)
 
 
