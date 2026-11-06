@@ -173,6 +173,66 @@ class StatsDoctorTests(CliCase):
         self.assertIs(obs.os, os)
         self.assertEqual(sys.platform, native_platform)
 
+    def test_denied_ps_keeps_doctor_report(self) -> None:
+        self.session(TID, "hello", "hi")
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        fake = fake_run()
+
+        def run(argv: Sequence[object]) -> CompletedProcess[bytes]:
+            if argv[0] == "ps":
+                raise PermissionError(1, "PRIVATE_SENTINEL")
+            return fake(argv)
+
+        code, out, err = self.doctor(run=run)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("error", out)
+        checks = {check["check"]: check for check in out["checks"]}
+        self.assertIs(checks["store_readable"]["ok"], True)
+        self.assertEqual(
+            checks["launchd_job"],
+            {
+                "check": "launchd_job",
+                "ok": None,
+                "level": "error",
+                "detail": "process_inspection_unavailable",
+            },
+        )
+        self.assertLessEqual(
+            {"roots_readable", "roots_present"}, checks.keys()
+        )
+        self.assertNotIn("PRIVATE_SENTINEL", json.dumps(out) + err)
+
+    def test_store_failure_survives_denied_ps(self) -> None:
+        self.session(TID, "hello", "hi")
+        self.assertEqual(self.muninn("ingest")[0], 0)
+        fake = fake_run()
+
+        def run(argv: Sequence[object]) -> CompletedProcess[bytes]:
+            if argv[0] == "ps":
+                raise PermissionError(1, "PRIVATE_SENTINEL")
+            return fake(argv)
+
+        with mock.patch.object(
+            store,
+            "connect_ro",
+            side_effect=store.StoreUnavailableError("absent"),
+        ):
+            code, out, err = self.doctor(run=run)
+        self.assertEqual(code, 1, out)
+        self.assertIs(out["ok"], False)
+        self.assertNotIn("error", out)
+        checks = {check["check"]: check for check in out["checks"]}
+        self.assertIs(checks["store_readable"]["ok"], False)
+        self.assertEqual(checks["store_readable"]["detail"], "absent")
+        self.assertIsNone(checks["launchd_job"]["ok"])
+        self.assertEqual(
+            checks["launchd_job"]["detail"], "process_inspection_unavailable"
+        )
+        self.assertLessEqual(
+            {"roots_readable", "roots_present"}, checks.keys()
+        )
+        self.assertNotIn("PRIVATE_SENTINEL", json.dumps(out) + err)
+
     def test_unsafe_status_control_retains_bytes_and_restores_privacy(
         self,
     ) -> None:

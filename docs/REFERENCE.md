@@ -1008,6 +1008,18 @@ four fields:
 - **`detail`**: a short string whose meaning depends on the check (below); empty when
   there is nothing to add.
 
+A null service result does not prove that the service is running. On macOS,
+`launchd_job` reports fixed codes when observation cannot verify the process:
+`launchctl_unavailable`, `launchctl_pid_unavailable`,
+`process_inspection_unavailable`, `process_inspection_timeout`,
+`process_inspection_failed`, or `process_pid_unverified`. The other checks remain
+in the report. A launchctl timeout reports `ok: false` with `launchctl_timeout`;
+another failed query reports `ok: false` with `launchctl_failed`. A failed query
+alone does not prove that the service is stopped. Native messages and process
+command lines are not returned. Each native command has a 60-second limit.
+An unavailable observation does not require a recovery action. Exit 0 still
+means only that no error-level check is false.
+
 When a repair baseline exists, the result includes `recovery_guidance`.
 It gives `platform`, `status`, `reason` and `steps`.
 `review_repair.detail: baseline_present_recovery_unverified` means only that a
@@ -1071,7 +1083,7 @@ owns those files.
 | `upgrade_snapshot` | warn | no retained pre-upgrade recovery archive is present | names of retained `muninn.sqlite.pre-upgrade-*` files; successful upgrades preserve them. Keep them until the owner reviews recovery and retention needs. They can contain transcript text and the legacy knowledge ledger that `erase` cannot scrub. Never remove them merely to clear this warning or restore them over newer data. |
 | `tombstone_key` | error | `tombstone.key` is whole (32 bytes), and present whenever keyed tombstones exist | `missing` or `damaged` |
 | `release_leftovers` | warn | no `.pruning-*` release directory is left in `~/.local/lib/muninn` | their names |
-| `launchd_job` | error | on macOS, the launchd job is loaded with a live process | its pid |
+| `launchd_job` | error | on macOS, launchctl reports one positive PID and a successful PID-only process query agrees; unavailable inspection reports `null`, never success | verified PID or fixed observation code above |
 | `managed_service` | error | on Linux/Windows, the managed user service/task is owned and its heartbeat identifies the actual writer; unavailable inspection reports `null`, never success; paths compare by resolved identity; each command is limited to 60 s and a timeout fails the check | constant code and process id |
 | `roots_readable` | error | every provider root that exists is readable | names of blocked roots |
 | `roots_present` | info | always | names of provider roots that do not exist |

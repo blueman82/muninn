@@ -20,6 +20,19 @@ Read `detail` before taking action.
 
 - `heartbeat`, `launchd_job`, or `managed_service`: check the owned per-user service.
   A null service result means ownership or status remains unverified.
+  It does not prove that the service is running, even when doctor exits 0.
+  On macOS, `launchd_job` passes only when launchctl reports one positive PID
+  and a successful PID-only process query agrees.
+  Unverified observations return null with `launchctl_unavailable`,
+  `launchctl_pid_unavailable`, `process_inspection_unavailable`,
+  `process_inspection_timeout`, `process_inspection_failed`, or
+  `process_pid_unverified`.
+  `launchctl_timeout` and `launchctl_failed` return false.
+  A failed launchctl query alone does not prove that the service is stopped.
+  Each native command has a 60-second limit.
+  Native messages and process command lines are not returned.
+  The other checks remain in the report.
+  An unavailable observation does not require a recovery action.
 - `file_modes` or `data_dir_mode`: POSIX directories require mode 0700 and files require mode 0600.
   Windows requires private ACLs.
   `chmod` does not establish those ACLs.
