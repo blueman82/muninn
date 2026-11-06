@@ -60,6 +60,7 @@ def _advance(pending: Round, context: ReviewContext) -> None:
     pending.refresh_count = 0
     pending.first_execution = None
     pending.prepared_prompt = b""
+    pending.ready = None
 
 
 def _correct(

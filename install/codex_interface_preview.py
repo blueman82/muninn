@@ -2,39 +2,35 @@
 
 from __future__ import annotations
 
-import hashlib
 import sqlite3
 import time
+from pathlib import Path
 
 from install import policy_preview
+from install.codex_interface_legacy import legacy_facts
 from install.codex_interface_models import InterfacePlan
 from install.context import Ctx, StepFailedError
 from install.host_renewal_preview import scan_state
 from install.policy_source_format import validate_policy_source
 from muninn import (
     review_codex_launch,
+    review_codex_policy,
     review_managed_files,
+    review_managed_host,
     review_managed_probe,
 )
-from muninn.review_codex_policy import check_host
+from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_json import (
     canonical_json,
-    canonical_json_value,
-    result_schema,
 )
-from muninn.review_launch_inputs import PromptArtifact
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import digest
-from muninn.review_rounds import round_schema
-from muninn.review_runner import (
-    RunnerCapability,
-    check_private_path,
-    read_private_file,
-)
-from muninn.review_runtime_bridge import capture, selection_only
+from muninn.review_runtime_bridge import capture, migration_delta
 from muninn.review_runtime_models import (
+    MANAGED_HOST_RUNTIME,
+    HostEnrollment,
     ManagedCodexSelection,
-    require_legacy_runner,
+    ManagedHostIdentity,
 )
 from muninn.store import db_path
 
@@ -42,53 +38,8 @@ from muninn.store import db_path
 def legacy_binding(
     ctx: Ctx, policy: ReviewPolicy
 ) -> review_codex_launch.ExperimentalBinding:
-    """Check saved approval integrity without the old runtime."""
-    require_legacy_runner(policy.runner)
-    terms = policy.experimental_codex
-    if terms is None:
-        raise ValueError("codex_approval_required")
-    check_host(terms, ctx.data)
-    directory = ctx.data / "review-capabilities"
-    for path in (
-        ctx.data,
-        directory,
-        directory / "selected",
-        ctx.data / "review-prompts",
-    ):
-        check_private_path(path, directory=True)
-    capability = RunnerCapability.model_validate_json(
-        read_private_file(
-            directory / "selected" / (digest(policy) + ".json"),
-            65536,
-        )
-    )
-    binding = review_codex_launch.stored_binding(ctx.data, capability)
-    raw = read_private_file(
-        ctx.data / "review-prompts" / (policy.prompt_digest + ".json"),
-        policy.max_input_bytes,
-    )
-    if (
-        binding.requested != policy.runner
-        or binding.host_identity != terms.host_identity
-        or capability.status != "unverified"
-        or any(
-            getattr(capability, key) != value
-            for key, value in policy.runner.model_dump().items()
-        )
-        or capability.schema_digest
-        != hashlib.sha256(
-            canonical_json_value(round_schema()).encode()
-        ).hexdigest()
-        or policy.result_schema_digest
-        != hashlib.sha256(
-            canonical_json_value(result_schema()).encode()
-        ).hexdigest()
-        or hashlib.sha256(raw).hexdigest() != policy.prompt_digest
-        or canonical_json(PromptArtifact.model_validate_json(raw)).encode()
-        != raw
-    ):
-        raise ValueError("capability_changed")
-    return binding
+    """Retain the installer-only integrity reader projection."""
+    return legacy_facts(ctx, policy)[0]
 
 
 def preview(ctx: Ctx) -> InterfacePlan:
@@ -112,21 +63,15 @@ def preview(ctx: Ctx) -> InterfacePlan:
             if digest(old) != control["policy_digest"]:
                 raise ValueError("capability_changed")
             _supported_decisions(conn, old)
-            previous = legacy_binding(ctx, old)
-            selected = ManagedCodexSelection(
-                selection="codex_managed_interface_v1",
-                runner="codex_cli",
-                manager_root=ctx.home / ".codex/packages/standalone",
-                selector="current",
-                interface="codex-json-review-v1",
-                model=old.runner.model,
-                reasoning=old.runner.reasoning,
+            previous, legacy_digest = legacy_facts(ctx, old)
+            target = review_managed_host.observe()
+            candidate, enrollment = _candidate(
+                ctx.home, old, target, review_codex_policy.host_identity()
             )
-            candidate = ReviewPolicy.model_validate_json(
-                canonical_json(old.model_copy(update={"runner": selected}))
-            )
-            selection_only(old, candidate)
-            capsule = capture(conn, old, candidate)
+            selected = candidate.runner
+            assert isinstance(selected, ManagedCodexSelection)
+            migration_delta(old, candidate)
+            capsule = capture(conn, old, candidate, host_enrollment=enrollment)
             scanned = scan_state(
                 conn,
                 db_path(ctx.data),
@@ -152,21 +97,26 @@ def preview(ctx: Ctx) -> InterfacePlan:
             )
             if (
                 again != scanned
-                or capture(conn, old, candidate) != capsule
-                or legacy_binding(ctx, old) != previous
+                or capture(conn, old, candidate, host_enrollment=enrollment)
+                != capsule
+                or legacy_facts(ctx, old) != (previous, legacy_digest)
             ):
                 raise StepFailedError("codex_interface_state_changed")
+            if review_managed_host.observe(deadline=deadline) != target:
+                raise StepFailedError("codex_host_changed")
         return InterfacePlan(
             kind="codex-managed-interface-plan-v1",
             home=ctx.data,
             old=old,
             candidate=candidate,
             old_binding=previous,
+            host_enrollment=enrollment,
+            legacy_artifacts_digest=legacy_digest,
             observation=observed,
             bridge=capsule,
             state=scanned.state,
             containment=scanned.containment,
-            minimum_runtime="codex-managed-interface-v1",
+            minimum_runtime=MANAGED_HOST_RUNTIME,
         )
     except ValueError as exc:
         code = str(exc)
@@ -176,11 +126,54 @@ def preview(ctx: Ctx) -> InterfacePlan:
             "runtime_interface_unsupported",
             "runtime_probe_unavailable",
             "runtime_structure_limit",
+            "codex_interface_legacy_approval_invalid",
+            "codex_host_identity_unavailable",
+            "codex_host_changed",
+            "codex_platform_changed",
+            "codex_data_home_changed",
         }:
             raise StepFailedError(code) from None
         raise StepFailedError("codex_interface_state_changed") from None
     except (OSError, TypeError):
         raise StepFailedError("codex_interface_state_changed") from None
+
+
+def _candidate(
+    home: Path, old: ReviewPolicy, target: ManagedHostIdentity, observed: str
+) -> tuple[ReviewPolicy, HostEnrollment]:
+    """Copy exact non-host terms into the one disclosed new host rule."""
+    terms = old.experimental_codex
+    assert isinstance(terms, CodexExperiment)
+    enrollment = HostEnrollment(
+        kind="codex-managed-host-enrollment-v1",
+        saved_legacy_host=terms.host_identity,
+        observed_legacy_host=observed,
+        target=target,
+    )
+    selected = ManagedCodexSelection(
+        selection="codex_managed_interface_v1",
+        runner="codex_cli",
+        manager_root=home / ".codex/packages/standalone",
+        selector="current",
+        interface="codex-json-review-v1",
+        model=old.runner.model,
+        reasoning=old.runner.reasoning,
+    )
+    enrolled = ManagedCodexExperiment(
+        kind="ongoing-mac-codex-managed-v1",
+        activation_authorized=terms.activation_authorized,
+        host_identity=target,
+        data_home=terms.data_home,
+        accepted_uncertainties=terms.accepted_uncertainties,
+    )
+    candidate = ReviewPolicy.model_validate_json(
+        canonical_json(
+            old.model_copy(
+                update={"runner": selected, "experimental_codex": enrolled}
+            )
+        )
+    )
+    return candidate, enrollment
 
 
 def _supported_decisions(conn: sqlite3.Connection, old: ReviewPolicy) -> None:
@@ -195,6 +188,27 @@ def _supported_decisions(conn: sqlite3.Connection, old: ReviewPolicy) -> None:
     ).fetchone()
     if unsupported is not None:
         raise StepFailedError("codex_interface_decision_unsupported")
+
+
+def same_plan(ctx: Ctx, approved: InterfacePlan) -> bool:
+    """Normalize only a newly observed legacy diagnostic in both copies."""
+    fresh = preview(ctx)
+    diagnostic = approved.host_enrollment.observed_legacy_host
+    enrollment = fresh.host_enrollment.model_copy(
+        update={"observed_legacy_host": diagnostic}
+    )
+    normalized = fresh.model_copy(
+        update={
+            "host_enrollment": enrollment,
+            "bridge": fresh.bridge.model_copy(
+                update={"host_enrollment": enrollment}
+            ),
+        }
+    )
+    return (
+        InterfacePlan.model_validate_json(canonical_json(normalized))
+        == approved
+    )
 
 
 def summary(plan: InterfacePlan) -> dict[str, object]:
@@ -215,6 +229,12 @@ def summary(plan: InterfacePlan) -> dict[str, object]:
             len(item.inputs) for item in plan.bridge.requests
         ),
         "nonruntime_terms_changed": False,
+        "host_binding_changed": True,
+        "saved_legacy_host": plan.host_enrollment.saved_legacy_host,
+        "observed_legacy_host": plan.host_enrollment.observed_legacy_host,
+        "legacy_observation": "observed at preview",
+        "target_host": plan.host_enrollment.target.model_dump(mode="json"),
+        "predecessor_host_continuity": "unverified",
         "trust": "owner-trusted-local-manager;auxiliary-or"
         "igin-unknown;same-uid-co"
         "mpromise-possible",

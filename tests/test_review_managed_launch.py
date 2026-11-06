@@ -16,7 +16,13 @@ from muninn.review_runtime_models import (
     ManagedCapability,
     ManagedInterfaceBinding,
 )
-from tests.managed_codex_support import identity, selection
+from tests.managed_codex_support import (
+    host_enrollment,
+    identity,
+    managed_policy,
+    physical_host,
+    selection,
+)
 from tests.test_review_codex_launch import CodexProductionLaunchTests
 
 
@@ -26,7 +32,8 @@ class ManagedLaunchTests(CodexProductionLaunchTests):
     def managed(self) -> tuple[ManagedCapability, ManagedInterfaceBinding]:
         """Publish an approved fixture without touching real HOME."""
         selected = selection(self.tmp / "manager")
-        self.policy = self.policy.model_copy(update={"runner": selected})
+        old = self.policy
+        self.policy = managed_policy(old, selected.manager_root)
         self.context = self.context.model_copy(
             update={
                 "policy": self.policy,
@@ -40,7 +47,9 @@ class ManagedLaunchTests(CodexProductionLaunchTests):
                 canonical_json(self.policy).encode()
             ).hexdigest(),
             bridge_digest=None,
-            host_identity="1" * 64,
+            host_identity=physical_host(),
+            host_enrollment=host_enrollment(old, self.policy),
+            legacy_artifacts_digest="c" * 64,
             auth_home=self.binding.auth_home,
             operation_id="fixture-operation",
             plan_digest="b" * 64,
@@ -57,7 +66,7 @@ class ManagedLaunchTests(CodexProductionLaunchTests):
         binding = ManagedInterfaceBinding(
             kind="codex-managed-binding-v1",
             requested=selected,
-            host_identity="1" * 64,
+            host_identity=physical_host(),
             auth_home=self.binding.auth_home,
             cli_cwd=self.binding.cli_cwd,
             schema_path=self.binding.schema_path,
@@ -116,3 +125,71 @@ class ManagedLaunchTests(CodexProductionLaunchTests):
         path.unlink()
         with self.assertRaisesRegex(ValueError, "capability_unavailable"):
             review_runner.prepare_launch(self.context, capability, self.prompt)
+
+    def test_renamed_host_keeps_same_physical_grant_and_launch(self) -> None:
+        capability, binding = self.managed()
+        before = canonical_json(self.policy)
+        observed = identity(binding.requested.manager_root)
+        with (
+            mock.patch("platform.node", return_value="renamed-synthetic-host"),
+            mock.patch(
+                "muninn.review_codex_policy.host_identity",
+                side_effect=AssertionError("managed launch read legacy name"),
+            ),
+            mock.patch(
+                "muninn.review_managed_files.observe", return_value=observed
+            ),
+            mock.patch(
+                "muninn.review_managed_probe.negotiate", return_value=observed
+            ),
+        ):
+            spec = review_runner.prepare_launch(
+                self.context, capability, self.prompt
+            )
+        self.assertEqual(spec.execution, observed)
+        self.assertEqual(canonical_json(self.policy), before)
+
+    def test_foreign_or_unavailable_physical_identity_precedes_package_probe(
+        self,
+    ) -> None:
+        capability, _ = self.managed()
+        for value in (
+            physical_host("7" * 64),
+            ValueError("codex_host_identity_unavailable"),
+        ):
+            code = (
+                "codex_host_identity_unavailable"
+                if isinstance(value, ValueError)
+                else "codex_host_changed"
+            )
+            with (
+                self.subTest(code=code),
+                mock.patch(
+                    "muninn.review_managed_host.observe",
+                    side_effect=(
+                        value if isinstance(value, ValueError) else None
+                    ),
+                    return_value=(
+                        value if not isinstance(value, ValueError) else None
+                    ),
+                ),
+                mock.patch(
+                    "muninn.review_managed_files.observe",
+                    side_effect=AssertionError(
+                        "host refusal reached package probe"
+                    ),
+                ),
+                self.assertRaisesRegex(ValueError, code),
+            ):
+                review_runner.prepare_launch(
+                    self.context, capability, self.prompt
+                )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(
+            mock.patch(
+                "muninn.review_managed_host.observe",
+                return_value=physical_host(),
+            )
+        )

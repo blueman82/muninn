@@ -6,23 +6,29 @@ import sqlite3
 from contextlib import closing
 from unittest import mock
 
-from install import codex_interface, legacy_state, policy_records
+from install import (
+    codex_interface,
+    legacy_state,
+    policy_records,
+    steps_release,
+)
 from install.codex_interface_preview import preview
 from install.context import StepFailedError
 from muninn.review_json import canonical_json
 from muninn.review_progress import digest
-from tests.test_codex_interface_preview import InterfacePreviewTests
+from tests.codex_interface_support import InterfaceApplyFixture
 from tools.codex_interface_artifacts import plan_artifacts
 from tools.codex_policy_artifacts import publish_files
 
 
-class InterfaceCommitTests(InterfacePreviewTests):
+class InterfaceCommitTests(InterfaceApplyFixture):
     """Retain approved intent and old queue across predecessor/successor."""
 
     def intent(
         self,
     ) -> tuple[dict[str, object], codex_interface.InterfaceReceipt]:
         """Prepare a temp operation with explicit synthetic yes consent."""
+        self.managed_release()
         plan = preview(self.ctx)
         self.ctx.dry_run = False
         self.ctx.codex_interface = plan.digest
@@ -35,8 +41,15 @@ class InterfaceCommitTests(InterfacePreviewTests):
             "repo": str(self.repo),
             "sha": self.sha,
             "ts": self.ctx.ts,
+            "python": {"path": str(self.executable)},
         }
         codex_interface.run(self.ctx, rec, plan)
+        with mock.patch(
+            "install.steps_release.prepare_runtime",
+            return_value=self.executable,
+        ):
+            steps_release.prepare_release(self.ctx, rec)
+            steps_release.pin(self.ctx, rec)
         value = codex_interface.receipt(self.ctx, rec)
         bundle = plan_artifacts(plan, value.approval, self.ctx.ts)
         publish_files(self.ctx.data, bundle.files)

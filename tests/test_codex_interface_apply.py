@@ -18,7 +18,6 @@ from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn.review_progress import digest
 from tests.codex_interface_support import InterfaceApplyFixture
-from tests.installer_support import git
 from tools.codex_interface_artifacts import plan_artifacts
 
 
@@ -75,16 +74,7 @@ class InterfaceApprovalTests(InterfaceApplyFixture):
     def test_normal_fake_upgrade_commits_rule_and_preserves_complete_old_queue(
         self,
     ) -> None:
-        marker = self.repo / "muninn/review_runtime_models.py"
-        marker.write_text(
-            '"""Support the fake managed runtime cont'
-            'ract."""\n\nfrom __future__ import annotat'
-            'ions\n\nCONTRACT = "codex_managed_interfac'
-            'e_v1"\n'
-        )
-        git(self.repo, "add", "muninn/review_runtime_models.py")
-        git(self.repo, "commit", "-qm", "fixture managed interface")
-        self.sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
+        self.managed_release()
         request = self.request()
         plan = preview(self.ctx)
         self.ctx.dry_run = False

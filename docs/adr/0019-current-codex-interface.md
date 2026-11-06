@@ -22,9 +22,33 @@ required advertised arguments with three fixed, isolated model-free probes.
 Missing isolation refuses. Package metadata is not whole-package publisher proof.
 
 Keep old exact policy shapes, canonical bytes and fingerprints. Enforce their
-actual executable hashes. One initial checked UPDATE RULE can replace only the
-runner selection. It requires a concrete nonwriting preview and fresh yes/y
-consent. Keep every nonruntime policy term, account, scope and limit exact.
+actual executable hashes. One initial checked UPDATE RULE changes the runner
+selection and enrolls this physical computer. It requires a preview that writes
+nothing and fresh yes/y consent. Keep every other policy term, account, scope
+and limit exact.
+
+The old computer digest includes its name. A different digest does not prove
+that the physical computer changed. The preview reads the old proof, prompt,
+schema and auth directory without the removed executable. It shows the old
+digest and the name-based digest observed at preview. It reports the old
+physical computer as unverified.
+
+The new terms use a typed digest of Darwin's public physical computer ID.
+Muninn calls `gethostuuid` once, with a positive wait of at most 50 ms.
+A shorter caller deadline reduces that wait. This limits the native resource
+wait, not total operating-system delay. Muninn keeps no raw ID or computer name.
+There is no second identity source if the call cannot supply a checked ID.
+
+The same physical ID permits a computer-name change. A different or unavailable
+physical ID stops enrollment, native preparation and checked restart.
+Memory bridge gates check the exact approved transition without a native ID
+call. They keep the existing local proposal, source and generation rules.
+
+The installer checks the selected release's prepared source files before grant
+publication, in the SQL commit and before restart or committed resume.
+The source must declare `codex-managed-host-enrollment-v1` and parse the new
+managed terms. The older runner-selection marker is insufficient. A later
+runtime downgrade leaves the committed grant stopped for checked recovery.
 
 Store stable selection in the policy and attempt. Store actual checked identity
 and append-only activation history per call. Compatible updates leave the grant

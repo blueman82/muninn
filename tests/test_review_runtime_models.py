@@ -18,7 +18,7 @@ from muninn.review_runtime_models import (
     ManagedCallRecord,
     require_legacy_runner,
 )
-from tests.managed_codex_support import identity, selection
+from tests.managed_codex_support import identity, managed_policy, selection
 from tests.test_review_codex_production import experimental_policy
 
 
@@ -38,8 +38,8 @@ class RuntimeModelTests(TestCase):
             model="gpt-6.1-sol",
             reasoning="low",
         )
-        policy = experimental_policy(Path("/private/muninn")).model_copy(
-            update={"runner": selected}
+        policy = managed_policy(
+            experimental_policy(Path("/private/muninn")), selected.manager_root
         )
         raw = canonical_json(policy)
         self.assertNotIn('"version"', json.dumps(json.loads(raw)["runner"]))

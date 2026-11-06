@@ -11,6 +11,28 @@ from pydantic import Field, model_validator
 
 from muninn.knowledge_models import Digest, StrictModel, Text, UtcSeconds
 
+type ManagedMinimumRuntime = Literal["codex-managed-host-enrollment-v1"]
+
+MANAGED_HOST_RUNTIME: ManagedMinimumRuntime = (
+    "codex-managed-host-enrollment-v1"
+)
+
+
+class ManagedHostIdentity(StrictModel):
+    """Bind the public Darwin platform UUID without retaining the raw ID."""
+
+    kind: Literal["darwin-ioplatformuuid-v1"]
+    digest: Digest
+
+
+class HostEnrollment(StrictModel):
+    """Keep preview-time legacy facts separate from physical authority."""
+
+    kind: Literal["codex-managed-host-enrollment-v1"]
+    saved_legacy_host: Digest
+    observed_legacy_host: Digest
+    target: ManagedHostIdentity
+
 
 class RunnerConfig(StrictModel):
     """Require every requested legacy runner setting explicitly."""
@@ -176,7 +198,7 @@ class ManagedInterfaceBinding(StrictModel):
 
     kind: Literal["codex-managed-binding-v1"]
     requested: ManagedCodexSelection
-    host_identity: Digest
+    host_identity: ManagedHostIdentity
     auth_home: Path
     cli_cwd: Path
     schema_path: Path
@@ -195,12 +217,21 @@ class EnrollmentApproval(StrictModel):
     old_policy_digest: Digest
     new_policy_digest: Digest
     bridge_digest: Digest | None
-    host_identity: Digest
+    host_identity: ManagedHostIdentity
+    host_enrollment: HostEnrollment
+    legacy_artifacts_digest: Digest
     auth_home: Path
     operation_id: Text
     plan_digest: Digest
     approved_at: UtcSeconds
     approval: Literal["owner_yes"]
+
+    @model_validator(mode="after")
+    def physical_target(self) -> Self:
+        """Reject enrollment of a different physical target."""
+        if self.host_identity != self.host_enrollment.target:
+            raise ValueError("capability_changed")
+        return self
 
 
 class ActivationRuntime(StrictModel):
@@ -226,6 +257,7 @@ class InitialBridge(StrictModel):
     home: Path
     old_policy_digest: Digest
     new_policy_digest: Digest
+    host_enrollment: HostEnrollment
     requests: Annotated[tuple[BridgeRequest, ...], Field(max_length=1024)]
 
     @model_validator(mode="after")

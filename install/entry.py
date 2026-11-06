@@ -214,6 +214,11 @@ def _interface_detail(error: Exception) -> str:
         "codex_interface_recovery_required",
         "codex_interface_record_invalid",
         "codex_interface_limit",
+        "codex_interface_legacy_approval_invalid",
+        "codex_host_identity_unavailable",
+        "codex_host_changed",
+        "codex_platform_changed",
+        "codex_data_home_changed",
         "codex_interface_decision_unsupported",
     }
     return code if code in allowed else "codex_interface_recovery_required"

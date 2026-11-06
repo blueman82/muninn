@@ -155,7 +155,12 @@ def check_managed(
             or approval.new_policy_digest != digest(policy)
         ):
             raise ValueError("capability_changed")
-    except (ValueError, OSError):
+    except (ValueError, OSError) as exc:
+        if type(exc) is ValueError and str(exc) in {
+            "codex_host_identity_unavailable",
+            "codex_host_changed",
+        }:
+            raise StepFailedError(str(exc)) from None
         raise StepFailedError("learning_recovery_policy_required") from None
     require_finished(conn)
 

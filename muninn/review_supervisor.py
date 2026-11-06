@@ -36,7 +36,6 @@ from muninn.review_process import (
 )
 from muninn.review_process_identity import recover_group
 from muninn.review_progress import checked_policy, digest
-from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_request_views import request_view
 from muninn.review_requests import (
     claim_or_refuse_attempt,
@@ -127,6 +126,9 @@ class Supervisor:
             while self._pending:
                 self._event(self._pending[0], now)
                 del self._pending[0]
+            for pending in tuple(self._rounds.values()):
+                if pending.ready is not None:
+                    self._event(pending.ready, now)
             if not self._ready_to_spawn(now):
                 return
             self._catchup = catch_up_due(
@@ -280,23 +282,15 @@ class Supervisor:
         key = (event.attempt_id, event.round_index)
         pending = self._rounds[key]
         if isinstance(event, WorkerReady):
-            try:
-                self._persist(event, now)
-                pending.context = review_prompt.refresh(
-                    self.home, pending.context
-                )
-                assert self.capability is not None
-                self._prepare(pending, now)
-                review_round_launch.activate(
-                    self.home, pending, self.policy, self.monitor, now
-                )
-            except ValueError as exc:
-                code = (
-                    str(exc)
-                    if str(exc) in RUNTIME_CODES
-                    else "activation_refused"
-                )
-                cancel_registered(self.monitor, *key, code)
+            self._recheck_at = review_round_launch.ready(
+                self.home,
+                pending,
+                event,
+                self.monitor,
+                now,
+                self._recheck_at,
+                (self._prepare, self._persist),
+            )
         elif isinstance(event, WorkerPrestartRefused):
             try:
                 assert self.capability is not None
@@ -321,6 +315,7 @@ class Supervisor:
                     self.monitor, *key, "process_identity_unverified"
                 )
         else:
+            pending.ready = None
             self._persist(event, now)
             if execute_result(self.home, pending, event, now, self._fail):
                 self._next.append(pending)

@@ -257,6 +257,23 @@ This writes nothing and runs only fixed isolated model-free checks.
 Apply only its exact digest with `--codex-interface PLAN_DIGEST`.
 The installer requires fresh yes/y consent to that initial UPDATE RULE.
 A preview or source review is not activation approval.
+
+This one approval also enrolls the physical computer. The old name-based digest
+does not prove physical continuity. Preview reports that continuity as unverified.
+Keep its observed_legacy_host value as a preview diagnostic only. A later
+computer-name change on the same physical target does not require new approval.
+
+The new target has kind darwin-ioplatformuuid-v1 and a digest. Muninn reads the
+public Darwin ID once, with a positive native wait of at most 50 ms. It keeps
+no raw ID or name. The wait does not limit all operating-system delay.
+A different physical ID stops with codex_host_changed. An unavailable checked
+ID stops with codex_host_identity_unavailable. Do not substitute another ID.
+
+The selected runtime must declare codex-managed-host-enrollment-v1 and parse
+ongoing-mac-codex-managed-v1 terms before grant commit or restart. An old
+selection marker cannot pass. A runtime downgrade after commit keeps the new
+grant stopped for checked recovery. Repeat the same operation with compatible
+code. Do not restore the old grant or start the service by hand.
 Ordinary upgrades do not enroll it. Do not combine it with host renewal,
 `--enable-learning`, a fresh install, new scope/history or another policy input.
 

@@ -21,7 +21,7 @@ from muninn.knowledge_models import (
     UnresolvedId,
     UtcSeconds,
 )
-from muninn.review_codex_policy import CodexExperiment
+from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
@@ -145,8 +145,8 @@ class ReviewPolicy(StrictModel):
     hook_wait_seconds: UtcSeconds
     allow_global: bool
     budget: PilotBudget | OngoingBudget
-    experimental_codex: CodexExperiment | None = Field(
-        default=None, exclude_if=lambda value: value is None
+    experimental_codex: CodexExperiment | ManagedCodexExperiment | None = (
+        Field(default=None, exclude_if=lambda value: value is None)
     )
 
     @model_validator(mode="after")
@@ -167,6 +167,10 @@ class ReviewPolicy(StrictModel):
             if isinstance(self.budget, OngoingBudget):
                 raise ValueError("ongoing_policy_required")
             return
+        if isinstance(self.runner, ManagedCodexSelection) != isinstance(
+            self.experimental_codex, ManagedCodexExperiment
+        ):
+            raise ValueError("codex_experimental_policy")
         input_ceiling = {
             "muninn-codex-ongoing-production": 65536,
             "muninn-codex-ongoing-production-v2": 1_048_576,

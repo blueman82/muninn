@@ -13,7 +13,7 @@ from unittest import mock, skipIf
 
 from muninn import review_managed_files as files
 from tests.ingest_support import IngestCase
-from tests.managed_codex_support import package, selection
+from tests.managed_codex_support import fixture_stamps, package, selection
 
 
 @skipIf(sys.platform == "win32", "requires POSIX ownership and file modes")
@@ -26,6 +26,9 @@ class ManagedFileTests(IngestCase):
         self.release = package(self.root)
         self.selected = selection(self.root)
         for patch in (
+            mock.patch.object(
+                files, "stamp", side_effect=fixture_stamps(self.tmp)
+            ),
             mock.patch.object(files, "manager_root", return_value=self.root),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),
@@ -98,6 +101,16 @@ class ManagedFileTests(IngestCase):
                 ):
                     self.observe()
                 path.unlink()
+
+    def test_unsafe_fixture_ancestor_still_refuses(self) -> None:
+        self.tmp.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(
+                ValueError, "runtime_selection_unsafe"
+            ):
+                self.observe()
+        finally:
+            self.tmp.chmod(0o700)
 
     def test_structural_limit_refuses_before_large_read(self) -> None:
         with (self.release / "oversized").open("wb") as stream:

@@ -24,7 +24,14 @@ from muninn.review_models import ReviewContext
 from muninn.review_process import WorkerReady
 from muninn.review_round_state import Round
 from muninn.review_runtime_models import ManagedCallRecord, RuntimeIdentity
-from tests.managed_codex_support import package, publish_authority, selection
+from tests.managed_codex_support import (
+    fixture_stamps,
+    host_enrollment,
+    managed_policy,
+    package,
+    physical_host,
+    publish_authority,
+)
 from tests.review_pause_support import initialize
 from tests.test_review_codex_production import experimental_policy
 from tests.test_review_requests import RequestCase
@@ -33,6 +40,10 @@ from tests.test_review_requests import RequestCase
 @skipIf(os.name == "nt", "Darwin managed route uses POSIX test stand-ins")
 class ManagedSupervisorTests(RequestCase):
     """Exercise preparation with fake clients and temporary stores."""
+
+    policy_revision = 1
+    policy_concurrency = 1
+    carry_legacy = False
 
     def setUp(self) -> None:
         super().setUp()
@@ -49,21 +60,52 @@ class ManagedSupervisorTests(RequestCase):
         old = experimental_policy(self.home).model_copy(
             update={"prompt_digest": hashlib.sha256(raw).hexdigest()}
         )
-        self.policy = old.model_copy(update={"runner": selection(self.root)})
+        if self.policy_revision == 3:
+            old = old.model_copy(
+                update={"policy_id": "muninn-codex-ongoing-production-v3"}
+            )
+        if self.policy_concurrency != 1:
+            old = old.model_copy(
+                update={"concurrency": self.policy_concurrency}
+            )
+        selected = managed_policy(old, self.root)
+        if self.carry_legacy:
+            self.policy = old
+            self.conn.execute(
+                "UPDATE review_control SET policy_json=?,policy_digest=?",
+                (canonical_json(old), self.digest(old)),
+            )
+            self.request = self.enqueue()
+        self.policy = selected
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,"
             "policy_digest=?,admission=1",
             (canonical_json(self.policy), self.digest(self.policy)),
         )
-        capsule = review_runtime_bridge.capture(self.conn, old, self.policy)
+        capsule = review_runtime_bridge.capture(
+            self.conn,
+            old,
+            self.policy,
+            host_enrollment=host_enrollment(old, self.policy),
+        )
         publish_authority(self.home, old, self.policy, capsule)
         prompts = self.home / "review-prompts"
         prompts.mkdir(mode=0o700)
         path = prompts / (self.policy.prompt_digest + ".json")
         path.write_bytes(raw)
         path.chmod(0o600)
-        self.request = self.enqueue()
+        if not self.carry_legacy:
+            self.request = self.enqueue()
         for patch in (
+            mock.patch(
+                "muninn.review_managed_host.observe",
+                return_value=physical_host(),
+            ),
+            mock.patch.object(
+                review_managed_files,
+                "stamp",
+                side_effect=fixture_stamps(self.tmp),
+            ),
             mock.patch.dict(os.environ, {"MUNINN_HOME": str(self.home)}),
             mock.patch("platform.system", return_value="Darwin"),
             mock.patch("platform.machine", return_value="arm64"),

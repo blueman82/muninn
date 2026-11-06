@@ -8,7 +8,7 @@ from install import codex_interface_preview as previewing
 from install.context import StepFailedError
 from muninn import review_codex_policy
 from tests.host_renewal_support import HostFixture, states
-from tests.managed_codex_support import identity
+from tests.managed_codex_support import identity, physical_host
 
 
 class InterfacePreviewTests(HostFixture):
@@ -18,6 +18,13 @@ class InterfacePreviewTests(HostFixture):
         super().setUp()
         self.ctx.review_policy = None
         self.ctx.renew_codex_host = None
+        self.physical = physical_host()
+        self.enterContext(
+            mock.patch(
+                "muninn.review_managed_host.observe",
+                return_value=self.physical,
+            )
+        )
         self.enterContext(
             mock.patch.object(
                 review_codex_policy,
@@ -49,8 +56,10 @@ class InterfacePreviewTests(HostFixture):
         self.assertEqual(plan.old, self.old)
         self.assertEqual(plan.observation.requested.version, "0.166.0")
         self.assertEqual(
-            plan.candidate.model_dump(exclude={"runner"}),
-            self.old.model_dump(exclude={"runner"}),
+            plan.candidate.model_dump(
+                exclude={"runner", "experimental_codex"}
+            ),
+            self.old.model_dump(exclude={"runner", "experimental_codex"}),
         )
         self.assertEqual(len(plan.bridge.requests), 1)
         self.assertEqual(states(self.home), before)

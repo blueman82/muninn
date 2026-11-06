@@ -13,6 +13,7 @@ from muninn import (
     review_managed_probe,
     store,
 )
+from muninn.review_codex_policy import ManagedCodexExperiment, check_host
 from muninn.review_json import (
     canonical_json,
     canonical_json_value,
@@ -42,16 +43,14 @@ def prepare_managed(
     home = store.data_home(os.environ)
     binding, approval = checked_binding(home, capability)
     terms = context.policy.experimental_codex
-    if terms is None:
+    if not isinstance(terms, ManagedCodexExperiment):
         raise ValueError("codex_approval_required")
     if terms.data_home != home:
         raise ValueError("codex_data_home_changed")
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("runtime_interface_unsupported")
-    if (
-        terms.host_identity != review_codex_launch.host_identity()
-        or terms.host_identity != binding.host_identity
-    ):
+    check_host(terms, home, deadline=context.deadline)
+    if terms.host_identity != binding.host_identity:
         raise ValueError("codex_host_changed")
     if context.scope.project_id is None:
         raise ValueError("codex_project_required")

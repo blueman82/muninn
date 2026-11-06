@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+import re
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
-from muninn import review_codex_launch, review_managed_launch
+from muninn import (
+    review_codex_launch,
+    review_managed_files,
+    review_managed_launch,
+    review_runtime_authority,
+)
 from muninn.review_codex_output import output_contract_digest
+from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_json import canonical_json, canonical_json_value
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import digest
@@ -14,13 +24,110 @@ from muninn.review_rounds import round_schema
 from muninn.review_runtime_models import (
     EnrollmentApproval,
     FileStamp,
+    HostEnrollment,
     InitialBridge,
     ManagedCapability,
     ManagedCodexSelection,
+    ManagedHostIdentity,
     ManagedInterfaceBinding,
     RunnerConfig,
     RuntimeIdentity,
 )
+
+
+def physical_host(value: str = "6" * 64) -> ManagedHostIdentity:
+    """Supply synthetic physical identity without invoking Apple APIs."""
+    return ManagedHostIdentity(kind="darwin-ioplatformuuid-v1", digest=value)
+
+
+def managed_policy(old: ReviewPolicy, root: Path) -> ReviewPolicy:
+    """Construct typed fixture enrollment while keeping all other terms."""
+    terms = old.experimental_codex
+    assert isinstance(terms, (CodexExperiment, ManagedCodexExperiment))
+    selected = ManagedCodexExperiment(
+        kind="ongoing-mac-codex-managed-v1",
+        activation_authorized=terms.activation_authorized,
+        host_identity=physical_host(),
+        data_home=terms.data_home,
+        accepted_uncertainties=terms.accepted_uncertainties,
+    )
+    return ReviewPolicy.model_validate(
+        old.model_dump()
+        | {
+            "runner": selection(root),
+            "experimental_codex": selected,
+        }
+    )
+
+
+def host_enrollment(old: ReviewPolicy, new: ReviewPolicy) -> HostEnrollment:
+    """Keep legacy observations synthetic and separate from new authority."""
+    assert isinstance(old.experimental_codex, CodexExperiment)
+    assert isinstance(new.experimental_codex, ManagedCodexExperiment)
+    return HostEnrollment(
+        kind="codex-managed-host-enrollment-v1",
+        saved_legacy_host=old.experimental_codex.host_identity,
+        observed_legacy_host=old.experimental_codex.host_identity,
+        target=new.experimental_codex.host_identity,
+    )
+
+
+def fixture_stamps(base: Path) -> Callable[[Path], FileStamp]:
+    """Model Darwin parent modes without hiding disposable fixture changes."""
+    actual = review_managed_files.stamp
+    ancestors = set(base.parents)
+
+    def read(path: Path) -> FileStamp:
+        info = actual(path)
+        if path in ancestors:
+            return info.model_copy(update={"mode": info.mode & ~0o022})
+        return info
+
+    return read
+
+
+@contextmanager
+def private_authority_fixture(home: Path) -> Generator[None]:
+    """Model private Darwin fixture I/O without replacing proof validation."""
+    parents = {
+        home / "review-capabilities" / name
+        for name in ("", "selected", "managed-approvals", "managed-bridges")
+    }
+    directories = parents | {home, home / "review-runner-cwd"}
+
+    def check(path: Path, *, directory: bool) -> None:
+        review_runtime_authority.canonical_path(path)
+        if directory:
+            valid = path in directories and path.is_dir()
+        else:
+            valid = (
+                path == home / "review-codex-schema.json"
+                or (
+                    path.parent in parents
+                    and re.fullmatch(r"[0-9a-f]{64}\.json", path.name)
+                    is not None
+                )
+            ) and path.is_file()
+        if not valid:
+            raise ValueError("capability_storage")
+
+    def read(path: Path, limit: int) -> bytes:
+        check(path, directory=False)
+        with path.open("rb") as stream:
+            raw = stream.read(limit + 1)
+        if len(raw) > limit:
+            raise ValueError("capability_limit")
+        return raw
+
+    with (
+        mock.patch.object(
+            review_runtime_authority, "check_private_path", side_effect=check
+        ),
+        mock.patch.object(
+            review_runtime_authority, "read_private_file", side_effect=read
+        ),
+    ):
+        yield
 
 
 def selection(root: Path) -> ManagedCodexSelection:
@@ -121,7 +228,9 @@ def publish_authority(
         old_policy_digest=digest(old),
         new_policy_digest=digest(new),
         bridge_digest=bridge_digest,
-        host_identity="1" * 64,
+        host_identity=capsule.host_enrollment.target,
+        host_enrollment=capsule.host_enrollment,
+        legacy_artifacts_digest="a" * 64,
         auth_home=auth,
         operation_id="fixture-operation",
         plan_digest="a" * 64,
@@ -133,7 +242,7 @@ def publish_authority(
     binding = ManagedInterfaceBinding(
         kind="codex-managed-binding-v1",
         requested=new.runner,
-        host_identity="1" * 64,
+        host_identity=capsule.host_enrollment.target,
         auth_home=auth,
         cli_cwd=cwd,
         schema_path=schema,

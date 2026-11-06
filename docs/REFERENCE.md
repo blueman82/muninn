@@ -1415,6 +1415,38 @@ RULE. A preview, digest or source review is not that consent. Ordinary upgrades
 do not enroll this rule. Do not combine it with fresh install, host renewal,
 `--enable-learning`, new history/scope or another policy input.
 
+This one approval also enrolls this physical computer. The old name-based
+digest can change when the computer name changes. It does not prove which
+physical computer held the old approval. The preview reports that continuity
+as `unverified`. It shows `saved_legacy_host`, `observed_legacy_host` with the
+label `observed at preview`, and typed `target_host`. Reading these fields
+grants no permission.
+
+The new terms use `ongoing-mac-codex-managed-v1`. The physical target has kind
+`darwin-ioplatformuuid-v1` and a digest. Muninn reads the public Darwin physical
+ID once, with a positive native wait of at most 50 ms. A shorter caller
+deadline reduces the wait. Operating-system delay can increase total elapsed
+time. Muninn keeps no raw ID or computer name. Hashing does not prove that
+the computer or user process is secure. Hardware repair and copied virtual
+machines can affect the identity.
+
+A computer-name change on the same physical target keeps the grant.
+`codex_host_changed` means a checked physical target differs.
+`codex_host_identity_unavailable` means Muninn cannot read a checked physical
+ID. Both conditions stop native preparation or checked restart.
+There is no identity fallback. `codex_interface_legacy_approval_invalid`
+means the old proof, prompt, schema, settings or auth directory cannot support
+the proposed change. Repair that cause before a new preview.
+
+The plan, bridge and approval keep the original preview diagnostic.
+Apply checks every other approved field. Before grant publication, SQL commit
+and service start, Muninn checks the physical target and selected runtime.
+The runtime must declare `codex-managed-host-enrollment-v1` and parse the new
+terms. An old selection marker alone cannot pass. An incompatible selected
+runtime stops with `codex_interface_runtime_required`. After commit, Muninn
+keeps the new grant stopped for checked recovery; it does not restore an old
+grant or ask for the same approval again.
+
 The rule trusts the owner's local manager. Local metadata and hashes do not prove
 publisher origin for every helper or resource. Same-user compromise and unknown
 billing details remain limits. The rule preserves the existing auth home, model,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,17 +12,23 @@ from muninn import (
     review_codex_launch,
     review_managed_files,
     review_prompt,
+    review_recovery,
     review_runtime_records,
     review_snapshot,
+    store,
 )
+from muninn.review_codex_policy import ManagedCodexExperiment, check_host
 from muninn.review_launch_spec import LaunchSpec
 from muninn.review_models import ReviewPolicy
 from muninn.review_process import (
     ProcessMonitor,
     WorkerLaunched,
     WorkerPrestartRefused,
+    WorkerReady,
+    cancel_registered,
 )
 from muninn.review_process_protocol import activation
+from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_round_state import Round
 from muninn.review_runner import RunnerCapability, prepare_launch
 from muninn.review_runtime_models import (
@@ -29,7 +37,10 @@ from muninn.review_runtime_models import (
     ManagedCodexSelection,
 )
 from muninn.review_spawn import create_wrapper
-from muninn.review_supervisor_store import database, require_main
+from muninn.review_supervisor_store import (
+    database,
+    require_main,
+)
 
 
 def initialize(home: Path, pending: Round, artifact: bytes) -> None:
@@ -101,6 +112,13 @@ def prepare(
 
 def _reused(pending: Round, previous: LaunchSpec) -> LaunchSpec:
     """Keep fresh evidence when reusing the same checked execution facts."""
+    terms = pending.context.policy.experimental_codex
+    if isinstance(terms, ManagedCodexExperiment):
+        check_host(
+            terms,
+            store.data_home(os.environ),
+            deadline=pending.context.deadline,
+        )
     if pending.prepared_prompt != pending.prompt:
         pending.launch = replace(
             previous,
@@ -161,6 +179,7 @@ def refused(
     now: float,
 ) -> None:
     """Refresh only after the owned wrapper proved no native creation."""
+    pending.ready = None
     if pending.launch is None or pending.launch.execution is None:
         raise ValueError("runtime_race_exhausted")
     if event.identity_digest != review_runtime_records.identity_digest(
@@ -214,6 +233,7 @@ def launched(
 def create(pending: Round, monitor: ProcessMonitor, output_limit: int) -> None:
     """Create only the fixed idle wrapper outside SQLite and monitor locks."""
     require_main()
+    pending.ready = None
     spec = pending.launch
     assert spec is not None
     pending.handle = create_wrapper(
@@ -224,6 +244,72 @@ def create(pending: Round, monitor: ProcessMonitor, output_limit: int) -> None:
         output_limit,
     )
     pending.spawned = True
+
+
+def ready(
+    home: Path,
+    pending: Round,
+    event: WorkerReady,
+    monitor: ProcessMonitor,
+    now: float,
+    recheck_at: float,
+    checks: tuple[
+        Callable[[Round, float], None],
+        Callable[[WorkerReady, float], None],
+    ],
+) -> float:
+    """Retain one idle Ready phase without extending its owned deadline."""
+    prepare, persist = checks
+    key = (event.attempt_id, event.round_index)
+    if (
+        pending.handle is not None
+        and event.identity != pending.handle.identity
+    ):
+        pending.ready = None
+        return recheck_at
+    try:
+        if (
+            isinstance(pending.context.policy.runner, ManagedCodexSelection)
+            and time.monotonic() >= pending.context.deadline
+        ):
+            raise ValueError("deadline")
+        pending.context = review_prompt.refresh(home, pending.context)
+        if pending.ready is None:
+            persist(event, now)
+        if pending.ready is not None and now < recheck_at:
+            return recheck_at
+        prepare(pending, now)
+        if pending.ready is not None:
+            with database(home) as conn:
+                review_recovery.clear(conn, "setup")
+        activate(home, pending, pending.context.policy, monitor, now)
+        pending.ready = None
+        return recheck_at
+    except ValueError as exc:
+        code = str(exc)
+        if (
+            code == "codex_host_identity_unavailable"
+            and isinstance(
+                pending.context.policy.runner, ManagedCodexSelection
+            )
+            and pending.handle is not None
+            and pending.spawned
+        ):
+            with database(home) as conn:
+                review_recovery.record(conn, "setup", code, "launch", now)
+            pending.ready = event
+            return now + 60.0
+        pending.ready = None
+        cancel_registered(
+            monitor,
+            *key,
+            (
+                code
+                if code in RUNTIME_CODES or code == "deadline"
+                else "activation_refused"
+            ),
+        )
+        return recheck_at
 
 
 def resume_setup(pending: Round) -> None:

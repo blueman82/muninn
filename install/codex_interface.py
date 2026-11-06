@@ -10,6 +10,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from install import (
+    codex_interface_checks,
     codex_interface_recovery,
     policy_records,
     record,
@@ -20,7 +21,8 @@ from install.codex_interface_models import (
     InterfacePlan,
     InterfaceReceipt,
 )
-from install.codex_interface_preview import legacy_binding, preview
+from install.codex_interface_preview import preview as preview
+from install.codex_interface_preview import same_plan
 from install.context import Ctx, StepFailedError
 from install.host_renewal_preview import scan_state
 from install.record import Record
@@ -29,6 +31,7 @@ from muninn import review_pause as q
 from muninn.review_json import canonical_json
 from muninn.review_progress import digest
 from muninn.review_runner import read_private_file
+from muninn.review_runtime_models import MANAGED_HOST_RUNTIME
 from tools.codex_interface_artifacts import plan_artifacts
 from tools.codex_policy_artifacts import publish_files
 
@@ -64,6 +67,13 @@ def confirm(
         prompt = input
     disclosure = (
         f"Approve UPDATE RULE {plan.digest}?\n"
+        "Enroll this physical computer for the managed Codex rule. "
+        "The old computer identity cannot prove physical continuity. "
+        "The name-based digest was observed at preview.\n"
+        f"Physical target: {plan.host_enrollment.target.kind} "
+        f"{plan.host_enrollment.target.digest}.\n"
+        f"Legacy digest observed at preview: "
+        f"{plan.host_enrollment.observed_legacy_host}.\n"
         "Trust this computer's fixed local Codex manager and checked JSON rev"
         "iew interface. "
         "Compatible future updates keep this same grant; version/hash are per"
@@ -141,9 +151,11 @@ def run(ctx: Ctx, rec: Record, plan: InterfacePlan) -> None:
         or ctx.interface_plan != plan
     ):
         raise StepFailedError("codex_interface_approval_required")
-    if preview(ctx) != plan:
+    codex_interface_checks.physical(ctx, plan.candidate)
+    if not same_plan(ctx, plan):
         raise StepFailedError("codex_interface_plan_changed")
     approval = confirm(plan, ctx.learning_prompt, float(ctx.now()))
+    codex_interface_checks.physical(ctx, plan.candidate)
     bundle = plan_artifacts(plan, approval, ctx.ts)
     value = InterfaceReceipt(
         kind="codex-managed-interface-receipt-v1",
@@ -159,7 +171,7 @@ def run(ctx: Ctx, rec: Record, plan: InterfacePlan) -> None:
         successor=None,
         contained=None,
         artifacts_digest=bundle.digest,
-        minimum_runtime="codex-managed-interface-v1",
+        minimum_runtime=MANAGED_HOST_RUNTIME,
     )
     rec["codex_interface"] = value.model_dump(mode="json")
     record.save(ctx, rec)
@@ -252,19 +264,6 @@ def verify_artifacts(ctx: Ctx, value: InterfaceReceipt) -> None:
             raise StepFailedError("codex_interface_record_changed")
 
 
-def _runtime(ctx: Ctx, value: InterfaceReceipt) -> None:
-    """Require compatible code before publishing the new grant."""
-    selected = (ctx.lib / "current").resolve(strict=True)
-    if selected != ctx.lib / value.sha:
-        raise StepFailedError("codex_interface_runtime_required")
-    marker = selected / "muninn/review_runtime_models.py"
-    if (
-        not marker.is_file()
-        or b"codex_managed_interface_v1" not in marker.read_bytes()
-    ):
-        raise StepFailedError("codex_interface_runtime_required")
-
-
 def activate(
     ctx: Ctx, rec: Record, owner: q.MaintenanceOwner, path: Path
 ) -> None:
@@ -274,11 +273,9 @@ def activate(
         return
     if value.contained is None:
         raise StepFailedError("codex_interface_recovery_required")
-    _runtime(ctx, value)
+    codex_interface_checks.approved(ctx, rec, value)
     if not review_managed_files.matches(value.plan.observation):
         raise StepFailedError("codex_interface_plan_changed")
-    if legacy_binding(ctx, value.plan.old) != value.plan.old_binding:
-        raise StepFailedError("codex_interface_state_changed")
     bundle = plan_artifacts(value.plan, value.approval, value.operation)
     publish_files(ctx.data, bundle.files)
     verify_artifacts(ctx, value)
@@ -342,6 +339,7 @@ def commit_transaction(
         ):
             raise StepFailedError("codex_interface_state_changed")
         verify_artifacts(ctx, value)
+        codex_interface_checks.approved(ctx, rec, value)
         if not review_managed_files.matches(value.plan.observation):
             raise StepFailedError("codex_interface_plan_changed")
         conn.execute(

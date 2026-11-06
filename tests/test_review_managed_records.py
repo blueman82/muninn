@@ -7,7 +7,7 @@ from muninn import review_runtime_records as records
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext
 from muninn.review_runtime_models import ManagedCallRecord
-from tests.managed_codex_support import identity, selection
+from tests.managed_codex_support import identity, managed_policy, selection
 from tests.test_review_codex_production import experimental_policy
 from tests.test_review_requests import RequestCase
 
@@ -18,8 +18,8 @@ class ManagedRecordTests(RequestCase):
     def setUp(self) -> None:
         super().setUp()
         self.selected = selection(self.tmp / "manager")
-        self.policy = experimental_policy(self.home).model_copy(
-            update={"runner": self.selected}
+        self.policy = managed_policy(
+            experimental_policy(self.home), self.selected.manager_root
         )
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import struct
 import time
 from pathlib import Path
@@ -28,7 +30,7 @@ from muninn.review_runtime_models import (
     ManagedCapability,
     RuntimeIdentity,
 )
-from tests.managed_codex_support import identity
+from tests.managed_codex_support import identity, physical_host
 from tests.test_review_managed_records import ManagedRecordTests
 
 
@@ -55,12 +57,12 @@ class ManagedRaceTests(TestCase):
         return worker
 
     def test_owned_enoent_emits_positive_refusal(self) -> None:
-        observed = identity(Path("/fixture/manager"))
+        observed = identity(Path.cwd() / "fixture/manager")
         worker = self.worker()
         worker.incoming.extend(
             protocol.activation(
                 (observed.requested.executable, "exec"),
-                Path("/fixture/cwd"),
+                Path.cwd() / "fixture/cwd",
                 {},
                 b"prompt",
                 8192,
@@ -72,7 +74,9 @@ class ManagedRaceTests(TestCase):
             mock.patch(
                 "muninn.review_managed_files.matches", return_value=True
             ),
-            mock.patch("subprocess.Popen", side_effect=FileNotFoundError),
+            mock.patch.object(
+                worker, "_create", side_effect=FileNotFoundError
+            ),
         ):
             worker._launch()
         self.assertIsNone(worker.cli)
@@ -84,12 +88,12 @@ class ManagedRaceTests(TestCase):
         self.assertEqual(notice.code, "exec_enoent")
 
     def test_permission_error_is_not_positive_updater_race(self) -> None:
-        observed = identity(Path("/fixture/manager"))
+        observed = identity(Path.cwd() / "fixture/manager")
         worker = self.worker()
         worker.incoming.extend(
             protocol.activation(
                 (observed.requested.executable, "exec"),
-                Path("/fixture/cwd"),
+                Path.cwd() / "fixture/cwd",
                 {},
                 b"prompt",
                 8192,
@@ -101,25 +105,43 @@ class ManagedRaceTests(TestCase):
             mock.patch(
                 "muninn.review_managed_files.matches", return_value=True
             ),
-            mock.patch("subprocess.Popen", side_effect=PermissionError),
+            mock.patch.object(worker, "_create", side_effect=PermissionError),
             self.assertRaises(PermissionError),
         ):
             worker._launch()
         self.assertEqual(worker.outgoing, b"")
 
     def test_legacy_activation_bytes_have_no_managed_defaults(self) -> None:
-        raw = protocol.activation(
-            ("/exact/client",), Path("/cwd"), {}, b"x", 10
-        )
+        executable, cwd = Path.cwd() / "client", Path.cwd() / "cwd"
+        raw = protocol.activation((str(executable),), cwd, {}, b"x", 10)
         header = struct.unpack("!I", raw[8:12])[0]
         self.assertEqual(
             raw[12 : 12 + header],
-            b'{"argv":["/exact/client"],"cwd":"/cwd","env":{}}',
+            json.dumps(
+                {"argv": [str(executable)], "cwd": str(cwd), "env": {}},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode(),
         )
 
 
 class RoundRefreshTests(ManagedRecordTests):
     """Carry one refresh across reservation and worker readiness."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(
+            mock.patch.dict(os.environ, {"MUNINN_HOME": str(self.home)})
+        )
+        self.enterContext(mock.patch("platform.system", return_value="Darwin"))
+        self.enterContext(mock.patch("platform.machine", return_value="arm64"))
+        self.enterContext(
+            mock.patch(
+                "muninn.review_managed_host.observe",
+                return_value=physical_host(),
+            )
+        )
 
     def capability(self) -> ManagedCapability:
         """Supply fixture authority; launch discovery is faked separately."""

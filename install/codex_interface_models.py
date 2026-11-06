@@ -12,11 +12,15 @@ from install.host_renewal_models import ContainmentPlan, HostState
 from install.policy_record_models import Control
 from muninn.knowledge_models import Digest, StrictModel, Text, UtcSeconds
 from muninn.review_codex_launch import ExperimentalBinding
+from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
+from muninn.review_runtime_bridge import migration_delta
 from muninn.review_runtime_models import (
+    HostEnrollment,
     InitialBridge,
     ManagedCodexSelection,
+    ManagedMinimumRuntime,
     RunnerConfig,
     RuntimeIdentity,
 )
@@ -30,28 +34,32 @@ class InterfacePlan(StrictModel):
     old: ReviewPolicy
     candidate: ReviewPolicy
     old_binding: ExperimentalBinding
+    host_enrollment: HostEnrollment
+    legacy_artifacts_digest: Digest
     observation: RuntimeIdentity
     bridge: InitialBridge
     state: HostState
     containment: ContainmentPlan
-    minimum_runtime: Literal["codex-managed-interface-v1"]
+    minimum_runtime: ManagedMinimumRuntime
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
         """Require the exact selection delta and its corresponding capsule."""
         old, new = self.old, self.candidate
+        previous, selected = old.experimental_codex, new.experimental_codex
         if (
             not isinstance(old.runner, RunnerConfig)
             or not isinstance(new.runner, ManagedCodexSelection)
-            or old.experimental_codex is None
-            or old.model_dump(exclude={"runner"})
-            != new.model_dump(exclude={"runner"})
+            or not isinstance(previous, CodexExperiment)
+            or not isinstance(selected, ManagedCodexExperiment)
             or (old.runner.model, old.runner.reasoning)
             != (new.runner.model, new.runner.reasoning)
             or self.old_binding.requested != old.runner
-            or self.old_binding.host_identity
-            != old.experimental_codex.host_identity
-            or self.home != old.experimental_codex.data_home
+            or self.old_binding.host_identity != previous.host_identity
+            or self.home != previous.data_home
+            or self.host_enrollment.saved_legacy_host != previous.host_identity
+            or self.host_enrollment.target != selected.host_identity
+            or self.host_enrollment != self.bridge.host_enrollment
             or self.bridge.home != self.home
             or self.bridge.old_policy_digest
             != hashlib.sha256(canonical_json(old).encode()).hexdigest()
@@ -59,6 +67,10 @@ class InterfacePlan(StrictModel):
             != hashlib.sha256(canonical_json(new).encode()).hexdigest()
         ):
             raise ValueError("codex_interface_plan_changed")
+        try:
+            migration_delta(old, new)
+        except ValueError:
+            raise ValueError("codex_interface_plan_changed") from None
         return self
 
     @property
@@ -98,12 +110,15 @@ class InterfaceReceipt(StrictModel):
     successor: Control | None
     contained: HostState | None
     artifacts_digest: Digest
-    minimum_runtime: Literal["codex-managed-interface-v1"]
+    minimum_runtime: ManagedMinimumRuntime
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
         """Reject incomplete phases or a widened grant."""
-        if self.approval.plan_digest != self.plan.digest:
+        if (
+            self.approval.plan_digest != self.plan.digest
+            or self.minimum_runtime != self.plan.minimum_runtime
+        ):
             raise ValueError("codex_interface_record_changed")
         if self.phase != "approved_intent" and self.contained is None:
             raise ValueError("codex_interface_record_changed")

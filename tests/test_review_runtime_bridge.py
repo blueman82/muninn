@@ -3,18 +3,32 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 import time
 from unittest import mock
 
 from install import review_policy_transition
-from muninn import review_budget, review_claims, review_prompt, review_rounds
+from muninn import (
+    review_budget,
+    review_claims,
+    review_prompt,
+    review_rounds,
+    review_runtime_authority,
+)
 from muninn import review_runtime_bridge as bridge
 from muninn.review_commit_state import checked_request_policy
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext
 from muninn.review_read_budget import ReadBudget
 from muninn.review_supervisor_store import mark_correction
-from tests.managed_codex_support import identity, publish_authority, selection
+from tests.managed_codex_support import (
+    host_enrollment,
+    identity,
+    managed_policy,
+    physical_host,
+    private_authority_fixture,
+    publish_authority,
+)
 from tests.test_review_codex_production import experimental_policy
 from tests.test_review_requests import RequestCase
 
@@ -31,14 +45,25 @@ class RuntimeBridgeTests(RequestCase):
         )
         self.request = self.enqueue()
         self.old = self.policy
-        self.new = self.old.model_copy(
-            update={"runner": selection(self.tmp / "manager")}
+        self.new = managed_policy(self.old, self.tmp / "manager")
+        capsule = bridge.capture(
+            self.conn,
+            self.old,
+            self.new,
+            host_enrollment=host_enrollment(self.old, self.new),
         )
-        capsule = bridge.capture(self.conn, self.old, self.new)
         publish_authority(self.home, self.old, self.new, capsule)
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?",
             (canonical_json(self.new), self.digest(self.new)),
+        )
+        if sys.platform == "win32":
+            self.enterContext(private_authority_fixture(self.home))
+        self.enterContext(
+            mock.patch(
+                "muninn.review_managed_host.observe",
+                return_value=physical_host(),
+            )
         )
 
     def row(self) -> sqlite3.Row:
@@ -74,6 +99,30 @@ class RuntimeBridgeTests(RequestCase):
         )
         with self.assertRaisesRegex(ValueError, "review_policy_required"):
             bridge.effective_policy(self.conn, self.row())
+
+    def test_typed_bridge_has_no_live_physical_identity_read(self) -> None:
+        with mock.patch(
+            "muninn.review_managed_host.observe",
+            side_effect=AssertionError("bridge read invoked native identity"),
+        ):
+            self.assertEqual(
+                bridge.effective_policy(self.conn, self.row()), self.new
+            )
+
+    def test_private_storage_standin_keeps_real_proof_hash_checks(
+        self,
+    ) -> None:
+        with private_authority_fixture(self.home):
+            self.assertEqual(
+                bridge.effective_policy(self.conn, self.row()), self.new
+            )
+            capability = review_runtime_authority.selected_capability(
+                self.home, self.digest(self.new)
+            )
+            path = capability.proof_path
+            path.write_bytes(path.read_bytes() + b" ")
+            with self.assertRaisesRegex(ValueError, "review_policy_required"):
+                bridge.effective_policy(self.conn, self.row())
 
     def test_removed_authority_refuses_without_reconstruction(self) -> None:
         for path in (
@@ -180,10 +229,13 @@ class RuntimeBridgeTests(RequestCase):
             (canonical_json(self.old), self.digest(self.old)),
         )
         self.request = self.enqueue()
-        self.new = self.old.model_copy(
-            update={"runner": selection(self.tmp / "manager")}
+        self.new = managed_policy(self.old, self.tmp / "manager")
+        capsule = bridge.capture(
+            self.conn,
+            self.old,
+            self.new,
+            host_enrollment=host_enrollment(self.old, self.new),
         )
-        capsule = bridge.capture(self.conn, self.old, self.new)
         publish_authority(self.home, self.old, self.new, capsule)
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,"

@@ -10,7 +10,9 @@ from typing import Literal
 
 from pydantic import field_validator
 
+from muninn import review_managed_host
 from muninn.knowledge_models import Digest, StrictModel
+from muninn.review_runtime_models import ManagedHostIdentity
 
 # Historical assessment proof still uses this hash; ongoing admission does not.
 PINNED_EXECUTABLE = (
@@ -38,6 +40,26 @@ class CodexExperiment(StrictModel):
         return value
 
 
+class ManagedCodexExperiment(StrictModel):
+    """Record explicit physical-host enrollment for a stable managed rule."""
+
+    kind: Literal["ongoing-mac-codex-managed-v1"]
+    activation_authorized: Literal[True]
+    host_identity: ManagedHostIdentity
+    data_home: Path
+    accepted_uncertainties: Literal[
+        "posthoc-actions;unknown-requests-and-billing;incomplete-tool-source-isolation;deferred-C6-assessment"
+    ]
+
+    @field_validator("activation_authorized", mode="before")
+    @classmethod
+    def explicit_authorization(cls, value: object) -> object:
+        """Require literal true in the new enrollment authorization."""
+        if value is not True:
+            raise ValueError("codex_experimental_authorization")
+        return value
+
+
 def host_identity() -> str:
     """Bind the selected native host without reading credentials."""
     return hashlib.sha256(
@@ -49,11 +71,21 @@ def host_identity() -> str:
     ).hexdigest()
 
 
-def check_host(terms: CodexExperiment, home: Path) -> None:
+def check_host(
+    terms: CodexExperiment | ManagedCodexExperiment,
+    home: Path,
+    *,
+    deadline: float | None = None,
+) -> None:
     """Refuse activation on another host or under another data home."""
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise ValueError("codex_platform_changed")
-    if terms.host_identity != host_identity():
+    observed = (
+        review_managed_host.observe(deadline=deadline)
+        if isinstance(terms, ManagedCodexExperiment)
+        else host_identity()
+    )
+    if terms.host_identity != observed:
         raise ValueError("codex_host_changed")
     if (
         terms.data_home != home
@@ -63,6 +95,8 @@ def check_host(terms: CodexExperiment, home: Path) -> None:
         raise ValueError("codex_data_home_changed")
 
 
-def check_activation(terms: CodexExperiment, home: Path) -> None:
+def check_activation(
+    terms: CodexExperiment | ManagedCodexExperiment, home: Path
+) -> None:
     """Require the bound host before enabling experimental learning."""
     check_host(terms, home)

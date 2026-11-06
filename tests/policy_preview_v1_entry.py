@@ -137,6 +137,7 @@ def entry_environment(
     """Confine every provider and home override to the synthetic fixture."""
     home = world.home
     assert policy.experimental_codex is not None
+    assert isinstance(policy.experimental_codex.host_identity, str)
     return dict(
         os.environ,
         HOME=str(home),

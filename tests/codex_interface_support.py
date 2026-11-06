@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest import mock
 
 from install import codex_interface, installer
@@ -14,15 +15,16 @@ class InterfaceApplyFixture(InterfacePreviewTests):
     """Use real installer steps with fake services and temporary HOME."""
 
     def managed_release(self) -> None:
-        """Commit a text compatibility marker in the temporary fake repo."""
-        marker = self.repo / "muninn/review_runtime_models.py"
-        marker.write_text(
-            '"""Support the fake managed runtime cont'
-            'ract."""\n\nfrom __future__ import annotat'
-            'ions\n\nCONTRACT = "codex_managed_interfac'
-            'e_v1"\n'
-        )
-        git(self.repo, "add", "muninn/review_runtime_models.py")
+        """Commit the actual data parser source in the temporary fake repo."""
+        root = Path(__file__).resolve().parents[1]
+        for name in (
+            "review_runtime_models.py",
+            "review_codex_policy.py",
+            "review_models.py",
+        ):
+            relative = Path("muninn") / name
+            (self.repo / relative).write_bytes((root / relative).read_bytes())
+            git(self.repo, "add", str(relative))
         git(self.repo, "commit", "-qm", "fixture managed interface")
         self.sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
 

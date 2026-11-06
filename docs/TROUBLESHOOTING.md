@@ -261,3 +261,26 @@ new grant paused. Resume the same checked operation. Do not restore an archive,
 edit the grant or restart older code against the managed JSON format. A recovered
 installation can retain an admission pause; installation success does not prove
 that learning resumed or that a model used the expected billed account.
+# Physical computer enrollment for managed Codex
+
+If the old Codex executable is gone and the old computer digest differs,
+use the managed interface preview. The old digest includes the computer name.
+Its change does not prove a change of physical computer.
+
+```sh
+bin/muninn-install --upgrade --codex-interface preview --check
+```
+
+The preview writes nothing. It checks the old approval files and shows a new
+physical target. One fresh yes/y approval authorizes that target and the stable
+Codex runner rule. Old physical continuity stays unverified.
+
+If Muninn reports `codex_host_identity_unavailable`, it cannot read a checked
+physical ID. If it reports `codex_host_changed`, a checked physical ID differs.
+Do not change the approval files or substitute another identity source.
+Keep the service stopped and give the finite code to the maintainer.
+
+If Muninn reports `codex_interface_runtime_required`, use a release that can
+parse the new managed host terms. The old runner-selection marker cannot pass.
+After a grant commits, repeat the same checked operation with compatible code.
+Do not start the service by hand or restore an old grant.

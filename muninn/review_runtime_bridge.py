@@ -7,11 +7,13 @@ import sqlite3
 from pathlib import Path
 
 from muninn import review_runtime_authority
+from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_json import canonical_json, canonical_json_value
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import checked_policy, digest
 from muninn.review_runtime_models import (
     BridgeRequest,
+    HostEnrollment,
     InitialBridge,
     ManagedCodexSelection,
     RunnerConfig,
@@ -37,15 +39,19 @@ _IMMUTABLE = (
 )
 
 
-def selection_only(old: ReviewPolicy, new: ReviewPolicy) -> None:
-    """Permit the explicit stable selection while preserving all limits."""
+def migration_delta(old: ReviewPolicy, new: ReviewPolicy) -> None:
+    """Permit only the explicit runner and physical-host enrollment delta."""
+    previous, selected = old.experimental_codex, new.experimental_codex
     if (
         not isinstance(old.runner, RunnerConfig)
         or old.runner.runner != "codex_cli"
         or not isinstance(new.runner, ManagedCodexSelection)
-        or old.experimental_codex is None
-        or old.model_dump(exclude={"runner"})
-        != new.model_dump(exclude={"runner"})
+        or not isinstance(previous, CodexExperiment)
+        or not isinstance(selected, ManagedCodexExperiment)
+        or old.model_dump(exclude={"runner", "experimental_codex"})
+        != new.model_dump(exclude={"runner", "experimental_codex"})
+        or previous.model_dump(exclude={"kind", "host_identity"})
+        != selected.model_dump(exclude={"kind", "host_identity"})
         or (old.runner.model, old.runner.reasoning)
         != (new.runner.model, new.runner.reasoning)
     ):
@@ -85,10 +91,22 @@ def _inputs(
 
 
 def capture(
-    conn: sqlite3.Connection, old: ReviewPolicy, new: ReviewPolicy
+    conn: sqlite3.Connection,
+    old: ReviewPolicy,
+    new: ReviewPolicy,
+    *,
+    host_enrollment: HostEnrollment,
 ) -> InitialBridge:
     """Capture the full old queue in the caller's coherent snapshot."""
-    selection_only(old, new)
+    migration_delta(old, new)
+    assert isinstance(old.experimental_codex, CodexExperiment)
+    assert isinstance(new.experimental_codex, ManagedCodexExperiment)
+    if (
+        host_enrollment.saved_legacy_host
+        != old.experimental_codex.host_identity
+        or host_enrollment.target != new.experimental_codex.host_identity
+    ):
+        raise ValueError("review_policy_required")
     path = Path(conn.execute("PRAGMA database_list").fetchone()[2]).parent
     requests: list[BridgeRequest] = []
     metadata_bytes = 0
@@ -120,6 +138,7 @@ def capture(
         home=path,
         old_policy_digest=digest(old),
         new_policy_digest=digest(new),
+        host_enrollment=host_enrollment,
         requests=tuple(requests),
     )
     if len(canonical_json(capsule).encode()) > 256 * 1024:
@@ -143,6 +162,8 @@ def current_bridge(
     if (
         binding.requested != current.runner
         or approval.new_policy_digest != digest(current)
+        or not isinstance(current.experimental_codex, ManagedCodexExperiment)
+        or binding.host_identity != current.experimental_codex.host_identity
     ):
         raise ValueError("review_policy_required")
     if binding.initial_bridge is None:
@@ -156,6 +177,7 @@ def current_bridge(
         or capsule.home != home
         or capsule.new_policy_digest != digest(current)
         or capsule.old_policy_digest != approval.old_policy_digest
+        or capsule.host_enrollment != approval.host_enrollment
     ):
         raise ValueError("review_policy_required")
     return capsule
@@ -180,12 +202,18 @@ def effective_policy(
         raise ValueError("review_policy_required")
     if canonical_json(current) == row["policy_json"]:
         return current
-    selection_only(old, current)
+    migration_delta(old, current)
     try:
         capsule = current_bridge(conn, current)
     except (ValueError, OSError):
         raise ValueError("review_policy_required") from None
     if capsule is None or capsule.old_policy_digest != digest(old):
+        raise ValueError("review_policy_required")
+    assert isinstance(old.experimental_codex, CodexExperiment)
+    if (
+        capsule.host_enrollment.saved_legacy_host
+        != old.experimental_codex.host_identity
+    ):
         raise ValueError("review_policy_required")
     selected = next(
         (item for item in capsule.requests if item.request_id == row["id"]),

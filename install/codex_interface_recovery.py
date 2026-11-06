@@ -12,6 +12,7 @@ from pathlib import Path
 
 from install import (
     codex_interface,
+    codex_interface_checks,
     legacy_state,
     lifecycle,
     policy_records,
@@ -86,6 +87,8 @@ def resume(ctx: Ctx, rec: Record, check: OperationCheck) -> None:
         raise StepFailedError("codex_interface_recovery_required")
     ctx.interface_plan, ctx.interface_operation = value.plan, check
     lifecycle.stop(ctx)
+    if value.phase in {"grant_committed", "complete"}:
+        codex_interface_checks.before_start(ctx, rec)
 
 
 def verify_committed(ctx: Ctx, rec: Record, conn: sqlite3.Connection) -> None:
@@ -93,6 +96,7 @@ def verify_committed(ctx: Ctx, rec: Record, conn: sqlite3.Connection) -> None:
     value = codex_interface.receipt(ctx, rec)
     if value.phase not in {"grant_committed", "complete"}:
         raise StepFailedError("codex_interface_recovery_required")
+    codex_interface_checks.before_start(ctx, rec)
     actual = conn.execute("SELECT * FROM review_control").fetchone()
     if (
         actual is None
