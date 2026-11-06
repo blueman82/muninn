@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import tempfile
 import time
 from pathlib import Path
-from unittest import mock
+from unittest import TestCase, mock, skipIf
 
 from muninn import review_managed_files as files
 from muninn import review_managed_probe as probes
+from tests.managed_codex_support import identity
 from tests.test_review_managed_files import ManagedFileTests
 
 
@@ -211,3 +215,62 @@ class ManagedProbeTests(ManagedFileTests):
         ):
             self.probe(observed)
         native.assert_not_called()
+
+
+@skipIf(sys.platform != "darwin", "requires native Darwin sandbox policy")
+class ManagedProbeProfileTests(TestCase):
+    """Check kernel read permissions with a fixed system helper."""
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.observed = identity(self.root / "manager")
+        self.observed.package_root.mkdir(mode=0o700, parents=True)
+        self.inside = self.observed.package_root / "inside.txt"
+        self.outside = self.root / "outside.txt"
+        for path in (self.inside, self.outside):
+            path.write_bytes(b"owned profile fixture\n")
+            path.chmod(0o600)
+
+    def cat(self, path: Path, *, allowed: bool) -> None:
+        """Read a tiny owned fixture with bounded streams and cleanup."""
+        with subprocess.Popen(
+            (
+                "/usr/bin/sandbox-exec",
+                "-p",
+                probes._profile(self.observed),
+                "/bin/cat",
+                str(path),
+            ),
+            cwd=Path("/var/empty"),
+            env={"HOME": "/var/empty", "PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        ) as proc:
+            try:
+                deadline = time.monotonic() + 5.0
+                if allowed:
+                    try:
+                        output = probes._read_output(proc, deadline)
+                    except ValueError:
+                        self.fail(f"fixture reader failed: rc={proc.poll()}")
+                    self.assertEqual(output, b"owned profile fixture\n")
+                else:
+                    with self.assertRaisesRegex(
+                        ValueError, "runtime_probe_unavailable"
+                    ):
+                        probes._read_output(proc, deadline)
+                    self.assertEqual(proc.returncode, 1)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=1.0)
+
+    def test_loader_starts_and_reads_inside_package(self) -> None:
+        self.cat(self.inside, allowed=True)
+
+    def test_root_permission_does_not_allow_outside_package_read(self) -> None:
+        self.cat(self.outside, allowed=False)

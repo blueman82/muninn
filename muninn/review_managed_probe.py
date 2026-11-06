@@ -59,6 +59,8 @@ def _profile(identity: RuntimeIdentity) -> str:
     return (
         "(version 1)(deny default)(allow process-exec)"
         f"(allow file-read* {reads})"
+        # dyld opens the root directory itself before loading the executable.
+        '(allow file-read* (literal "/"))'
         '(allow file-read-metadata (literal "/var/empty") '
         '(literal "/private/var/empty") (literal "/dev/null"))'
     )
