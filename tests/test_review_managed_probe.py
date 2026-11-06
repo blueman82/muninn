@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -274,3 +275,50 @@ class ManagedProbeProfileTests(TestCase):
 
     def test_root_permission_does_not_allow_outside_package_read(self) -> None:
         self.cat(self.outside, allowed=False)
+
+    def system_query(self, args: tuple[str, ...], *, allowed: bool) -> bytes:
+        """Read a fixed kernel value with bounded output and cleanup."""
+        with subprocess.Popen(
+            (
+                "/usr/bin/sandbox-exec",
+                "-p",
+                probes._profile(self.observed),
+                *args,
+            ),
+            cwd=Path("/var/empty"),
+            env={"HOME": "/var/empty", "PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        ) as proc:
+            try:
+                deadline = time.monotonic() + 5.0
+                if not allowed:
+                    with self.assertRaisesRegex(
+                        ValueError, "runtime_probe_unavailable"
+                    ):
+                        probes._read_output(proc, deadline)
+                    self.assertEqual(proc.returncode, 1)
+                    return b""
+                try:
+                    return probes._read_output(proc, deadline)
+                except ValueError:
+                    self.fail(f"kernel value read stopped: rc={proc.poll()}")
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=1.0)
+
+    def test_page_size_matches_os_api(self) -> None:
+        if sys.platform != "darwin":
+            self.skipTest("requires native Darwin page-size API")
+        expected = os.sysconf("SC_PAGESIZE")
+        self.assertGreater(expected, 0)
+        self.assertEqual(
+            self.system_query(("/usr/bin/getconf", "PAGESIZE"), allowed=True),
+            f"{expected}\n".encode(),
+        )
+
+    def test_other_kernel_value_remains_blocked(self) -> None:
+        self.system_query(("/usr/sbin/sysctl", "-n", "hw.ncpu"), allowed=False)

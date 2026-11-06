@@ -46,7 +46,7 @@ _COMMANDS = (("--version",), ("--help",), ("exec", "--help"))
 
 
 def _profile(identity: RuntimeIdentity) -> str:
-    """Deny writes, network and reads outside package/loader inputs."""
+    """Deny writes, network and reads outside required runtime inputs."""
     reads = " ".join(
         f"(subpath {json.dumps(str(path))})"
         for path in (
@@ -61,6 +61,8 @@ def _profile(identity: RuntimeIdentity) -> str:
         f"(allow file-read* {reads})"
         # dyld opens the root directory itself before loading the executable.
         '(allow file-read* (literal "/"))'
+        # libc reads the legacy page-size node for the Rust stack guard.
+        '(allow sysctl-read (sysctl-name "hw.pagesize_compat"))'
         '(allow file-read-metadata (literal "/var/empty") '
         '(literal "/private/var/empty") (literal "/dev/null"))'
     )
