@@ -1,6 +1,6 @@
 ---
 name: muninn-doctor
-description: Run Muninn health checks after installation, upgrade, or a reported failure.
+description: Run Muninn health checks after installation, upgrade, or a reported error.
 ---
 
 # muninn doctor
@@ -9,144 +9,181 @@ description: Run Muninn health checks after installation, upgrade, or a reported
 muninn doctor --pretty
 ```
 
-Exit 0 means no error-level check failed.
-Exit 1 means an error-level check failed.
+Exit 0 means no check reported an error-level problem.
+Exit 1 means a check reported an error-level problem.
 Warnings do not change the exit code.
 Each check has `ok`, `level`, and `detail`.
-A null `ok` means Muninn could not verify the condition.
-Read `detail` before taking action.
+A null `ok` means Muninn could not check the condition.
+Read `detail` before taking a step.
 
 ## Service and storage checks
 
 - `heartbeat`, `launchd_job`, or `managed_service`: check the owned per-user service.
   A null service result means ownership or status remains unverified.
-  It does not prove that the service is running, even when doctor exits 0.
+  This result does not prove that the service is active.
+  Exit 0 does not change this limit.
+
   On macOS, `launchd_job` passes only when launchctl reports one positive PID
-  and a successful PID-only process query agrees.
-  Unverified observations return null with `launchctl_unavailable`,
+  and a PID-only system query completes without error and gives the same PID.
+
+  Unverified observations give null with `launchctl_unavailable`,
   `launchctl_pid_unavailable`, `process_inspection_unavailable`,
   `process_inspection_timeout`, `process_inspection_failed`, or
   `process_pid_unverified`.
-  `launchctl_timeout` and `launchctl_failed` return false.
-  A failed launchctl query alone does not prove that the service is stopped.
+  `launchctl_timeout` and `launchctl_failed` give `false`.
+
+  An error from a launchctl query alone does not prove that the service stopped.
   Each native command has a 60-second limit.
-  Native messages and process command lines are not returned.
+  The report contains no native messages or OS task command lines.
   The other checks remain in the report.
-  An unavailable observation does not require a recovery action.
-- `file_modes` or `data_dir_mode`: POSIX directories require mode 0700 and files require mode 0600.
-  Windows requires private ACLs.
-  `chmod` does not establish those ACLs.
-- `unexpected_files`: inspect the named files.
-  Keep supervisor locks, witnesses, repair records, stop records, journals, keys, and retained archives.
-  Never delete these files to bypass a refusal.
-- `unowned_journal`: a crashed writer left a journal.
+  An unavailable observation does not make a recovery step necessary.
+
+- `file_modes` or `data_dir_mode`: POSIX directories must have mode 0700 and files must have mode 0600.
+  Windows must have private ACLs.
+  `chmod` does not prove those ACLs.
+
+- `unexpected_files`: examine the named files.
+  Keep supervisor locks, witnesses, repair records, stop records, journals, keys, and archives.
+  Do not remove these files to bypass a refusal.
+
+- `unowned_journal`: a writer crashed and left a journal.
   The next writer rolls it back.
-- `db_free_space`: run `muninn compact` when space recovery is needed.
+
+- `db_free_space`: run `muninn compact` when space recovery is necessary.
+
 - `tombstone_key`: a missing or damaged key blocks ingest, rebuild, and erase.
-  Restore `tombstone.key` from a backup.
+  Replace `tombstone.key` with the key from a recovery copy.
   Do not recreate the key by hand.
-- `aside_files`: an unreadable retained store can still contain erased text.
-  Salvage required data before deleting that retained store.
-- `upgrade_snapshot`: the installer retains private pre-upgrade recovery archives.
-  A successful upgrade does not remove them.
-  They can contain transcript text, including the legacy knowledge ledger.
+
+- `aside_files`: a store that Muninn kept but cannot read can contain erased text.
+  Collect necessary data before removing that store.
+
+- `upgrade_snapshot`: the installer keeps private archives from before the upgrade for recovery.
+  An upgrade that ends without error does not remove them.
+  They can contain transcript text and the legacy knowledge ledger.
   `erase` cannot scrub this copy.
-  Keep it until the owner reviews recovery and retention needs.
-  Do not delete it just to clear this warning or restore it over newer data.
+  Keep it until the owner examines recovery and retention needs.
+  Do not remove it only to clear this warning.
+  Do not replace newer data with this copy.
+
 - `release_leftovers`: the next installer run removes leftover `.pruning-*` release directories.
 
 ## Ingest checks
 
-- `poller_error`: the last pass raised an exception.
+- `poller_error`: the last pass raised an error.
   `detail` gives its class name.
-  A successful poller pass clears it.
+  A poller pass that ends without error clears it.
   Manual ingest does not clear it.
-- `failed_sources`: this counts failed read attempts during the last completed invocation.
-  It can include sources that later recovered.
-  Repeated attempts count separately.
-  Preparation misses are excluded.
-- `unreadable_files`: inspect permissions for the reported failed open attempts.
-  The macOS poller can require Full Disk Access.
-- `reread`: `N of M` counts active sources awaiting another read after a classifier change.
-  If source reads succeed, the remaining count reaches zero.
-  If the count remains positive, inspect `failed_sources` and `stats.last_pass.unreadable_files`.
-  These fields count attempts, not distinct unresolved sources.
+
+- `failed_sources`: this counts read tries with errors during the last completed invocation.
+  It can include sources that subsequently recovered.
+  Each try counts independently.
+  It does not count misses during preparatory work.
+
+- `unreadable_files`: examine permissions for the reported open tries with errors.
+  The macOS poller can make Full Disk Access necessary.
+
+- `reread`: `N of M` counts active sources that await one more read after a classifier change.
+  If source reads succeed, the remaining count reaches 0.
+  If the count remains positive, examine `failed_sources` and `stats.last_pass.unreadable_files`.
+  These fields count tries, not unique unresolved sources.
 
 ## Learning checks
 
-- `review_backlog` reports queued requests.
-- `review_policy` reports configured-policy presence and model validity.
-  It does not establish that admission is open or the policy digest matches.
+- `review_backlog` reports queued learning work.
+
+- `review_policy` reports if a configured policy exists and passes model validation.
+  It does not prove that admission is open or that the policy digest agrees.
+
 - `review_admission` reports stored admission prerequisites.
-  `open` means the switch is on and the checked policy has a matching canonical digest.
-  `closed` means the switch is off; this is informational, with `ok: false`.
+  `open` means the switch is on and the checked policy has the same canonical digest.
+  `closed` means the switch is off.
+  This is informational, with `ok: false`.
   `closed_policy_absent`, `closed_policy_invalid`, or `closed_policy_digest_mismatch`
   also report policy integrity while admission is off.
+
   An open switch with `policy_absent`, `policy_invalid`, or `policy_digest_mismatch`
   is a warning.
   `control_absent` or `control_invalid` is a warning with `ok: null`.
-  An open, valid control does not prove provider access, scanning, or learning success.
-- `review_auth`, `review_config`, and `review_abandoned` report attempt history.
-  Historical configuration errors do not establish a current admission failure.
-  With no control row, `review_abandoned` is unknown with `generation_unavailable`;
-  `review_capture_gaps` is unknown with `control_absent`.
-  Independent history, backlog, coverage, and attention checks remain available.
-- `review_attention` gives a fixed stage, cause, and action.
-  The next Codex session also shows required action.
-  These diagnostics contain no transcript text.
-- `review_process_deadline` reports a recorded deadline failure or an overdue unfinished call.
-  It does not prove a live process or a completed stop.
-- `review_commit_delay` and `review_cancel_delay` report delayed finalisation.
-- `review_coverage_gaps` and `review_capture_gaps` report eligible records without matching completion evidence.
-  They include admitted historical replay and exclude untouched activation history.
-  Endpoint equality cannot prove unchanged interior content.
-  Missing, changed, or erased evidence remains a gap.
-  Refusals and lost logs do not count as success.
-  A capture gap does not identify its cause or prove a lost lifecycle event.
-  New capture and catch-up log entries preserve `evidence_limit` for source-read refusals.
-  Those limits include source traversal, not just selected text.
-  A narrower window can still require reading earlier records.
-  Do not raise limits or replay history merely to clear the count.
-- `review_pause` reports witness presence.
-  It does not verify process containment.
-- `review_repair` reports a saved repair record.
-- `review_erasure_intent` reports journal presence without proving consistency.
-- `review_windows_repair` reports an unqualified Windows repair boundary.
-  Keep all protocol evidence.
+  An open control that passes validation does not prove provider access, scanning, or learning success.
 
-Doctor does not create, reset, or delete repair files.
-An absent database, PID, or lock does not prove that related processes stopped.
+- `review_auth`, `review_config`, and `review_abandoned` report try history.
+  Historical configuration errors do not prove a current admission error.
+  With no control row, `review_abandoned` is unknown with `generation_unavailable`.
+  `review_capture_gaps` is unknown with `control_absent`.
+  History, backlog, coverage, and owner-step checks remain available independently.
+
+- `review_attention` gives a fixed phase, cause, and necessary step.
+  The next Codex session also shows the necessary step.
+  These diagnostics contain no transcript text.
+
+- `review_process_deadline` reports a recorded deadline error or an overdue unfinished call.
+  It does not prove that a related OS task is active or that it stopped.
+
+- `review_commit_delay` and `review_cancel_delay` report finalisation that did not finish on time.
+
+- `review_coverage_gaps` and `review_capture_gaps` report eligible records without corresponding proof that the work completed.
+  They include admitted historical replay and exclude untouched activation history.
+  Equal endpoints cannot prove that content between them did not change.
+  Missing, changed, or erased source records leave coverage unproved.
+  Refusals and missing logs do not count as success.
+
+  A capture omission does not identify its cause or prove a missing lifecycle notification.
+  New capture and catch-up log entries keep `evidence_limit` for source-read refusals.
+  Those limits include source traversal and selected text.
+  A narrower window can make reads of earlier records necessary.
+  Do not increase limits or replay history merely to clear the count.
+
+- `review_pause` reports if a witness exists.
+  It does not prove OS task containment.
+
+- `review_repair` reports a stored repair record.
+
+- `review_erasure_intent` reports if a journal exists without proving consistency.
+
+- `review_windows_repair` reports an unqualified Windows repair boundary.
+  Keep all protocol proof records.
+
+Doctor does not make, reset, or remove repair files.
+A missing database, PID, or lock does not prove that related OS tasks stopped.
 
 ## Recovery
 
 If macOS or Linux reports `recovery_guidance`, run `muninn recover`.
-If recovery returns `reboot_required`, restart the computer.
-After restarting, run `muninn recover` again.
+If recovery reports `reboot_required`, start the computer again.
+After the computer starts, run `muninn recover` again.
 Run `muninn doctor --pretty` after recovery.
-`recover` does not restart the service.
+`recover` does not start the service again.
 On Windows, keep all repair files.
-Windows repair requires native qualification before release.
 
-An erase operation can interrupt the service.
-Read `erasure_status` before claiming that the service restarted.
-If `restart` is `not_attempted`, check the service and restart it when required.
-Retained archives prevent verified erasure.
-Original-read limits do not limit journal work, total I/O, or command time.
-Process deadlines do not limit database commit or cancellation delays.
+Windows repair must have native qualification before release.
+An erase operation can stop the service.
+Read `erasure_status` before claiming that the service started again.
+If `restart` is `not_attempted`, check the service and start it again when necessary.
+Archives that remain prevent proved erasure.
+Limits on source reads do not limit journal work, total I/O, or command time.
 
-Report failed checks.
+OS task deadlines do not limit database commit or cancellation wait times.
+Report checks that did not succeed.
 Claim a repair only after a new doctor run passes.
 
 For `codex_host_changed`, check current-format 2 and outstanding recovery first.
-An installed format-1 store needs the ordinary checked upgrade before renewal;
-that prerequisite grants no host permission. Prepare a candidate changing only
-its saved host field, then use `bin/muninn-install --upgrade --review-policy PATH
---renew-codex-host preview --check`. The preview is non-writing in every flag
-position. Request the owner's new affirmative installer answer for that exact
-plan before applying its digest. Disclose full upgrade/Codex hook checks,
-possible background learning before return, ongoing permission without an
-aggregate call or spending cap, and unknown provider billing/isolation. Keep
-pauses and old work. Reading a notice grants no permission and starts no timer.
-A committed grant survives later upgrade failure. Preserve its receipt/archive;
-resume only that exact operation. Missing evidence or an unexplained lock gap
-requires maintainer review, not receipt edits, archive restoration or a new grant.
+An installed format-1 store must have the ordinary checked upgrade before renewal.
+That prerequisite grants no host permission.
+Prepare a candidate that changes only its stored host field.
+Then use `bin/muninn-install --upgrade --review-policy PATH
+--renew-codex-host preview --check`.
+
+The preview writes nothing in all flag positions.
+
+Get the owner's new affirmative installer answer for that same plan before applying its digest.
+Disclose the full upgrade, Codex hook checks, and possible background learning before the command ends.
+Also disclose ongoing permission without an aggregate call or spending cap, and unverified provider billing and runner/host separation.
+Keep pauses and previous work.
+
+A notice grants no permission and starts no timer.
+A committed grant remains in force if the upgrade subsequently ends with an error.
+Keep its receipt and archive.
+Continue only that same operation.
+Missing proof or an unexplained break in lock continuity makes maintainer inspection necessary.
+Do not edit receipts, replace current data with an archive, or make a new grant to bypass that inspection.

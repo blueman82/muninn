@@ -3,149 +3,163 @@
 ## Prerequisites
 
 - macOS (launchd), Linux (systemd user service) or Windows x64/ARM64 (Task Scheduler).
-- Python 3.13 or newer. The installer pins the interpreter it runs under; set
-  `MUNINN_PYTHON=/path/to/python3.13` to override at run time.
-- `git`, and a clean clone of this repo checked out at the commit to install.
+- Python 3.13 or newer. The installer pins the interpreter that executes it.
+  Set `MUNINN_PYTHON=/path/to/python3.13` to select a different interpreter at run time.
+- `git`, and a clean clone of this repo at the commit to install.
 - Optional desktop apps: Claude, Codex, Cursor.
-- Absent app: hook setup skipped.
-- Installed Claude/Codex without `~/.claude/settings.json`/`~/.codex/config.toml`:
-  manual setup guidance.
+
+The installer skips hook setup for a missing app.
+For installed Claude/Codex without `~/.claude/settings.json`/`~/.codex/config.toml`, it gives manual setup guidance.
 
 ## Install on a new machine
 
-From the repository root, with a clean worktree at the required commit:
+From the repository root, with a clean worktree at the necessary commit:
 
-    bin/muninn-install --check    # plain-sentence preview; writes nothing
-    bin/muninn-install
+```sh
+bin/muninn-install --check    # preview in plain sentences. Writes nothing
+bin/muninn-install
+```
 
-`--check` never creates an environment, installs packages or enables Git hooks.
-It reuses a compatible selected interpreter or this checkout's ready `.venv`.
-If the pinned runtime is missing, prepare it separately before retrying:
+`--check` does not make an environment, install packages or enable Git hooks.
+It uses a compatible selected interpreter or this checkout's prepared `.venv`.
+If the pinned runtime is unavailable, prepare it before trying again:
 
-    python3.13 -m venv .venv
-    .venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
+```sh
+python3.13 -m venv .venv
+.venv/bin/python3.13 -m pip install --require-hashes -r requirements-runtime.lock
+```
 
-Alternatively, set `MUNINN_PYTHON` to an existing compatible environment. A normal
-install can still offer runtime and Git-hook setup; accepting those prompts changes
-the checkout. That setup is separate from the read-only preview.
+You can also set `MUNINN_PYTHON` to an existing compatible environment.
+A usual install can offer runtime and Git-hook setup.
+Approval of those prompts changes the checkout.
+That setup occurs independently of the read-only preview.
 
-An upgrade preview also needs the existing private writer lock and a stable
-DELETE-mode store without journal, WAL or shared-memory sidecars. It refuses
-missing, busy, unsafe or changing state with `review_policy_preview_unavailable`.
-The preview never creates a lock, repairs permissions, stops the service or
-clears recovery state. Preserve refused state and use the existing recovery
-guidance; the preview does not make it safe to install.
+An upgrade preview must have the existing private writer lock and a stable DELETE-mode store without journal, WAL or shared-memory sidecars.
+It refuses missing, busy, dangerous or changing conditions with `review_policy_preview_unavailable`.
+The preview does not make a lock, repair permissions, stop the service or clear recovery conditions.
+Keep refused conditions and use the existing recovery guidance.
+The preview does not make it safe to install.
 
-`bin/muninn-install` installs this checkout's `HEAD`. It runs a fresh install when
-neither the data directory nor release exists, and an upgrade when both exist. An
-incomplete installation (only one exists) is refused. `--status` compares the installed
-commit with `HEAD` using local Git history. It reports whether the checkout or
-installed version is newer. If the installed version is newer, update the checkout
-before installing. Unknown or divergent history reports `versions differ`; inspect
-the revisions before installing. Status does not fetch from the network or change
-the installation. Other arguments are forwarded to `install.installer` (`--repo`,
-`--sha`, `--fresh`, `--upgrade`, `--dry-run`, `--home`, `--review-policy`), which needs a full 40-hex
-`--sha` equal to `HEAD`. A fresh install refuses if the data directory or the launchd
-plist already exists. It pins the release, indexes your existing transcripts, configures the managed provider hooks, starts the
-poller, runs
-`muninn doctor`, and prunes to one release. Before live-store mutation, failures can
-roll back installer changes. After possible mutation, current-format upgrade keeps
-current data and the selected runtime/configuration, leaves the service stopped,
-and records `recovery_required`. Retained archives are not automatic restore
-authority; see [the recovery contract](REFERENCE.md#current-knowledge-and-learning).
+`bin/muninn-install` installs this checkout's `HEAD`.
+It selects a new installation if there is no data directory and no release.
+It selects an upgrade when the data directory and release exist.
+It refuses an installation that has only one of them.
 
-| Platform | Installed desktop app evidence |
+`--status` compares the installed commit with `HEAD` through local Git history.
+It reports if the checkout or installed version is newer.
+If the installed version is newer, update the checkout before installing.
+Unknown or divergent history reports `versions differ`.
+Examine the revisions before installing.
+Status does not fetch from the network or change the installation.
+
+Other arguments go to `install.installer`: `--repo`, `--sha`, `--fresh`, `--upgrade`, `--dry-run`, `--home`, and `--review-policy`.
+The installer must have a full 40-hex `--sha` equal to `HEAD`.
+A new installation refuses an existing data directory or launchd plist.
+It pins the release, indexes existing transcripts, configures managed provider hooks, and starts the poller.
+It then runs `muninn doctor` and prunes to one release.
+
+Before live-store mutation, errors can cause rollback of installer changes.
+After possible mutation, an upgrade of the current format keeps current data and the selected runtime/configuration.
+It keeps the service stopped and records `recovery_required`.
+Archives that remain do not give automatic authority to replace current data.
+See [the recovery contract](REFERENCE.md#current-knowledge-and-learning).
+
+| Platform | Installed desktop app proof |
 |---|---|
 | macOS | `Claude.app`, `Codex.app`, `Cursor.app` in `/Applications` or `~/Applications` |
-| Windows | Desktop executables in LocalAppData/Program Files; current-user `Claude`/`OpenAI.Codex` MSIX registration with an existing executable declared in its manifest |
+| Windows | Desktop executables in `LocalAppData`/`Program Files`. Current-user `Claude`/`OpenAI.Codex` MSIX registration with an existing executable declared in its manifest |
 | Linux | `claude-desktop`, `chatgpt`, `cursor` on PATH |
 
-- Provider setup/config validation/hook verification: installed app required.
-- Leftover settings/transcripts: never installation evidence.
-- Absent app: setup skipped.
-- Installed Claude/Codex without config: manual setup guidance.
-- History import/existing index: independent of app detection.
-- Cursor setup prompt: installed Cursor; interactive install only.
+- Provider setup, config validation and hook checks must have an installed app.
+- Leftover settings or transcripts do not prove installation.
+- The installer skips setup for a missing app.
+- Installed Claude/Codex without config means manual setup guidance.
+- History import and an existing index operate independently of app detection.
+- The Cursor setup prompt needs installed Cursor and an interactive install.
 
-An interactive install asks whether to configure Muninn's Cursor
-`sessionStart`, `sessionEnd` and `preCompact` hooks automatically or leave them
-for manual setup. Automatic setup merges only Muninn's handlers into `~/.cursor/hooks.json`, preserving other
-hooks. Rollback restores prior owned handlers while retaining current foreign
-additions, edits, deletions and order. On a non-interactive install, or if you
-choose manual, no Cursor config is changed; the installer prints the target path and a direct link to the
-instructions below. An upgrade only changes Cursor settings if you choose
-automatic setup.
+An interactive install gives two Cursor setup selections: automatic or manual.
+Automatic setup merges only Muninn's `sessionStart`, `sessionEnd` and `preCompact` handlers into `~/.cursor/hooks.json` and keeps other hooks.
+Rollback replaces prior owned handlers and keeps current new entries, edits, deletions and sequence from other software.
+For a non-interactive install or manual selection, the installer does not change Cursor config.
+It prints the target path and a direct hyperlink to the instructions below.
+An upgrade changes Cursor settings only with automatic setup.
 
-Codex only runs plugin hooks after you trust them: start a Codex session and run
-`/hooks` if the installer prints `OWNER STEP`.
+Codex runs plugin hooks only after your trust decision.
+Start a Codex session and run `/hooks` if the installer prints `OWNER STEP`.
 
 ## Upgrade an installed machine
 
-    bin/muninn-install --check
-    bin/muninn-install
+```sh
+bin/muninn-install --check
+bin/muninn-install
+```
 
-The installer selects the commit, restarts the poller, verifies, then deletes every
-other release. It keeps the existing index instead of running the fresh-install history
-import; after a successful upgrade, Claude and Codex polling resumes, while Cursor
-history is not re-imported. Fresh and upgrade reconcile managed Claude/Codex definitions while preserving
-unrelated hooks; Cursor reconciliation follows the automatic setup choice. Changed
-definitions require owner approval; use `/hooks` for Codex when prompted. When a release changes how
-transcripts are classified (`stats` shows `classifier_version`), the poller re-reads
-every transcript once after the upgrade, Claude and Codex alike, one source at a time;
-large stores may require additional time. Monitor progress with `muninn stats`
-(`reread.pending` falls towards 0) or `muninn doctor` (the `reread` line). The re-read
-holds the writer lock longer, so other writers see exit 3 meanwhile, and it can leave
-free pages: if `doctor` then warns `db_free_space`, run `muninn compact`. A failed
-upgrade may require recovery instead of returning to the old release, as described
-above. Ordinary writers and rebuild refuse unmarked stores. During `--upgrade`, a
-recognized schema v3 store is copied
-into the marked format after the managed poller stops. The installer keeps a private
-copy of the entire old database, including its old knowledge ledger; only indexed
-history is copied into the new store, and the latest erasure is applied before
-publication. Other unmarked schemas remain untouched and refuse upgrade.
+The installer selects the commit, starts the poller again, checks the result, and removes all other releases.
+It keeps the existing index and does not run the new-installation history import.
+After an upgrade that ends without error, Claude and Codex polling continues.
+It does not import Cursor history again.
+New installations and upgrades reconcile managed Claude/Codex definitions and keep unrelated hooks.
+Cursor reconciliation follows the automatic setup selection.
 
-The exact legacy release `5c1a69b0edff81df80836d72a80971a91a8f9520`
-has a macOS/Linux continuation after managed launch exclusion and a later OS boot.
-All old manual commands, source/module invocations, imported clients and custom
-jobs must remain stopped through upgrade and recovery. Repeat the same prepared
-checkout and `--upgrade --repo DIR --sha SHA` after the restart. The installer
-retains the original archive, copies indexed history, applies latest erasure,
-and publishes the marked store before selecting compatible configuration.
-Preserve its private operation directory and launch exclusion if interrupted;
-recovery proceeds forward from verified actual state. Windows legacy closure and
-live native qualification remain separate prerequisites. See [REFERENCE.md](REFERENCE.md).
+Changed definitions must have owner approval.
+Use `/hooks` for Codex when prompted.
+When a release changes how it classifies transcripts, `stats` shows `classifier_version`.
+After that upgrade, the poller reads each Claude and Codex transcript again, one source at a time.
+Large stores can use more time.
+
+Monitor the result with `muninn stats`: `reread.pending` decreases to 0.
+You can also use the `reread` line in `muninn doctor`.
+The new read holds the writer lock longer, so other writers see exit 3 during that time.
+The store can then have free pages.
+If `doctor` then reports `db_free_space`, run `muninn compact`.
+An upgrade error can make recovery necessary with no rollback to the previous release, as described above.
+
+Ordinary writers and rebuild refuse unmarked stores.
+During `--upgrade`, the installer stops the managed poller, then copies a recognized schema v3 store into the marked format.
+It keeps a private copy of the full previous database and its previous knowledge ledger.
+It copies only indexed history into the new store and applies the latest erasure before publication.
+It does not change other unmarked schemas and refuses their upgrade.
+
+The specified legacy release `5c1a69b0edff81df80836d72a80971a91a8f9520` has a macOS/Linux continuation after managed launch exclusion and a subsequent OS boot.
+Keep all previous manual commands, source/module invocations, imported clients and custom work stopped through upgrade and recovery.
+After the computer starts again, repeat the same prepared checkout and `--upgrade --repo DIR --sha SHA`.
+The installer keeps the initial archive, copies indexed history, and applies the latest erasure.
+It publishes the marked store before selecting compatible configuration.
+
+If interrupted, keep its private operation directory and launch exclusion.
+Recovery proceeds forward from checked actual conditions.
+Windows legacy closure and live native qualification remain prerequisites that apply independently.
+See [`REFERENCE.md`](REFERENCE.md).
 
 ### Default learning policy
 
-A learning policy tells Muninn when it may send captured conversation text to
-the learning runner. It also sets limits for each request. Every clone includes
-the default profile at `tools/default_codex_policy.json`.
+A learning policy tells Muninn when it can send captured conversation text to the learning runner.
+It also sets limits for each learning task.
+Each clone includes the default policy template at `tools/default_codex_policy.json`.
 
-Muninn applies the profile during an install that uses the current default home
-when the store has no learning policy. The host must meet the Codex runner
-requirements. It must use Apple silicon macOS. A signed Codex CLI must be on
-`PATH`. The Codex sign-in directory must exist. Muninn records the host, data
-directory and executable in a private capability file. If a check fails,
-installation can finish, but learning stays pending. Trust Codex hooks when
-Codex prompts you at `/hooks`.
+Muninn applies the policy template during an install that uses the current default home when the store has no learning policy.
+The host must satisfy the Codex runner requirements: Apple silicon macOS, a signed Codex CLI on `PATH`, and an existing Codex sign-in directory.
+Muninn records the host, data directory and executable in a private runner-check file.
+If a check does not succeed, installation can finish, but learning stays pending.
+Trust Codex hooks when Codex prompts you at `/hooks`.
 
-The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt
-recall. They do not control learning from completed sessions.
+The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt recall.
+They do not control learning from completed sessions.
 
-During first setup, the installer asks which records to review:
+During first setup, the installer gives two selections for the records to examine:
 
-- **From now:** review records created after this install or upgrade.
-- **All available history:** review verified older project records, then review new records.
+- **`From now`:** examine records made after this install or upgrade.
+- **All available history:** examine checked older project records, then new records.
 
-The installer keeps your choice for later upgrades.
-An ordinary upgrade with no new learning or policy request preserves the saved
-scope and its original boundary. It does not ask to review additional history
-or queue that history to complete the upgrade. An explicit scope or policy
-request still uses the normal review and consent checks.
-If you choose history, it shows eligible requests, excluded ranges, and a time estimate before confirmation.
-A capture gap does not equal a review request.
+The installer keeps your selection for subsequent upgrades.
+An ordinary upgrade with no new learning or policy instruction keeps the stored scope and its initial boundary.
+It does not prompt for approval to examine more history or queue that history to complete the upgrade.
+An explicit scope or policy instruction uses the usual inspection and consent checks.
+For history, the installer shows eligible learning tasks, excluded ranges, and a time estimate before confirmation.
+
+A capture omission does not equal a learning task.
 Muninn excludes missing, erased, changed, or unverifiable source ranges.
-For late imports, From now also excludes older or undated records.
+For late imports, `From now` also does not include older or undated records.
 
 To select future records without a scope prompt, run:
 
@@ -153,254 +167,298 @@ To select future records without a scope prompt, run:
 bin/muninn-install --learning-scope now
 ```
 
-Each attempt allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
-Revision 3 allows four concurrent requests and three total attempts per request.
-Temporary failures wait 5 seconds, then 30 seconds, before their remaining attempts.
-Manual and live requests take priority over queued history.
-Within each group, Muninn processes older requests first.
-Muninn checks the current knowledge revision before saving each result.
+Each try allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
+Revision 3 allows four concurrent learning tasks and three total tries for each task.
+Temporary errors wait 5 seconds, then 30 seconds, before their remaining tries.
+Muninn handles manual and live work before queued history.
+In each group, Muninn handles older work first.
+Muninn checks the current knowledge revision before keeping each result.
 
 The policy allows project scope only.
 It has no total call limit or expiry.
 These controls cannot limit subscription allowance or predict subscription cost.
-An API cost estimate requires comparable calls with reported costs.
+An API cost estimate must have comparable calls with reported costs.
 A small sample gives a low-confidence estimate.
-Time estimates use whole worker batches.
-The installer separates first-attempt estimates from estimates with permitted retries.
-Estimates exclude setup waits and database delays.
 
-The running background program can recheck unavailable setup while learning is enabled.
-It waits at least 60 seconds. Reading a warning starts no timer.
-One rejected request does not stop unrelated requests under revision 3.
-If help is required, the next Codex session shows the cause and action.
-You do not need to run `doctor` to receive this message.
-Muninn preserves owner pauses and blocks calls whose stopped state remains unverified.
+Time estimates use full worker batches.
+The installer gives first-try estimates and estimates with permitted retries independently.
+Estimates exclude setup waits and database wait times.
 
-To customise the profile, edit `tools/default_codex_policy.json` in your private clone.
+The active background software can check unavailable setup again while learning stays enabled.
+It waits a minimum of 60 seconds.
+A warning does not start a timer when you read it.
+One rejected task does not stop unrelated tasks with revision 3.
+If help is necessary, the next Codex session shows the cause and necessary step.
+
+You do not have to run `doctor` to receive this message.
+Muninn keeps owner pauses and blocks calls without proof that they stopped.
+
+To customise the policy template, edit `tools/default_codex_policy.json` in your private clone.
 Commit the change before installation.
-For revision 3, set `concurrency`, `max_attempts`, and `retry_backoff_seconds` under `revisions.3`.
+For revision 3, set `concurrency`, `max_attempts`, and `retry_backoff_seconds` in `revisions.3`.
 Use one backoff value for each permitted retry.
-Keep concurrency at or below 4 and attempts at or below 3.
-The `limits` object controls the other byte, round, context, and deadline limits.
-You can reduce these limits within the enforced bounds.
-Keep the runner, model, reasoning, host binding, and project-scope settings.
+Keep concurrency at or below 4 and tries at or below 3.
+
+The `limits` object controls the other byte, call, context, and deadline limits.
+You can decrease these limits in the enforced limits.
+Keep the runner, model, `reasoning`, host binding, and project-scope settings.
 Record the approver in `approved_by` and the UTC approval time in `approved_at`.
 
 Eligible repository defaults can move from revision 1 or 2 to revision 3 during upgrade.
-The new approval time must be later.
-Muninn preserves old request policies and knowledge.
-It marks unstarted old-policy requests as replaced.
+The new approval time must follow the previous time.
+Muninn keeps previous task policies and knowledge.
+It marks unstarted previous-policy tasks as replaced.
 The selected learning scope controls new admission.
-Changed custom policies retain their existing limits.
-If learning is paused, the installer asks separately before enabling it.
+Changed custom policies keep their existing limits.
+
+With learning paused, the installer prompts for approval independently before enabling it.
 Declining keeps the pause.
-An accepted restart requires every recorded call and attempt to have finished.
-An unchanged legacy default can receive this checked policy update.
-The update retains its recorded runner version and host settings.
-For an unattended, explicitly approved restart, use `bin/muninn-install --enable-learning`.
-This flag does not bypass process checks or approve changed custom policies.
-A retained From now choice keeps its original start time.
-The installer confirms replacement work before replacing an old queue.
+An accepted start must have all recorded calls and tries finished.
+An unchanged legacy default can get this checked policy update.
+The update keeps its recorded runner version and host settings.
+
+For an unattended, explicitly approved start, use `bin/muninn-install --enable-learning`.
+This flag does not bypass OS task checks or give approval to changed custom policies.
+A `From now` selection that remains keeps its initial start time.
+The installer confirms replacement work before replacing a previous queue.
 Do not edit the store by hand.
-See the [policy reference](REFERENCE.md#default-learning-policy).
+See the [policy contract](REFERENCE.md#default-learning-policy).
 
 ## Uninstall
 
-    bin/muninn-uninstall --dry-run    # says what it would do; writes nothing
-    bin/muninn-uninstall
+```sh
+bin/muninn-uninstall --dry-run    # preview. Writes nothing
+bin/muninn-uninstall
+```
 
-It stops the poller, removes the launchd plist, removes only Muninn's hooks from
-`~/.claude/settings.json`, Muninn's managed lifecycle handlers from
-`~/.cursor/hooks.json`, and only Muninn's sections from `~/.codex/config.toml`,
-deletes the Codex plugin cache, and removes `~/.local/lib/muninn` and the
-`~/.local/bin/muninn` link (only if it points into that release directory). Your
-transcripts and every other setting stay as they are. If a provider config cannot be
-edited safely it refuses before mutation, reports the cause and exits 1. Resolve the
-reported cause before retrying.
+Uninstall stops the poller and removes the launchd plist.
+It removes only Muninn's hooks from `~/.claude/settings.json`, managed lifecycle handlers from `~/.cursor/hooks.json`, and sections from `~/.codex/config.toml`.
+It removes the Codex plugin cache and `~/.local/lib/muninn`.
+It removes the `~/.local/bin/muninn` symbolic link only if it points into that release directory.
+Your transcripts and all other settings stay unchanged.
 
-The data directory (the index and the knowledge ledger) is moved to
-`~/.local/share/muninn-removed-<timestamp>/muninn`, not deleted, because the ledger
-cannot be rebuilt from transcripts. Add `--purge-data` to delete it. Repeated runs and
-runs on an uninstalled machine report the existing state without further changes. After
-an uninstall `bin/muninn-install` does a fresh install.
+If safe provider config edits are not possible, uninstall refuses before mutation, reports the cause and exits 1.
+Resolve the reported cause before trying again.
+It moves the data directory, with the index and knowledge ledger, to `~/.local/share/muninn-removed-<timestamp>/muninn`.
+It does not remove the directory because transcripts cannot rebuild the ledger.
+Add `--purge-data` to remove it.
+
+Subsequent runs and runs on an uninstalled machine report the existing conditions without more changes.
+After an uninstall, `bin/muninn-install` makes a new installation.
 
 ## Per-prompt recall starts off
 
-A `--fresh` install creates `~/.local/share/muninn/recall.off`, so muninn does not add
-earlier prompts to each of your prompts. Session-start memory and `muninn search` remain
-available. Automatic recall is disabled by default pending retrieval relevance
-validation (`docs/adr/0007-recall-off-by-default.md`).
+A `--fresh` install makes `~/.local/share/muninn/recall.off`.
+Thus muninn does not add earlier prompts to each of your prompts.
+Session-start memory and `muninn search` remain available.
+Automatic recall starts disabled, pending retrieval relevance validation (`docs/adr/0007-recall-off-by-default.md`).
 
-Advisory mode gives the model a short `<muninn-retrieval>` instruction to search
-project history when it matters, without automatic recall or a hook store read.
-Create `~/.local/share/muninn/recall.advisory` with mode 0600 and remove
-`recall.off` to select it. With both files present, off wins.
+Advisory mode gives the model a short `<muninn-retrieval>` instruction to examine project history when necessary.
+It does not add automatic recall or a hook store read.
+Make `~/.local/share/muninn/recall.advisory` with mode 0600 and remove `recall.off` to select it.
+If the two files exist, off wins.
 
-To turn recall on: `unlink ~/.local/share/muninn/recall.off`. To turn it off again:
-`install -m 600 /dev/null ~/.local/share/muninn/recall.off`. Details in
-`docs/REFERENCE.md`. An `--upgrade` never changes either mode file.
+To turn recall on: `unlink ~/.local/share/muninn/recall.off`.
+To turn it off again: `install -m 600 /dev/null ~/.local/share/muninn/recall.off`.
+See `docs/REFERENCE.md`.
+An `--upgrade` does not change the two mode files.
 
-With recall enabled, supplied context asks the model for a short `Memory R<number>:
-useful/noise/uncertain` assessment. At 50 recorded nonempty blocks, the hook gives you
-a prompt to paste into Claude or Codex for a source-backed batch review. The reminder
-continues until that complete batch is acknowledged. See
-[reviewing automatic recall](REFERENCE.md#reviewing-automatic-recall); model ratings
-alone don't prove that answers improved.
+With recall enabled, supplied context tells the model to give a short `Memory R<number>: useful/noise/uncertain` rating.
+At 50 recorded nonempty blocks, the hook gives you a prompt to paste into Claude or Codex for a source-checked batch inspection.
+The reminder continues until acknowledgment of that complete batch.
+See [automatic recall inspection](REFERENCE.md#reviewing-automatic-recall).
+Model ratings alone do not prove that answers improved.
 
 ## Read knowledge and request bounded learning
 
-A relevant memory question can need your choice.
+A related memory question can make your selection necessary.
 The agent prepares and shows the complete proposed change in conversation.
-That display includes exact approve and reject reply sentences for its proposal ID.
-Send the chosen sentence as a whole plain chat message.
-The agent verifies your original reply and handles all commands.
+That display includes the specified approval and reject reply sentences for its proposal ID.
+Send the selected sentence as a full plain chat message.
+The agent checks your initial reply and handles all commands.
 
-Viewing a proposal gives no approval. A reply alone does not establish saved memory.
-For an edit, the agent prepares a new complete proposal with a new display and fresh approval.
-The agent reports saved only after Muninn returns the actual saved receipt.
-A checked decision can remain pending or blocked.
-Ordinary supported learning still saves without a new approval step.
+A proposal view gives no approval.
+A reply alone does not prove stored memory.
+For an edit, the agent prepares a new complete proposal with a new display and new approval.
+The agent reports stored memory only after Muninn gives the actual stored receipt.
+A checked decision can stay pending or blocked.
+Ordinary learning with checked source records keeps its automatic storage without a new approval step.
 
 These commands are agent operations:
 
-    muninn know unresolved
-    muninn know decision stage --input /path/to/candidate.json
-    muninn know decision show D_ID
-    muninn know decision submit --input /path/to/intent.json
-    muninn know decision status D_ID --human
-    muninn know decision apply D_ID
+```sh
+muninn know unresolved
+muninn know decision stage --input /path/to/candidate.json
+muninn know decision show D_ID
+muninn know decision submit --input /path/to/intent.json
+muninn know decision status D_ID --human
+muninn know decision apply D_ID
+```
 
-`D_ID` identifies one complete proposal. Use the real ID returned by stage.
-The agent sends the exact decoded show `text` as its whole final message.
-It adds no prose, Markdown fence, or newline outside that text.
-The saved policy limits the complete display, including its reply instructions.
-Muninn refuses a display that cannot fit. It does not show a shortened version for approval.
-See [the reference](REFERENCE.md#conversational-memory-decisions) for the checked input and output fields.
+`D_ID` identifies one complete proposal.
+Use the actual ID from the `stage` command.
+The agent sends the unmodified decoded show `text` as its full last message.
+It adds no prose, Markdown fence, or newline external to that text.
+The stored policy limits the complete display and its reply instructions.
+Muninn refuses a display that cannot fit.
 
-Current supported knowledge can also be inspected:
+It does not show a shortened version for approval.
+See [the contract](REFERENCE.md#conversational-memory-decisions) for the checked input and output fields.
 
-    muninn know list
-    muninn know search "project convention"
-    muninn know context
-    muninn learn list
+You can also examine current knowledge with source checks:
 
-Current knowledge uses `K_` UUID IDs and explicit revisions. Context contains
-current applicable supported notes and a guide index, excluding withheld,
-expired, superseded, retracted, erased or unsupported guidance. Open guides with
-`muninn know show K_ID`, then open cited originals before relying on them.
+```sh
+muninn know list
+muninn know search "project convention"
+muninn know context
+muninn learn list
+```
 
-    muninn learn request --session codex:THREAD --from-line 2 --through-line 8 --policy /path/to/policy.json
-    muninn learn show R_ID
-    muninn learn retry R_ID
-    muninn learn replay --session codex:THREAD --from-line 2 --through-line 8 --policy /path/to/policy.json
-    muninn know propose --input /path/to/proposal.json
-    muninn know retract K_ID --expected-revision 1 --reason "Withdrawn by owner"
+Current knowledge uses `K_` UUID IDs and explicit revisions.
+Context contains current applicable notes with source proof and a guide index.
+It does not include withheld, expired, superseded, retracted, erased or unsupported guidance.
+Open guides with `muninn know show K_ID`, then open cited source records before using them.
 
-Replace placeholders with actual indexed session/request/knowledge IDs and explicit
-files. Requests require the installed admitted immutable policy; `--policy` must
-match it. There are no implicit runner/model/budget settings. Request bounds must
-be paired; replay requires bounds and policy. Retry explicitly restarts the same
-request when still permitted; completed receipts remain idempotent. Proposals
-contain `request_id` plus strict `result`, use admitted evidence and pass checked
-commit; they invoke no model and cannot invent owner authority. Corrections use
-supported proposed replacement. `know add`, `know check` and their old flags are
-retired. See [the exact contracts](REFERENCE.md#current-knowledge-and-learning).
+```sh
+muninn learn request --session codex:THREAD --from-line 2 --through-line 8 --policy /path/to/policy.json
+muninn learn show R_ID
+muninn learn retry R_ID
+muninn learn replay --session codex:THREAD --from-line 2 --through-line 8 --policy /path/to/policy.json
+muninn know propose --input /path/to/proposal.json
+muninn know retract K_ID --expected-revision 1 --reason "Withdrawn by owner"
+```
+
+Replace placeholders with actual indexed session, task and knowledge IDs and explicit files.
+Learning tasks must use the installed admitted immutable policy.
+`--policy` must equal it.
+There are no implicit runner, model or budget settings.
+Task line limits must be paired.
+Replay must have line limits and policy.
+
+Retry explicitly starts the same task again when permitted.
+Completed receipts remain idempotent.
+Proposals contain `request_id` plus strict `result`, use admitted source proof and pass checked commit.
+They invoke no model and cannot invent owner authority.
+Corrections use proposed replacements with source checks.
+Do not use `know add`, `know check` or their previous flags.
+
+See [the full contracts](REFERENCE.md#current-knowledge-and-learning).
 
 ## Verify the installation
 
-    muninn doctor            # exit 0 = healthy
-    muninn --pretty stats    # counts; add --pretty for indented JSON
-    muninn search "a phrase you remember"
+```sh
+muninn doctor            # exit 0 = healthy
+muninn --pretty stats    # counts. Add --pretty for indented JSON
+muninn search "a phrase you remember"
+```
 
 ## Cursor history
 
-On a fresh install, Muninn checks for Cursor's database at
-`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and imports it
-when present. Cursor does not need to be installed. The installer prints which of
-Claude, Codex and Cursor have history to index; `--dry-run` reports what it would index
-without importing anything.
+On a new installation, Muninn checks for Cursor's database at `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`.
+It imports the database when available.
+Cursor installation is not necessary.
+The installer prints which of Claude, Codex and Cursor have history to index.
+`--dry-run` reports the proposed index work without importing anything.
 
 The installer can merge the native Cursor hook into `~/.cursor/hooks.json`.
-For manual setup after installation, copy the managed lifecycle handlers from the
-installed release's `integrations/cursor/hooks.json`, preserving other hooks in
-`~/.cursor/hooks.json`. The installed fragment already contains the escaped native
-launcher command. On macOS/Linux it is under `~/.local/lib/muninn/current/`; on
-Windows it is under the selected `%LOCALAPPDATA%\Muninn\lib\<sha>\` release.
-Outside macOS, set `MUNINN_CURSOR_DB` to Cursor's native absolute database path in
-Cursor's environment; without it, the hook skips the import. Before compaction,
-the hook selects exactly one `composerData:<conversation_id>` matching the
-documented hook identity and processes at most the `message_count` bubbles
-reported by Cursor, probing one additional bubble to detect an oversized
-conversation. A present stored `composerId` must also match. Missing, malformed,
-duplicate or mismatched identity skips before writes; there is no newest-row
-fallback. Scope uses the hook's valid native absolute `workspace_roots`: a
-single root is authoritative. With multiple roots, a payload `cwd` equal to or
-inside a listed root takes precedence over inherited `CURSOR_PROJECT_DIR`;
-the environment directory is a fallback only when it also matches a listed root.
-Missing, invalid or ambiguous roots skip
-before writes. If the stored conversation has more bubbles, Muninn skips
-that conversation whole; `muninn ingest --full` remains the complete import
-path. The hook does not add context to the compacted turn.
-Cursor has distinct native `sessionStart`, `sessionEnd` and `preCompact` handlers.
-Startup refresh binds the native workspace independently of history capture;
-sessionEnd imports the exact ended conversation without requiring `message_count`.
+For manual setup, copy managed lifecycle handlers from the installed release's `integrations/cursor/hooks.json`.
+Keep other hooks in `~/.cursor/hooks.json`.
+The installed fragment contains the escaped native launcher command.
+On macOS/Linux, it is at `~/.local/lib/muninn/current/`.
+On Windows, it is at the selected `%LOCALAPPDATA%\Muninn\lib\<sha>\` release.
+
+On systems other than macOS, set `MUNINN_CURSOR_DB` to Cursor's native absolute database path in Cursor's environment.
+Without it, the hook skips the import.
+Before compaction, the hook selects one `composerData:<conversation_id>` equal to the documented hook identity.
+It reads at most the `message_count` bubbles reported by Cursor.
+It checks one more bubble to find an oversized conversation.
+If a stored `composerId` exists, it must agree.
+
+Missing, malformed, duplicate or unequal identity skips before writes.
+There is no newest-row fallback.
+Scope uses the hook's correct native absolute `workspace_roots`.
+A single root is authoritative.
+With multiple roots, a payload `cwd` equal to a listed root or in its subtree has precedence before inherited `CURSOR_PROJECT_DIR`.
+The environment directory is a fallback only when it also agrees with a listed root.
+
+Missing, incorrect or ambiguous roots skip before writes.
+If the stored conversation has more bubbles, Muninn skips the full conversation.
+`muninn ingest --full` remains the complete import path.
+The hook does not add context to the compacted turn.
+Cursor has individual native `sessionStart`, `sessionEnd` and `preCompact` handlers.
+
+Startup refresh binds the native workspace independently of history capture.
+sessionEnd imports the specified ended conversation without `message_count` as a prerequisite.
 End/precompact enqueue bounded learning windows only with an admitted frozen policy.
-A busy/unavailable capture is not acknowledged as durable; recovery cannot prove
-the exact missed event/cutoff. Resume/postcompact injection remains unproven:
-explicitly run `muninn know context` after resume or compaction. Already injected
-context cannot be retracted. Prompt recall still follows `recall.off`.
-An exact refresh also corrects stored event scope when unchanged content was previously imported under another cwd;
-ordinary full imports keep their existing behavior.
+Busy or unavailable capture gets no acknowledgment of durable storage.
+Recovery cannot prove the specified missed notification or cutoff.
 
-The hook fields are documented in [Cursor's hook contract](https://cursor.com/docs/hooks).
-Their mapping to the local database is empirical: a [Cursor bundle analysis](https://forum.cursor.com/t/cursor-hooks-intermittently-emit-empty-conversation-id-session-id-on-tool-execution-events/167095)
-links lifecycle hook `conversation_id` to `composerId`, and [exporter source](https://github.com/Callum-Ward/cursaves/blob/main/cursor_saves/export.py#L108)
-looks up `composerData:<composerId>`. The database format is not a vendor-supported
-storage API; a format change may cause a skipped refresh. Real Cursor lifecycle
-execution on this checkout remains unverified.
+Context from hooks after a resumed session or compaction remains unproven.
+Explicitly run `muninn know context` after those operations.
+Context that a hook supplied cannot be retracted.
+Prompt recall continues to follow `recall.off`.
 
-    muninn search "a phrase from Cursor" --provider cursor
+A refresh of the specified conversation also corrects stored record scope for unchanged content previously imported with a different cwd.
+Ordinary full imports keep their existing behavior.
+
+See [Cursor's hook contract](https://cursor.com/docs/hooks) for the hook fields.
+Their mapping to the local database is empirical.
+A [Cursor bundle analysis](https://forum.cursor.com/t/cursor-hooks-intermittently-emit-empty-conversation-id-session-id-on-tool-execution-events/167095) connects lifecycle hook `conversation_id` to `composerId`.
+[Exporter source](https://github.com/Callum-Ward/cursaves/blob/main/cursor_saves/export.py#L108) looks up `composerData:<composerId>`.
+The database format is not a vendor-supported storage API.
+A format change may cause a skipped refresh.
+
+Actual Cursor lifecycle execution on this checkout remains unverified.
+
+```sh
+muninn search "a phrase from Cursor" --provider cursor
+```
 
 ## Installed files
 
 | Path | What |
 |---|---|
 | `~/.local/lib/muninn/<sha>/` | the one pinned release |
-| `~/.local/lib/muninn/current`, `python` | links to it and to the interpreter |
-| `~/.local/lib/muninn/install-record.json` | sha, Python, config keys touched, outcome |
+| `~/.local/lib/muninn/current`, `python` | symbolic links to it and the interpreter |
+| `~/.local/lib/muninn/install-record.json` | sha, Python, changed config keys, outcome |
 | `~/.local/lib/muninn/install.log` | timestamped steps and exit codes, no transcript text |
 | `~/.local/share/muninn/` | the database, logs and heartbeat |
-| `~/.local/bin/muninn` | link to `current/bin/muninn` |
+| `~/.local/bin/muninn` | symbolic link to `current/bin/muninn` |
 
 A new project can initially have no indexed project memory.
-This is normal empty context, not proof of database damage.
-Indexing creates the project mapping when it indexes an event.
-SessionEnd requests learning from already indexed records. It does not ingest or wait.
-A later startup, resume, clear, or compact can read the new mapping.
-Prompt recall remains separate. Waiting alone does not refresh the current conversation's startup context.
+This is usual empty context, not proof of database damage.
+Indexing makes the project mapping when it indexes a record.
+SessionEnd seeks learning from records in the index.
+It does not run ingest or wait.
 
-If learning reports `codex_host_changed`, ask the agent to check store-format and
-recovery prerequisites, then prepare the non-writing host-renewal preview in
-[REFERENCE.md](REFERENCE.md#renew-an-approved-codex-computer-binding). An installed
-format-1 store needs an ordinary upgrade to format 2 first. That step grants no
-new host permission. The later renewal needs your affirmative answer for its
-exact displayed digest. A full upgrade can run Codex hook checks and start
-background learning before returning; ongoing approval has no total call or
-spending cap of its own.
+A subsequent startup, session continuation, clear, or compact can read the new mapping.
+Prompt recall operates independently.
+Waiting alone does not refresh the current conversation's startup context.
+
+If learning reports `codex_host_changed`, tell the agent to check store-format and recovery prerequisites.
+Then prepare the preview that writes nothing in [`REFERENCE.md`](REFERENCE.md#renew-an-approved-codex-computer-binding).
+An installed format-1 store must have an ordinary upgrade to format 2 first.
+That step grants no new host permission.
+The subsequent renewal must have your affirmative answer for its specified displayed digest.
+
+A full upgrade can run Codex hook checks and start background learning before the command ends.
+Ongoing approval has no total call or spending cap of its own.
 
 ### Keep learning on the current managed Codex
 
-A saved executable path can disappear after Codex updates. On Apple silicon
-macOS, prepare the explicit stable interface rule with:
+A stored executable path can become unavailable after Codex updates.
+On Apple silicon macOS, prepare the explicit stable interface rule with:
 
 ```sh
 bin/muninn-install --upgrade --codex-interface preview --check
 ```
 
-The preview writes nothing and creates no model request. It can check the saved
-approval when the old executable is missing. Apply its exact digest with
-`bin/muninn-install --upgrade --codex-interface PLAN_DIGEST`. The installer asks
-for a fresh `yes` or `y` to that rule. It preserves account, model, scope, history,
-limits and existing work. Compatible later Codex updates need no new approval.
-This trusts the fixed local manager, not an arbitrary program on `PATH`. See
-[the full contract](REFERENCE.md#follow-the-current-trusted-codex-installation).
+The preview writes nothing and makes no model call.
+It can check the stored approval when the previous executable is unavailable.
+Apply its specified digest with `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST`.
+The installer seeks a new `yes` or `y` for that rule.
+It keeps account, model, scope, history, limits and existing work.
+Compatible subsequent Codex updates have no new approval prerequisite.
+
+This trusts the fixed local manager, not an arbitrary executable on `PATH`.
+See [the full contract](REFERENCE.md#follow-the-current-trusted-codex-installation).
