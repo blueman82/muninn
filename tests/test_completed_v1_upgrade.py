@@ -6,6 +6,7 @@ import json
 import os
 import unittest
 from contextlib import closing
+from types import SimpleNamespace
 from unittest import mock
 
 from install import cutover, recovery_guidance
@@ -24,13 +25,20 @@ class CompletedV1UpgradeTests(V1PreviewFixture):
     def setUp(self) -> None:
         super().setUp()
         for target, value in (
-            ("muninn.review_pause_state.sys.platform", "darwin"),
+            (
+                "muninn.review_pause_state.sys",
+                SimpleNamespace(platform="darwin"),
+            ),
+            (
+                "muninn.review_repair_binding.sys",
+                SimpleNamespace(platform="darwin"),
+            ),
             ("muninn.review_volume_identity.observe", VOLUME),
             ("muninn.review_boot_identity.observe", BOOT),
         ):
             patcher = (
                 mock.patch(target, value)
-                if target.endswith("sys.platform")
+                if target.endswith(".sys")
                 else mock.patch(target, return_value=value)
             )
             patcher.start()

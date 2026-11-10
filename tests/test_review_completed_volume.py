@@ -10,6 +10,7 @@ import unittest
 from argparse import Namespace
 from contextlib import closing
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from muninn import cli_recovery, store
@@ -31,14 +32,21 @@ class CompletedVolumeTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name)
         for target, value in (
-            ("muninn.review_pause_state.sys.platform", "darwin"),
+            (
+                "muninn.review_pause_state.sys",
+                SimpleNamespace(platform="darwin"),
+            ),
+            (
+                "muninn.review_repair_binding.sys",
+                SimpleNamespace(platform="darwin"),
+            ),
             ("muninn.cli_recovery._platform_name", "darwin"),
             ("muninn.review_volume_identity.observe", VOLUME),
             ("muninn.review_boot_identity.observe", BOOT),
         ):
             patcher = (
                 mock.patch(target, return_value=value)
-                if not target.endswith("sys.platform")
+                if not target.endswith(".sys")
                 else mock.patch(target, value)
             )
             patcher.start()
