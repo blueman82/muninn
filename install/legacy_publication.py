@@ -118,9 +118,7 @@ def witness(
         ctx.data,
         owner.fd,
         state.WITNESS,
-        state.Witness(
-            version=1, lock_identity=identity, owner=None, state="complete"
-        ),
+        state.make_witness(ctx.data, owner.fd, bind_volume=False),
     )
 
 

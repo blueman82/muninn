@@ -32,6 +32,7 @@ def same_owner(
         current is None
         or current.owner != selected.owner
         or current.lock_identity != selected.lock_identity
+        or current.volume_uuid != selected.volume_uuid
     ):
         raise PauseRefusedError("owner_changed")
 

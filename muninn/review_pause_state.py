@@ -6,7 +6,6 @@ import contextlib
 import hashlib
 import json
 import os
-import stat
 import sys
 import threading
 from pathlib import Path
@@ -15,42 +14,43 @@ from uuid import uuid4
 
 from pydantic import Field, model_validator
 
-from muninn import file_sync, platform_io, platform_lock, store
+from muninn import (
+    file_sync,
+    platform_io,
+    platform_lock,
+    review_volume_identity,
+    store,
+)
 from muninn.knowledge_models import Digest, SchemaVersion, StrictModel
 from muninn.review_json import reject_constant, unique_object
+from muninn.review_pause_identity import (
+    Identity as Identity,
+)
+from muninn.review_pause_identity import (
+    PauseRefusedError as PauseRefusedError,
+)
+from muninn.review_pause_identity import (
+    SnapshotChangedError as SnapshotChangedError,
+)
+from muninn.review_pause_identity import (
+    directory_identity as directory_identity,
+)
+from muninn.review_pause_identity import (
+    identity as _identity,
+)
+from muninn.review_pause_identity import (
+    lock_identity as lock_identity,
+)
+from muninn.review_pause_identity import (
+    private as _private,
+)
 from muninn.tombstones import reapply_tombstones
 
 LOCK = "review.supervisor.lock"
 WITNESS = "review.supervisor.json"
 BASELINE = "review.supervisor.repair.json"
 LIMIT = 1024
-type Identity = tuple[Annotated[int, Field(ge=0)], Annotated[int, Field(ge=0)]]
 type Token = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
-type RefusalCode = Literal[
-    "coordination_timeout",
-    "owner_changed",
-    "reboot_required",
-    "boot_identity_unavailable",
-    "legacy_volume_confirmation_required",
-    "pause_unverified",
-]
-
-
-class PauseRefusedError(ValueError):
-    """Report a finite coordination refusal without exposing content."""
-
-    def __init__(self, code: RefusalCode) -> None:
-        """Keep the original finite reason available to the caller."""
-        self.code = code
-        super().__init__(code)
-
-
-class SnapshotChangedError(PauseRefusedError):
-    """Refuse discarded evidence after a safe pathname changed identity."""
-
-    def __init__(self) -> None:
-        """Preserve the public refusal code without certifying publication."""
-        super().__init__("pause_unverified")
 
 
 class Owner(StrictModel):
@@ -67,12 +67,24 @@ class Witness(StrictModel):
     lock_identity: Identity
     owner: Owner | None
     state: Literal["active", "complete"]
+    volume_uuid: (
+        Annotated[
+            str,
+            Field(pattern=r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$"),
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def active_owner(self) -> Self:
         """Require an exact stop target for every active owner."""
         if self.state == "active" and self.owner is None:
             raise ValueError("active_owner_required")
+        if (
+            self.volume_uuid is not None
+            and self.volume_uuid.replace("-", "") == "0" * 32
+        ):
+            raise ValueError("pause_unverified")
         return self
 
 
@@ -117,39 +129,6 @@ class Baseline(StrictModel):
         ):
             raise ValueError("pause_unverified")
         return self
-
-
-def _private(path: Path, *, directory: bool = False) -> os.stat_result:
-    """Reject links, public modes and foreign ownership before opening."""
-    info = path.lstat()
-    expected = stat.S_ISDIR if directory else stat.S_ISREG
-    if not expected(info.st_mode) or not platform_io.is_private(
-        path, directory=directory
-    ):
-        raise PauseRefusedError("pause_unverified")
-    if os.name != "nt" and info.st_uid != os.getuid():
-        raise PauseRefusedError("pause_unverified")
-    return info
-
-
-def _identity(info: os.stat_result) -> Identity:
-    """Project the native descriptor identity used by the lock protocol."""
-    return info.st_dev, info.st_ino
-
-
-def directory_identity(home: Path) -> Identity:
-    """Read one verified private data directory identity."""
-    return _identity(_private(home, directory=True))
-
-
-def lock_identity(home: Path, fd: int) -> Identity:
-    """Require a private unchanged lock path matching the held descriptor."""
-    _private(home, directory=True)
-    path = _private(home / LOCK)
-    held = os.fstat(fd)
-    if not stat.S_ISREG(held.st_mode) or _identity(path) != _identity(held):
-        raise PauseRefusedError("pause_unverified")
-    return _identity(held)
 
 
 def acquire(home: Path) -> int:
@@ -255,10 +234,13 @@ def publish(home: Path, fd: int, name: str, value: StrictModel) -> None:
     """Publish private bounded state and sync the parent before proceeding."""
     lock_identity(home, fd)
     inspect(home, name)
-    raw = value.model_dump_json().encode()
+    payload = value.model_dump(mode="json")
+    if isinstance(value, Witness) and value.volume_uuid is None:
+        payload.pop("volume_uuid")
+    raw = json.dumps(payload).encode()
     if len(raw) > LIMIT:
         raise PauseRefusedError("pause_unverified")
-    store.write_json_atomic(home / name, value.model_dump(mode="json"))
+    store.write_json_atomic(home / name, payload)
     if os.name != "nt":
         file_sync.sync_path(home)
     lock_identity(home, fd)
@@ -276,7 +258,7 @@ def retire_baseline(home: Path, fd: int) -> None:
     file_sync.sync_path(home)
 
 
-def seed_new(home: Path, fd: int) -> None:
+def seed_new(home: Path, fd: int, *, bind_volume: bool = True) -> None:
     """Seed a caller-proven new home under held owner and writer ownership.
 
     Only controlled initialization with affirmative never-exposed provenance
@@ -286,7 +268,7 @@ def seed_new(home: Path, fd: int) -> None:
     Raises:
         PauseRefusedError: If prior witness or repair authority exists.
     """
-    identity = lock_identity(home, fd)
+    lock_identity(home, fd)
     if (
         inspect(home, WITNESS)[1] is not None
         or inspect(home, BASELINE)[1] is not None
@@ -296,9 +278,7 @@ def seed_new(home: Path, fd: int) -> None:
         home,
         fd,
         WITNESS,
-        Witness(
-            version=1, lock_identity=identity, owner=None, state="complete"
-        ),
+        make_witness(home, fd, bind_volume=bind_volume),
     )
 
 
@@ -326,11 +306,7 @@ def begin_owner(home: Path) -> tuple[int, str]:
         resources.enter_context(store.writer_lock(home, wait_s=0))
         identity = lock_identity(home, fd)
         previous = parse(inspect(home, WITNESS)[0], Witness)
-        if (
-            previous is None
-            or previous.state != "complete"
-            or (previous.lock_identity != identity)
-        ):
+        if previous is None or not completed_matches(home, previous, identity):
             raise PauseRefusedError("pause_unverified")
         _replay(home)
         retire_baseline(home, fd)
@@ -339,11 +315,8 @@ def begin_owner(home: Path) -> tuple[int, str]:
             home,
             fd,
             WITNESS,
-            Witness(
-                version=1,
-                lock_identity=identity,
-                owner=Owner(pid=os.getpid(), generation=token),
-                state="active",
+            make_witness(
+                home, fd, owner=Owner(pid=os.getpid(), generation=token)
             ),
         )
         resources.close()
@@ -373,8 +346,89 @@ def complete_owner(home: Path, fd: int, token: str) -> None:
         previous is None
         or previous.lock_identity != identity
         or (previous.state != "active" or previous.owner != owner)
+        or (
+            previous.volume_uuid is not None
+            and previous.volume_uuid != review_volume_identity.observe(home)
+        )
     ):
         raise PauseRefusedError("pause_unverified")
     publish(
-        home, fd, WITNESS, previous.model_copy(update={"state": "complete"})
+        home, fd, WITNESS, make_witness(home, fd, owner=owner, complete=True)
     )
+
+
+def make_witness(
+    home: Path,
+    fd: int,
+    *,
+    owner: Owner | None = None,
+    complete: bool = False,
+    bind_volume: bool = True,
+) -> Witness:
+    """Build current identity evidence while the caller holds its lock.
+
+    Installer preparation keeps legacy output until runtime selection.
+
+    Args:
+        home: Private Muninn data directory.
+        fd: Held lifetime lock descriptor.
+        owner: Active owner, or None for ownerless completion.
+        complete: Whether an identified owner has finished containment.
+        bind_volume: Whether the selected runtime can read UUID fields.
+
+    Returns:
+        A witness bound to the held lock and available native volume.
+    """
+    identity = lock_identity(home, fd)
+    volume = (
+        review_volume_identity.observe(home)
+        if bind_volume and sys.platform == "darwin"
+        else None
+    )
+    lock_identity(home, fd)
+    return Witness(
+        version=1,
+        lock_identity=identity,
+        owner=owner,
+        state="complete" if owner is None or complete else "active",
+        volume_uuid=volume,
+    )
+
+
+def completed_matches(
+    home: Path, witness: Witness, identity: Identity
+) -> bool:
+    """Match completion by persistent volume and inode on macOS.
+
+    Legacy records retain exact device matching until checked migration.
+
+    Args:
+        home: Private Muninn data directory.
+        witness: Strictly parsed completion evidence.
+        identity: Current checked lock identity.
+
+    Returns:
+        Whether completion belongs to the current lock.
+
+    Raises:
+        PauseRefusedError: If the recorded volume cannot be verified.
+    """
+    require_volume(home, witness)
+    if witness.state != "complete":
+        return False
+    if witness.volume_uuid is None:
+        return witness.lock_identity == identity
+    return witness.lock_identity[1] == identity[1]
+
+
+def require_volume(home: Path, witness: Witness) -> None:
+    """Refuse any recorded UUID that does not match the current volume.
+
+    Raises:
+        PauseRefusedError: If the platform or volume differs.
+    """
+    if witness.volume_uuid is not None and (
+        sys.platform != "darwin"
+        or review_volume_identity.observe(home) != witness.volume_uuid
+    ):
+        raise PauseRefusedError("pause_unverified")

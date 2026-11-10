@@ -46,6 +46,10 @@ class CliRecoveryTests(CliCase):
     def leave_legacy_device_remap(self) -> tuple[bytes, bytes]:
         """Model an old record whose device numbers changed after reboot."""
         self.leave_uncertain_owner()
+        path = self.home / state.WITNESS
+        value = json.loads(path.read_bytes())
+        value.pop("volume_uuid", None)
+        store.write_json_atomic(path, value)
         _, lock_file = state.inspect(self.home, state.LOCK)
         _, witness_file = state.inspect(self.home, state.WITNESS)
         assert lock_file is not None and witness_file is not None

@@ -101,7 +101,7 @@ class WindowsMetadataTests(unittest.TestCase):
         )
         for platform, raw, calls in (
             ("win32", b"", 0),
-            ("darwin", b"", 1),
+            ("darwin", b"", 3),
             ("darwin", baseline.model_dump_json().encode("utf-8"), 1),
         ):
             with (
@@ -125,7 +125,9 @@ class WindowsMetadataTests(unittest.TestCase):
                 )
             self.assertEqual(inspect.call_count, calls)
             if calls:
-                inspect.assert_called_with(Path(tmp), state.BASELINE)
+                inspect.assert_called_with(
+                    Path(tmp), state.LOCK if calls == 3 else state.BASELINE
+                )
 
     def test_matching_darwin_baseline_requires_confirmation(self) -> None:
         """Keep legacy confirmation active when Darwin evidence matches."""

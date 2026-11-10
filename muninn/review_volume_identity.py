@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-from muninn import review_pause_state as state
-from muninn.review_pause_state import PauseRefusedError
+from muninn import review_pause_identity as state
+from muninn.review_pause_identity import PauseRefusedError
 
 _VOL_UUID = 0x80040000  # ATTR_VOL_INFO | ATTR_VOL_UUID
 _RESULT_SIZE = 20

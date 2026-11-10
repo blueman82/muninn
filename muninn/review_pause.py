@@ -16,6 +16,7 @@ from typing import Literal
 from muninn import poller_stop as poller_stop
 from muninn import (
     review_boot_identity,
+    review_pause_complete,
     review_volume_identity,
     store,
 )
@@ -49,6 +50,7 @@ from muninn.tombstones import reapply_tombstones
 class EraseStatus:
     """Retain independent truthful milestones through original exceptions."""
 
+    bind_volume: bool = True
     stop_may_have_been_published: bool = False
     repair_phase: Literal[
         "none", "baseline_recorded", "reconciling", "complete"
@@ -277,17 +279,18 @@ def _verify(
     latest = state.parse(raw, state.Witness)
     _same_owner(selected, latest)
     baseline_raw, baseline_file = state.inspect(home, state.BASELINE)
-    if (
-        latest is not None
-        and latest.lock_identity == identity
-        and latest.state == "complete"
+    baseline = state.parse(baseline_raw, state.Baseline)
+    if review_pause_complete.verify(
+        home,
+        fd,
+        RepairSnapshot(
+            baseline, baseline_file, latest, identity, predecessor, ""
+        ),
+        repair=repair,
+        confirmed=confirm_legacy_volume,
+        status=status,
+        reconcile=lambda: reapply_tombstones(conn, home),
     ):
-        if baseline_file is not None and not repair:
-            raise PauseRefusedError("pause_unverified")
-        reapply_tombstones(conn, home)
-        state.retire_baseline(home, fd)
-        if baseline_file is not None:
-            status.repair_phase = "complete"
         return
     if not repair:
         raise PauseRefusedError("pause_unverified")
@@ -347,9 +350,7 @@ def _verify(
         home,
         fd,
         state.WITNESS,
-        state.Witness(
-            version=1, lock_identity=identity, owner=None, state="complete"
-        ),
+        state.make_witness(home, fd, bind_volume=status.bind_volume),
     )
     state.retire_baseline(home, fd)
     status.repair_phase = "complete"
@@ -362,6 +363,7 @@ def erase_connection(
     wait_s: float,
     status: EraseStatus,
     confirm_legacy_volume: bool = False,
+    bind_volume: bool = True,
 ) -> Generator[sqlite3.Connection]:
     """Yield an autocommit store while retaining owner then writer barriers.
 
@@ -377,6 +379,7 @@ def erase_connection(
         PauseRefusedError: If saved pause evidence is not safe to repair.
     """
     _check_wait(wait_s)
+    status.bind_volume = bind_volume
     if not store.db_path(home).is_file():
         raise store.StoreUnavailableError("store is absent")
     if (

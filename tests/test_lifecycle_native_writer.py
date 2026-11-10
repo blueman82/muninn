@@ -132,7 +132,6 @@ class NativeWriterProofTests(unittest.TestCase):
                 Path(temporary).resolve(), run_real, "busy", platform="linux"
             )
             store.connect_rw(store.db_path(ctx.data)).close()
-            initialize(ctx.data)
 
             def start(ctx: Ctx, python: Path, release: Path) -> None:
                 descriptor, token = state.begin_owner(ctx.data)
@@ -154,6 +153,7 @@ class NativeWriterProofTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(LookupError, "startup reached"),
             ):
+                initialize(ctx.data)
                 lifecycle_native_writer.busy_stop(ctx)
 
     def test_busy_proof_refuses_outside_native_linux_before_effects(

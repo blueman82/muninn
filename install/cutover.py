@@ -83,7 +83,7 @@ def _fresh(
             store.assert_store_format(conn)
         _same_home(ctx.data, identity)
         file_sync.sync_path(path)
-        state.seed_new(ctx.data, owner.fd)
+        state.seed_new(ctx.data, owner.fd, bind_volume=False)
         _same_home(ctx.data, identity)
         rec["store"] = {
             "phase": "fresh_initialized",

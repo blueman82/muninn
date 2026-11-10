@@ -28,23 +28,27 @@ def legacy_volume_change_requires_confirmation(home: Path) -> bool:
         return False
     baseline_raw, _ = state.inspect(home, state.BASELINE)
     baseline = state.parse(baseline_raw, state.Baseline)
-    if baseline is None or not baseline.boot.startswith("darwin:"):
+    if baseline is not None and not baseline.boot.startswith("darwin:"):
         return False
     witness_raw, witness_file = state.inspect(home, state.WITNESS)
     _, lock_file = state.inspect(home, state.LOCK)
     witness = state.parse(witness_raw, state.Witness)
     if witness_file is None or lock_file is None:
         return False
-    if not legacy_device_change_matches(
+    if legacy_completed_candidate(witness, lock_file.identity):
+        return True
+    if baseline is None or not baseline.boot.startswith("darwin:"):
+        return False
+    matches = legacy_device_change_matches(
         baseline,
         witness,
         lock_file.identity,
         witness_file,
         review_boot_identity.observe(),
-    ):
-        return False
-    review_volume_identity.observe(home)
-    return True
+    )
+    if matches:
+        review_volume_identity.observe(home)
+    return matches
 
 
 def legacy_device_change_matches(
@@ -159,4 +163,18 @@ def same_repair_binding(
         and before.identity[1] == predecessor.identity[1]
         and before.sha256 == predecessor.sha256
         and review_volume_identity.observe(home) == baseline.volume_uuid
+    )
+
+
+def legacy_completed_candidate(
+    witness: state.Witness | None, identity: state.Identity
+) -> bool:
+    """Identify a completed macOS record missing its original disk binding."""
+    return (
+        sys.platform == "darwin"
+        and witness is not None
+        and witness.state == "complete"
+        and witness.volume_uuid is None
+        and witness.lock_identity[0] != identity[0]
+        and witness.lock_identity[1] == identity[1]
     )

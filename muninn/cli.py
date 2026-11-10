@@ -165,6 +165,7 @@ def _run(args: Namespace, env: Env) -> int:
         return code
     if status is not None:
         out["erasure_status"] = asdict(status)
+        out["erasure_status"].pop("bind_volume")
         if status.stop_may_have_been_published:
             out["erasure_status"] |= {
                 "restart": "not_attempted",

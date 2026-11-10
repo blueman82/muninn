@@ -24,7 +24,6 @@ class PauseBootDeviceTests(PauseCase):
 
     def setUp(self) -> None:
         """Give each simulated boot a selectable native volume UUID."""
-        super().setUp()
         self.volume_uuid = VOLUME_A
         patcher = mock.patch.object(
             pause.review_volume_identity,
@@ -33,6 +32,16 @@ class PauseBootDeviceTests(PauseCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        super().setUp()
+
+    def abandon(self) -> bytes:
+        """Retain legacy active-owner coverage without a witness disk UUID."""
+        super().abandon()
+        path = self.home / state.WITNESS
+        value = json.loads(path.read_bytes())
+        value.pop("volume_uuid", None)
+        store.write_json_atomic(path, value)
+        return path.read_bytes()
 
     def remap_baseline(
         self, *, lock: bool = True, witness: bool = True
