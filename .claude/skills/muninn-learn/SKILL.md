@@ -116,7 +116,7 @@ A refusal code alone does not prove that the wording check was correct.
 If Muninn incorrectly rejects direct owner wording, the maintainer must examine the cause.
 For a related unresolved question or explicit owner `review`, use the different `muninn-know` decision flow.
 
-Ordinary learning with checked `support` records without a new approval step.
+Ordinary learning records knowledge with checked `support` without a new approval step.
 Local operators must put back the approved setup when they repair it.
 Maintainers must examine unclear defects and exhausted source-read allowances.
 
@@ -129,7 +129,7 @@ The operation limit includes source traversal, not only selected text.
 Capture, catch-up and `attempt` logs keep this code without transcript text.
 
 Older capture logs can contain only `unavailable`.
-Their unchanged cause is unknown.
+Their cause is unknown.
 Muninn fails the `request` without an automatic retry.
 Limits and admission stay unchanged.
 
@@ -174,7 +174,8 @@ This also applies with `recall.off` or `recall.advisory`.
 
 Muninn shows setup notices before eligible `request` notices.
 Muninn then selects the newest eligible `request` notice.
-A newer contained error cannot hide an older necessary `action`, when admission cannot safely continue.
+A newer contained error cannot hide an older necessary `action`.
+This also applies when admission cannot safely continue.
 If admission cannot safely continue and no necessary step stays, Muninn shows a contained issue with current pause guidance.
 
 With open admission and a correct stored policy and digest, contained `request` errors stay quiet at startup.
@@ -190,7 +191,8 @@ Muninn fails before one more reservation or launch, without truncation, a limit 
 
 Do not retry the `request` unchanged.
 
-Closed admission stays readable without a recorded issue.
+Closed admission stays readable.
+No recorded issue is necessary.
 A missing, invalid, or mismatched stored policy also makes a startup `action`.
 Muninn reads recorded admission and validates the stored policy and digest for this decision.
 Recorded `action` wording does not prove current admission.
@@ -202,7 +204,7 @@ It displays constant software text, no question bodies, source text, or model ou
 
 Examine contained errors with `muninn learn list --state failed`, `muninn learn show R_ID`, or `muninn learn explain R_ID --human`.
 After you dismiss one `request` notice, an older eligible notice can show.
-End without an error clears the `request` notice.
+Muninn clears the notice when the `request` succeeds.
 
 You cannot dismiss a setup notice with a `request` ID.
 `Evidence` can contain transcript text.
@@ -221,7 +223,7 @@ This is not a promised check time.
 
 A warning starts no timer when you read it.
 An unsuccessful check keeps or replaces the warning.
-A correct related setup check or launch clears it.
+When a related setup check or launch succeeds, it clears the warning.
 Clearing the warning does not prove recorded memory.
 
 Current human wording comes from safe codes.
@@ -271,7 +273,7 @@ Without `--task`, the `request` uses project scope.
 End and precompact capture are different from startup context refresh.
 A busy enqueue does not prove durable capture.
 Subsequent recovery cannot prove which `event` or cutoff was missed.
-Cursor waits for native import or explicit full index.
+Cursor waits for native import or explicit full `ingest`.
 
 Cursor context on resume or after compaction stays unproven.
 Use `muninn know context` to get that context explicitly.
@@ -296,7 +298,7 @@ A prompt hook that completes without an error does not prove that startup memory
 
 For a removed previous Codex executable on Darwin/arm64, prepare the managed interface rule with `bin/muninn-install --upgrade --codex-interface preview --check`.
 This writes nothing and runs only fixed isolated model-free checks.
-Apply only its same digest with `--codex-interface PLAN_DIGEST`.
+Apply only the digest from that preview with `--codex-interface PLAN_DIGEST`.
 The installer needs new yes/y consent to that initial UPDATE RULE.
 
 A preview or source `review` is not activation approval.
@@ -341,7 +343,7 @@ Native measured facts stay unknown when unreported.
 Each `round` keeps its own facts.
 One proved pre-exec race can refresh the same reservation.
 A second race stops with `runtime_race_exhausted`.
-It makes no more `attempt` or refunded charge.
+It adds no `attempt` and refunds no charge.
 
 Started or uncertain execution does not authorize automatic relaunch.
 

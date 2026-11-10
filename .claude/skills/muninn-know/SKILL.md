@@ -76,7 +76,7 @@ Writer exit 3 means busy.
 
 ### Conversational memory decisions
 
-Ordinary learning with checked `support` records without a new owner approval step.
+Ordinary learning records knowledge with checked `support` without a new owner approval step.
 A related unresolved question, or an explicit owner `review` `request`, can start one more decision.
 The agent prepares a complete checked proposal and handles all commands.
 A question or an earlier error code alone is not a complete proposal.
@@ -153,7 +153,7 @@ That unchanged rule appends owner `evidence` without changing the proposal's oth
 | `reply` | Makes a complete plain chat sentence necessary, with unchanged capitalization, spaces, and last period. |
 | `agent` | Gives commands and checks to the agent. A reply alone does not prove recorded memory. |
 
-The agent sends the unchanged decoded `text` as its full `original` last message.
+The agent sends the unchanged decoded `text` as its full `original` `final` message.
 It adds no Markdown fence, prose, or newline external to that text.
 The owner sends the unchanged approval or refusal sentence as a full plain chat message.
 A bare `approved`, copied wrapper, tool response, or agent statement gives no approval.
@@ -214,7 +214,8 @@ The agent can prepare a new proposal when checked `evidence` permits it.
 
 A rejected draft does not put back withheld knowledge or automatically resolve its question.
 
-Explicit views use the actual recorded strict policy and digest, while learning is paused.
+Explicit views use the actual recorded strict policy and digest.
+This applies with learning active or paused.
 The complete show text must fit that policy's current `context_bytes` in UTF-8 bytes.
 The limit includes all owner instructions.
 Muninn refuses oversize displays. It does not truncate them.

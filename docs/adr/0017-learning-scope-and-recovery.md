@@ -26,10 +26,10 @@ Ordinary safe learning does not make approval necessary for each memory.
   The software names it a `request`.
 
 - **`Attempt`:** One try to complete a `job`.
-  A temporary error can make one more `attempt` possible.
+  A temporary error can give permission for one more `attempt`.
 
 - **`Round`:** One model `call` in an `attempt`.
-  A `round` can specify an allowed `evidence` read or report a last proposal.
+  A `round` can specify an allowed `evidence` read or report a `final` proposal.
 
 - **Worker:** A `process` that runs one `job`.
 
@@ -80,7 +80,7 @@ Use at maximum four workers and three total `attempts` for each `request`.
 Do manual and live work before queued history.
 Keep creation sequence in each of those groups.
 
-Keep SQLite writes on the primary thread.
+Keep SQLite writes on the `main thread`.
 In the record transaction, check current knowledge metadata.
 If results become stale, prepare new results in the same `attempt` limit.
 
@@ -168,7 +168,7 @@ The different [ADR 0018 proposal](0018-conversational-memory-decisions.md) inclu
 
 ### Correction within the existing allowance
 
-Use at maximum one correction `call` when a current `review` `round` stays.
+Use at maximum one correction `call` when a current `review` `round` is available.
 Keep these limits unchanged:
 
 - Two `rounds` by default, three total `attempts`, and four workers.
@@ -178,7 +178,7 @@ Keep these limits unchanged:
 - The 5-second and 30-second waits for temporary errors.
 
 A preceding controlled read can consume the remaining `round`.
-A controlled read lets the model `request` only `evidence` that the `job` permits.
+A controlled read lets the model specify only `evidence` that the `job` permits.
 The correction must report a `final` operation.
 It cannot select one more read.
 
@@ -276,7 +276,7 @@ Do not keep raw output with an invalid schema.
 
 Only the supervisor may defer a permitted candidate error for correction.
 First, all original-evidence checks must succeed, and a correction `round` must stay available.
-Roll back the rejected transaction without governed writes or last `attempt` records.
+Roll back the rejected transaction without governed writes or `final` `attempt` records.
 `Governed` writes are changes subject to Muninn's validation, maintenance, and erasure rules.
 
 Other callers keep current behavior.
@@ -294,7 +294,7 @@ Do not reconstruct a batch that is unavailable.
 Before correction, refresh the active `request` and the complete set of `evidence` admitted for it.
 Check again policy, generation, `rounds`, original-read budgets, deadline, and knowledge freshness.
 At the corrected record, run again all current checks.
-Use no more preflight `evidence` read.
+Do not add a preflight `evidence` read.
 
 Do not get the database write lock again while the outer operation holds it.
 Do not record rejected model content as diagnostic data.
@@ -313,7 +313,7 @@ Keep ordinary safely contained `request` errors in doctor, `request` history, an
 Do not make dismissal necessary merely to stop duplicate SessionStart notices.
 Keep the current `notice()` selection.
 
-Keep each issue that doctor reports as needing owner input.
+Keep all issues that doctor reports through `review_attention`.
 
 Startup shows these errors or necessary steps:
 
@@ -333,7 +333,7 @@ If new work stays safe, these errors do not make owner steps necessary:
 - Exhausted safe retries.
 
 A constant read limit stays available for checks.
-It does not `request` unchanged reruns.
+It specifies no unchanged reruns.
 
 ### Fixed diagnostics
 

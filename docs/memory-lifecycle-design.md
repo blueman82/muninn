@@ -16,10 +16,10 @@ The approval includes this revised design and the two ADR changes.
 ## How it will work
 
 1. A session ends.
-   Muninn can then `review` its records without an active conversation.
+   Muninn can then examine its records without an active conversation.
 
 2. Muninn prepares proposed facts or instructions and checks their `evidence`.
-   Ordinary safe learning records automatically.
+   Muninn records ordinary safe knowledge automatically.
 
 3. Sometimes the `evidence` leaves an actual question that Muninn cannot safely answer.
    The agent shows it only when it is related to the current task or the owner specifies a `review`.
@@ -76,7 +76,7 @@ They do not prove live behavior on one or the other system.
 
 ## Proposed changes
 
-1. Use at maximum one safe correction `call` when a current `review` `round` stays.
+1. Use at maximum one safe correction `call` when a current `review` `round` is available.
    Keep two `rounds`, three `attempts`, four workers, and all `evidence` checks.
 
 2. Use format correction or candidate removal only after the specified errors.
@@ -140,7 +140,7 @@ Errors that make account access, `security` steps, or approval necessary must st
 - **Owner proof:** An `original` owner statement with source and author identities that Muninn can check.
 
 - **Digest:** A hash that connects an identity to the same stored data.
-  A label specified to the record type keeps different record types different.
+  Each record type has its own digest label to distinguish it from other record types.
 
 - **Receipt:** The durable record that confirms which checked knowledge changes committed.
 
@@ -239,7 +239,7 @@ Add only the narrow correction below, in a current remaining `round`.
 
 Before writing, Muninn checks `original` bytes, permitted `evidence`, authority, scope, current revisions, and tombstones.
 It records correct changes in one transaction.
-Hermes checks `final` batch capacity and fixes approval to a selected entry.
+Hermes checks the completed batch against its limit and fixes approval to a selected entry.
 Keep all Muninn checks in its write path.
 
 Shared candidate checks must not bypass the transaction.
@@ -271,7 +271,7 @@ Add scoped checks and complete conversational decisions without new owner author
 
 Muninn records safe codes for `learn show`, explanations, and doctor.
 Startup selects a recorded issue.
-Hermes distinguishes selected pending proposals from completed writes in `review` notices.
+In `review` notices, Hermes distinguishes selected pending proposals from writes that succeed.
 Show startup `action` only when needed.
 
 Keep ordinary safely contained errors available for checks.
@@ -348,7 +348,7 @@ The default stays two `rounds`.
 Do not make one more `attempt` or extend the deadline.
 Do not increase worker count or change `request` scope.
 
-If no `round` stays, record the safely contained error.
+If no `round` is available, record the safely contained error.
 Continue unrelated `requests`.
 
 The model runner is the software that starts the model and reports its response.
@@ -441,9 +441,9 @@ Do not retry it unchanged.
 Use a typed `ProposalRejectedError` only for the permitted candidate errors in the current validation path.
 After all original-evidence checks pass, the supervisor can defer that typed error for correction.
 Add a default-off `defer_candidate_failure` option to the current commit path.
-Only the supervisor has permission to turn it on, and only when one correction `round` stays.
+Only the supervisor has permission to turn it on, and only when one correction `round` is available.
 
-Roll back the rejected transaction without governed writes or last `attempt` records.
+Roll back the rejected transaction without governed writes or `final` `attempt` records.
 All other callers and errors keep their current behavior.
 
 Keep the `original` candidate batch in temporary `Round` `state` for an `independent` check of the unchanged subset.
@@ -456,7 +456,7 @@ After restart, block the previous `attempt`.
 Do not reconstruct a batch that is unavailable.
 
 At corrected commit, run again all current checks against recorded `state` and `original` bytes.
-Use no more preflight `evidence` read.
+Do not add a preflight `evidence` read.
 Do not get the write lock again while the outer operation holds it.
 
 Use at maximum one correction `call`.
@@ -509,7 +509,7 @@ Do not hide an active shared setup error because a newer `request` error exists.
 
 Add an `action` selector used only at startup.
 Keep the current `notice()` selection.
-Keep each issue that doctor reports as needing owner input.
+Keep all issues that doctor reports through `review_attention`.
 Usual errors stay readable in doctor, `request` history, and explanations.
 
 Do not report doctor as healthy merely because startup stopped a duplicate notice.
@@ -592,7 +592,7 @@ Do not report automatic resolution.
 
 A view gives no approval, new `evidence`, authority, or knowledge change.
 The question itself stays a model proposal.
-The owner gives approval, `requests` an edit, or rejects the complete proposal in conversation.
+The owner gives approval, specifies an edit, or rejects the complete proposal in conversation.
 The agent runs all necessary commands.
 
 Do not tell the owner to examine the database or run commands.
@@ -604,7 +604,7 @@ The `SessionEnd` hook can make a `job` for subsequent `review` without an active
 Do not make an owner decision necessary for each learned item or safely contained proposal error.
 
 Show a decision for an actual unresolved question related to the current task.
-Also show a decision when the owner explicitly `requests` `review`.
+Also show a decision when the owner explicitly specifies a `review`.
 A subsequent `review` cannot promise `delivery` in the conversation that ended.
 
 The implementer chooses if the work runs during the live conversation or subsequently.
@@ -640,7 +640,7 @@ A proposed answer says if the change can answer all or part of the question.
 The software names this question `disposition`.
 
 Keep a digest for the proposal identity and all these unchanged fields.
-Give the digest a label specified to this record type.
+Give each record type its own digest label.
 The software names this domain separation.
 The digest connects the proposal ID to the same stored content.
 
@@ -682,7 +682,7 @@ The owner types a reply in conversation.
 The owner does not run these sentences as commands.
 Use these instructions in the complete display:
 
-1. Send one different message.
+1. Send the sentence in its own message.
 
 2. Use the displayed sentence unchanged, with capital letters, the ID, and the last period.
 
@@ -851,7 +851,8 @@ Resolve a question only through a checked application.
 The displayed proposed answer must identify and answer that question.
 It must account for each affected revision that stays current.
 
-If the change answers only part, keep the unresolved `state` and tell the remainder.
+If the change answers only part, keep the unresolved `state`.
+Tell the owner which part of the question stays unanswered.
 Refusal of a draft does not put back withheld knowledge or necessarily answer its question.
 A replacement can make a previous affected revision stale while its historical question stays open.
 Keep historical `state` different from current relevance.
@@ -1071,7 +1072,7 @@ These behaviors justify Muninn's different `evidence` `origins` and checked lear
 
 The inspected checkout has no tracked test suite.
 Its online `evaluation` changes memory by default.
-The `disable_memory_evolution` and `storage_prefix` settings are available.
+It has a `disable_memory_evolution` setting and allows different `storage_prefix` values.
 For future experiments, test search against a fixed store independently from changes to the store.
 
 Do not claim improved search when the memory store silently changes between the runs being compared.
@@ -1079,7 +1080,7 @@ Do not claim improved search when the memory store silently changes between the 
 This design proposes no graph, embedding provider, merge policy, or automatic increase in trust.
 An embedding provider converts text into numbers for similarity search.
 Muninn distinguishes exposure to recalled advice from `independent` `evidence` used to compare results.
-It also checks the agent's own report independently.
+Muninn also distinguishes the agent's own report from that `evidence`.
 
 Muninn's offline replay and learning `evaluation` have `independent` labels and different test families.
 They also have unchanged tests withheld from design work.
@@ -1126,7 +1127,7 @@ All other fixed refusals end that result.
 The approved maximum stays two `rounds`, three total `attempts`, and four workers.
 Keep the current 5-second and 30-second waits for temporary errors.
 
-The [approved ADR 0018](adr/0018-conversational-memory-decisions.md) includes same proposal retention and checked owner decisions.
+The [approved ADR 0018](adr/0018-conversational-memory-decisions.md) includes retention of unchanged proposals and checked owner decisions.
 It also includes the disclosed owner-support rule, actual question resolution, and schema maintenance.
 It makes no different authority override.
 Recalled text and CLI execution cannot become owner `evidence`.
@@ -1176,7 +1177,7 @@ Do not divide the decision schema from its maintenance or erasure duties.
 These checks are necessary.
 They do not claim that all tests are complete without errors.
 
-1. An accepted first-round format error receives constant feedback and can complete in `round` two.
+1. An eligible first-round format error receives constant feedback and can complete in `round` two.
    The same error in the last `round` ends the `attempt` without one more `call`.
    Unknown operations and invalid schema structures qualify only after native and strict JSON decoding pass.
    Muninn rejects a correction that specifies one more controlled read.
@@ -1203,7 +1204,7 @@ They do not claim that all tests are complete without errors.
    Input/output limits and unchanged constant read limits also do not start correction.
 
 7. Exhausted ordinary errors stay available in doctor, `request` checks, and explanations.
-   Duplicate SessionStart hooks do not make dismissal necessary of these contained errors.
+   Subsequent SessionStart hooks must not make dismissal of these contained errors necessary.
 
 8. Sign-in, `security`, approval, owner-pause, uncertain-process, and unknown action-required errors stay readable.
    A newer ordinary error cannot hide a shared setup error.

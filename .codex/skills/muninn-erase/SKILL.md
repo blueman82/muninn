@@ -117,10 +117,11 @@ Current receipts keep audit access until replay.
 The guard reads the full journal without a constant memory or time bound.
 Keep the journal and `tombstone.key`.
 
-Uncertain containment can make a bound repair baseline and a subsequent accepted boot necessary.
+Uncertain containment can make a bound repair baseline and a subsequent boot necessary.
+That boot must have recovery `support`.
 The same boot refuses with `reboot_required`.
 Do not remove witness or baseline files to bypass that refusal.
-Windows boot repair and retirement of a current repair baseline stay unaccepted required-platform release blockers.
+Windows boot repair and retirement of a current repair baseline stay unsupported required-platform release blockers.
 
 They are not completed recovery `support`.
 Native `qualification` has its own checks.

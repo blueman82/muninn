@@ -79,7 +79,7 @@ It identifies each `original` by its complete physical locator:
 - Cursor locators include the database, conversation, and record key.
 
 Each different physical read uses the read allowance.
-Each selection gets different checks of its source, `state`, scope, projection, selector, hash, excerpt, tombstone, and provenance.
+Each selection gets its own checks of its source, `state`, scope, projection, selector, hash, excerpt, tombstone, and provenance.
 Projection identifies how Muninn extracted the field.
 The selector identifies the chosen part of that field.
 
@@ -92,7 +92,7 @@ Duplicate or overlapping selections use it again for each selection.
 Using the same bytes again cannot allow unlimited selected content or locator metadata.
 
 Muninn discards those bytes when the operation ends, with or without an error.
-Setup, boundary checks, and last `acceptance` stay different verification operations.
+Setup, boundary checks, and `final` `acceptance` stay different verification operations.
 Each subsequent operation rereads `originals` to find changes between operations.
 This change increases no configured allowance.
 
@@ -164,7 +164,7 @@ After you dismiss one `request` notice, an older notice can show.
 
 Dismissal keeps `requests`, `attempts`, `calls`, `evidence`, receipts, and `attempt` error codes.
 It removes the recorded notice's `stage` and `action`.
-End without an error clears that request's notice.
+Muninn clears that request's notice when the `request` succeeds.
 A subsequent error can make a new notice.
 
 Dismissal does not repair setup or enable learning.
@@ -186,7 +186,7 @@ They include:
 
 - Exclusion of erased content and content from a different scope.
 
-- Notice sequence, dismissal, subsequent errors, and end without an error.
+- Notice selection, dismissal, subsequent errors, and `request` success.
 
 - Copies of recorded `state` during upgrade.
 

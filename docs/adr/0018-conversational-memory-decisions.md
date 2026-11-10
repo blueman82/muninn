@@ -22,7 +22,7 @@ Approval for each memory is not necessary.
 
 Sometimes, the records leave an actual question that Muninn cannot safely answer.
 If that question affects the current task, the agent can get an answer from the owner.
-The owner can also `request` a memory `review`.
+The owner can also specify a memory `review`.
 A usual unsuccessful proposal does not, by itself, need an owner decision.
 
 The agent first prepares a complete proposed memory change.
@@ -99,7 +99,7 @@ No such record proves which unchanged change received owner approval.
 
 An agent command cannot prove an actual owner decision.
 
-The owner must be able to give approval, `request` an edit, or reject related memory in conversation.
+The owner must be able to give approval, specify an edit, or reject related memory in conversation.
 The agent runs commands and checks the result.
 A view alone cannot complete that decision.
 
@@ -112,7 +112,7 @@ The `SessionEnd` hook can make a `job` for subsequent `review` without an active
 Do not make an owner decision necessary for each learned item or safely contained proposal error.
 
 Show a decision for an actual unresolved question related to the current task.
-Also show a decision when the owner explicitly `requests` `review`.
+Also show a decision when the owner explicitly specifies a `review`.
 A subsequent `review` cannot promise `delivery` in the conversation that ended.
 
 The implementer is the person or agent that builds this feature.
@@ -149,7 +149,7 @@ A proposed answer says if the change can answer all or part of the question.
 The software names this question `disposition`.
 
 Keep a digest for the proposal identity and all these unchanged fields.
-Give the digest a label specified to this record type.
+Give each record type its own digest label.
 The software names this domain separation.
 The digest connects the proposal ID to the same stored content.
 
@@ -191,7 +191,7 @@ The owner types a reply in conversation.
 The owner does not run these sentences as commands.
 Use these instructions in the complete display:
 
-1. Send one different message.
+1. Send the sentence in its own message.
 
 2. Use the displayed sentence unchanged, with capital letters, the ID, and the last period.
 
@@ -360,7 +360,8 @@ Resolve a question only through a checked application.
 The displayed proposed answer must identify and answer that question.
 It must account for each affected revision that stays current.
 
-If the change answers only part, keep the unresolved `state` and tell the remainder.
+If the change answers only part, keep the unresolved `state`.
+Tell the owner which part of the question stays unanswered.
 Refusal of a draft does not put back withheld knowledge or necessarily answer its question.
 A replacement can make a previous affected revision stale while its historical question stays open.
 Keep historical `state` different from current relevance.
