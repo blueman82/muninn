@@ -34,10 +34,7 @@ def verify_source(owner: q.MaintenanceOwner, conn: sqlite3.Connection) -> None:
     Raises:
         StepFailedError: If historical containment or erasure is unresolved.
     """
-    if not owner.active or not owner.writer_held or conn.in_transaction:
-        raise StepFailedError("marked_v1_recovery_required")
-    if validate_policy_source(conn) != 1:
-        raise StepFailedError("cutover_source_mismatch")
+    verify_erasure(owner, conn)
     try:
         identity = state.lock_identity(owner.home, owner.fd)
         latest = state.parse(
@@ -47,10 +44,31 @@ def verify_source(owner: q.MaintenanceOwner, conn: sqlite3.Connection) -> None:
         if (
             latest is None
             or latest.state != "complete"
-            or latest.lock_identity != identity
+            or not state.completed_matches(owner.home, latest, identity)
             or state.inspect(owner.home, state.BASELINE)[1] is not None
-            or conn.execute("PRAGMA journal_mode").fetchone()[0] != "delete"
         ):
+            raise StepFailedError("marked_v1_recovery_required")
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        raise StepFailedError("marked_v1_recovery_required") from exc
+
+
+def verify_erasure(
+    owner: q.MaintenanceOwner, conn: sqlite3.Connection
+) -> None:
+    """Require exact historical format and completed erasure without writes.
+
+    This check supplies no containment proof. The caller must separately
+    verify the completed owner while retaining the same maintenance locks.
+
+    Raises:
+        StepFailedError: If format, journal mode or erasure is unresolved.
+    """
+    if not owner.active or not owner.writer_held or conn.in_transaction:
+        raise StepFailedError("marked_v1_recovery_required")
+    if validate_policy_source(conn) != 1:
+        raise StepFailedError("cutover_source_mismatch")
+    try:
+        if conn.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
             raise StepFailedError("marked_v1_recovery_required")
         tombstones.require_current_tombstones(conn, owner.home)
         _completed_support(conn, owner)

@@ -388,7 +388,9 @@ for name in ("review.supervisor.lock", "writer.lock"):
         with self.connected() as (owner, conn):
             with (
                 mock.patch.object(
-                    q, "reapply_tombstones", side_effect=original
+                    q,
+                    "reapply_tombstones",
+                    side_effect=original,
                 ),
                 self.assertRaises(LookupError) as caught,
             ):

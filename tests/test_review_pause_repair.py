@@ -74,7 +74,9 @@ class PauseRepairTests(PauseCase):
         for failure in (original, after_commit):
             with (
                 mock.patch.object(
-                    pause, "reapply_tombstones", side_effect=failure
+                    pause,
+                    "reapply_tombstones",
+                    side_effect=failure,
                 ),
                 self.assertRaises(OSError) as caught,
                 pause.erase_connection(
@@ -250,7 +252,9 @@ class PauseRepairTests(PauseCase):
                 pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                review_pause_replay, "reapply_tombstones", side_effect=drift
+                review_pause_replay,
+                "reapply_tombstones",
+                side_effect=drift,
             ),
             self.assertRaisesRegex(ValueError, "pause_unverified"),
             pause.erase_connection(self.home, wait_s=1, status=self.status),
@@ -321,7 +325,9 @@ class PauseRepairTests(PauseCase):
                 pause.review_boot_identity, "observe", return_value=BOOT_B
             ),
             mock.patch.object(
-                pause, "reapply_tombstones", side_effect=checked
+                pause,
+                "reapply_tombstones",
+                side_effect=checked,
             ),
             pause.erase_connection(
                 self.home, wait_s=1, status=self.status

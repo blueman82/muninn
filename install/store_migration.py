@@ -141,12 +141,7 @@ def prepare(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
                 ctx.data,
                 owner.fd,
                 state.WITNESS,
-                state.Witness(
-                    version=1,
-                    lock_identity=state.lock_identity(ctx.data, owner.fd),
-                    owner=None,
-                    state="complete",
-                ),
+                state.make_witness(ctx.data, owner.fd, bind_volume=False),
             )
             q.verify_current(owner, conn)
             check()

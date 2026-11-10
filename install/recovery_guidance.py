@@ -9,7 +9,12 @@ from argparse import Namespace
 from contextlib import closing
 from typing import NoReturn, cast
 
-from install import decision_source, policy_preview, snapshot_io
+from install import (
+    completed_recovery,
+    decision_source,
+    policy_preview,
+    snapshot_io,
+)
 from install.context import Ctx, StepFailedError, dry
 from install.policy_source_format import legacy_source, validate_policy_source
 from install.record import Record
@@ -62,13 +67,18 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
         return
     try:
         code, result = cli_recovery.recover(
-            Namespace(), installed_env(ctx), ctx.data, {}
+            Namespace(bind_witness_volume=False),
+            installed_env(ctx),
+            ctx.data,
+            {},
         )
         if _reason(result) == "legacy_volume_confirmation_required":
             approved = _confirm_legacy_volume(ctx)
             if approved:
                 code, result = cli_recovery.recover(
-                    Namespace(confirm_legacy_volume=True),
+                    Namespace(
+                        confirm_legacy_volume=True, bind_witness_volume=False
+                    ),
                     installed_env(ctx),
                     ctx.data,
                     {},
@@ -128,7 +138,18 @@ def _run_pause_recovery(ctx: Ctx, rec: Record) -> None:
 def _historical_checked(ctx: Ctx, rec: Record) -> bool:
     """Explain historical repair without invoking a current-only recovery."""
     try:
-        return _historical_store(ctx)
+        try:
+            return _historical_store(ctx)
+        except q.PauseRefusedError as exc:
+            if exc.code != "legacy_volume_confirmation_required":
+                raise StepFailedError("marked_v1_recovery_required") from exc
+            if not _confirm_legacy_volume(ctx):
+                ctx.say("Disk confirmation is necessary. No files changed.")
+                raise StepFailedError("marked_v1_recovery_required") from exc
+            try:
+                return _historical_store(ctx, confirmed=True)
+            except q.PauseRefusedError as error:
+                raise StepFailedError("marked_v1_recovery_required") from error
     except StepFailedError as exc:
         if str(exc) != "marked_v1_recovery_required":
             raise
@@ -178,7 +199,7 @@ def _confirm_legacy_volume(ctx: Ctx) -> bool | None:
     return answer.strip().casefold() in ("y", "yes")
 
 
-def _historical_store(ctx: Ctx) -> bool:
+def _historical_store(ctx: Ctx, *, confirmed: bool = False) -> bool:
     """Leave supported historical stores for explicit installer migration."""
     path = store.db_path(ctx.data)
     if not path.is_file():
@@ -195,7 +216,7 @@ def _historical_store(ctx: Ctx) -> bool:
             raise StepFailedError("cutover_source_mismatch") from exc
     with (
         q.maintenance_owner(
-            ctx.data, wait_s=15.0, status=q.EraseStatus()
+            ctx.data, wait_s=15.0, status=q.EraseStatus(bind_volume=False)
         ) as owner,
         q.maintenance_writer(owner),
         snapshot_io.validated(path) as check,
@@ -206,7 +227,12 @@ def _historical_store(ctx: Ctx) -> bool:
         ) as conn,
     ):
         check()
-        decision_source.verify_source(owner, conn)
+        try:
+            decision_source.verify_source(owner, conn)
+        except StepFailedError as exc:
+            if str(exc) != "marked_v1_recovery_required":
+                raise
+            completed_recovery.repair(owner, conn, confirmed=confirmed)
         check()
     return True
 

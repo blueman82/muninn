@@ -52,9 +52,8 @@ def _needs_recovery(home: Path) -> tuple[bool, bool]:
         return False, False
     if (
         witness is not None
-        and witness.state == "complete"
         and lock_file is not None
-        and witness.lock_identity == lock_file.identity
+        and state.completed_matches(home, witness, lock_file.identity)
     ):
         return False, False
     return True, False
@@ -118,6 +117,7 @@ def recover(a: Namespace, env: Env, home: Path, record: Record) -> Result:
         A JSON-ready recovery result and exit code.
     """
     confirm_legacy_volume = bool(getattr(a, "confirm_legacy_volume", False))
+    bind_volume = bool(getattr(a, "bind_witness_volume", True))
     del env
     if not home.exists():
         return _no_recovery()
@@ -142,6 +142,7 @@ def recover(a: Namespace, env: Env, home: Path, record: Record) -> Result:
         record,
         pending_erasure,
         confirm_legacy_volume,
+        bind_volume,
     )
 
 
@@ -198,6 +199,7 @@ def _repair(
     record: Record,
     pending_erasure: bool,
     confirm_legacy_volume: bool,
+    bind_volume: bool,
 ) -> Result:
     """Repair through the existing checked maintenance barriers.
 
@@ -207,6 +209,7 @@ def _repair(
         record: Content-free call-log entry.
         pending_erasure: Whether the read-only check found unapplied intent.
         confirm_legacy_volume: Whether the owner approved the old disk binding.
+        bind_volume: Whether the selected runtime can read UUID fields.
 
     Returns:
         A recovery result or a refusal with its next action.
@@ -218,6 +221,7 @@ def _repair(
             wait_s=cli_core.WRITER_WAIT_S,
             status=status,
             confirm_legacy_volume=confirm_legacy_volume,
+            bind_volume=bind_volume,
         ):
             pass
     except review_pause.PauseRefusedError as error:
