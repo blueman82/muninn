@@ -84,14 +84,13 @@ class GateCannotBeRemovedTest(unittest.TestCase):
                         ["-m", "tools.check", "--full"],
                     )
 
-    def test_claude_code_blocks_stopping_on_a_failing_gate(self) -> None:
+    def test_claude_code_runs_the_fast_gate_after_each_edit(self) -> None:
         settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
         hooks = settings["hooks"]
-        stop = json.dumps(hooks["Stop"])
-        self.assertIn("tools.check --full", stop)
-        self.assertIn("exit 2", stop)
+        self.assertNotIn("Stop", hooks)
         edit = json.dumps(hooks["PostToolUse"])
         self.assertIn("tools.check", edit)
+        self.assertIn("exit 2", edit)
         self.assertIn("Edit", edit)
 
     def test_git_hooks_are_switched_on(self) -> None:
