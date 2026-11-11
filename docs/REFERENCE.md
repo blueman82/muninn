@@ -128,13 +128,13 @@ The thread classes are `primary`, `subagent`, `reviewer`, and `other`.
 Default queries include `primary`.
 
 `primary` includes a Codex desktop session that continues a ChatGPT conversation, with `thread_source` `chatgpt_handoff`.
-Its opening message, copied conversation, and ChatGPT-composed `request` are recorded as `harness`.
+Muninn records its opening message, copied conversation, and ChatGPT-composed `request` as `harness`.
 `other` means an unrecognized format. Muninn does not guess that it is primary.
 
 **Providers:** `claude`, `codex`, `cursor`.
 **Source roots:** `claude-projects`, `codex-sessions`, `codex-archived`, `cursor-imports`.
 
-**Retrieval outcomes are counted.**
+**Retrieval outcome counts.**
 `stages` in a `search` or `hook prompt` line of `calls.jsonl` can include integer flags 0/1.
 A flag appears only with value 1.
 `miss_zero` means searchable terms but no result.
@@ -167,7 +167,7 @@ Check actual misses with labeled questions.
 
 Knowledge IDs are `K_` plus 32 lowercase hexadecimal characters.
 `request` IDs use `R_` with the same shape.
-Numeric knowledge aliases are rejected.
+Muninn rejects numeric knowledge aliases.
 List/search report `knowledge: [KnowledgeView, ...]`.
 
 A single typed view keeps its fields at this JSON object's root, with the same notice, freshness, and logging metadata.
@@ -236,7 +236,7 @@ If not it is null.
 
 Strict validation rejects more fields and coercion.
 
-`know add`, `know check`, previous tags/confidence/contradiction/loop flags and numeric ID coercion are retired.
+Muninn rejects `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and numeric ID coercion.
 They have no compatibility aliases.
 `quote-check` checks verbatim `event` text, but a match alone does not grant proposal authority.
 
@@ -265,7 +265,7 @@ This path checks that historical erasure is complete without writing the format-
 It keeps supervisor output in the legacy format before runtime selection.
 Pending historical erasure or an uncertain owner needs the checked format-1 recovery procedure before migration.
 
-During `--upgrade`, a schema v3 database with the accepted table contract is copied into the marked current format.
+During `--upgrade`, the installer copies a schema v3 database with the accepted table contract into the marked current format.
 Recognition uses its schema version and table set, not the previous release commit or SQL formatting.
 The full `original` database stays in a private pre-upgrade archive, with the legacy knowledge ledger.
 That legacy ledger is not imported into the current format.
