@@ -10,7 +10,7 @@ from typing import Any, cast
 
 from install import policy_preview
 from install.context import Ctx, StepFailedError
-from muninn import review_runtime_authority, store
+from muninn import review_runtime_authority, review_unknown_binding, store
 from muninn.review_codex_policy import check_host
 from muninn.review_models import OngoingBudget, ReviewPolicy
 from muninn.review_progress import digest
@@ -71,10 +71,9 @@ def require_finished(conn: sqlite3.Connection) -> None:
     """Refuse explicit restart while any recorded call remains uncertain."""
     unsafe = conn.execute(
         "SELECT 1 FROM review_attempt WHERE ended_at IS NULL "
-        "UNION ALL SELECT 1 FROM review_call WHERE state!='completed' "
         "UNION ALL SELECT 1 FROM review_request WHERE state='running' LIMIT 1"
     ).fetchone()
-    if unsafe is not None:
+    if unsafe is not None or review_unknown_binding.unsafe_calls(conn):
         raise StepFailedError(
             "learning_recovery_unverified: an earlier review may "
             "still be active"

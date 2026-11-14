@@ -189,6 +189,7 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 | `muninn learn cancel R_ID` | Current `RequestView` after cancellation. |
 | `muninn learn retry R_ID` | Explicit restart of the same `request`, with cancelled `requests` when current guards permit. Completed `requests` keep their receipt/`state` without a different commit. |
 | `muninn learn resume --policy PATH --failed-request R_ID` | Turns stopped ongoing Codex admission on after you check the latest specified `rejected_authority` error. The file must equal the installed policy. All `attempts` must be terminal and all calls completed. Other error types, abandoned `attempts`, and pending work are not permitted. `failed` `requests` stay `failed`. Output is `{"admission":true,"policy_id":...}`. |
+| `muninn learn recover-unknown --attempt A_ID --round N --accept-uncertainty` | Accept one exact historical uncertainty while preserving failed history and conservative charges. See the recovery section below. |
 | `muninn learn replay --session REF --from-line N --through-line N --policy PATH` | Explicit bounded historical `request` through the same `evidence`/commit path. No automatic archive `review`. |
 
 
@@ -1955,3 +1956,42 @@ It does not build a new default policy or cancel the initial carried `requests`.
 Unfinished or uncertain calls refuse restart.
 
 The complete private installer recovery record is bounded to 4 MiB.
+
+
+### Accept one historical unknown call
+
+```sh
+muninn learn recover-unknown --attempt A_ID --round N --accept-uncertainty
+```
+
+This explicit owner action accepts uncertainty for one named historical call.
+It does not prove that no process launched, that a native process stopped, or
+that provider charges stopped. The call must remain `unknown`, with no recorded
+launch or process identity, under an ended failed attempt and a failed request.
+The installed supported v3 Codex policy and any managed grant must validate.
+Other unacknowledged uncertain calls, unended attempts and running requests
+refuse recovery. Pending requests are preserved.
+
+The command atomically records an acknowledgement, advances the generation and
+opens the same policy. It preserves the call, its conservative reservation and
+usage, and the failed request and attempt. It starts no model and retries no
+historical request. Output contains `acknowledgement_id` (`UA_` plus 32 hex
+characters), `attempt_id`, `round_index`, `request_id`, `call_digest`,
+`attempt_digest`, `request_digest`, `request_policy_digest`, `call_policy_digest`,
+`policy_digest`, `old_generation`, `resulting_generation`, `acknowledged_at` and
+`accept_uncertainty: true`. Policy digests describe separate historical and
+current authorities; a checked legacy-to-managed bridge can make them differ.
+
+A repeat returns the same acknowledgement without changing admission or the
+generation, including after a later pause or policy change. Its resulting
+generation describes the original recovery, not current service status. Changed
+historical records refuse with `recovery_refused`. Malformed typed values return
+`rejected_validation`; normal store and contention errors keep their existing
+CLI codes. The installer and supervisor exempt only the exact unchanged
+acknowledged call behind its generation fence. New uncertain work still blocks.
+The unknown count does not become zero: its state and charge remain recorded.
+
+When installing this command to recover an older paused store, upgrade without
+`--enable-learning` and decline the separate restart prompt. The upgrade keeps
+admission closed and snapshots a store before adding acknowledgement metadata.
+Run the installed recovery command, then restart the service. See ADR 0020.

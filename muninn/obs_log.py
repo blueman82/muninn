@@ -85,6 +85,7 @@ _REVIEW_EVENTS = frozenset(
         "review_call_launched",
         "review_call_completed",
         "review_call_unknown",
+        "review_unknown_accepted",
         "review_commit_rejected",
     }
 )

@@ -44,7 +44,10 @@ GOVERNED_TABLES = (
 # The marked current format keeps an exact DDL identity.
 _SHAPES = {
     2: frozenset(
-        {"ec7fd6d4a91b3ac65fe10b54ecdd36372213a0427cb6cab0d4e2400f613be1e9"}
+        {
+            "ec7fd6d4a91b3ac65fe10b54ecdd36372213a0427cb6cab0d4e2400f613be1e9",
+            "37baee7221debd915fe5ba1ee2ba88ff3dea7f3f3a8bf6c219f5b7d6df01f06f",
+        }
     ),
     1: frozenset(
         {
@@ -154,7 +157,7 @@ def _empty(conn: sqlite3.Connection) -> None:
         raise ValueError("cutover_target_mismatch")
     optional = tuple(
         name
-        for name in ("learning_setup", "review_issue")
+        for name in ("learning_setup", "review_issue", "review_unknown_ack")
         if review_state.available(conn, name)
     )
     for table in BASE_TABLES + GOVERNED_TABLES + optional:
@@ -337,7 +340,11 @@ def copy_governed_state(
             if version in (1, 2):
                 tables += tuple(
                     name
-                    for name in ("learning_setup", "review_issue")
+                    for name in (
+                        "learning_setup",
+                        "review_issue",
+                        "review_unknown_ack",
+                    )
                     if review_state.available(source, name)
                 )
             result = _copy(source, target, tables, version)

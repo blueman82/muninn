@@ -24,3 +24,4 @@ Each `exception` or deferred decision has an explicit status.
 | [0017](0017-learning-scope-and-recovery.md) | Select learning scope and recover bounded `review` errors. Narrow correction change accepted 2026-10-29 and merged in PR #77 at `5fa95b51`.  installation and live verification stay different checks. |
 | [0018](0018-conversational-memory-decisions.md) | Connect owner decisions to unchanged memory candidates. Accepted 2026-10-29 and included in private source. New `review`, last full gate, publication, installation, and live verification pending. |
 | [0019](0019-current-codex-interface.md) | Follow the current trusted Codex interface with one initial checked rule. Compatible versions keep the same grant. Activation and live `acceptance` stay different. |
+| [0020](0020-owner-unknown-call-acknowledgement.md) | Accept one named historical uncertainty while preserving its state, charge and generation fence. |

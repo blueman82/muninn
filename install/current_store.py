@@ -10,7 +10,14 @@ from pathlib import Path
 from install import record, snapshot_io
 from install.context import Ctx, StepFailedError
 from install.record import Record
-from muninn import file_sync, review_requests, store
+from muninn import (
+    file_sync,
+    platform_rebuild,
+    review_requests,
+    review_state,
+    review_unknown_state,
+    store,
+)
 from muninn import review_pause as q
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import checked_policy, digest
@@ -21,6 +28,7 @@ def _fence_current(conn: sqlite3.Connection) -> sqlite3.Row:
     control = conn.execute("SELECT * FROM review_control").fetchone()
     conn.execute("BEGIN IMMEDIATE")
     try:
+        review_unknown_state.ensure(conn)
         conn.execute(
             "UPDATE review_control SET admission=0,generation=generation+1"
         )
@@ -72,6 +80,18 @@ def prepare_current(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
             "file_identity": [path.stat().st_dev, path.stat().st_ino],
         }
         record.save(ctx, rec)
+        with closing(store.connect_rw(path)) as conn:
+            revalidate()
+            q.verify_current(owner, conn)
+            needs_metadata = not review_state.available(
+                conn, "review_unknown_ack"
+            )
+        if needs_metadata:
+            revalidate()
+            archive = platform_rebuild.retain_upgrade_store(ctx.data, path)
+            rec["store"]["archive"] = str(archive)
+            record.save(ctx, rec)
+            revalidate()
         with closing(store.connect_rw(path)) as conn:
             revalidate()
             q.verify_current(owner, conn)

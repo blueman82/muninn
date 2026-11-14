@@ -9,7 +9,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Literal
 
-from muninn import review_recovery, store
+from muninn import review_recovery, review_unknown_binding, store
 from muninn.review_catchup import catch_up
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext, ReviewPolicy
@@ -79,18 +79,15 @@ def startup_snapshot(
 
 def halt_interrupted(conn: sqlite3.Connection, policy: ReviewPolicy) -> None:
     """Keep uncertain ongoing calls stopped across shutdown and restart."""
-    if (
-        policy.experimental_codex is not None
+    unended = (
+        not review_recovery.enabled(policy)
         and conn.execute(
-            (
-                "SELECT 1 FROM review_attempt "
-                "WHERE ended_at IS NULL UNION ALL "
-                if not review_recovery.enabled(policy)
-                else ""
-            )
-            + "SELECT 1 FROM review_call WHERE state IN "
-            "('reserved','launched','unknown') LIMIT 1"
+            "SELECT 1 FROM review_attempt WHERE ended_at IS NULL LIMIT 1"
         ).fetchone()
+        is not None
+    )
+    if policy.experimental_codex is not None and (
+        unended or review_unknown_binding.unsafe_calls(conn)
     ):
         review_recovery.record(
             conn, "setup", "process_identity_unverified", "recovery", 0.0
