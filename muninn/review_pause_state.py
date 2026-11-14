@@ -9,10 +9,15 @@ import os
 import sys
 import threading
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, cast
 from uuid import uuid4
 
-from pydantic import Field, model_validator
+from pydantic import (
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from muninn import (
     file_sync,
@@ -86,6 +91,19 @@ class Witness(StrictModel):
         ):
             raise ValueError("pause_unverified")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, object]:
+        """Keep absent and explicit volume fields distinct in signed plans."""
+        value = cast(dict[str, object], handler(self))
+        if (
+            self.volume_uuid is None
+            and "volume_uuid" not in self.model_fields_set
+        ):
+            value.pop("volume_uuid", None)
+        return value
 
 
 class Fingerprint(StrictModel):
@@ -235,8 +253,6 @@ def publish(home: Path, fd: int, name: str, value: StrictModel) -> None:
     lock_identity(home, fd)
     inspect(home, name)
     payload = value.model_dump(mode="json")
-    if isinstance(value, Witness) and value.volume_uuid is None:
-        payload.pop("volume_uuid")
     raw = json.dumps(payload).encode()
     if len(raw) > LIMIT:
         raise PauseRefusedError("pause_unverified")
@@ -386,13 +402,15 @@ def make_witness(
         else None
     )
     lock_identity(home, fd)
-    return Witness(
-        version=1,
-        lock_identity=identity,
-        owner=owner,
-        state="complete" if owner is None or complete else "active",
-        volume_uuid=volume,
-    )
+    fields: dict[str, object] = {
+        "version": 1,
+        "lock_identity": identity,
+        "owner": owner,
+        "state": "complete" if owner is None or complete else "active",
+    }
+    if volume is not None:
+        fields["volume_uuid"] = volume
+    return Witness.model_validate(fields)
 
 
 def completed_matches(
