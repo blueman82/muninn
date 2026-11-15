@@ -14,7 +14,7 @@ from muninn import classify
 from muninn.event_model import TEXT_LIMIT, as_record, finish
 from muninn.knowledge_models import Provider, Scope
 from muninn.redaction import redact
-from muninn.review_authority import direct_speech
+from muninn.review_authority import direct_speech, whole_sentences
 from muninn.review_evidence_models import (
     Authority,
     EvidenceLocator,
@@ -258,20 +258,21 @@ def selected(
 
 
 def authority(
+    provider: Provider,
     field: Field,
     context: list[Field],
     record: dict[str, Any],
     primary: bool,
     selector: EvidenceSelector | None = None,
 ) -> Authority:
-    """Make a conservative contextual judgment, not from role alone."""
+    """Judge owner authority by provenance, not from role or wording."""
     if field.evidence_type == "assistant_report":
         return "reported"
     if field.evidence_type != "owner_statement" or not primary:
         return "untrusted"
     text = "\n".join(
         f.text for f in context if f.evidence_type == "owner_statement"
-    ).strip()
+    )
     if any(f.evidence_type == "tool_result" for f in context):
         return "untrusted"
     start = selector.start if selector and selector.start is not None else 0
@@ -282,7 +283,8 @@ def authority(
     )
     return (
         "direct_owner"
-        if direct_speech(text, field.text, (start, end), record)
+        if direct_speech(provider, text, record)
+        and whole_sentences(field.text, (start, end))
         else "untrusted"
     )
 
@@ -379,7 +381,9 @@ def build_record(
             canonical_json(selector).encode()
         ).hexdigest(),
         evidence_type=field.evidence_type,
-        authority=authority(field, permitted, record, True, selector),
+        authority=authority(
+            locator.source.provider, field, permitted, record, True, selector
+        ),
         scope=scope,
         excerpt=excerpt,
         state="live",

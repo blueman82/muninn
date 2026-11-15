@@ -130,7 +130,7 @@ def window_note(
                     {
                         "action": "add",
                         "form": "note",
-                        "kind": "decision",
+                        "kind": "fact",
                         "scope": evidence.scope.model_dump(),
                         "content": text,
                         "conditions": [],

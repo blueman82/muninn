@@ -28,6 +28,11 @@ def schema_version(value: object) -> object:
     return value
 
 
+def absent(value: object) -> bool:
+    """Leave an absent optional copy out of stored and shown JSON."""
+    return value is None
+
+
 def unique_evidence(value: list[str]) -> list[str]:
     """Reject repeated evidence references."""
     if len(value) != len(set(value)):
@@ -90,14 +95,23 @@ class Expiry(StrictModel):
 
 
 class SupportedClaim(StrictModel):
-    """Pair one assertion with unique, nonempty support references."""
+    """Pair one assertion with unique, nonempty support references.
+
+    ``text`` is the verbatim proof. ``corrected`` is an unchecked copy with
+    spelling and grammar fixed, shown only in owner views.
+    """
 
     text: Text
     evidence_refs: EvidenceRefs
+    corrected: Text | None = Field(default=None, exclude_if=absent)
 
 
 class NoteBody(StrictModel):
-    """Represent one supported assertion and its explicit conditions."""
+    """Represent one supported assertion and its explicit conditions.
+
+    ``content`` and ``conditions`` are the verbatim proof. ``corrected`` is
+    an unchecked copy with spelling and grammar fixed, for owner views.
+    """
 
     form: Literal["note"]
     kind: Kind
@@ -106,6 +120,7 @@ class NoteBody(StrictModel):
     conditions: list[Text]
     evidence_refs: EvidenceRefs
     reason: Text
+    corrected: Text | None = Field(default=None, exclude_if=absent)
 
 
 class GuideStep(StrictModel):
@@ -266,3 +281,38 @@ class KnowledgeContext(StrictModel):
         ):
             raise ValueError("ineligible_context_note")
         return self
+
+
+def proof_only(view: KnowledgeView) -> KnowledgeView:
+    """Drop unchecked corrected copies before agents or recall see a view.
+
+    Args:
+        view: A knowledge view as stored, possibly with corrected copies.
+
+    Returns:
+        The same view with only the verbatim proof text.
+    """
+    body = view.body
+    if isinstance(body, NoteBody):
+        return view.model_copy(
+            update={"body": body.model_copy(update={"corrected": None})}
+        )
+    if body is None:
+        return view
+
+    def plain(claim: SupportedClaim) -> SupportedClaim:
+        return claim.model_copy(update={"corrected": None})
+
+    clean = body.model_copy(
+        update={
+            "summary": plain(body.summary),
+            "applicability": [plain(c) for c in body.applicability],
+            "decision_points": [plain(c) for c in body.decision_points],
+            "pitfalls": [plain(c) for c in body.pitfalls],
+            "steps": [
+                step.model_copy(update={"claim": plain(step.claim)})
+                for step in body.steps
+            ],
+        }
+    )
+    return view.model_copy(update={"body": clean})

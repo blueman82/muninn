@@ -19,6 +19,7 @@ from muninn.knowledge_models import (
     Scope,
     StrictModel,
     Text,
+    proof_only,
 )
 from muninn.review_correction import RoundFormatError
 from muninn.review_evidence import validate_evidence
@@ -267,8 +268,10 @@ def _knowledge(
             knowledge_read.search_knowledge(conn, request.query, request.scope)
             if isinstance(request, SearchRequest)
             else (
-                knowledge_read.show_knowledge(
-                    conn, request.knowledge_id, request.revision
+                proof_only(
+                    knowledge_read.show_knowledge(
+                        conn, request.knowledge_id, request.revision
+                    )
                 ),
             )
         )

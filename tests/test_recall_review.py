@@ -282,7 +282,7 @@ class RecallReviewTests(RecallCase):
         self.assertEqual(source["evidence_id"], recorded["evidence_refs"][0])
         code, opened = self.command("open", source["ref"], "--context", "3")
         self.assertEqual((code, opened["hash_ok"]), (0, True))
-        self.assertEqual(opened["text"], "Use Python for this project.")
+        self.assertEqual(opened["text"], "Use Python.")
         self.assertEqual(
             opened["provenance"]["line_sha256"], source["line_sha256"]
         )

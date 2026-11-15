@@ -71,6 +71,11 @@ def redacted_body(body: Body) -> Body:
             strict=True,
         ):
             claim["text"] = text
+        for claim in supported:
+            if "corrected" in claim:
+                claim["corrected"] = redact(claim["corrected"])[0]
+    if "corrected" in data:
+        data["corrected"] = redact(data["corrected"])[0]
     return type(body).model_validate(data)
 
 

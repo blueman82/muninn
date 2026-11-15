@@ -14,10 +14,12 @@ from muninn.knowledge_write import (
     save_unresolved,
 )
 from muninn.redaction import redact
+from muninn.review_binding import Adjacent, adjacent_gap
 from muninn.review_candidates import (
     CommitRejectedError as CommitRejectedError,
 )
 from muninn.review_candidates import (
+    OwnerSupport,
     ProposalRejectedError,
     validate_batch,
 )
@@ -108,6 +110,20 @@ def _evidence(
             raise
         raise CommitRejectedError(code, "original evidence") from None
     return records
+
+
+def _pairs(conn: sqlite3.Connection, budget: ReadBudget) -> Adjacent:
+    """Reread agreement gaps in the commit transaction and fail closed."""
+
+    def adjacent(assistant: EvidenceRecord, owner: EvidenceRecord) -> bool:
+        try:
+            return adjacent_gap(conn, assistant, owner, budget)
+        except EvidenceLimitError as exc:
+            raise CommitRejectedError(exc.code, "original evidence") from None
+        except ValueError:
+            return False
+
+    return adjacent
 
 
 def _complete(
@@ -249,6 +265,10 @@ def commit_review(
                 request_view(row).scope,
                 evidence,
                 defer_candidate_failure=defer_candidate_failure,
+                owner=OwnerSupport(
+                    _pairs(conn, budget),
+                    fence.owner_evidence_id if fence else None,
+                ),
             )
             receipt = _complete(conn, context, row, result)
             if fence is not None:

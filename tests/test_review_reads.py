@@ -355,9 +355,7 @@ class ReviewReadTests(ScopeCommitCase):
 
     def test_changed_support_original_refuses_current_knowledge(self) -> None:
         self.path.write_bytes(
-            self.path.read_bytes().replace(
-                b"Use Python for", b"Use Rustxx for"
-            )
+            self.path.read_bytes().replace(b"Use Python.", b"Use Rustxx.")
         )
         with self.assertRaises(ValueError):
             self.read()

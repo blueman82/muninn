@@ -99,10 +99,11 @@ class KnowledgeStoragePrivacyTests(CliLearningCase):
             "SELECT * FROM review_evidence"
         ).fetchall()
         code, receipt = self.propose(
-            kind="preference",
+            kind="fact",
             content=f"Use key {CANARY} for the cache.",
             conditions=[f"Only with {CANARY}", "Keep the cache local."],
             reason=f"Owner supplied {CANARY}",
+            corrected=f"Use the key {CANARY} for the cache.",
         )
         self.assertEqual((code, receipt["outcome"]), (0, "completed"))
         self.assertIsNone(receipt["no_change_reason"])
@@ -117,10 +118,11 @@ class KnowledgeStoragePrivacyTests(CliLearningCase):
             ["Only with [redacted:secret]", "Keep the cache local."],
         )
         self.assertEqual(body["reason"], "Owner supplied [redacted:secret]")
+        self.assertIn("key [redacted:secret] for", body["corrected"])
         self.assertEqual(version["reason"], body["reason"])
         self.assertEqual(
             (body["form"], body["kind"], body["scope"]),
-            ("note", "preference", self.scope.model_dump()),
+            ("note", "fact", self.scope.model_dump()),
         )
         self.assertEqual(body["evidence_refs"], [self.evidence[0].id])
         expected = (

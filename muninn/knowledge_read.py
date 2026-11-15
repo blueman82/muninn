@@ -17,6 +17,7 @@ from muninn.knowledge_models import (
     KnowledgeView,
     Scope,
     UnresolvedId,
+    proof_only,
 )
 from muninn.knowledge_scope import scope_applies
 from muninn.knowledge_write import claims, json_value
@@ -404,7 +405,10 @@ def search_knowledge(
     if fts is None:
         return ()
     with read_snapshot(conn):
-        return tuple(current_knowledge(conn, scope, time.time(), fts))
+        return tuple(
+            proof_only(view)
+            for view in current_knowledge(conn, scope, time.time(), fts)
+        )
 
 
 def unresolved_ids(
