@@ -230,6 +230,18 @@ Each accepted claim has `text` and `evidence_refs`.
 Each guide step has `key`, `claim`, and `depends_on`.
 Dependencies can refer only to steps before that step.
 
+A note and each guide claim can also have an optional `corrected`: a copy with spelling and grammar fixed.
+Muninn does not check `corrected`.
+`know list`, `know show`, and `know decision show` and `status` print it next to the proof.
+Recall, `know context`, `know search`, and review model input never contain it.
+
+A preference, a decision, a global change, or a replacement of a preference or decision needs owner support (ADR 0022).
+Each line (note content, each condition, or a guide claim) must equal whole verbatim sentences of a cited excerpt.
+The comparison is case-sensitive, collapses whitespace, and ignores one final `.`, `!`, or `;`.
+The excerpt comes from a cited `direct_owner` owner line, or from a cited assistant reply that is the final permitted field directly before a cited `direct_owner` owner reply.
+For that pair, Muninn reads the gap again; a tool call, tool result, or other message between them refuses it with `rejected_authority`.
+Owner authority comes from provenance (provider prompt label, no injection flag, no tool result, no harness tag or Muninn marker), not from wording.
+
 A replacement uses `action: replace`, `knowledge_id`, and `expected_revision`.
 `unresolved` entries have `claim`, `affected` (knowledge/revision pairs), `evidence_refs` and a specified missing-evidence `question`.
 `no_change_reason` is nonempty only when changes/unresolved are empty.
@@ -359,22 +371,21 @@ That unchanged rule appends owner `evidence` without changing the proposal's oth
 | Field | Meaning |
 |---|---|
 | `meaning` | Identifies this complete proposal and says viewing gives no approval. |
-| `approve` | The unchanged sentence `Please approve memory D_ID.` with the actual ID. |
-| `reject` | The unchanged sentence `Please reject memory D_ID.` with the actual ID. |
-| `edit` | Tells the agent to prepare and display a new complete proposal with its own approval. |
-| `reply` | Makes a complete plain chat sentence necessary, with unchanged capitalization, spaces, and last period. |
-| `agent` | Gives commands and checks to the agent. A reply alone does not prove recorded memory. |
+| `reply` | Tells the owner to reply in their own words straight after this display. |
+| `edit` | Tells the owner that a change needs a new complete proposal with its own reply. |
+| `agent` | Says the agent reads the reply and records the action. A reply alone does not prove recorded memory. |
 
 The agent sends the unchanged decoded `text` as its full `original` last message.
 It adds no Markdown fence, prose, or newline external to that text.
-The owner sends the unchanged approval or refusal sentence as a full plain chat message.
-A bare `approved`, copied wrapper, tool response, or agent statement gives no approval.
+It shows only one proposal in that message.
+The owner replies in their own words in the next message.
+The agent decides whether the reply means approve, reject, or edit (ADR 0022).
+A tool response, hook text, or agent statement gives no approval.
 
 Viewing and status checks do not check or accept a decision.
 
 For an edit, the agent prepares and displays a new complete proposal.
-The unchanged replacement sentence is `Please replace memory D_OLD with memory D_NEW.`.
-It uses the actual IDs and the new proposal's complete display.
+The owner replies to the new proposal's complete display.
 Checked replacement supersedes the previous draft.
 
 It gives no approval to the new draft.
@@ -387,7 +398,10 @@ Each locator has `source` (`provider`, `thread_id`), `line`, `part`, and `line_s
 
 Each selector has `json_pointer`, `start`, and `end`.
 The verifier needs the complete accepted `original` fields, not a selected substring.
-Only current eligible primary sources and direct-owner wording can supply proof.
+Only current eligible primary sources and owner messages with `direct_owner` provenance can supply proof.
+The display must be the final assistant message directly before the owner reply, with no message, tool call, or tool result between them.
+Every `D_` ID in the display must be `candidate_id` or `replacement_id`.
+One owner reply backs one decision: a second intent with the same `owner_locator` is refused with `owner_proof`.
 Input files, labels, claimed IDs, and commands cannot supply proof.
 
 `Stage`, submit, status, and apply report `DecisionView`.

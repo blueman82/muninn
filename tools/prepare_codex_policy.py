@@ -205,6 +205,12 @@ def policy(
             "and authorized read results. Propose only supported same-scope "
             "changes; otherwise return final with no_change_reason. "
             "Never invent evidence identifiers or unsupported claims. "
+            "For a decision or preference, copy each content line, "
+            "condition and claim verbatim as whole sentences from a cited "
+            "direct owner line, or from the final assistant reply directly "
+            "before an owner reply that agrees with it; then cite both. "
+            "Put the same meaning with spelling and grammar fixed, stated "
+            "as a plain decision, in corrected. "
             "Use at most one read before returning the final result. "
             + review_codex_launch.JSON_ONLY_INSTRUCTION
         ),

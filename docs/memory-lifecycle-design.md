@@ -659,34 +659,15 @@ Do not reconstruct the same proposal from an error code.
 
 #### Put reply instructions in the complete display
 
+ADR 0022 replaces the fixed approval sentence of ADR 0018.
 Before publication, include program-owned `owner_decision` instructions in the read-only `DISPLAY` response.
 Keep the complete proposal and its disclosed owner-support rule unchanged.
 The last display must contain everything the owner needs for the decision.
 Do not put the reply instructions only in a different commentary message.
 
-The initial display gives these unchanged sentences with its actual proposal ID:
-
-- `Please approve memory D_ID.`
-
-- `Please reject memory D_ID.`
-
-The initial display also gives plain edit guidance.
+The instructions tell the owner to reply in their own words straight after the display.
 For an edit, the agent prepares and displays a new complete proposal.
-The subsequent checked replacement sentence is `Please replace memory D_OLD with memory D_NEW.`.
-It names the two actual proposal IDs.
-
-It supersedes the previous draft without approving the new draft.
-The new proposal needs its own subsequent unchanged approval.
-
-The owner types a reply in conversation.
-The owner does not run these sentences as commands.
-Use these instructions in the complete display:
-
-1. Send the sentence in its own message.
-
-2. Use the displayed sentence unchanged, with capital letters, the ID, and the last period.
-
-3. Do not add other text to that message.
+The new proposal needs its own reply.
 
 A display, click, tool `call`, or agent-written statement gives no approval by itself.
 The display adds no approval authority and changes no stored proposal or digest rule.
@@ -694,7 +675,6 @@ The display adds no approval authority and changes no stored proposal or digest 
 An edit makes a new proposal ID and needs a new complete display.
 A checked owner edit replaces the earlier draft as the active draft.
 It does not give approval to the new proposal.
-The new proposal needs its own checked approval before application.
 
 Approval must not apply to edited content, changed targets, or changed normalization.
 
@@ -702,21 +682,23 @@ Approval must not apply to edited content, changed targets, or changed normaliza
 
 The owner field is the part of the `original` record that contains the owner's complete message.
 Connect each accepted decision to checked `original` owner `evidence` and the same proposal digest.
-Check the `original` full owner field, its author, and its same proposal ID.
 Use current source checks for that verification.
 
-The `D_ID` identifies the proposal.
-It does not replace proof of the owner's reply.
+The agent reads the reply and records approve, reject, or edit in the intent.
+Code does not check the meaning of the reply. The owner accepted this risk.
+Code checks these facts:
 
-Use the accepted complete-sentence reply patterns above.
-Check affirmative intent independently from checks that identify the owner.
-Reject negated, conditional, quoted, ambiguous, or contradictory decisions.
+- The reply has `direct_owner` by provenance, and the intent selects the full owner message.
+
+- The display record is the final `assistant_report` directly before the reply, in the same thread, with no permitted field between them.
+
+- The display equals the complete display text of the target proposal.
+
+- Every `D_` ID in the display is the intent's `candidate_id` or `replacement_id`.
+
+- One owner reply backs one decision. A second intent with the same owner locator is refused.
+
 Apply the same source and identity checks to refusal and replacement decisions.
-
-A bare “approved” does not work in the reply path implemented in source.
-An older design allowed such a reply only with different proof of its same proposal ID.
-The source does not contain that optional alternative.
-The agent must get the accepted complete sentence with the same ID.
 
 Agent statements, CLI `calls`, recalled text, and unverified message wrappers cannot prove approval.
 Do not use a tool response or copied owner text as checked `original` owner `evidence`.
@@ -1282,17 +1264,15 @@ They do not claim that all tests are complete without errors.
     Prior committed decision `evidence` stays unchanged.
     A subsequent change to recorded knowledge needs a different checked retraction or replacement.
 
-18. Intent checks reject negated, conditional, quoted, ambiguous, and contradictory statements independently from owner identification.
-    The current path needs a checked accepted complete-sentence reply with the same ID.
-    A bare “approved” does not work in that path.
+18. The agent judges the meaning of the owner reply (ADR 0022).
+    Code checks provenance, adjacency to the single display, and one reply for one decision.
 
 19. Proposal creation, display, and application use the same normalization and disclose the owner-support rule.
     A display without all necessary content cannot receive correct approval.
     Changed normalization needs a new proposal.
     The read-only `DISPLAY` response includes program-owned `owner_decision` instructions alongside the unchanged complete proposal and `support` rule.
 
-    It gives the unchanged approve and reject sentences with its actual proposal ID, plus plain edit guidance.
-    A subsequent checked replacement sentence names the previous and new IDs without approving the new proposal.
+    It tells the owner to reply in their own words straight after the display, plus plain edit guidance.
     A commentary question, click, or tool `call` cannot replace checked owner `evidence`.
 
 20. The affected tests pass in a temporary `MUNINN_HOME`.
