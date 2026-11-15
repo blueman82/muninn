@@ -61,12 +61,9 @@ class DecisionCliTests(DecisionCliCase):
         frame = json.loads(display["text"])
         self.assertEqual(frame["candidate"], view["candidate"])
         self.assertEqual(
-            frame["owner_decision"]["approve"],
-            f"Please approve memory {ident}.",
+            set(frame["owner_decision"]), {"meaning", "reply", "edit", "agent"}
         )
-        self.assertEqual(
-            frame["owner_decision"]["reject"], f"Please reject memory {ident}."
-        )
+        self.assertIn(ident, frame["owner_decision"]["meaning"])
         code, status = self.call("know", "decision", "status", ident)
         self.assertEqual((code, status["state"]), (0, "waiting_verification"))
         self.assertEqual(self.call("know", "unresolved")[1]["unresolved"], [])

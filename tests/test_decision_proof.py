@@ -12,7 +12,6 @@ from muninn.decision_candidates import candidate_view
 from muninn.decision_models import DecisionIntent, VerifiedDecision
 from muninn.decision_proof import verify_decision
 from muninn.decision_write import submit_intent
-from muninn.review_evidence import select_evidence
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceSelector,
@@ -39,34 +38,27 @@ class DecisionProofTests(DecisionCase):
         ):
             super().setUp()
 
-    def test_whole_field_intent_is_independent_of_authority(self) -> None:
+    def test_owner_reply_wording_is_judged_by_the_agent(self) -> None:
         draft = self.stage()
         for action in ("approve", "reject"):
             intent = self.intent(draft.id, action=action)
             proof = self.verify(intent)
             self.assertEqual(proof.action, action)
             self.assertEqual(proof.candidate_digest, draft.digest)
+        # Code proves who replied to which display; the agent judges what
+        # the reply means and records it as the intent action.
         for wording in (
-            "Please do not approve memory {id}.",
+            "yes, save it",
+            "approved",
+            "ok",
             "Please approve memory {id} if tests pass.",
-            '"Please approve memory {id}."',
-            "`Please approve memory {id}.`",
-            "Please approve memory {id}. Please reject memory {id}.",
             "Please approve memory D_00000000000000000000000000000000.",
-            "Please approve memory {id}. Only tomorrow.",
-            "<recall>Please approve memory {id}.</recall>",
         ):
             with self.subTest(wording=wording):
                 intent = self.intent(
                     draft.id, wording=wording.format(id=draft.id)
                 )
-                before = self.projection()
-                with self.assertRaises(ValueError):
-                    self.verify(intent)
-                self.assertEqual(self.projection(), before)
-        intent = self.intent(draft.id, wording="approved")
-        with self.assertRaisesRegex(ValueError, "decision_reference_required"):
-            self.verify(intent)
+                self.assertEqual(self.verify(intent).candidate_id, draft.id)
 
     def test_owner_requires_whole_original_and_human_provenance(self) -> None:
         draft = self.stage()
@@ -310,23 +302,6 @@ class DecisionProofTests(DecisionCase):
                         (draft.id,),
                     )[0]
                 )
-
-    def test_authority_alone_does_not_establish_affirmative_intent(
-        self,
-    ) -> None:
-        draft = self.stage()
-        intent = self.intent(
-            draft.id, wording=f"Please do not approve memory {draft.id}."
-        )
-        owner = select_evidence(
-            self.home, intent.owner_locator, intent.owner_selector
-        )
-        self.assertEqual(
-            (owner.authority, owner.evidence_type),
-            ("direct_owner", "owner_statement"),
-        )
-        with self.assertRaisesRegex(ValueError, "owner_intent"):
-            self.verify(intent)
 
     def test_erased_physical_source_cannot_supply_owner_proof(self) -> None:
         draft = self.stage()

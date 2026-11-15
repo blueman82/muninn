@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -17,10 +18,10 @@ from muninn.decision_models import (
     DecisionView,
     VerifiedDecision,
 )
-from muninn.decision_words import choice_words
 from muninn.event_model import as_list, as_record
 from muninn.knowledge_scope import scope_applies
 from muninn.review_authority import injected
+from muninn.review_binding import adjacent_gap
 from muninn.review_commit_state import EVIDENCE_ERRORS
 from muninn.review_evidence import validate_evidence
 from muninn.review_evidence_models import (
@@ -43,12 +44,7 @@ from muninn.review_selectors import (
 )
 from muninn.tombstones import require_current_tombstones
 
-
-def decision_words(intent: DecisionIntent) -> str:
-    """Return the supported dedicated whole-field instruction."""
-    return choice_words(
-        intent.candidate_id, intent.action, intent.replacement_id
-    )
+_PROPOSAL = re.compile(r"D_[0-9a-f]{32}")
 
 
 def _original(
@@ -341,15 +337,11 @@ def _verify(
         budget,
         policy.max_input_bytes,
     )
-    if owner.excerpt == "approved":
-        raise ValueError("decision_reference_required")
     if (
         owner.evidence_type != "owner_statement"
         or owner.authority != "direct_owner"
     ):
         raise ValueError("owner_proof")
-    if owner.excerpt != decision_words(intent):
-        raise ValueError("owner_intent")
     display = _original(
         conn,
         intent.display_locator,
@@ -358,7 +350,14 @@ def _verify(
         _remaining(policy, start, budget),
         show_candidate(conn, target.id, policy.context_bytes).text,
     )
-    if display.evidence_type != "assistant_report":
+    # The agent judges what the reply means; code proves it answered this
+    # one display, shown alone, with nothing permitted in between.
+    shown = set(_PROPOSAL.findall(display.excerpt or ""))
+    if (
+        display.evidence_type != "assistant_report"
+        or not shown <= {intent.candidate_id, intent.replacement_id}
+        or not adjacent_gap(conn, display, owner, budget, whole_display=True)
+    ):
         raise ValueError("display_proof")
     if not all(
         scope_applies(record.scope, view.candidate.scope)

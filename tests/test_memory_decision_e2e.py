@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from muninn import review_requests
@@ -62,8 +61,7 @@ class MemoryDecisionE2ETests(DecisionCliCase):
         code, display = self.call("know", "decision", "show", ident)
         self.assertEqual(code, 0, display)
         text = display["text"]
-        phrase = json.loads(text)["owner_decision"]["approve"]
-        view = self.submit_cli(ident, display=text, wording=phrase)
+        view = self.submit_cli(ident, display=text, wording="yes, save it")
         self.assertEqual(view["state"], "approved_pending")
         self.transaction(
             lambda: review_requests.cancel_request(
@@ -99,17 +97,15 @@ class MemoryDecisionE2ETests(DecisionCliCase):
         rejected_display = self.call("know", "decision", "show", rejected_id)[
             1
         ]["text"]
-        phrase = json.loads(rejected_display)["owner_decision"]["reject"]
         rejected = self.submit_cli(
             rejected_id,
             action="reject",
             display=rejected_display,
-            wording=phrase,
+            wording="no, drop it",
         )
         self.assertEqual(rejected["state"], "rejected")
         self.assertEqual(self.row("SELECT count(*) FROM knowledge")[0], 0)
-        phrase = json.loads(display)["owner_decision"]["approve"]
-        accepted = self.submit_cli(new, display=display, wording=phrase)
+        accepted = self.submit_cli(new, display=display, wording="approved")
         self.assertEqual(accepted["state"], "approved_pending")
         independent = str(self.stage_cli()["id"])
         independent_display = self.call(
