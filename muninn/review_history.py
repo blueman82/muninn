@@ -165,6 +165,7 @@ def _verify(
     content = hashlib.sha256()
     # Hash from line 1, but charge only from the window start.
     for line, raw, _ in originals(
+        conn,
         source,
         1,
         item.window.through_line,

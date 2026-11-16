@@ -57,7 +57,7 @@ def _native(
         or (saved is not None and saved.mode == "all")
     ):
         return True
-    raw = originals(source, 1, 1, budget=budget)[0][1]
+    raw = originals(conn, source, 1, 1, budget=budget)[0][1]
     if classify.record_hash(raw) != source["first_line_sha256"]:
         raise ValueError("evidence_changed")
     try:

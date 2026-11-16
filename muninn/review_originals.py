@@ -285,6 +285,7 @@ def _cursor(
 
 
 def originals(
+    _conn: sqlite3.Connection,
     source: sqlite3.Row,
     first: int,
     last: int,

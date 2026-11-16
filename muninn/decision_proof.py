@@ -69,7 +69,7 @@ def _original(
     if limit <= 0:
         raise EvidenceLimitError("evidence_byte_limit")
     _, raw, physical = originals(
-        source, locator.line, locator.line, limit, budget=budget
+        conn, source, locator.line, locator.line, limit, budget=budget
     )[0]
     record = decode(raw)
     if display_text is not None:

@@ -107,6 +107,7 @@ def validate_cursor_boundary(
     if not window.from_line <= first <= window.through_line:
         raise ValueError("rejected_scope")
     records = originals(
+        conn,
         source,
         first,
         window.through_line,
@@ -126,7 +127,9 @@ def select_evidence(
     """Select a permitted original field; the caller checks admission."""
     with closing(store.connect_ro(store.db_path(home))) as conn:
         source = _source(conn, locator.source)
-        _, raw, original = originals(source, locator.line, locator.line)[0]
+        _, raw, original = originals(conn, source, locator.line, locator.line)[
+            0
+        ]
         return build_record(conn, source, locator, selector, raw, original)
 
 
@@ -142,6 +145,7 @@ def initial_evidence(
     with closing(store.connect_ro(store.db_path(home))) as conn:
         source = _source(conn, window.source)
         records = originals(
+            conn,
             source,
             window.from_line,
             window.through_line,
