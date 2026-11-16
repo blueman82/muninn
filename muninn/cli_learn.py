@@ -11,7 +11,12 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from muninn import query, review_recovery, review_requests
+from muninn import (
+    query,
+    review_recovery,
+    review_requests,
+    review_unknown_recovery,
+)
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
 from muninn.cli_know_shared import saved_policy
 from muninn.cli_learn_explain import explain
@@ -343,7 +348,15 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Dispatch explicit learning controls with content-free refusal codes."""
     record["cmd"] = f"learn {a.learn_cmd}"
     try:
-        if a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
+        if a.learn_cmd == "recover-unknown":
+            out = review_unknown_recovery.recover(
+                home,
+                a.attempt_id,
+                a.round_index,
+                accept_uncertainty=a.accept_uncertainty,
+                now=time.time(),
+            ).model_dump(mode="json")
+        elif a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
             out = read_store(
                 home,
                 lambda conn: setup(

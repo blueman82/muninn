@@ -8,6 +8,7 @@ from typing import Any, NoReturn, Protocol
 
 from muninn import query
 from muninn.cli_core import (
+    attempt_argument,
     decision_argument,
     knowledge_argument,
     request_argument,
@@ -275,6 +276,12 @@ def _add_learning(cmd: _Commands) -> None:
     p = learn.add("explain", "explain retained learning history")
     p.add_argument("request_id", type=request_argument)
     p.add_argument("--human", action="store_true")
+    p = learn.add("recover-unknown", "accept uncertainty for one failed call")
+    p.add_argument(
+        "--attempt", dest="attempt_id", type=attempt_argument, required=True
+    )
+    p.add_argument("--round", dest="round_index", type=int, required=True)
+    p.add_argument("--accept-uncertainty", action="store_true", required=True)
     p = learn.add("resume")
     p.add_argument("--policy", required=True)
     p.add_argument("--failed-request", type=request_argument, required=True)

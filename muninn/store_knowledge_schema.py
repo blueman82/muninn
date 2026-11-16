@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from muninn.review_state import STATE_SQL
+from muninn.review_unknown_state import ACK_SQL
 
 KNOWLEDGE_SQL = r"""
 CREATE TABLE store_meta (
@@ -170,4 +171,4 @@ CREATE TABLE review_receipt (
 CREATE VIRTUAL TABLE knowledge_fts USING fts5(
   knowledge_id UNINDEXED, revision UNINDEXED, text);
 INSERT INTO knowledge_fts(knowledge_fts, rank) VALUES ('secure-delete', 1);
-""" + STATE_SQL
+""" + STATE_SQL + ACK_SQL

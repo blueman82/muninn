@@ -19,7 +19,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from muninn import store
 from muninn.decision_models import DecisionId
-from muninn.knowledge_models import KnowledgeId, RequestId, UnresolvedId
+from muninn.knowledge_models import (
+    AttemptId,
+    KnowledgeId,
+    RequestId,
+    UnresolvedId,
+)
 
 __all__ = [
     "WRITER_WAIT_S",
@@ -110,6 +115,14 @@ def knowledge_argument(value: str) -> KnowledgeId:
         return TypeAdapter(KnowledgeId).validate_python(value, strict=True)
     except ValidationError:
         raise ArgumentTypeError("invalid_knowledge_id") from None
+
+
+def attempt_argument(value: str) -> AttemptId:
+    """Require the typed review attempt UUID."""
+    try:
+        return TypeAdapter(AttemptId).validate_python(value, strict=True)
+    except ValidationError:
+        raise ArgumentTypeError("invalid_attempt_id") from None
 
 
 def request_argument(value: str) -> RequestId:
