@@ -20,7 +20,7 @@ class Item(NamedTuple):
     conditions: tuple[str, ...]
 
 
-def _item_lines(number: int, item: Item) -> list[str]:
+def item_lines(number: int, item: Item) -> list[str]:
     """Wrap one numbered memory and its conditions."""
     lines = textwrap.wrap(
         item.text,
@@ -54,7 +54,7 @@ def banner(head: str, items: Sequence[Item], footer: str | None) -> list[str]:
     body = [
         line
         for number, item in enumerate(items, 1)
-        for line in _item_lines(number, item)
+        for line in item_lines(number, item)
     ]
     codes = [
         f"{BAR} {number}: {item.ident}" for number, item in enumerate(items, 1)
@@ -78,7 +78,7 @@ def more_line(count: int, page: int, flag: str) -> str:
 def paginate(
     count: int,
     get: Callable[[int], Item],
-    fits: Callable[[list[Item], int], bool],
+    fits: Callable[[list[Item], int, int], bool],
     too_long: Callable[[Item], Item],
     stop_after: int | None = None,
 ) -> list[list[Item]]:
@@ -88,8 +88,8 @@ def paginate(
         count: Number of eligible memories in their fixed order.
         get: The shown item at a position; called in order, only as far as
             the pages need, so its lookups can be lazy.
-        fits: Whether a page with these items, and this many left after
-            it, fits its byte limit.
+        fits: Whether a page with these items, this many left after it and
+            this 1-based number fits its byte limit.
         too_long: The look-up item for a memory larger than a page.
         stop_after: Build at most this many pages, or all of them.
 
@@ -102,7 +102,8 @@ def paginate(
     at = 0
     while at < count and (stop_after is None or len(pages) < stop_after):
         page: list[Item] = []
-        while at < count and fits([*page, get(at)], count - at - 1):
+        number = len(pages) + 1
+        while at < count and fits([*page, get(at)], count - at - 1, number):
             page.append(get(at))
             at += 1
         if not page:

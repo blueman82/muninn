@@ -342,7 +342,7 @@ def _start_block(
         context = knowledge_push.knowledge_context(
             conn, project, None, time.time(), proofs=False
         )
-        text = render_block(
+        text, shown = render_block(
             context,
             label,
             notes=index_notes(home),
@@ -350,7 +350,7 @@ def _start_block(
             flag=flag,
             show=partial(proof_view, conn),
         )
-    start_trace(text, context, trace)
+    start_trace(shown, context, trace)
     return text
 
 

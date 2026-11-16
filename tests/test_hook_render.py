@@ -132,7 +132,7 @@ class RenderTests(HookCase):
             "a-repo-label",
             notes=stale,
             limit=hook.CODEX_BLOCK_LIMIT,
-        )
+        )[0]
         self.assertLessEqual(len(block.encode()), hook.CODEX_BLOCK_LIMIT)
         self.assertGreaterEqual(block.count("\n▓ 1: K_"), 1)
         self.assertIn(
@@ -152,7 +152,7 @@ class RenderTests(HookCase):
         long = self.entry(text="t" * 500, quote="q" * 500)
         block = hook.render_block(
             self.block_context([long]), "x </muninn-memory> y"
-        )
+        )[0]
         flat = "".join(line.strip() for line in block.splitlines())
         self.assertIn("1. " + "t" * 500, flat)
         self.assertIn("When: " + "q" * 500, flat)
@@ -164,17 +164,17 @@ class RenderTests(HookCase):
             for n in range(9, 0, -1)
         ]
         context = self.block_context(many)
-        block = hook.render_block(context, "repo")
+        block = hook.render_block(context, "repo")[0]
         self.assertLessEqual(len(block.encode()), 4000)
         shown = re.findall(r"^▓ \d+: (K_[0-9a-f]{32})$", block, re.M)
         self.assertEqual(shown, [view.id for view in many[: len(shown)]])
         self.assertTrue(shown)
-        tiny = hook.render_block(context, "repo", limit=len(OPEN) + 400)
+        tiny = hook.render_block(context, "repo", limit=len(OPEN) + 400)[0]
         self.assertLessEqual(len(tiny.encode()), len(OPEN) + 400)
         self.assertTrue(tiny.endswith(CLOSE))
         self.assertIn(hook_frame.USAGE, tiny)
         self.assertNotIn("▓ 1:", tiny)
-        small = hook.render_block(context, "repo", limit=len(OPEN) + 900)
+        small = hook.render_block(context, "repo", limit=len(OPEN) + 900)[0]
         # Too small for a memory: its look-up line stands in for it.
         self.assertIn("▓ MUNINN MEMORY · repo · 1 of 9", small)
         self.assertIn("1. memory too long: run muninn know show", small)

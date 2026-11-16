@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from collections.abc import Mapping
 
 from pydantic import TypeAdapter, ValidationError
 
+from muninn.hook_banner import Item, item_lines
 from muninn.hook_frame import escape_delimiter, frame
 from muninn.knowledge_models import KnowledgeContext, RequestId
 from muninn.review_recovery import explain
@@ -93,32 +93,24 @@ def status_line(
     return "\n".join([head, *shown])
 
 
-# Lines of the session-start list: a numbered memory and its code line.
-_ITEM = re.compile(r"\d+\. ")
-_CODE = re.compile(r"▓ \d+: (K_[0-9a-f]{32})$")
-
-
 def start_trace(
-    text: str, context: KnowledgeContext, trace: dict[str, object]
+    shown: list[Item], context: KnowledgeContext, trace: dict[str, object]
 ) -> None:
     """Record the shown memory codes and lines of a session-start block.
 
     Args:
-        text: The rendered block.
+        shown: The memories the block shows, in order.
         context: Every eligible memory the block was cut from.
         trace: Receives ``knowledge_ids``, ``knowledge_omitted`` and the
             ``shown`` lines for the human status message.
     """
-    lines = text.splitlines()
-    ids = [match[1] for line in lines if (match := _CODE.match(line))]
-    trace["knowledge_ids"] = ids
-    trace["knowledge_omitted"] = context.truncated or len(ids) < (
+    trace["knowledge_ids"] = [item.ident for item in shown]
+    trace["knowledge_omitted"] = context.truncated or len(shown) < (
         len(context.notes) + len(context.guides)
     )
-    firsts = [line for line in lines if _ITEM.match(line)]
     trace["shown"] = [
-        printable(f"{ident} {line}")
-        for ident, line in zip(ids, firsts, strict=False)
+        printable(f"{item.ident} {item_lines(number, item)[0]}")
+        for number, item in enumerate(shown, 1)
     ]
 
 

@@ -122,6 +122,36 @@ class PageTests(HookCase):
         self.assertGreater(sizes[0], sizes[1])
 
 
+class PageLimitTests(HookCase):
+    """Fit each printed page, with its page label, in the byte limit."""
+
+    def test_every_page_fits_without_the_start_hints(self) -> None:
+        for i in range(40):
+            self.add(content=f"M{i} " + "x" * (i * 7 % 50), created_at=i)
+        context = knowledge_push.knowledge_context(
+            self.conn, self.scope, None, time.time()
+        )
+        # Without the start block's hint lines, only the page check itself
+        # keeps the page label and footer inside the limit.
+        with (
+            mock.patch.object(hook_start, "SEARCH_HINT", ""),
+            mock.patch.object(hook_start, "OPEN_HINT", ""),
+        ):
+            for base in (hook.BLOCK_LIMIT, hook.CODEX_BLOCK_LIMIT):
+                for limit in range(base - 400, base + 1, 4):
+                    number = 1
+                    while True:
+                        try:
+                            page = hook_start.render_page(
+                                context, "repo", number, limit=limit
+                            )
+                        except ValueError:
+                            break
+                        with self.subTest(limit=limit, page=number):
+                            self.assertLessEqual(len(page.encode()), limit)
+                        number += 1
+
+
 class PageCliTests(CliLearningCase):
     """Print a page as text, not JSON."""
 
@@ -233,8 +263,8 @@ class LazyEqualsEagerTests(HookCase):
                 self.assertEqual(
                     hook_start.render_block(
                         lazy, "repo", limit=limit, show=show
-                    ),
-                    hook_start.render_block(eager, "repo", limit=limit),
+                    )[0],
+                    hook_start.render_block(eager, "repo", limit=limit)[0],
                 )
                 pages: list[str] = []
                 while True:

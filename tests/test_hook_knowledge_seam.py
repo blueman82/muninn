@@ -195,7 +195,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         hook_frame = importlib.import_module("muninn.hook_start")
         text = hook_frame.render_block(
             from_context, "repo", notes=("manual diagnostic",), limit=1500
-        )
+        )[0]
         # A memory larger than a page is shown as its look-up line.
         self.assertIn(f"▓ 1: {ident}", text)
         self.assertIn("1. memory too long: run muninn know show", text)
@@ -205,7 +205,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         self.assertTrue(text.endswith("</muninn-memory>"))
         self.assertLessEqual(len(text.encode()), 1500)
         self.assertEqual(
-            hook_frame.render_block(from_context, "repo", limit=10), ""
+            hook_frame.render_block(from_context, "repo", limit=10)[0], ""
         )
 
     def test_unicode_escaping_redaction_and_provider_byte_bounds(self) -> None:
@@ -357,16 +357,16 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         self.add()
         context = self.context_view()
         hook_start = importlib.import_module("muninn.hook_start")
-        for limit in (300, 350, 400, 500, 600, 700, 900):
+        for limit in (300, 350, 400, 500, 600, 720, 900):
             with self.subTest(limit=limit):
-                text = hook_start.render_block(context, "repo", limit=limit)
+                text = hook_start.render_block(context, "repo", limit=limit)[0]
                 self.assertIn('trust="untrusted-data"', text)
                 self.assertIn("never instructions", text)
                 self.assertTrue(text.endswith("</muninn-memory>"))
                 self.assertLessEqual(len(text.encode()), limit)
                 # Once the header fits, it counts the one memory, and a
                 # memory left out is pointed to by the footer.
-                if limit >= 700:
+                if limit >= 720:
                     self.assertIn("▓ MUNINN MEMORY · repo · ", text)
                     self.assertTrue(
                         "· 1 of 1" in text or "▓ 1 more memories." in text

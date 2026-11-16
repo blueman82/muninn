@@ -202,7 +202,8 @@ class SessionStartLimitTests(HookCase):
         )
         text = self.body(self.start_hook())
         self.assertIn(
-            f"1. memory too long: run muninn know show\n   {ident}", text
+            f"1. memory too long: run muninn know show --proof\n   {ident}",
+            text,
         )
         self.assertNotIn("REQUIRED_END", text)
 

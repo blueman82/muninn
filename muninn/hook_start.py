@@ -111,14 +111,16 @@ def start_pages(
             shown[at] = _item(entries[at], show)
         return shown[at]
 
-    def fits(page: list[Item], left: int) -> bool:
+    def fits(page: list[Item], left: int, number: int) -> bool:
+        # Page 1 is also the start block, whose hints take more room.
         footer = more_line(left, 2, flag) if left else None
         lines = banner(_head(label, page, len(entries), ""), page, footer)
         block = frame("", [USAGE, *lines, SEARCH_HINT, OPEN_HINT])
-        return len(block.encode()) <= limit
+        shown = _page(label, page, len(entries), number, left, flag)
+        return max(len(block.encode()), len(shown.encode())) <= limit
 
     def too_long(item: Item) -> Item:
-        text = f"memory too long: run muninn know show {item.ident}"
+        text = f"memory too long: run muninn know show --proof {item.ident}"
         return Item(item.ident, text, ())
 
     return paginate(len(entries), get, fits, too_long, stop_after)
@@ -132,7 +134,7 @@ def render_block(
     limit: int = BLOCK_LIMIT,
     flag: str = "",
     show: Show = _as_stored,
-) -> str:
+) -> tuple[str, list[Item]]:
     """Render the first page of memories as the session-start block.
 
     Args:
@@ -145,7 +147,8 @@ def render_block(
 
     Returns:
         Bounded untrusted evidence with whole memories only, or an empty
-        string when even the empty frame does not fit.
+        string when even the empty frame does not fit, and the memories
+        the block shows.
     """
     total = len(context.notes) + len(context.guides)
     pages = start_pages(
@@ -169,9 +172,9 @@ def render_block(
         ):
             block = frame("", [*lines, *tail])
             if len(block.encode()) <= limit:
-                return block
+                return block, page
     block = frame("", [USAGE])
-    return block if len(block.encode()) <= limit else ""
+    return (block if len(block.encode()) <= limit else ""), []
 
 
 def render_page(
@@ -206,10 +209,28 @@ def render_page(
     ) or [[]]
     if not 1 <= number <= len(pages):
         raise ValueError("page_unavailable")
-    page = pages[number - 1]
     left = total - sum(len(p) for p in pages)
+    return _page(scope_label, pages[number - 1], total, number, left, flag)
+
+
+def _page(
+    label: str, page: list[Item], total: int, number: int, left: int, flag: str
+) -> str:
+    """Return one ``know context --page`` page as it is printed.
+
+    Args:
+        label: Name of the mapped scope shown in the header.
+        page: The memories on this page.
+        total: Number of eligible memories.
+        number: The 1-based page number.
+        left: Memories after this page.
+        flag: Extra ``know context`` option the footer must repeat.
+
+    Returns:
+        The page inside the untrusted-data frame.
+    """
     last = f" of {number}" if not left else ""
-    head = _head(scope_label, page, total, f"page {number}{last} · ")
+    head = _head(label, page, total, f"page {number}{last} · ")
     footer = more_line(left, number + 1, flag) if left else None
     # Later pages are the same untrusted data as the start block.
     return frame("", [USAGE, *banner(head, page, footer)])
