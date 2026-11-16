@@ -105,8 +105,7 @@ class QueryCase(unittest.TestCase):
         root.mkdir(exist_ok=True)
         thread = "knowledge-" + uuid4().hex
         instruction = "Use this synthetic instruction."
-        # The original holds the note text verbatim, as owner support needs.
-        raw = json.dumps(user_msg(1, text)).encode()
+        raw = json.dumps(user_msg(1, instruction)).encode()
         path = root / f"{thread}.jsonl"
         path.write_bytes(raw + b"\n")
         source = self.add_source(thread)

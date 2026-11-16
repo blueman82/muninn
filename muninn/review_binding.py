@@ -1,16 +1,12 @@
-"""Bind owner-required claims to verbatim sentences of trusted lines."""
+"""Find the full owner messages that prove an owner-required claim."""
 
 from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from typing import Any
 
 from muninn import classify
-from muninn.knowledge_models import Body, EvidenceId, NoteBody
-from muninn.knowledge_write import claims
-from muninn.redaction import redact
-from muninn.review_authority import SENTENCE, whole_sentences
+from muninn.knowledge_models import EvidenceId
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceRecord,
@@ -24,70 +20,34 @@ from muninn.review_selectors import (
     check_tombstones,
     decode,
     fields,
+    indexed_kind,
 )
 
 type Adjacent = Callable[[EvidenceRecord, EvidenceRecord], bool]
 
 
-def _normal(text: str) -> str:
-    """Collapse whitespace and ignore one final terminator."""
-    collapsed = " ".join(text.split())
-    return collapsed[:-1] if collapsed[-1:] in (".", "!", ";") else collapsed
+def full_field(record: EvidenceRecord) -> bool:
+    """Report whether a record selects its whole field, with no span."""
+    return record.selector.start is None and record.selector.end is None
 
 
-def verbatim(unit: str, excerpt: str) -> bool:
-    """Test a claim line against whole consecutive sentences of an excerpt.
-
-    Args:
-        unit: One claim line: note content, one condition or a guide claim.
-        excerpt: The redacted evidence excerpt, itself whole sentences.
-
-    Returns:
-        Whether the line equals, case-sensitively, a run of complete
-        sentences of the excerpt, so no negation or limit can be dropped.
-    """
-    # Excerpts are redacted, so compare the line as it will be stored.
-    wanted = _normal(redact(unit)[0])
-    bounds = [
-        (m.start(), m.end())
-        for m in SENTENCE.finditer(excerpt)
-        if m[0].strip(" .!;\t\r\n")
-    ]
-    for i, (start, _) in enumerate(bounds):
-        for _, end in bounds[i:]:
-            found = _normal(excerpt[start:end])
-            if found == wanted:
-                return True
-            if len(found) > len(wanted) + 1:
-                break
-    return False
-
-
-def claim_lines(body: Body) -> list[tuple[list[str], list[EvidenceId]]]:
-    """Return the lines of each supported claim with its references."""
-    if isinstance(body, NoteBody):
-        return [([body.content, *body.conditions], body.evidence_refs)]
-    return [([text], refs) for _, text, refs, _ in claims(body)]
-
-
-def bound(
-    lines: list[str],
+def owner_supported(
     refs: list[EvidenceId],
     records: dict[EvidenceId, EvidenceRecord],
     adjacent: Adjacent | None,
 ) -> bool:
-    """Require every line to come from cited trusted words.
+    """Require a full owner message as proof, with only paired replies.
 
     Args:
-        lines: Claim lines that need owner support.
         refs: Known evidence references cited by the claim.
         records: Revalidated evidence by identity.
         adjacent: Checks that an assistant record is the final permitted
             field directly before an owner record, or None to refuse pairs.
 
     Returns:
-        Whether each line equals whole sentences of a cited owner line, or
-        of a cited assistant reply directly before a cited owner reply.
+        Whether the claim cites a full ``direct_owner`` message, and each
+        cited assistant reply is a full field directly before one of them.
+        The model's claim text is not compared with the proof.
     """
     cited = [records[r] for r in refs]
     owners = [
@@ -95,24 +55,15 @@ def bound(
         for r in cited
         if r.authority == "direct_owner"
         and r.evidence_type == "owner_statement"
+        and full_field(r)
     ]
-    pending = [
-        line
-        for line in lines
-        if not any(o.excerpt and verbatim(line, o.excerpt) for o in owners)
-    ]
-    if not owners or not pending:
-        return bool(owners)
-    if adjacent is None:
-        return False
-    paired = [
-        r.excerpt
-        for r in cited
-        if r.evidence_type == "assistant_report"
-        and r.excerpt
-        and any(adjacent(r, o) for o in owners)
-    ]
-    return all(any(verbatim(line, e) for e in paired) for line in pending)
+    replies = [r for r in cited if r.evidence_type == "assistant_report"]
+    return bool(owners) and all(
+        adjacent is not None
+        and full_field(reply)
+        and any(adjacent(reply, owner) for owner in owners)
+        for reply in replies
+    )
 
 
 def adjacent_gap(
@@ -134,8 +85,8 @@ def adjacent_gap(
             whole and only field of its record, so it is not read again.
 
     Returns:
-        Whether the assistant field is the last permitted field of its
-        record, covers whole sentences, and no permitted field of any
+        Whether the assistant line is an indexed reply whose field is the
+        last permitted field of its record, and no permitted field of any
         record lies between it and the owner record.
 
     Raises:
@@ -150,10 +101,15 @@ def adjacent_gap(
         or assistant.line >= owner.line
     ):
         return False
+    source = source_row(conn, _thread(owner))
+    # A fork or replay copy of a reply has no reply event of its own.
+    if not indexed_kind(
+        conn, source["id"], assistant.line, assistant.line_sha256, "reply"
+    ):
+        return False
     first = assistant.line + 1 if whole_display else assistant.line
     if first == owner.line:
         return True
-    source = source_row(conn, _thread(owner))
     records = originals(
         conn, source, first, owner.line - 1, MAX_SCAN_BYTES, budget=budget
     )
@@ -172,32 +128,13 @@ def adjacent_gap(
     if not whole_display:
         if classify.record_hash(records[0][1]) != assistant.line_sha256:
             return False
-        if not _final_sentences(assistant, gap.pop(0)):
+        projected = fields(assistant.provider, gap.pop(0))
+        if not projected or (projected[-1].part, projected[-1].pointer) != (
+            assistant.part,
+            assistant.selector.json_pointer,
+        ):
             return False
     return not any(fields(owner.provider, record) for record in gap)
-
-
-def _final_sentences(
-    assistant: EvidenceRecord, record: dict[str, Any]
-) -> bool:
-    """Require the last permitted field of a record, in whole sentences."""
-    projected = fields(assistant.provider, record)
-    pointer = assistant.selector.json_pointer
-    at = [
-        i
-        for i, f in enumerate(projected)
-        if f.part == assistant.part and f.pointer == pointer
-    ]
-    if len(at) != 1 or at[0] != len(projected) - 1:
-        return False
-    text = projected[-1].text
-    start = assistant.selector.start or 0
-    end = (
-        assistant.selector.end
-        if assistant.selector.end is not None
-        else len(text)
-    )
-    return whole_sentences(text, (start, end))
 
 
 def _thread(record: EvidenceRecord) -> SourceRef:

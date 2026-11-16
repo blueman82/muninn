@@ -88,3 +88,19 @@ class DecisionAdjacencyTests(DecisionCase):
         reused = intent.model_copy(update={"candidate_id": second.id})
         with self.assertRaisesRegex(ValueError, "owner_proof"):
             self.transaction(lambda: submit_intent(self.conn, reused, 17.0))
+
+    def test_unindexed_copy_cannot_back_a_decision(self) -> None:
+        # Fork and replay copies keep no event row of their own.
+        for line, code in ((0, "owner_proof"), (1, "display_proof")):
+            with self.subTest(code=code):
+                draft = self.stage()
+                intent = self.intent(draft.id, wording="yes")
+                lines = (
+                    intent.owner_locator.line,
+                    intent.display_locator.line,
+                )
+                self.conn.execute(
+                    "DELETE FROM event WHERE line=?", (lines[line],)
+                )
+                with self.assertRaisesRegex(ValueError, code):
+                    self.verify(intent)

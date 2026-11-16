@@ -100,7 +100,7 @@ class KnowledgeStorageProjectionTests(CliLearningCase):
         )
         self.assertEqual(redact(CANARY), (CANARY, False))
         code, receipt = self.propose(
-            kind="fact", content="Use cache token:", conditions=[CANARY]
+            kind="preference", content="Use cache token:", conditions=[CANARY]
         )
         self.assertEqual((code, receipt["outcome"]), (0, "completed"))
         body = self.body()

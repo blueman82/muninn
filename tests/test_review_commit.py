@@ -40,7 +40,7 @@ class CommitCase(RequestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.records[1] = user_msg(1, "Use Python.")
+        self.records[1] = user_msg(1, "Use Python for this project.")
         self.path = self.write(rollout(), self.records)
         self.run_ingest()
         self.evidence = review_evidence.initial_evidence(

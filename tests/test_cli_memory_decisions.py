@@ -64,8 +64,11 @@ class DecisionCliTests(DecisionCliCase):
             set(frame["owner_decision"]), {"meaning", "reply", "edit", "agent"}
         )
         self.assertIn(ident, frame["owner_decision"]["meaning"])
+        proof = ["[owner] Use Python for this project."]
+        self.assertEqual(frame["proof"], proof)
         code, status = self.call("know", "decision", "status", ident)
         self.assertEqual((code, status["state"]), (0, "waiting_verification"))
+        self.assertEqual(status["proof"], proof)
         self.assertEqual(self.call("know", "unresolved")[1]["unresolved"], [])
         self.assertEqual(self.projection(), before)
 

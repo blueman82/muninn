@@ -20,7 +20,7 @@ class ScopeCommitCase(CommitCase):
 
     def setUp(self) -> None:
         RequestCase.setUp(self)
-        self.records[1] = user_msg(1, "Use Python.")
+        self.records[1] = user_msg(1, "Use Python for this project.")
         self.path = self.write(rollout(), self.records)
         self.run_ingest()
         self.select_originals()
@@ -211,7 +211,7 @@ class GlobalScopeTests(ScopeCommitCase):
 
     def setUp(self) -> None:
         RequestCase.setUp(self)
-        self.records[1] = user_msg(1, "Use Python.")
+        self.records[1] = user_msg(1, "Use Python for this project.")
         self.path = self.write(rollout(), self.records)
         self.run_ingest()
         self.conn.execute(

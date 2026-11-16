@@ -10,8 +10,8 @@ from muninn.knowledge_models import (
     KnowledgeContext,
     NoteBody,
     Scope,
-    proof_only,
 )
+from muninn.knowledge_proof import proof_view
 from muninn.knowledge_read import (
     candidate_rows,
     eligible_current,
@@ -68,7 +68,7 @@ def knowledge_context(
                 continue
             notes, guides = list(context.notes), list(context.guides)
             if isinstance(view.body, NoteBody):
-                notes.append(proof_only(view))
+                notes.append(proof_view(conn, view))
             elif isinstance(view.body, GuideBody):
                 guides.append(
                     GuideIndex(

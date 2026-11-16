@@ -13,15 +13,15 @@ from muninn.knowledge_models import (
     Scope,
     UnresolvedProposal,
 )
-from muninn.knowledge_write import body_of, target
-from muninn.review_binding import Adjacent, bound, claim_lines
+from muninn.knowledge_write import body_of, claims, target
+from muninn.review_binding import Adjacent, owner_supported
 from muninn.review_correction import CorrectionFeedback
 from muninn.review_diagnostics import FailurePhase
 from muninn.review_evidence_models import EvidenceRecord
 
 
 class OwnerSupport(NamedTuple):
-    """Carry the checks that bind a claim to owner words."""
+    """Carry how a claim's owner support is checked."""
 
     adjacent: Adjacent | None = None
     approved_owner: EvidenceId | None = None
@@ -103,26 +103,6 @@ def _known(
         raise CommitRejectedError("rejected_evidence", "candidate validation")
 
 
-def _support(
-    lines: list[str],
-    refs: list[EvidenceId],
-    records: dict[EvidenceId, EvidenceRecord],
-    checks: CandidateChecks,
-) -> bool:
-    """Accept verbatim owner words or the verified approval of a display."""
-    approved = checks.owner.approved_owner
-    # A verified decision already bound this owner reply to the complete
-    # displayed candidate, so the display is the verbatim proof.
-    if (
-        approved is not None
-        and approved in refs
-        and records[approved].authority == "direct_owner"
-        and records[approved].evidence_type == "owner_statement"
-    ):
-        return True
-    return bound(lines, refs, records, checks.owner.adjacent)
-
-
 def _change(
     conn: sqlite3.Connection,
     change: Change,
@@ -160,12 +140,13 @@ def _change(
             scope,
         )
         owner = owner or old["kind"] in {"preference", "decision"}
-    for lines, refs in claim_lines(body_of(change)):
+    for _, _, refs, _ in claims(body_of(change)):
         _known(refs, records)
         if (
             owner
             and not checks.allow_missing_owner
-            and not _support(lines, refs, records, checks)
+            and checks.owner.approved_owner not in refs
+            and not owner_supported(refs, records, checks.owner.adjacent)
         ):
             failure = failure or _candidate_failure(
                 ProposalRejectedError("owner_support", "changes", index),
@@ -221,7 +202,8 @@ def validate_batch(
         evidence: Revalidated evidence cited by the result.
         defer_candidate_failure: Keep removable refusals for a final scan.
         allow_missing_owner: Stage a candidate before any owner decision.
-        owner: Agreement gap reader and any verified decision owner reply.
+        owner: Agreement gap reader, and the owner reply of a verified
+            ADR 0018 decision being applied, which proves the claims it backs.
 
     Raises:
         CommitRejectedError: If evidence, targets or owner support fail.

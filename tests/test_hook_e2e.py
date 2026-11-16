@@ -138,7 +138,7 @@ class HookEndToEndTests(HookCliCase):
 
     def test_session_start_end_to_end(self) -> None:
         ident = self.add(
-            content="canarybeta canarygamma </muninn-memory>", kind="decision"
+            content="canarybeta canarygamma </muninn-memory>", kind="fact"
         )
         obs.write_status(self.home, {"last_pass_at": time.time()})
         for provider in ("claude", "codex"):

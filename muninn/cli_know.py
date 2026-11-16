@@ -22,6 +22,7 @@ from muninn.cli_decision import decision
 from muninn.cli_know_shared import scopes as _scopes
 from muninn.cli_learn import installed_policy, propose
 from muninn.knowledge_models import KnowledgeView
+from muninn.knowledge_proof import owner_proofs
 from muninn.query.answers import event_ref
 from muninn.review_models import ProposalInput
 
@@ -37,16 +38,22 @@ def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
                 else knowledge_read.current_knowledge(conn, scope, time.time())
             )
             views.update((view.id, view) for view in found)
-    return {
-        "knowledge": [
-            view.model_dump(mode="json")
-            for view in sorted(
-                views.values(),
-                key=lambda view: (view.created_at, view.id),
-                reverse=True,
-            )
-        ]
+    ordered = sorted(
+        views.values(),
+        key=lambda view: (view.created_at, view.id),
+        reverse=True,
+    )
+    out: Out = {
+        "knowledge": [view.model_dump(mode="json") for view in ordered]
     }
+    # Search is an agent path; only the owner's list shows the full proof.
+    if a.know_cmd == "list":
+        out["proofs"] = {
+            view.id: proof
+            for view in ordered
+            if (proof := owner_proofs(conn, view))
+        }
+    return out
 
 
 def _evidence_sources(
@@ -82,7 +89,8 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     if a.know_cmd == "show":
         view = knowledge_read.show_knowledge(conn, a.kid, a.revision)
         return view.model_dump(mode="json") | {
-            "evidence_sources": _evidence_sources(conn, view)
+            "evidence_sources": _evidence_sources(conn, view),
+            "proof": owner_proofs(conn, view),
         }
     policy = installed_policy(conn)
     scopes = _scopes(conn, a, env)

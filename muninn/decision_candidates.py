@@ -26,6 +26,7 @@ from muninn.knowledge_models import (
     ReviewResult,
     Scope,
 )
+from muninn.knowledge_proof import candidate_proofs
 from muninn.knowledge_write import body_of, claims, redacted_body, target
 from muninn.redaction import redact, redact_parts
 from muninn.review_candidates import validate_batch
@@ -338,6 +339,7 @@ def show_candidate(
             "candidate": view.candidate.model_dump(mode="json"),
             "enrichment": {"version": 1, "rule": ENRICHMENT_RULE},
             "owner_decision": owner_instructions(ident),
+            "proof": candidate_proofs(conn, view.candidate.result),
         }
     )
     if len(text.encode()) > max_bytes:

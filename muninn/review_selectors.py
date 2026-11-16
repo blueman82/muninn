@@ -14,7 +14,7 @@ from muninn import classify
 from muninn.event_model import TEXT_LIMIT, as_record, finish
 from muninn.knowledge_models import Provider, Scope
 from muninn.redaction import redact
-from muninn.review_authority import direct_speech, whole_sentences
+from muninn.review_authority import direct_speech
 from muninn.review_evidence_models import (
     Authority,
     EvidenceLocator,
@@ -275,17 +275,43 @@ def authority(
     )
     if any(f.evidence_type == "tool_result" for f in context):
         return "untrusted"
-    start = selector.start if selector and selector.start is not None else 0
-    end = (
-        selector.end
-        if selector and selector.end is not None
-        else len(field.text)
+    # The proof is the full field; a slice could drop a negation or limit.
+    partial = selector is not None and (
+        selector.start is not None or selector.end is not None
     )
     return (
         "direct_owner"
-        if direct_speech(provider, text, record)
-        and whole_sentences(field.text, (start, end))
+        if not partial and direct_speech(provider, text, record)
         else "untrusted"
+    )
+
+
+def indexed_kind(
+    conn: sqlite3.Connection,
+    source_id: int,
+    line: int,
+    line_sha256: str,
+    kind: str,
+) -> bool:
+    """Report whether the indexer kept this exact line as an event kind.
+
+    Args:
+        conn: Readable store connection.
+        source_id: Indexed source row of the thread.
+        line: Physical line of the original record.
+        line_sha256: Hash of that line.
+        kind: ``prompt`` for owner text or ``reply`` for an assistant reply.
+
+    Returns:
+        False for lines the indexer skipped, such as fork and replay copies.
+    """
+    return (
+        conn.execute(
+            "SELECT 1 FROM event WHERE source_id=? AND line=? "
+            "AND line_sha256=? AND kind=? LIMIT 1",
+            (source_id, line, line_sha256, kind),
+        ).fetchone()
+        is not None
     )
 
 
@@ -365,6 +391,14 @@ def build_record(
         ).fetchone()
         if indexed is None or indexed[0] != locator.line_sha256:
             raise ValueError("evidence_changed")
+    owner = authority(
+        locator.source.provider, field, permitted, record, True, selector
+    )
+    # A fork or replay copy of an owner line has no prompt event of its own.
+    if owner == "direct_owner" and not indexed_kind(
+        conn, source["id"], locator.line, locator.line_sha256, "prompt"
+    ):
+        owner = "untrusted"
     return EvidenceRecord(
         id=f"E_{uuid4().hex}",
         provider=locator.source.provider,
@@ -381,9 +415,7 @@ def build_record(
             canonical_json(selector).encode()
         ).hexdigest(),
         evidence_type=field.evidence_type,
-        authority=authority(
-            locator.source.provider, field, permitted, record, True, selector
-        ),
+        authority=owner,
         scope=scope,
         excerpt=excerpt,
         state="live",
