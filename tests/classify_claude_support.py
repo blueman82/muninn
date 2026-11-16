@@ -48,6 +48,9 @@ def claude_rec(
     }
     if rtype == "user":
         record["promptId"] = "p1"
+        # Claude Code labels a message the person typed; pass origin=None
+        # for a record without that label.
+        record["origin"] = {"kind": "human"}
     else:
         record.update(requestId="req-1", apiBlockIndex=0, effort="high")
         message.update(
@@ -61,6 +64,8 @@ def claude_rec(
     if sidechain:
         record["agentId"] = "a1"
     record.update(extra)
+    if record.get("origin", "") is None:
+        del record["origin"]
     return record
 
 

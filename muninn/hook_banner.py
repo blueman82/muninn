@@ -70,23 +70,28 @@ def banner(head: str, items: Sequence[Item], footer: str | None) -> list[str]:
 def more_line(count: int, page: int, flag: str) -> str:
     """Point to the next page of memories."""
     return (
-        f"{BAR} {count} more memories: muninn know context --page {page}"
-        f"{flag}"
+        f"{BAR} {count} more memories. Before you write code, run: muninn"
+        f" know context --page {page}{flag}"
     )
 
 
 def paginate(
-    items: Sequence[Item],
+    count: int,
+    get: Callable[[int], Item],
     fits: Callable[[list[Item], int], bool],
     too_long: Callable[[Item], Item],
+    stop_after: int | None = None,
 ) -> list[list[Item]]:
     """Split memories into consecutive pages, each one once.
 
     Args:
-        items: All eligible memories in their fixed order.
+        count: Number of eligible memories in their fixed order.
+        get: The shown item at a position; called in order, only as far as
+            the pages need, so its lookups can be lazy.
         fits: Whether a page with these items, and this many left after
             it, fits its byte limit.
         too_long: The look-up item for a memory larger than a page.
+        stop_after: Build at most this many pages, or all of them.
 
     Returns:
         The pages in order. A page takes items until the next one does not
@@ -95,15 +100,13 @@ def paginate(
     """
     pages: list[list[Item]] = []
     at = 0
-    while at < len(items):
+    while at < count and (stop_after is None or len(pages) < stop_after):
         page: list[Item] = []
-        while at < len(items) and fits(
-            [*page, items[at]], len(items) - at - 1
-        ):
-            page.append(items[at])
+        while at < count and fits([*page, get(at)], count - at - 1):
+            page.append(get(at))
             at += 1
         if not page:
-            page = [too_long(items[at])]
+            page = [too_long(get(at))]
             at += 1
         pages.append(page)
     return pages

@@ -6,8 +6,9 @@ import json
 import re
 import time
 import unittest
+from unittest import mock
 
-from muninn import hook, hook_frame, knowledge_push
+from muninn import hook, hook_start, knowledge_push, knowledge_write
 from muninn.hook_banner import Item, banner
 from muninn.hook_frame import CLOSE, OPEN, USAGE
 from muninn.knowledge_models import KnowledgeContext
@@ -16,7 +17,9 @@ from tests.test_cli_learning import CliLearningCase
 
 CODE = re.compile(r"^▓ (\d+): (K_[0-9a-f]{32})$", re.M)
 MORE = re.compile(
-    r"^▓ (\d+) more memories: muninn know context --page (\d+)", re.M
+    r"^▓ (\d+) more memories\. Before you write code, run: muninn know"
+    r" context --page (\d+)",
+    re.M,
 )
 
 
@@ -78,9 +81,12 @@ class PageTests(HookCase):
                 seen: list[str] = []
                 number = 1
                 while True:
-                    page = hook_frame.render_page(
+                    page = hook_start.render_page(
                         context, "repo", number, limit=limit, flag=flag
                     )
+                    self.assertTrue(page.startswith(OPEN))
+                    self.assertTrue(page.endswith(CLOSE))
+                    self.assertLessEqual(len(page.encode()), limit)
                     codes = [m[2] for m in CODE.finditer(page)]
                     seen += codes
                     more = MORE.search(page)
@@ -100,7 +106,7 @@ class PageTests(HookCase):
                     f"▓ MUNINN MEMORY · repo · {len(first)} of 12", start
                 )
                 with self.assertRaisesRegex(ValueError, "page_unavailable"):
-                    hook_frame.render_page(
+                    hook_start.render_page(
                         context, "repo", number + 1, limit=limit
                     )
 
@@ -108,7 +114,7 @@ class PageTests(HookCase):
         context = self.everything()
         sizes = [
             len(
-                hook_frame.start_pages(context, "repo", limit, "")[0],
+                hook_start.start_pages(context, "repo", limit, "")[0],
             )
             for limit in (hook.BLOCK_LIMIT, hook.CODEX_BLOCK_LIMIT)
         ]
@@ -171,7 +177,7 @@ class OrderTests(HookCase):
         seen: list[str] = []
         for number in range(1, 20):
             try:
-                page = hook_frame.render_page(context, "repo", number)
+                page = hook_start.render_page(context, "repo", number)
             except ValueError:
                 break
             seen += [m[2] for m in CODE.finditer(page)]
@@ -179,3 +185,81 @@ class OrderTests(HookCase):
             seen,
             [preference, decision, constraint, *reversed(facts)],
         )
+
+
+class PageLookupTests(HookCase):
+    """Show only as many notes as page 1 needs."""
+
+    def test_proof_lookups_stop_after_page_1(self) -> None:
+        for i in range(12):
+            self.add(
+                content=f"Memory {i}: " + "detail " * 60, created_at=20.0 + i
+            )
+        with mock.patch(
+            "muninn.hook.proof_view", wraps=hook.proof_view
+        ) as shown:
+            text = self.body(self.start_hook())
+        packed = len(CODE.findall(text))
+        self.assertTrue(0 < packed < 12)
+        self.assertEqual(shown.call_count, packed + 1)
+
+
+class PageCliManyTests(CliLearningCase):
+    """Print several pages through the CLI for each provider."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        notes = [
+            self.note(content=f"Fact {i}: " + "detail " * 60)
+            for i in range(10)
+        ]
+        # The oldest fact, so it lands on a later page.
+        notes[0] = self.note(content="Use \x1b[31mred\x1b[0m " * 3)
+        notes.append(self.note(kind="decision", content="Model decision."))
+        request = self.row(
+            "SELECT * FROM review_request WHERE id=?",
+            (self.context.request_id,),
+        )
+        # Stored through the checked writer, as the commit would.
+        for at, change in enumerate(self.result(notes).changes):
+            knowledge_write.apply_change(self.conn, change, request, 13.0 + at)
+
+    def page(self, number: int, *flag: str) -> str:
+        """Return one printed page."""
+        with self.assertRaises(json.JSONDecodeError):
+            self.call("know", "context", "--page", str(number), *flag)
+        return self.last_stdout
+
+    def test_pages_per_provider_and_refusals(self) -> None:
+        for provider, flag in (
+            ("codex", " --provider codex"),
+            ("cursor", ""),
+        ):
+            with self.subTest(provider=provider):
+                first = self.page(1, "--provider", provider)
+                self.assertTrue(first.startswith(OPEN))
+                # The decision comes first and shows its owner proof.
+                self.assertIn("1. [owner] Use Python for this project.", first)
+                self.assertNotIn("Model decision.", first)
+                self.assertIn(f"--page 2{flag}\n", first)
+                second = self.page(2, "--provider", provider)
+                self.assertTrue(second.startswith(OPEN))
+                self.assertIn("· page 2", second)
+                pages = [first, second]
+                while "more memories" in pages[-1]:
+                    pages.append(
+                        self.page(len(pages) + 1, "--provider", provider)
+                    )
+                (red,) = [
+                    n for n, text in enumerate(pages, 1) if "[31mred" in text
+                ]
+                self.assertGreaterEqual(red, 2)
+                self.assertNotIn("\x1b", "".join(pages))
+        for argv, error in (
+            (("--page", "0"), "page_unavailable"),
+            (("--page", "1", "--task", "t"), "page_task_unsupported"),
+            (("--provider", "codex"), "provider_needs_page"),
+        ):
+            with self.subTest(argv=argv):
+                code, out = self.call("know", "context", *argv)
+                self.assertEqual((code, out["error"]), (2, error))

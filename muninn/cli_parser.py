@@ -223,8 +223,7 @@ def _add_knowledge(cmd: _Commands) -> None:
     p.add_argument(
         "--provider",
         choices=("claude", "codex", "cursor"),
-        default="claude",
-        help="session-start byte limit that sets the pages",
+        help="with --page: the session-start byte limit (default claude)",
     )
     p = know.add("propose")
     p.add_argument("--input", required=True)

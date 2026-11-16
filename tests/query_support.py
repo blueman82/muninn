@@ -138,7 +138,7 @@ class QueryCase(unittest.TestCase):
             allow_global=True,
             extra_windows=(),
             # A fact keeps its model text in previews; a decision would
-            # show its owner proof instead (ADR 0022).
+            # show its owner proof instead.
             **({"kind": "fact"} | updates),
         )
 

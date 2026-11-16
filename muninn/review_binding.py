@@ -45,8 +45,9 @@ def owner_supported(
             field directly before an owner record, or None to refuse pairs.
 
     Returns:
-        Whether the claim cites a full ``direct_owner`` message, and each
-        cited assistant reply is a full field directly before one of them.
+        Whether the claim cites a full ``direct_owner`` message, no other
+        user text, and each cited assistant reply is a full field directly
+        before one of the owner messages.
         The model's claim text is not compared with the proof.
     """
     cited = [records[r] for r in refs]
@@ -58,11 +59,21 @@ def owner_supported(
         and full_field(r)
     ]
     replies = [r for r in cited if r.evidence_type == "assistant_report"]
-    return bool(owners) and all(
-        adjacent is not None
-        and full_field(reply)
-        and any(adjacent(reply, owner) for owner in owners)
-        for reply in replies
+    # Any other cited user text, such as a hook line, would join the proof.
+    others = [
+        r
+        for r in cited
+        if r.evidence_type == "owner_statement" and r not in owners
+    ]
+    return (
+        bool(owners)
+        and not others
+        and all(
+            adjacent is not None
+            and full_field(reply)
+            and any(adjacent(reply, owner) for owner in owners)
+            for reply in replies
+        )
     )
 
 

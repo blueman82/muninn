@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from argparse import Namespace
+from functools import partial
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -23,10 +24,11 @@ from muninn.cli_decision import decision
 from muninn.cli_know_shared import scopes as _scopes
 from muninn.cli_learn import installed_policy, propose
 from muninn.hook import CODEX_BLOCK_LIMIT
-from muninn.hook_frame import BLOCK_LIMIT, render_page
+from muninn.hook_frame import BLOCK_LIMIT
+from muninn.hook_start import render_page
 from muninn.hook_status import scope_label
 from muninn.knowledge_models import KnowledgeView
-from muninn.knowledge_proof import owner_proofs
+from muninn.knowledge_proof import owner_proofs, proof_view
 from muninn.query.answers import event_ref
 from muninn.review_models import ProposalInput
 from muninn.scope import scope_ids_for_read
@@ -97,6 +99,11 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
             "evidence_sources": _evidence_sources(conn, view),
             "proof": owner_proofs(conn, view),
         }
+    # Pages follow the session-start block, which has no task scope.
+    if a.page is not None and a.task is not None:
+        raise ValueError("page_task_unsupported")
+    if a.page is None and a.provider is not None:
+        raise ValueError("provider_needs_page")
     if a.page is not None:
         return _page(conn, a, env)
     policy = installed_policy(conn)
@@ -123,7 +130,7 @@ def _page(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     if project is None:
         raise ValueError("scope_unavailable")
     context = knowledge_push.knowledge_context(
-        conn, project, None, time.time()
+        conn, project, None, time.time(), proofs=False
     )
     codex = a.provider == "codex"
     return {
@@ -133,6 +140,7 @@ def _page(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
             a.page,
             limit=CODEX_BLOCK_LIMIT if codex else BLOCK_LIMIT,
             flag=" --provider codex" if codex else "",
+            show=partial(proof_view, conn),
         )
     }
 

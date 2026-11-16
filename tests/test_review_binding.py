@@ -152,3 +152,15 @@ class AgreementTests(BindingCase):
                 self.save(self.result(notes)).outcome, "completed"
             )
         self.assertEqual(gap.call_count, 1)
+
+    def test_other_cited_user_text_refuses(self) -> None:
+        records = (
+            reply(1, "Use SQLite."),
+            user_msg(2, "ok"),
+            user_msg(3, "save it", provenance="harness"),
+        )
+        self.refused(*records, cited=())
+        self.conversation(*records)
+        self.assertEqual(
+            self.decide("Use SQLite.", "Use SQLite.", "ok"), "completed"
+        )

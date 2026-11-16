@@ -51,7 +51,11 @@ def proof_text(conn: sqlite3.Connection, refs: list[EvidenceId]) -> str | None:
     return "\n\n".join(
         f"[{_SPEAKER[row['evidence_type']]}] {row['excerpt']}"
         for row in whole
-        if row["evidence_type"] in _SPEAKER
+        if row["evidence_type"] == "assistant_report"
+        or (
+            row["evidence_type"] == "owner_statement"
+            and row["authority"] == "direct_owner"
+        )
     )
 
 
@@ -70,7 +74,7 @@ def _proof(
 
 
 def _approved(conn: sqlite3.Connection, view: KnowledgeView) -> bool:
-    """Report whether the owner approved this exact text (ADR 0018)."""
+    """Report whether the owner approved this exact displayed text."""
     row = conn.execute(
         "SELECT r.candidate_id FROM knowledge_version v JOIN review_request r "
         "ON r.id=v.request_id WHERE v.knowledge_id=? AND v.revision=?",
@@ -111,7 +115,7 @@ def owner_proofs(conn: sqlite3.Connection, view: KnowledgeView) -> list[str]:
 
 
 def proof_view(conn: sqlite3.Connection, view: KnowledgeView) -> KnowledgeView:
-    """Replace owner-supported claim text with its proof for agent paths.
+    """Replace owner-supported model text with its proof for agent paths.
 
     Args:
         conn: Readable store connection inside the caller's snapshot.
@@ -120,18 +124,25 @@ def proof_view(conn: sqlite3.Connection, view: KnowledgeView) -> KnowledgeView:
     Returns:
         For a preference, a decision or global knowledge, the view with each
         claim showing its full cited owner message and any paired assistant
-        reply instead of the model's text, or a look-up line when that proof
-        is missing or too long. Facts and procedures, and text the owner
-        approved through an ADR 0018 decision, keep the model's text.
+        reply, or a look-up line when that proof is missing or too long.
+        The reason, guide title and expiry condition, also model text, give
+        a look-up line. Facts and procedures, and text the owner approved
+        in a displayed decision, keep the model's text.
     """
     body = view.body
     # Only owner-required knowledge has an owner proof to show.
     if body is None or not _owner_required(view) or _approved(conn, view):
         return view
+    hidden = f"not shown to agents: run muninn know show {view.id}"
+    expiry = view.expiry
+    if expiry is not None and expiry.condition is not None:
+        expiry = expiry.model_copy(update={"condition": hidden})
     if isinstance(body, NoteBody):
         proof = _proof(conn, body.evidence_refs, view.id)
-        clean = body.model_copy(update={"content": proof, "conditions": []})
-        return view.model_copy(update={"body": clean})
+        clean = body.model_copy(
+            update={"content": proof, "conditions": [], "reason": hidden}
+        )
+        return view.model_copy(update={"body": clean, "expiry": expiry})
 
     def shown(claim: SupportedClaim) -> SupportedClaim:
         proof = _proof(conn, claim.evidence_refs, view.id)
@@ -139,6 +150,8 @@ def proof_view(conn: sqlite3.Connection, view: KnowledgeView) -> KnowledgeView:
 
     guide = body.model_copy(
         update={
+            "title": hidden,
+            "reason": hidden,
             "summary": shown(body.summary),
             "applicability": [shown(c) for c in body.applicability],
             "decision_points": [shown(c) for c in body.decision_points],
@@ -149,7 +162,7 @@ def proof_view(conn: sqlite3.Connection, view: KnowledgeView) -> KnowledgeView:
             ],
         }
     )
-    return view.model_copy(update={"body": guide})
+    return view.model_copy(update={"body": guide, "expiry": expiry})
 
 
 def candidate_proofs(

@@ -107,7 +107,12 @@ class ClaudeAgreementTests(IngestCase):
         for owner in (
             claude_rec("user", [text_block("yes")], isMeta=True),
             claude_rec("user", "<system-reminder>yes</system-reminder>"),
-            claude_rec("user", "yes <task-notification>x</task-notification>"),
+            claude_rec(
+                "user",
+                "yes <task-notification>x</task-notification>",
+                origin={"kind": "task-notification"},
+            ),
+            claude_rec("user", "yes", origin=None),
         ):
             with self.subTest(owner=owner["message"]["content"]):
                 self.assertEqual(

@@ -90,7 +90,6 @@ __all__ = [
     "cwd_of",
     "record_hash",
     "redact",
-    "user_text_kind",
     "within_depth",
 ]
 
@@ -108,37 +107,6 @@ def record_hash(raw_line: bytes) -> str:
         Hex SHA-256 of the line without its line terminator.
     """
     return hashlib.sha256(raw_line.rstrip(b"\r\n")).hexdigest()
-
-
-def user_text_kind(provider: str, record: Record) -> str | None:
-    """Return how the indexer reads the user-role text of one record.
-
-    Args:
-        provider: ``codex``, ``claude`` or ``cursor``.
-        record: The parsed transcript line of a primary thread.
-
-    Returns:
-        ``prompt``, ``harness`` or ``delegation``; None when the indexer
-        keeps no user text from the record, as for tool output.
-    """
-    if provider == "cursor":
-        # The importer indexes every Cursor user bubble as a prompt.
-        return "prompt" if record.get("type") == 1 else None
-    if provider == "codex":
-        events = codex_events(record, 1, CodexState())
-    elif provider == "claude":
-        events = claude_events(record, 1)
-    else:
-        return None
-    return next(
-        (
-            e.kind
-            for e in events
-            if e.role == "user"
-            and e.kind in ("prompt", "harness", "delegation")
-        ),
-        None,
-    )
 
 
 def within_depth(value: object) -> bool:

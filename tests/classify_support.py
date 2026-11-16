@@ -24,7 +24,8 @@ GHP = "ghp_" + "Z9y8X7w6" * 3
 AKIA = "AKIA" + "QWERTYUIOPASDFGH"
 PEM_BODY = "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu"
 
-PASSTHROUGH = {"internal_chat_message_metadata_passthrough": {"turn_id": "t1"}}
+_META = "internal_chat_message_metadata_passthrough"
+PASSTHROUGH = {_META: {"turn_id": "t1"}}
 REPORT = "Message Type: FINAL_ANSWER\nPayload:\nsynthetic report"
 TASK = "Message Type: NEW_TASK\nTask name: t1\nPayload:\n"
 EXEC_ARGS = '{"cmd":"make test","workdir":"/work/repo"}'
@@ -136,7 +137,11 @@ def item(payload: Record, ordinal: int, kind: str = "response_item") -> Record:
 
 
 def user_msg(
-    ordinal: int, *texts: str, role: str = "user", images: int = 0
+    ordinal: int,
+    *texts: str,
+    role: str = "user",
+    images: int = 0,
+    provenance: str | None = "user",
 ) -> Record:
     """Build a Codex message record whose blocks are ``texts``.
 
@@ -145,6 +150,8 @@ def user_msg(
         *texts: One ``input_text`` block per text.
         role: Message role.
         images: Number of image blocks (with placeholders) to prepend.
+        provenance: Codex's own label for each user content item, as real
+            rollouts carry it, or None for a record without labels.
 
     Returns:
         The record.
@@ -157,7 +164,12 @@ def user_msg(
             {"type": "input_text", "text": "</image>"},
         ]
     payload = {"type": "message", "id": "m", "role": role, "content": blocks}
-    return item(dict(payload, **PASSTHROUGH), ordinal)
+    passthrough: Record = dict(PASSTHROUGH[_META])
+    if role == "user" and provenance is not None:
+        passthrough["content_item_metadata"] = [
+            {"provenance": {"type": provenance}} for _ in blocks
+        ]
+    return item(payload | {_META: passthrough}, ordinal)
 
 
 def reply(ordinal: int, text: str) -> Record:

@@ -46,8 +46,6 @@ HARNESS_TAGS = (
     "<user_shell_command>",
     "<skill",
     "<task",
-    "<user_action>",
-    "<send_user_message_question_reply>",
 )
 # Attached images lead a prompt as <image> tags; they are not prompt text.
 _IMAGES = re.compile(r"\A\s*(?:<image\b[^>]*>\s*(?:</image>\s*)?)+")

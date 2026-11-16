@@ -97,8 +97,8 @@ class SessionStartTests(HookCase):
         self.assertEqual(shown, list(reversed(numbers))[: len(shown)])
         self.assertTrue(0 < len(shown) < len(numbers))
         self.assertIn(
-            f"▓ {len(numbers) - len(shown)} more memories:"
-            " muninn know context --page 2",
+            f"▓ {len(numbers) - len(shown)} more memories. Before you write"
+            " code, run: muninn know context --page 2",
             text,
         )
         self.assertIn(
@@ -163,9 +163,7 @@ class SessionStartLimitTests(HookCase):
                 )
                 self.assertEqual(shown[provider][:1], numbers[-1:])
                 flag = " --provider codex" if provider == "codex" else ""
-                self.assertIn(
-                    f"more memories: muninn know context --page 2{flag}", text
-                )
+                self.assertIn(f"know context --page 2{flag}\n", text)
         self.assertGreater(len(texts["claude"].encode()), 2800)
         self.assertLess(len(shown["codex"]), len(shown["claude"]))
         self.assertGreater(len(shown["codex"]), 0)

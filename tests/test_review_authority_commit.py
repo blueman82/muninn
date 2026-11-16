@@ -16,9 +16,14 @@ class OwnerCommitCase(CommitCase):
     def setUp(self) -> None:
         RequestCase.setUp(self)
 
-    def prepare(self, text: str, passage: str | None = None) -> None:
+    def prepare(
+        self,
+        text: str,
+        passage: str | None = None,
+        provenance: str | None = "user",
+    ) -> None:
         """Select exact user speech before claiming a real review attempt."""
-        self.records[1] = user_msg(1, text)
+        self.records[1] = user_msg(1, text, provenance=provenance)
         self.path = self.write(rollout(), self.records)
         self.run_ingest(full=True)
         window = self.window(2, 2)
@@ -71,12 +76,18 @@ class ReviewAuthorityCommitTests(OwnerCommitCase):
                 finally:
                     case.doCleanups()
 
-    def check(self, text: str, passage: str | None, saved: bool) -> None:
+    def check(
+        self,
+        text: str,
+        passage: str | None,
+        saved: bool,
+        provenance: str | None = "user",
+    ) -> None:
         """Commit a preference on a fresh case and check the outcome."""
         case = OwnerCommitCase()
         case.setUp()
         try:
-            case.prepare(text, passage)
+            case.prepare(text, passage, provenance)
             result = case.result(
                 [
                     case.note(),
@@ -119,14 +130,15 @@ class ReviewAuthorityCommitTests(OwnerCommitCase):
                 self.check(text, passage, saved=False)
 
     def test_generated_text_rejects_the_whole_batch(self) -> None:
-        for text in (
-            "Use Rust.\n<environment_context>x</environment_context>",
-            "<user_action>Use Rust.</user_action>",
-            "<note>Use Rust.</note>",
-            "Use Rust. <muninn-recall>x</muninn-recall>",
+        # Codex's own label decides; the words do not.
+        for text, provenance in (
+            ("<user_action>Use Rust.</user_action>", "harness"),
+            ("Use Rust.", "agents_md"),
+            ("Use Rust.", None),
+            ("Use Rust. <muninn-recall>x</muninn-recall>", "user"),
         ):
-            with self.subTest(text=text):
-                self.check(text, None, saved=False)
+            with self.subTest(text=text, provenance=provenance):
+                self.check(text, None, saved=False, provenance=provenance)
 
     def test_assistant_speculation_cannot_support_a_preference(self) -> None:
         self.records[1] = reply(1, "I prefer Python for this project.")

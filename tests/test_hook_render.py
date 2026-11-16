@@ -135,7 +135,11 @@ class RenderTests(HookCase):
         )
         self.assertLessEqual(len(block.encode()), hook.CODEX_BLOCK_LIMIT)
         self.assertGreaterEqual(block.count("\n▓ 1: K_"), 1)
-        self.assertIn("more memories: muninn know context --page 2", block)
+        self.assertIn(
+            "more memories. Before you write code, run: muninn know"
+            " context --page 2",
+            block,
+        )
 
     def test_clean_cuts_to_the_limit_and_keeps_shorter_text(self) -> None:
         self.assertEqual(hook_frame.clean("x" * 300, 300), "x" * 300)
@@ -174,7 +178,11 @@ class RenderTests(HookCase):
         # Too small for a memory: its look-up line stands in for it.
         self.assertIn("▓ MUNINN MEMORY · repo · 1 of 9", small)
         self.assertIn("1. memory too long: run muninn know show", small)
-        self.assertIn("▓ 8 more memories: muninn know context --page 2", small)
+        self.assertIn(
+            "▓ 8 more memories. Before you write code, run: muninn know"
+            " context --page 2",
+            small,
+        )
 
     def test_first_record_reads_only_what_it_may(self) -> None:
         folder = self.tmp / "folder"

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import knowledge_push
+from muninn import hook, knowledge_push, knowledge_read, query
 from muninn.decision_models import DecisionIntent, VerifiedDecision
 from muninn.decision_proof import verify_decision
 from muninn.decision_write import submit_intent
@@ -118,3 +119,30 @@ class DecisionAdjacencyTests(DecisionCase):
         body = notes[0].body
         assert isinstance(body, NoteBody)
         self.assertEqual(body.content, "Use Python.")
+        found = knowledge_read.search_knowledge(
+            self.conn, "Python", self.scope
+        )
+        assert isinstance(found[0].body, NoteBody)
+        self.assertEqual(found[0].body.content, "Use Python.")
+        assert self.scope.project_id is not None
+        previews = query.search(
+            self.conn,
+            "Python",
+            cwd=self.scope.project_id,
+            env={"MUNINN_HOME": str(self.home)},
+        )
+        self.assertIn("Use Python.", json.dumps(previews["knowledge"]))
+        start = hook.session_start(
+            {
+                "hook_event_name": "SessionStart",
+                "cwd": self.scope.project_id,
+                "session_id": "s",
+                "source": "startup",
+            },
+            "claude",
+            {"MUNINN_HOME": str(self.home)},
+        )
+        self.assertIn(
+            "1. Use Python.",
+            json.dumps(start, ensure_ascii=False).replace("\\n", "\n"),
+        )

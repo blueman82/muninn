@@ -203,7 +203,8 @@ def validate_batch(
         defer_candidate_failure: Keep removable refusals for a final scan.
         allow_missing_owner: Stage a candidate before any owner decision.
         owner: Agreement gap reader, and the owner reply of a verified
-            ADR 0018 decision being applied, which proves the claims it backs.
+            owner-approved decision being applied, which proves the claims it
+            backs.
 
     Raises:
         CommitRejectedError: If evidence, targets or owner support fail.

@@ -31,7 +31,12 @@ def _size(context: KnowledgeContext) -> int:
 
 
 def knowledge_context(
-    conn: sqlite3.Connection, scope: Scope, max_bytes: int | None, now: float
+    conn: sqlite3.Connection,
+    scope: Scope,
+    max_bytes: int | None,
+    now: float,
+    *,
+    proofs: bool = True,
 ) -> KnowledgeContext:
     """Return current supported notes and guide labels within a byte cap.
 
@@ -41,6 +46,8 @@ def knowledge_context(
         max_bytes: Positive cap on the entire canonical UTF-8 envelope, or
             None for every eligible item, as session-start pages need.
         now: Explicit finite nonnegative expiry evaluation time.
+        proofs: Show notes as agents see them. False leaves notes as
+            stored, for a caller that shows only the notes it uses.
 
     Returns:
         Complete eligible notes and compact guide IDs/revisions. Oversized
@@ -71,13 +78,19 @@ def knowledge_context(
                 continue
             notes, guides = list(context.notes), list(context.guides)
             if isinstance(view.body, NoteBody):
-                notes.append(proof_view(conn, view))
+                notes.append(proof_view(conn, view) if proofs else view)
             elif isinstance(view.body, GuideBody):
+                # A guide title is model text too; agents get it hidden.
+                shown = proof_view(conn, view).body
                 guides.append(
                     GuideIndex(
                         id=view.id,
                         revision=view.revision,
-                        title=view.body.title,
+                        title=(
+                            shown.title
+                            if isinstance(shown, GuideBody)
+                            else view.body.title
+                        ),
                         scope=view.body.scope,
                     )
                 )
