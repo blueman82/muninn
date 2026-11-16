@@ -124,9 +124,10 @@ Maintainers must examine unclear defects and exhausted source-read allowances.
 `evidence_limit` means source verification exceeded a byte, record, or database-work limit.
 Do not retry that `request` unchanged.
 Tell the maintainer to examine its source-read budget.
-Records before the window start do not count against these limits.
+For JSONL sources, records before the window start do not count against these limits.
+Cursor sources count all records from the first record.
 
-The operation limit includes source traversal, not only selected text.
+The operation limit includes traversal of the counted records, not only selected text.
 Capture, catch-up and `attempt` logs keep this code without transcript text.
 
 Older capture logs can contain only `unavailable`.

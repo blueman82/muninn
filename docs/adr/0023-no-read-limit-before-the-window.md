@@ -30,13 +30,12 @@ The model input byte limit and the other budgets do not change.
 
 The window start is the first line of the evidence window.
 A boundary check that reads only the last line still charges each line from the window start.
-History confirmation hashes each line from line 1, but it charges each line from the window start.
+History confirmation hashes each line from line 1 as it reads it, but it charges each line from the window start.
 
 The Cursor reader is unchanged.
 Its walk from the first bubble is also limited by database work, and it reads all keys of the conversation.
 
-The unmerged ADR 0021 (branch `fix/source-read-budget-messages-20261114`, "Explicit source-read limits") sets limits on this read.
-This record replaces ADR 0021 on that point.
+Before this decision, the read budget (policy `max_input_bytes`), the record limit and the scan byte limit counted each line from line 1.
 
 ## Consequences
 
