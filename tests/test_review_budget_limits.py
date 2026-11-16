@@ -328,7 +328,7 @@ class ReviewProgressEdgeTests(RequestCase):
         for number in range(3):
             with self.subTest(number=number):
                 if number:
-                    self.append(self.path, [user_msg(500 + number, "refused")])
+                    self.append(self.path, [user_msg(number + 9, "x" * 9000)])
                     self.append(fresh, [user_msg(number + 1, "independent")])
                     self.run_ingest()
                 previous_log = log.read_bytes() if log.exists() else b""

@@ -252,9 +252,7 @@ def validated_source(
             )
     else:
         source = _jsonl_source(conn, provider, data)
-        raw = originals(conn, source, 1, 1, budget.bytes_left, budget=budget)[
-            0
-        ][1]
+        raw = originals(source, 1, 1, budget.bytes_left, budget=budget)[0][1]
     if classify.record_hash(raw) != source["first_line_sha256"]:
         raise ValueError("evidence_changed")
     first = as_payload(json.loads(raw))

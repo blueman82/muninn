@@ -82,13 +82,14 @@ class ConsumerReadBudgetTests(RequestCase):
         self.assertTrue(budgets)
         self.assertTrue(all(budget is budgets[0] for budget in budgets))
         budget = budgets[0]
+        # The window starts at line 2, so line 1 is not charged.
         self.assertEqual(
             budget.bytes_left,
             self.policy.max_input_bytes
-            - len(self.path.read_bytes())
+            - (len(self.path.read_bytes()) - len(line(self.records[0])))
             - selected.call_count * len(line(self.records[1])),
         )
-        self.assertEqual(budget.records_left, 4093 - selected.call_count)
+        self.assertEqual(budget.records_left, 4094 - selected.call_count)
         return budget
 
     def test_each_request_root_shares_reads_and_owns_a_fresh_grant(
@@ -159,7 +160,12 @@ class ConsumerReadBudgetTests(RequestCase):
     def test_claim_and_retry_refuse_combined_bytes_then_accept_exact_fit(
         self,
     ) -> None:
-        exact = len(self.path.read_bytes()) + len(line(self.records[1]))
+        # The window starts at line 2, so line 1 is not charged.
+        exact = (
+            len(self.path.read_bytes())
+            - len(line(self.records[0]))
+            + len(line(self.records[1]))
+        )
         for cap in (exact - 1, exact):
             self.cap(cap)
             request = self.enqueue()
@@ -215,7 +221,8 @@ class ConsumerReadBudgetTests(RequestCase):
     def test_supplied_enqueue_share_counts_failed_and_repeated_reads(
         self,
     ) -> None:
-        size = len(self.path.read_bytes())
+        # The window starts at line 2, so line 1 is not charged.
+        size = len(self.path.read_bytes()) - len(line(self.records[0]))
         budget = ReadBudget(size * 3)
 
         def enqueue(window_hash: str) -> RequestView:
@@ -240,7 +247,7 @@ class ConsumerReadBudgetTests(RequestCase):
         self.assertEqual(enqueue(self.window().boundary_hash).id, first.id)
         with self.assertRaisesRegex(ValueError, "evidence_limit"):
             enqueue(self.window().boundary_hash)
-        self.assertEqual((budget.bytes_left, budget.records_left), (0, 4087))
+        self.assertEqual((budget.bytes_left, budget.records_left), (0, 4090))
 
     def test_reconciliation_all_windows_share_one_source_budget(self) -> None:
         self.cap(3 * len(self.path.read_bytes()))
@@ -256,7 +263,11 @@ class ConsumerReadBudgetTests(RequestCase):
         grants = [call.kwargs["budget"] for call in prefix.call_args_list]
         self.assertEqual(len(grants), 2)
         self.assertIs(grants[0], grants[1])
-        self.assertEqual(grants[0].bytes_left, len(self.path.read_bytes()))
+        # The second window starts at line 3, so only line 3 is charged.
+        self.assertEqual(
+            grants[0].bytes_left,
+            2 * len(self.path.read_bytes()) - len(line(self.records[-1])),
+        )
         self.assertEqual(
             self.conn.execute(
                 "SELECT activation_line,completed_line FROM review_source"
@@ -266,7 +277,8 @@ class ConsumerReadBudgetTests(RequestCase):
 
     def test_claim_aggregates_record_units_and_accepts_exact_fit(self) -> None:
         originals = list(self.records)
-        for count in (4095, 4096):
+        # Line 1 is before the window and is not charged.
+        for count in (4096, 4097):
             self.records = (
                 originals[:2]
                 + [{"type": "noop"}] * (count - 3)
@@ -287,7 +299,7 @@ class ConsumerReadBudgetTests(RequestCase):
                     review_evidence, "reread", wraps=review_evidence.reread
                 ) as selected,
             ):
-                if count == 4095:
+                if count == 4096:
                     self.transaction(
                         lambda r=request: review_requests.claim_attempt(
                             self.conn, r.id, 1, 12.0

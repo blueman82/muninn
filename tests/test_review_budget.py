@@ -406,21 +406,15 @@ class ReviewAdmissionEdgeTests(RequestCase):
                 )
             )
 
-    def test_boundary_prefix_exceeding_policy_bytes_is_not_admitted(
+    def test_boundary_prefix_exceeding_policy_bytes_is_admitted(
         self,
     ) -> None:
+        # Lines 1 to 3 exceed 1000 bytes; the 2 to 3 window does not.
         self.policy = self.policy.model_copy(update={"max_input_bytes": 1000})
-        with self.assertRaisesRegex(ValueError, "evidence_limit"):
-            self.enqueue()
+        self.enqueue()
         self.assertEqual(
             self.conn.execute(
                 "SELECT count(*) FROM review_request"
             ).fetchone()[0],
-            0,
-        )
-        self.assertEqual(
-            self.conn.execute("SELECT count(*) FROM review_source").fetchone()[
-                0
-            ],
-            0,
+            1,
         )

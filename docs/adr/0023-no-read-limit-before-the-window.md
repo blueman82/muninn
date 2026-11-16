@@ -1,0 +1,49 @@
+# 0023: No read limit before the window
+
+## Status
+
+Accepted by the owner, 2026-11-16.
+
+## Context
+
+Muninn reads a JSONL session file from line 1 before each learning task.
+Index offsets cannot prove current line numbers after a provider rewrites the start of a file.
+Each line before the window counted against three limits:
+the task read budget (policy `max_input_bytes`, 1 MiB), 4,096 records, and 32 MiB of scanned bytes.
+
+Measurements on the owner's live store (read-only):
+
+- The call log has 2,859 admission refusals with `evidence_limit`.
+- No learning task covers a line after approximately line 413.
+- 1,479 of 3,794 sessions are larger than 1 MiB.
+- 54 sessions have more than 4,096 lines. 12 sessions are larger than 32 MiB.
+- A full read of an 80 MiB, 34,086-line file with a SHA-256 for each line took 0.16 s.
+
+## Decision
+
+Lines before the window start do not count against the byte budget, the record limit or the scan byte limit.
+Muninn still reads them from line 1 to prove line numbers.
+Each line before the window must still be a complete record of at most 8 MiB.
+
+Lines inside the window count against the byte and record allowances as before.
+The model input byte limit and the other budgets do not change.
+
+The window start is the first line of the evidence window.
+A boundary check that reads only the last line still charges each line from the window start.
+History confirmation hashes each line from line 1, but it charges each line from the window start.
+
+The Cursor reader is unchanged.
+Its walk from the first bubble is also limited by database work, and it reads all keys of the conversation.
+
+The unmerged ADR 0021 (branch `fix/source-read-budget-messages-20261114`, "Explicit source-read limits") sets limits on this read.
+This record replaces ADR 0021 on that point.
+
+## Consequences
+
+Each task reads the prefix again.
+The measured worst case is approximately 0.25 s for each task.
+For the largest session, the total is approximately 4 minutes over its life (inferred).
+
+Long sessions can be learned at any line.
+A window must still fit its own allowances.
+A provider file with a line before the window that is larger than 8 MiB or incomplete stays unavailable.

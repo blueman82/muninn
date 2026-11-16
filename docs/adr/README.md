@@ -25,3 +25,4 @@ Each `exception` or deferred decision has an explicit status.
 | [0018](0018-conversational-memory-decisions.md) | Connect owner decisions to unchanged memory candidates. Accepted 2026-10-29 and included in private source. New `review`, last full gate, publication, installation, and live verification pending. |
 | [0019](0019-current-codex-interface.md) | Follow the current trusted Codex interface with one initial checked rule. Compatible versions keep the same grant. Activation and live `acceptance` stay different. |
 | [0020](0020-owner-unknown-call-acknowledgement.md) | Accept one named historical uncertainty while preserving its state, charge and generation fence. |
+| [0023](0023-no-read-limit-before-the-window.md) | Lines before the window start do not count against the source read limits. Accepted 2026-11-16. |

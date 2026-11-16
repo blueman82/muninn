@@ -395,7 +395,7 @@ class ClaimRefusalTests(RequestCase):
                 "UPDATE review_control SET policy_json=?,policy_digest=?",
                 (canonical_json(self.policy), self.digest(self.policy)),
             )
-            self.request = self.enqueue()
+            self.request = self.enqueue(self.window(1, 3))
             self.conn.executemany(
                 "INSERT INTO review_input VALUES(?,?)",
                 [(self.request.id, r.id) for r in records],

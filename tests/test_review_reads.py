@@ -18,7 +18,7 @@ from muninn import (
 from muninn.knowledge_models import Scope
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext
-from tests.ingest_support import rollout
+from tests.ingest_support import line, rollout
 from tests.test_classify import user_msg
 from tests.test_review_scope import ScopeCommitCase
 
@@ -272,9 +272,13 @@ class ReviewReadTests(ScopeCommitCase):
         ]
         self.assertEqual(len(accounts), 2)
         self.assertIs(accounts[0], accounts[1])
+        # The window read charges from line 4 to the end of the file;
+        # support reads add bytes beyond that.
+        window_read = self.path.stat().st_size - sum(
+            len(line(r)) for r in self.records[:3]
+        )
         self.assertLess(
-            accounts[0].bytes_left,
-            self.policy.max_input_bytes - self.path.stat().st_size,
+            accounts[0].bytes_left, self.policy.max_input_bytes - window_read
         )
 
     def test_guide_title_context_retains_transitive_origin_erasure(

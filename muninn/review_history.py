@@ -163,13 +163,14 @@ def _verify(
         )
     }
     content = hashlib.sha256()
+    # Hash from line 1, but charge only from the window start.
     for line, raw, _ in originals(
-        conn,
         source,
         1,
         item.window.through_line,
         policy.max_input_bytes,
         budget=budget,
+        start=item.window.from_line,
     ):
         content.update(line.to_bytes(8, "big"))
         content.update(len(raw).to_bytes(8, "big"))

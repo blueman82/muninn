@@ -369,7 +369,6 @@ class SharedReaderTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "evidence_limit"),
             ):
                 review_originals.originals(
-                    self.case.conn,
                     source,
                     1,
                     window.through_line,
