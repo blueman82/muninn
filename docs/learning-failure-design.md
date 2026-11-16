@@ -14,15 +14,13 @@ A user-message field gets `direct_owner` only when all of these are true:
 
 - The source is an active primary session.
 
-- The indexer reads the message as a `prompt` (`classify.user_text_kind`), not as harness or delegation text.
+- The provider labels the message as typed by a person. Claude needs `origin.kind` `human`; a record without an origin gets no trust. Codex needs provenance type `user` on every content item, with one label for each item. Cursor user bubbles are trusted.
 
 - The provider record has no injection flag (`isMeta`, `isSidechain`, `isCompactSummary`, the channel flag, or `toolUseResult`).
 
 - The message has no tool result.
 
-- The message has no harness tag, Claude harness prefix, ChatGPT reference tag, or Muninn marker (`FLAG_MARKERS`) anywhere.
-
-- The message is not one tagged element that starts with `<name>` and ends with `</name>`.
+- The message has no Muninn marker (`FLAG_MARKERS`) and no ChatGPT reference tag anywhere.
 
 - The indexer kept the line as a `prompt` event. A fork or replay copy has no event of its own.
 

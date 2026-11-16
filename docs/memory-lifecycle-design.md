@@ -700,9 +700,9 @@ Code checks these facts:
 
 Apply the same source and identity checks to refusal and replacement decisions.
 
-Agent statements, CLI `calls`, recalled text, and unverified message wrappers cannot prove approval.
+Agent statements, CLI `calls`, recalled text, and messages without the provider's owner label cannot prove approval.
 Do not use a tool response or copied owner text as checked `original` owner `evidence`.
-Do not remove wrappers to make proof that the source checks cannot supply.
+Do not edit a message to make proof that the source checks cannot supply.
 
 Keep `original` factual `support` different from subsequent `evidence` of the owner's decision.
 Approval authorizes the displayed change.
@@ -1218,7 +1218,7 @@ They do not claim that all tests are complete without errors.
 13. Displayed content comes from the stored normalized proposal and checked digest.
     An edit makes a new identity and needs new approval after its complete display.
     Previous approval cannot apply to the edited proposal.
-    Unknown replies, agent statements, CLI `calls`, and unverified wrappers cannot prove a decision.
+    Unknown replies, agent statements, CLI `calls`, and messages without the provider's owner label cannot prove a decision.
 
     Checked `original` complete-sentence instructions identify the same proposal.
     The owner need not type JSON, commands, or hashes.

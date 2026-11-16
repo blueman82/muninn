@@ -62,14 +62,13 @@ The agent records approve, reject or edit in `DecisionIntent.action` (verified,
 muninn/decision_models.py:135-153). Code checks: owner reply provenance, full field; the
 display record is the final `assistant_report` directly before it, no permitted field
 between; the display equals `show_candidate` text (verified, decision_proof.py:353-362,
-decision_write.py:178-180); every `D_` id in that message is the intent's `candidate_id`
-or `replacement_id`; one owner reply backs one decision. Remove `decision_words` equality
+decision_write.py:178-180); one owner reply backs one decision. Remove `decision_words` equality
 (decision_proof.py:351, decision_write.py:177) and the "approved" refusal (:344-345).
 Update `owner_instructions` (decision_words.py:19-33) and both `skills/muninn-know/SKILL.md`.
 
 | ADR 0018 reason for the fixed sentence | Kept by |
 |---|---|
-| Wrong proposal (:156, :190) | adjacency + display equals target + no foreign `D_` id |
+| Wrong proposal (:156, :190) | adjacency + display equals target |
 | Agent, tool or recalled text (:86, :203) | provenance; owner-pasted text counts (risk) |
 | Transfer to edited content (:182) | candidate digest and display equality |
 | Replay (:313) | `intent_key` UNIQUE (verified, store_decision_schema.py:44) + one reply, one decision |
@@ -102,9 +101,10 @@ Update `owner_instructions` (decision_words.py:19-33) and both `skills/muninn-kn
 
 ## Implementation requirements (changed 16 Nov)
 
-1. Add `<user_action>` and `<send_user_message_question_reply>` to Codex `HARNESS_TAGS`
-   (absent today; verified, grep of muninn/codex_events.py). Refuse owner text that starts
-   with `<name>` and ends with `</name>`.
+1. Owner trust uses only the provider's label (Claude `origin.kind` `human`; Codex
+   provenance type `user` on every content item; Cursor user bubbles), with no harness
+   tag list and no wrapper rule. Codex `<send_user_message_question_reply>` items
+   labelled `user` are trusted whole (owner decision 7).
 2. Check the owner line and the display or agreement line against the indexed `event`
    table: same `source_id`, `line`, `line_sha256`, and `kind` `prompt` or `reply` (columns
    verified, muninn/store_schema.py:104-114). Fork and replay copies cannot back a decision.
@@ -138,10 +138,11 @@ Update `owner_instructions` (decision_words.py:19-33) and both `skills/muninn-kn
 - Decision tests (inferred): test_decision_proof.py:42-70 and :314-329 flip; :156-178
   depends on the full-field rule; decision_support.py:103-107 changes.
 - (changed 16 Nov) Branch tests for verbatim binding and `corrected` are removed (inferred).
-- New: provenance per provider; markers; new harness tags and `<name>` wrappers; event-table
+- New: provenance per provider; markers; a `<name>` wrapper is trusted by label; event-table
   check rejects fork copies; partial span gives no owner support; agreement (3617 line 10125
   after 10118) and question + "yes" save; gap or tool call rejects; one adjacency read per
-  pair; long proof gives the pointer line; decision "yes" saves; foreign `D_` id refuses.
+  pair; long proof gives the pointer line; decision "yes" saves; a display of another
+  proposal refuses.
 
 ## Owner decisions
 
@@ -191,6 +192,10 @@ Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recal
 - Owner views: `know list` adds `proofs` (by knowledge ID), `know show` adds `proof`,
   and the decision display text and `know decision status` add `proof`.
 - A Codex message with scalar `content` has no indexed event, so it cannot be a display.
+- The separate check that every `D_` ID in a display is the intent's `candidate_id` or
+  `replacement_id` was removed with owner approval on 2026-11-16: the display must equal
+  the target's `show_candidate` text, read as the whole and only field directly before
+  the owner reply, so a display of another proposal already fails.
 - Upgrade: in-flight learning requests and candidates staged before the upgrade fail
   once (stored evidence authority changes), then work normally. Pre-upgrade decision
   displays must be shown again (the display text changed).
