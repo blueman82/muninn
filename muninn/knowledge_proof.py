@@ -69,7 +69,7 @@ def _proof(
         return f"proof unavailable: run muninn know show {ident}"
     # A cut proof could lose a condition, so a long one is not shown.
     if len(text.encode()) > PROOF_LIMIT:
-        return f"proof too long: run muninn know show {ident}"
+        return f"proof too long: run muninn know show --proof {ident}"
     return text
 
 

@@ -95,6 +95,13 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
         return _views(conn, a, env)
     if a.know_cmd == "show":
         view = knowledge_read.show_knowledge(conn, a.kid, a.revision)
+        # Agents are sent here for a long proof, so no model text.
+        if a.proof:
+            return {
+                "id": view.id,
+                "revision": view.revision,
+                "proof": owner_proofs(conn, view),
+            }
         return view.model_dump(mode="json") | {
             "evidence_sources": _evidence_sources(conn, view),
             "proof": owner_proofs(conn, view),

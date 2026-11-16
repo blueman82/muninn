@@ -22,8 +22,8 @@ from muninn.knowledge_models import (
 
 type Show = Callable[[KnowledgeView], KnowledgeView]
 
-# Owner decision 2026-11-16: agents read the first page, so the owner's
-# decisions come first. Kinds not named here sort after facts.
+# Agents read the first page, so the owner's decisions come first. Kinds
+# not named here sort after facts.
 _KIND_ORDER = {
     "decision": 0,
     "preference": 0,

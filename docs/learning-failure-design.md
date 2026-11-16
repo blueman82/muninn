@@ -51,7 +51,7 @@ A question and a `yes` reply can be the proof.
 The proof is the full cited owner message, plus the paired assistant reply, as Muninn recorded them.
 Lists and conditions stay complete, because Muninn never cuts the proof.
 Recall, `know context`, `know search`, and review model input show the proof in place of the claim text.
-A proof over 2,000 bytes is not shown there: the agent gets `proof too long: run muninn know show K_ID`.
+A proof over 2,000 bytes is not shown there: the agent gets `proof too long: run muninn know show --proof K_ID`.
 `know list`, `know show`, `know decision show`, and `know decision status` show the full proof beside the claim text.
 
 ## Source-read allowance

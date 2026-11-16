@@ -6,8 +6,9 @@ import json
 from typing import Any
 from unittest import mock
 
-from muninn import review_rounds
+from muninn import knowledge_push, review_rounds
 from muninn.knowledge_models import Scope
+from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext
 from tests.ingest_support import rollout
 from tests.test_classify import user_msg
@@ -83,7 +84,8 @@ class ProofCliTests(CliLearningCase):
         )
         self.assertEqual(self.call("know", "context")[0], 0)
         self.assertIn(
-            f"proof too long: run muninn know show {ident}", self.last_stdout
+            f"proof too long: run muninn know show --proof {ident}",
+            self.last_stdout,
         )
         self.assertNotIn("Keep every detail.", self.last_stdout)
         self.assertNotIn(MODEL, self.last_stdout)
@@ -91,6 +93,31 @@ class ProofCliTests(CliLearningCase):
         self.assertEqual(code, 0)
         self.assertIn(MODEL, self.last_stdout)
         self.assertEqual(shown["proof"], [f"[owner] {long}"])
+        code, shown = self.call("know", "show", "--proof", ident)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            (shown["id"], shown["proof"]), (ident, [f"[owner] {long}"])
+        )
+        self.assertNotIn("body", shown)
+        for sentinel in (MODEL, CONDITION, REASON):
+            self.assertNotIn(sentinel, self.last_stdout)
+
+    def test_cap_counts_the_proof_and_omits_it_whole(self) -> None:
+        self.decide()
+        long = "Keep every detail. " * 90
+        self.conn.execute(
+            "UPDATE review_evidence SET excerpt=? WHERE id=?",
+            (long, self.evidence[0].id),
+        )
+        stored = knowledge_push.knowledge_context(
+            self.conn, self.scope, None, 20.0, proofs=False
+        )
+        # Room for the model text, but not for the longer proof.
+        cap = len(canonical_json(stored).encode()) + 10
+        shown = knowledge_push.knowledge_context(
+            self.conn, self.scope, cap, 20.0
+        )
+        self.assertEqual((shown.notes, shown.truncated), ([], True))
 
 
 class ProofHookTests(HookKnowledgeCase):

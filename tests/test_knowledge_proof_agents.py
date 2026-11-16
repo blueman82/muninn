@@ -60,6 +60,7 @@ class AgentPathTests(CliLearningCase):
         code, receipt = self.call("know", "propose", "--input", str(path))
         self.assertEqual(code, 0, receipt)
         ids = [item["knowledge_id"] for item in receipt["applied"]]
+        self.ids = ids
         expiry = {
             "at": None,
             "condition": SENTINELS["expiry"],
@@ -95,6 +96,21 @@ class AgentPathTests(CliLearningCase):
             {"MUNINN_HOME": str(self.home)},
         )
         out["session start"] = json.dumps(answer)
+        out["know show --proof"] = ""
+        for ident in self.ids:
+            self.call("know", "show", "--proof", ident)
+            out["know show --proof"] += self.last_stdout
+        recall = hook.prompt_submit(
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": str(self.cwd),
+                "session_id": "s",
+                "prompt": "how should we choose zebra storage here",
+            },
+            "claude",
+            {"MUNINN_HOME": str(self.home)},
+        )
+        out["recall"] = json.dumps(recall)
         return out
 
     def test_no_model_field_reaches_an_agent(self) -> None:

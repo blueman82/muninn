@@ -213,6 +213,11 @@ def _add_knowledge(cmd: _Commands) -> None:
     p = know.add("show")
     p.add_argument("kid", type=knowledge_argument)
     p.add_argument("--revision", type=int)
+    p.add_argument(
+        "--proof",
+        action="store_true",
+        help="print only the full proof, without the model text",
+    )
     p = know.add("context")
     p.add_argument("--task")
     p.add_argument(

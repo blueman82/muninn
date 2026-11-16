@@ -13,14 +13,16 @@ Read current revisions and open cited `originals` before relying on it.
 muninn know list [--all-projects] [--task TASK]
 muninn know search QUERY [--all-projects] [--task TASK]
 muninn know show K_ID [--revision N]
+muninn know show --proof K_ID [--revision N]
 muninn know context [--task TASK]
-muninn know context --page N [--provider claude|codex|cursor] [--task TASK]
+muninn know context --page N [--provider claude|codex|cursor]
 ```
 
 IDs use `K_` plus 32 lowercase hexadecimal characters.
 Muninn rejects numeric aliases.
 List/search report `knowledge: [KnowledgeView, ...]`; list also reports `proofs` by knowledge ID.
 Show reports one view with UUID, revision, `state`, body, `origin`, expiry and retraction metadata, and `evidence_sources`.
+`--proof` reports only `id`, `revision` and the full `proof`, with no claim text.
 
 Find the `E_` ID in `evidence_sources[].evidence_id` and open its `ref`.
 Compare the opened original's hash with `line_sha256`.
@@ -30,7 +32,7 @@ Historical revisions make explicit `--revision` necessary.
 Context reports `schema_version` and eligible note views in `notes`.
 It also reports compact `guide` IDs, revisions, titles, and scopes in `guides`, with `unresolved_ids` and `truncated`.
 The installed `context_bytes` limits this output.
-`--page N` prints page N of the session-start memories as plain text, in the start block's layout. When the start block ends with `▓ <k> more memories: muninn know context --page 2`, run that command to read the rest. Each memory appears on one page only. Decisions and preferences come first, then constraints and procedures, then facts, then guide titles.
+`--page N` prints page N of the session-start memories as plain text, in the start block's layout. When the start block ends with `▓ <k> more memories. Before you write code, run: muninn know context --page 2`, run that command to read the rest. Each memory appears on one page only. `--page` refuses `--task` and page 0; `--provider` needs `--page`. Decisions and preferences come first, then constraints and procedures, then facts, then guide titles.
 Current retrieval omits withheld/disputed, expired, superseded, retracted, erased, and unsupported guidance.
 
 Explicit show can keep withdrawn content.
@@ -73,7 +75,7 @@ Record an owner decision or preference only when attributable owner `evidence` a
 Cite the full owner message by its evidence ID; a partial span gives no owner support.
 For an agreement reply such as `yes`, also cite the final assistant reply directly before it.
 Write the decision in plain words in the claim text. Muninn does not check that text.
-The proof is the full cited messages. Context, search, and recall show the proof, not the claim text; a proof over 2,000 bytes becomes `proof too long: run muninn know show K_ID`, and a missing proof becomes `proof unavailable: run muninn know show K_ID`. Knowledge saved through an owner approval of a displayed proposal shows the approved text.
+The proof is the full cited messages. Context, search, and recall show the proof, not the claim text; a proof over 2,000 bytes becomes `proof too long: run muninn know show --proof K_ID`, and a missing proof becomes `proof unavailable: run muninn know show K_ID`. Knowledge saved through an owner approval of a displayed proposal shows the approved text.
 List and show print the full proof (`proofs`, `proof`) beside the claim text.
 
 `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and ID coercion have no active interface.

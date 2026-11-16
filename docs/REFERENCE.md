@@ -177,8 +177,9 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 | `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first, and `proofs`: full owner proofs by knowledge ID. |
 | `muninn know search QUERY [--all-projects] [--task TASK]` | SQLite FTS5 search of current permitted knowledge. No embeddings. |
 | `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources` and `proof` (the full owner proofs). This maps each `E_` ID to the transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions need `--revision`. Explicit show can keep withdrawn content. |
+| `muninn know show --proof K_ID [--revision N]` | Only `id`, `revision` and `proof` (the full owner proofs), with no model text. Agents use it for a proof too long for their context. |
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
-| `muninn know context --page N [--provider claude\|codex\|cursor] [--task TASK]` | Plain text, not JSON: page N of the session-start memories in the same untrusted-data frame and layout as the start block, with control characters replaced, and the header `page N of M · X of Y`. Page 1 is the start block's list. Each page continues where the last one stopped, so each memory appears once. `--provider` (default `claude`) sets the page size: Claude and Cursor 4,000 bytes, Codex 2,800. A missing page reports `page_unavailable`. |
+| `muninn know context --page N [--provider claude\|codex\|cursor]` | Plain text, not JSON: page N of the session-start memories in the same untrusted-data frame and layout as the start block, with control characters replaced. The header says `page N · X of Y`, and `page N of N · X of Y` on the last page. Page 1 is the start block's list. Each page continues where the last one stopped, so each memory appears once. `--provider` (default `claude`) sets the page size: Claude and Cursor 4,000 bytes, Codex 2,800. `--page` with `--task` reports `page_task_unsupported`; `--provider` without `--page` reports `provider_needs_page`; page 0 or a missing page reports `page_unavailable`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local `attempt` and `Receipt`. No model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision. Reports `KnowledgeView`. |
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded `request`. Paired `bounds` or activation/uncompleted boundary through the latest complete record. `--task` binds the `request` to one task in the source project. |
@@ -237,11 +238,11 @@ Owner support needs a cited `direct_owner` owner message with a full-field selec
 A partial span gives no owner support.
 For agreement, the claim also cites the final assistant reply directly before the owner reply.
 Muninn reads the gap again once for each pair; a tool call, tool result, or other message between them refuses the batch with `rejected_authority`.
-Owner authority comes from provenance (provider prompt label, an indexed `prompt` event, no injection flag, no tool result, no harness tag, no Muninn marker, and not one tagged element such as `<name>...</name>`), not from wording.
+Owner authority comes from provenance (provider prompt label, an indexed `prompt` event, no injection flag, no tool result, no harness tag, and no Muninn marker), not from wording.
 
 The proof is the full cited owner message, plus the paired assistant reply for agreement, as Muninn recorded them.
 `know context`, `know search`, recall, and review model input show the proof in place of the model's claim text for preferences, decisions, and global knowledge.
-A proof over 2,000 bytes is not cut: the agent gets `proof too long: run muninn know show K_ID`.
+A proof over 2,000 bytes is not cut: the agent gets `proof too long: run muninn know show --proof K_ID`.
 If the proof cannot be found, the agent gets `proof unavailable: run muninn know show K_ID`, never the model text.
 `muninn search` knowledge previews follow the same rule.
 Knowledge saved through an ADR 0018 owner approval shows the model text the owner approved.
@@ -1643,7 +1644,7 @@ This read-only startup context does not make a learning policy necessary.
 The order is decisions and preferences, then constraints and procedures, then facts and other notes, then guide titles; newest first inside each group. Global memories use the same order.
 Memories are taken in order until the next one does not fit; that one starts page 2.
 A memory larger than a whole page shows `memory too long: run muninn know show K_ID`.
-When memories are left out, the footer `▓ <k> more memories: muninn know context --page 2` points to the next page (Codex adds `--provider codex`).
+When memories are left out, the footer `▓ <k> more memories. Before you write code, run: muninn know context --page 2` points to the next page (Codex adds `--provider codex`).
 The `usage` text tells agents to check current revisions and open cited `originals`.
 
 Preview eligibility is not a truth guarantee.
