@@ -41,8 +41,20 @@ This record replaces ADR 0021 on that point.
 ## Consequences
 
 Each task reads the prefix again.
-The measured worst case is approximately 0.25 s for each task.
-For the largest session, the total is approximately 4 minutes over its life (inferred).
+Measured: one full read of an 80 MiB, 34,086-line file, with a SHA-256 for each line, took 0.16 s.
+
+Estimates (not measured):
+
+- One task reads the prefix one or two times (boundary check, then evidence read).
+  The worst case for each task is approximately 0.16 s x 1.5 = 0.25 s.
+- Over the life of the largest session, approximately 960 tasks x 0.25 s = 240 s, or 4 minutes.
+  The task count is an assumption, not a measurement.
+- A history scan checks windows of at most 200 lines.
+  Each window reads from line 1 two times: the boundary check and the content hash.
+  The largest session has at least 34,086 / 200 = 171 windows.
+  A read stops at its window, so it reads half of the file on average.
+  The scan cost is approximately 171 x 2 x 0.08 s = 27 s for that session.
+  The history scan holds the writer lock for this time.
 
 Long sessions can be learned at any line.
 A window must still fit its own allowances.

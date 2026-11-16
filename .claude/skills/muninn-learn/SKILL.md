@@ -124,7 +124,7 @@ Maintainers must examine unclear defects and exhausted source-read allowances.
 `evidence_limit` means source verification exceeded a byte, record, or database-work limit.
 Do not retry that `request` unchanged.
 Tell the maintainer to examine its source-read budget.
-A narrower window can make a read of earlier records necessary.
+Records before the window start do not count against these limits.
 
 The operation limit includes source traversal, not only selected text.
 Capture, catch-up and `attempt` logs keep this code without transcript text.

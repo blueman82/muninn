@@ -131,7 +131,7 @@ Read `detail` before taking a step.
   A capture omission does not identify its cause or prove a missing lifecycle notification.
   New capture and catch-up log entries keep `evidence_limit` for source-read refusals.
   Those limits include source traversal and selected text.
-  A narrower window can make reads of earlier records necessary.
+  Records before the window start do not count against these limits.
   Do not increase limits or replay history merely to clear the count.
 
 - `review_pause` reports if a witness exists.
