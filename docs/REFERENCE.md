@@ -174,9 +174,9 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 
 | Command | Meaning/output |
 |---|---|
-| `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first. |
+| `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first, and `proofs`: full owner proofs by knowledge ID. |
 | `muninn know search QUERY [--all-projects] [--task TASK]` | SQLite FTS5 search of current permitted knowledge. No embeddings. |
-| `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources`. This maps each `E_` ID to the transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions need `--revision`. Explicit show can keep withdrawn content. |
+| `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources` and `proof` (the full owner proofs). This maps each `E_` ID to the transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions need `--revision`. Explicit show can keep withdrawn content. |
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local `attempt` and `Receipt`. No model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision. Reports `KnowledgeView`. |
@@ -230,17 +230,18 @@ Each accepted claim has `text` and `evidence_refs`.
 Each guide step has `key`, `claim`, and `depends_on`.
 Dependencies can refer only to steps before that step.
 
-A note and each guide claim can also have an optional `corrected`: a copy with spelling and grammar fixed.
-Muninn does not check `corrected`.
-`know list`, `know show`, and `know decision show` and `status` print it next to the proof.
-Recall, `know context`, `know search`, and review model input never contain it.
-
 A preference, a decision, a global change, or a replacement of a preference or decision needs owner support (ADR 0022).
-Each line (note content, each condition, or a guide claim) must equal whole verbatim sentences of a cited excerpt.
-The comparison is case-sensitive, collapses whitespace, and ignores one final `.`, `!`, or `;`.
-The excerpt comes from a cited `direct_owner` owner line, or from a cited assistant reply that is the final permitted field directly before a cited `direct_owner` owner reply.
-For that pair, Muninn reads the gap again; a tool call, tool result, or other message between them refuses it with `rejected_authority`.
-Owner authority comes from provenance (provider prompt label, no injection flag, no tool result, no harness tag or Muninn marker), not from wording.
+The model cites evidence by ID only. Muninn does not compare the claim text with the evidence.
+Owner support needs a cited `direct_owner` owner message with a full-field selector (`start` and `end` null).
+A partial span gives no owner support.
+For agreement, the claim also cites the final assistant reply directly before the owner reply.
+Muninn reads the gap again once for each pair; a tool call, tool result, or other message between them refuses the batch with `rejected_authority`.
+Owner authority comes from provenance (provider prompt label, an indexed `prompt` event, no injection flag, no tool result, no harness tag, no Muninn marker, and not one tagged element such as `<name>...</name>`), not from wording.
+
+The proof is the full cited owner message, plus the paired assistant reply for agreement, as Muninn recorded them.
+`know context`, `know search`, recall, and review model input show the proof in place of the model's claim text for preferences, decisions, and global knowledge.
+A proof over 2,000 bytes is not cut: the agent gets `proof too long: run muninn know show K_ID`.
+`know list` (`proofs`, by knowledge ID), `know show` (`proof`), and `know decision show` and `status` (`proof`) show the full proof beside the model text.
 
 A replacement uses `action: replace`, `knowledge_id`, and `expected_revision`.
 `unresolved` entries have `claim`, `affected` (knowledge/revision pairs), `evidence_refs` and a specified missing-evidence `question`.
@@ -359,7 +360,7 @@ It gives no owner authority.
 A canonical display is the stable text Muninn generates from the recorded proposal.
 A digest checks the integrity of its unchanged fields.
 Show reports `DecisionDisplay`: `id`, `digest`, `text`, and `complete: true`.
-The canonical `text` contains `candidate`, `enrichment`, and `owner_decision`.
+The canonical `text` contains `candidate`, `enrichment`, `owner_decision`, and `proof` (the full owner messages the candidate cites).
 
 The complete candidate keeps content, scope, targets, `original` `supports`, versions, `disposition`, and digest.
 `disposition` describes the proposed answer to an originating question.
@@ -380,6 +381,7 @@ It adds no Markdown fence, prose, or newline external to that text.
 It shows only one proposal in that message.
 The owner replies in their own words in the next message.
 The agent decides whether the reply means approve, reject, or edit (ADR 0022).
+If the reply is unclear, ask again; do not submit.
 A tool response, hook text, or agent statement gives no approval.
 
 Viewing and status checks do not check or accept a decision.
@@ -402,6 +404,10 @@ Only current eligible primary sources and owner messages with `direct_owner` pro
 The display must be the final assistant message directly before the owner reply, with no message, tool call, or tool result between them.
 Every `D_` ID in the display must be `candidate_id` or `replacement_id`.
 One owner reply backs one decision: a second intent with the same `owner_locator` is refused with `owner_proof`.
+The owner and display lines must be indexed `prompt` and `reply` events, so a fork or replay copy cannot back a decision.
+
+After an upgrade to ADR 0022, a learning request that was in progress and a candidate staged before the upgrade fail once, then work normally.
+Show a pre-upgrade decision display again before the owner replies.
 Input files, labels, claimed IDs, and commands cannot supply proof.
 
 `Stage`, submit, status, and apply report `DecisionView`.

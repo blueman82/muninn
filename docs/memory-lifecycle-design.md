@@ -698,6 +698,8 @@ Code checks these facts:
 
 - One owner reply backs one decision. A second intent with the same owner locator is refused.
 
+- The owner and display lines are indexed `prompt` and `reply` events, so a fork or replay copy cannot back a decision.
+
 Apply the same source and identity checks to refusal and replacement decisions.
 
 Agent statements, CLI `calls`, recalled text, and unverified message wrappers cannot prove approval.

@@ -22,7 +22,11 @@ A user-message field gets `direct_owner` only when all of these are true:
 
 - The message has no harness tag, Claude harness prefix, ChatGPT reference tag, or Muninn marker (`FLAG_MARKERS`) anywhere.
 
-- The selection covers whole sentences. Outer whitespace and a final `.`, `!`, or `;` can stay outside it.
+- The message is not one tagged element that starts with `<name>` and ends with `</name>`.
+
+- The indexer kept the line as a `prompt` event. A fork or replay copy has no event of its own.
+
+- The selection is the full field. A partial span is `untrusted`.
 
 Questions, conditions, plain agreement such as `i agree`, and quoted or pasted text in an owner message get `direct_owner`.
 The transcript cannot show the difference between pasted text and typed text.
@@ -30,38 +34,25 @@ The agent decides what the words mean.
 In Cursor, every user bubble is a `prompt`, so a `stop` hook `followup_message` can look like owner text.
 The owner accepted these risks.
 
-## Verbatim proof
+## Proof
 
 A preference, a decision, a global change, and a replacement of a preference or a decision need owner support.
-Each line of such a claim must equal whole sentences of a bound excerpt.
-A line is the note content, one note condition, or one guide claim.
-The comparison is case-sensitive.
-It collapses whitespace and ignores one final `.`, `!`, or `;`.
-A line can equal a run of consecutive whole sentences of the excerpt.
-A sentence ends at `.`, `!`, or `;` before whitespace. A `?` does not end a sentence.
+The model cites evidence by ID only. Muninn does not compare the claim text with the evidence.
+The model's claim text is the decision text. Muninn does not check it.
 
-For example, the claim `use Python.` from `Never use Python.` omits the negation.
-Muninn rejects that claim.
-The claim `Use Postgres.` with the cited owner line `Use pytest.` is also rejected.
-
-A bound excerpt comes from one of these:
-
-- A cited `direct_owner` owner line.
-
-- A cited assistant reply that is the final permitted field directly before a cited `direct_owner` owner line in the same thread.
-
-For the second case, Muninn reads the gap again in the commit transaction.
-A tool call, a tool result, another message, or an erased line in the gap refuses the pair.
+Owner support needs a cited full `direct_owner` owner message.
+For agreement, the claim also cites the final assistant reply directly before the owner reply.
+Muninn reads the gap again once for each pair in the commit transaction.
+A tool call, a tool result, another message, an erased line, or a reply line that is not an indexed `reply` event refuses the pair.
+A cited assistant reply that is not paired refuses the claim.
 The agent decides that the owner reply agrees.
 A question and a `yes` reply can be the proof.
 
-The model can also write `corrected`, a copy with spelling and grammar fixed.
-Muninn does not check it.
-`know list`, `know show`, and `know decision show` show it next to the proof.
-Recall, `know context`, `know search`, and review model input show only the proof.
-
-A verified ADR 0018 decision binds the owner reply to the complete displayed candidate.
-When Muninn applies that decision, the display is the verbatim proof.
+The proof is the full cited owner message, plus the paired assistant reply, as Muninn recorded them.
+Lists and conditions stay complete, because Muninn never cuts the proof.
+Recall, `know context`, `know search`, and review model input show the proof in place of the claim text.
+A proof over 2,000 bytes is not shown there: the agent gets `proof too long: run muninn know show K_ID`.
+`know list`, `know show`, `know decision show`, and `know decision status` show the full proof beside the claim text.
 
 ## Source-read allowance
 
@@ -145,7 +136,7 @@ The explanation adds no source reads and keeps no new private content.
 Automatic startup notices, logs, stats, and doctor receive no new transcript or proposal text.
 
 You can examine and dismiss safety refusals.
-A refusal code alone does not prove that the provenance or verbatim check was correct.
+A refusal code alone does not prove that the provenance or proof check was correct.
 If Muninn incorrectly rejects owner support, the maintainer must examine the cause.
 Local operators can put back approved setup.
 
@@ -175,7 +166,7 @@ They include:
 
 - Owner provenance per provider, Muninn markers, and harness tags inside a message.
 
-- Verbatim whole-sentence proof, agreement pairs, and gaps that refuse a pair.
+- Full-message proof, agreement pairs, and gaps that refuse a pair.
 
 - Refusal of a complete batch without recording part of its knowledge changes.
 

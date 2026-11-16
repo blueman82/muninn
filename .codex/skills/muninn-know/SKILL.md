@@ -18,7 +18,7 @@ muninn know context [--task TASK]
 
 IDs use `K_` plus 32 lowercase hexadecimal characters.
 Muninn rejects numeric aliases.
-List/search report `knowledge: [KnowledgeView, ...]`.
+List/search report `knowledge: [KnowledgeView, ...]`; list also reports `proofs` by knowledge ID.
 Show reports one view with UUID, revision, `state`, body, `origin`, expiry and retraction metadata, and `evidence_sources`.
 
 Find the `E_` ID in `evidence_sources[].evidence_id` and open its `ref`.
@@ -68,11 +68,11 @@ Correct knowledge through an accepted replacement in a proposal.
 Use `action: replace`, `knowledge_id`, and `expected_revision`.
 Retraction makes the current expected revision and an explicit nonempty `reason` necessary.
 Record an owner decision or preference only when attributable owner `evidence` authorizes it.
-Copy each content line, condition, and claim verbatim as whole sentences from the cited owner line.
-For an agreement reply such as `yes`, copy whole sentences of the final assistant reply directly before it and cite both lines.
-Put the same meaning with spelling and grammar fixed in the optional `corrected` field.
-Muninn checks only the verbatim proof; list, show, and decision views print `corrected` beside it.
-Search, context, and recall show only the proof.
+Cite the full owner message by its evidence ID; a partial span gives no owner support.
+For an agreement reply such as `yes`, also cite the final assistant reply directly before it.
+Write the decision in plain words in the claim text. Muninn does not check that text.
+The proof is the full cited messages. Context, search, and recall show the proof, not the claim text; a proof over 2,000 bytes becomes `proof too long: run muninn know show K_ID`.
+List and show print the full proof (`proofs`, `proof`) beside the claim text.
 
 `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and ID coercion have no active interface.
 A missing installed admitted frozen policy refuses with `review_policy_required`.
@@ -140,7 +140,7 @@ It gives no owner authority.
 A canonical display is the stable text Muninn generates from the recorded proposal.
 A digest checks the integrity of its unchanged fields.
 Show reports `DecisionDisplay`: `id`, `digest`, `text`, and `complete: true`.
-The canonical `text` contains `candidate`, `enrichment`, and `owner_decision`.
+The canonical `text` contains `candidate`, `enrichment`, `owner_decision`, and `proof` (the full owner messages the candidate cites).
 
 The complete candidate keeps content, scope, targets, `original` `supports`, versions, `disposition`, and digest.
 `disposition` describes the proposed answer to an originating question.

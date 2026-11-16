@@ -1,10 +1,10 @@
-# 0022: Trust owner lines by provenance; bind decisions to verbatim text and adjacency
+# 0022: Trust owner lines by provenance; Muninn copies the full cited message as proof
 
 ## Status
 
-Accepted by the owner on 2026-11-15.
-It changes the rule that ADR 0017:79-80 keeps. It supersedes the reply-sentence parts of
-ADR 0018 (:156-176, :192-200); the rest of ADR 0018 stays in force (section 4).
+Accepted by the owner on 2026-11-15. Revised and accepted 2026-11-16 (full-message proof,
+2,000-byte agent-path cap). It changes the rule ADR 0017:79-80 keeps and supersedes
+ADR 0018 :156-176, :192-200; the rest of ADR 0018 stays (section 4).
 Installation and live verification stay different checks.
 
 ## Context
@@ -13,163 +13,170 @@ Installation and live verification stay different checks.
   :106-110), and decisions need it (verified, muninn/review_candidates.py:58, :86-96, :114-142).
 - 2026-11-15 model test: Codex cited the right owner lines in 5 of 5 runs, including
   "i agree" after a proposal; Muninn rejected all (reported by team lead; not reproduced).
-- `_support` checks authority and type only, not claim against text (verified,
-  review_candidates.py:86-96): a trusted "Use pytest" can back "Use Postgres" (inferred).
+- (changed 16 Nov) The 2026-11-15 version bound claims to verbatim sentences. Its
+  implementation (branch feat/adr0022-provenance-trust-20261115, muninn/review_binding.py;
+  notes at that branch's docs/adr/0022-provenance-trust.md:160-175) showed this is brittle
+  (reported by team lead): a list without full stops is one sentence, so one item cannot be
+  kept; a run of sentences can drop a condition ("If you are on Windows only. Use cmd.exe."
+  binds "Use cmd.exe."); per-claim gap rereads can exhaust the read budget.
 
 ## Decision
 
-The model judges meaning. Code checks provable facts: who typed it; the words are there.
+The model judges meaning and writes the decision text. Code checks only provable facts:
+who typed the message, and which messages are the proof. Muninn copies the proof itself.
 
 ### 1. Provenance decides owner authority
 An `owner_statement` gets `direct_owner` when: primary thread (verified,
 muninn/review_evidence.py:40-52); `classify.user_text_kind == "prompt"` (branch f765855);
 `injected()` false (verified, review_authority.py:63-80); no tool result in the message
 (verified, review_selectors.py:275-276); no harness tag, Claude prefix or ChatGPT tag
-anywhere (verified, review_authority.py:92-99); no `FLAG_MARKERS` string (event_model.py:28-33;
-new, today only `_QUOTED` stops `<muninn-memory`, verified review_authority.py:16).
-Cursor (owner decision 5): bubbles are always `prompt` (verified, f765855 classify.py), so
-Cursor owner lines get `direct_owner`; a `stop` hook `followup_message` arrives unlabelled
-(cursor.com/docs/agent/hooks; not checked here).
+anywhere (verified, review_authority.py:92-99); no `FLAG_MARKERS` string (event_model.py:28-33).
+Remove the wording checks: `_DIRECT`, `_UNCERTAIN`, comma rule, `_CONTEXT`, `_IMPORTED`,
+`_reported`, `_QUOTED`, fence rule (verified, review_authority.py:15-60, :87-110, :134).
+Cursor (owner decision 5): bubbles are always `prompt`, so Cursor owner lines are trusted.
 
-Wording checks, one by one:
-| Check | Location (verified) | Guards | Action |
-|---|---|---|---|
-| `_DIRECT`, `_UNCERTAIN`, comma rule, `_CONTEXT` | review_authority.py:29-44, :109, :134 | wording | remove |
-| `_IMPORTED`, `_REPORT`, `_reported` | :17-28, :48-60 | wording guess of a speaker | remove |
-| `_QUOTED`, `_IDENTIFIER` mask | :15-16, :87-89 | mostly wording; `<` also stopped tags | remove; tags and markers now checked by name |
-| heading/fence rule | :100 | wording ("# AGENTS.md" is a harness tag) | remove |
-| harness/ChatGPT tags anywhere; `injected` flags | :92-99; :63-80 | provenance | keep |
-| whole-sentence span | :141-155 | integrity (no lost "Never") | keep, as part of binding |
+### 2. Proof is the full cited field, copied by Muninn (changed 16 Nov)
+- The model cites evidence by id only. It copies no text as proof.
+- Owner support needs a cited `direct_owner` record whose selector covers the full field
+  (`start` and `end` null; verified, muninn/review_evidence_models.py:64-83). A partial
+  span gives no owner support. Initial evidence selects full fields (reported, branch ADR).
+- The proof is that full redacted field (verified, review_selectors.py:249-257). No sentence
+  splitting, no verbatim compare, no redact-before-compare step. The branch's `verbatim`,
+  `claim_lines`, `bound` and `_final_sentences` (review_binding.py) are dropped.
+- The model's claim text (note `content` and conditions, guide claim text) is the decision
+  text, unchecked. These fields exist today (verified, muninn/knowledge_models.py:91-107),
+  so the branch's separate `corrected` field (knowledge_models.py:100-123) goes away.
 
-### 2. Verbatim proof plus a corrected copy
-- Proof (code-checked): each line of an owner-required claim (review_candidates.py:114-127)
-  equals one bound excerpt; lines are note content, each condition, or a guide claim
-  (verified, muninn/knowledge_write.py:77-110). Equal: case-sensitive, whitespace collapsed,
-  one final `.`/`!`/`;` ignored; the `quote-check` rule (verified, muninn/query/quotes.py:14-41)
-  as equality. The excerpt is the redacted `EvidenceRecord.excerpt` (verified,
-  review_selectors.py:249-257), whole sentences only.
-- Bound excerpts come only from a cited `direct_owner` record or its paired assistant record.
-- Corrected copy (owner decision 1, not code-checked): the model also writes a copy with
-  spelling and grammar fixed, and for agreement the decision in plain words. No current
-  field fits: claim text must stay verbatim, and `reason` means why (verified,
-  muninn/knowledge_models.py:99-107). Add an optional `corrected: Text | None` to `NoteBody`
-  and `SupportedClaim` (knowledge_models.py:91-96, :99-107).
-- Owner views only (decision 6): `know list`, `know show`, `know decision show`/`status`
-  print the copy beside the proof (verified, muninn/cli_parser.py:206-240). Proof only: hook
-  recall (muninn/hook.py:338), `know context` (cli_know.py:94), review input
-  (review_rounds.py:255), `know search` (verified). Recall size is unchanged (inferred).
+### 3. Agreement replies (changed 16 Nov)
+- For agreement, the claim cites the owner reply and the final `assistant_report` directly
+  before it (verified, review_selectors.py:102-106, :187-197): same thread, no permitted
+  field between. The proof is both full fields.
+- Muninn checks adjacency once per (assistant, owner) pair per batch, not per claim. A read
+  error, erasure or exhausted budget refuses the pair.
+- No "?" rule (owner decision 3). The model judges agreement and writes the decision.
+- Scope (decision 4): `allow_global` stays `false` (verified,
+  tools/default_codex_policy.json:10; muninn/review_evidence.py:266-269).
 
-### 3. Agreement replies, no word list
-- A `direct_owner` line binds content through the final `assistant_report` before it
-  (verified, review_selectors.py:102-106, :187-197): same thread, no permitted field
-  between; validation rereads that gap and fails closed.
-- The claim cites both ids; lines equal whole assistant sentences; the model judges agreement.
-- No "?" rule (owner decision 3). A question plus the owner reply is the proof; the
-  corrected copy states the decision. `_SENTENCE` does not split at `?` (verified,
-  review_authority.py:45), so the proof can span the question and the next sentence.
-- Scope (decision 4): unchanged. `allow_global` stays `false` (verified,
-  tools/default_codex_policy.json:10; muninn/review_evidence.py:266-269): project scope only.
+### 4. ADR 0018 approvals
+The agent records approve, reject or edit in `DecisionIntent.action` (verified,
+muninn/decision_models.py:135-153). Code checks: owner reply provenance, full field; the
+display record is the final `assistant_report` directly before it, no permitted field
+between; the display equals `show_candidate` text (verified, decision_proof.py:353-362,
+decision_write.py:178-180); every `D_` id in that message is the intent's `candidate_id`
+or `replacement_id`; one owner reply backs one decision. Remove `decision_words` equality
+(decision_proof.py:351, decision_write.py:177) and the "approved" refusal (:344-345).
+Update `owner_instructions` (decision_words.py:19-33) and both `skills/muninn-know/SKILL.md`.
 
-### 4. ADR 0018 approvals: same pattern, no fixed sentence
-Today the owner types "Please approve memory D_x." (verified, decision_words.py:16), compared
-exactly (verified, decision_proof.py:351, decision_write.py:177); "approved" is refused (:344-345).
-- The agent judges whether the reply means approve, reject or edit, and records it in
-  `DecisionIntent.action` as today (verified, muninn/decision_models.py:135-153).
-- Code checks: the owner reply has `direct_owner` by provenance (section 1) and the intent
-  selects the full owner message; the `display_locator` record is the final
-  `assistant_report` directly before it, same thread, no permitted field between; the
-  display excerpt equals `show_candidate` text of the target (kept, decision_proof.py:353-362,
-  decision_write.py:178-180); every `D_` id (pattern at decision_models.py:28) in that full
-  assistant message is the intent's `candidate_id` or `replacement_id`.
-- One owner reply backs one decision: a second intent with the same owner locator is refused
-  (query on stored `locator_json`; no schema change, inferred).
-- Remove `decision_words` equality and the "approved" refusal. Keep tombstones, scope,
-  saved/erased state, budgets, digest, enrichment (ADR 0018:212-226) and receipts.
-- Change `owner_instructions` (decision_words.py:19-33) to "reply in your own words straight
-  after this display"; update `.claude`/`.codex` `skills/muninn-know/SKILL.md:94-110`
-  (identical, verified diff), docs/REFERENCE.md, docs/memory-lifecycle-design.md.
-
-ADR 0018 reasons for the fixed sentence, and how each is kept:
-| Reason (ADR 0018 line) | Kept by |
+| ADR 0018 reason for the fixed sentence | Kept by |
 |---|---|
-| Wrong proposal: ID names it (:156, :190) | adjacency + display equals target + no foreign `D_` id |
-| Approval by agent, tool, recalled text (:86, :203) | provenance; text copied into the owner's own message now counts (risk) |
-| Transfer to edited content (:182) | candidate digest and display equality, unchanged |
-| Replay: same reply reused (:313) | `intent_key` UNIQUE (verified, muninn/store_decision_schema.py:44) + one reply, one decision |
-| Bare "approved" has no reference (:198) | adjacency gives the reference |
-| Negated, conditional, conflicting reply (:194-195) | **NOT kept by code.** The agent judges meaning |
+| Wrong proposal (:156, :190) | adjacency + display equals target + no foreign `D_` id |
+| Agent, tool or recalled text (:86, :203) | provenance; owner-pasted text counts (risk) |
+| Transfer to edited content (:182) | candidate digest and display equality |
+| Replay (:313) | `intent_key` UNIQUE (verified, store_decision_schema.py:44) + one reply, one decision |
+| Negated or conditional reply (:194-195) | **not by code**: the agent judges meaning (risk) |
 
-Code cannot prove the last row (ADR 0018:86): code proves the owner replied to that one
-display; the agent decides it means approve. Accepted risk (Consequences).
+### 5. Who sees what, and size (changed 16 Nov)
+- Owner views show the model text beside the proof: `know list`, `know show`,
+  `know decision show`, `know decision status` (verified, muninn/cli_parser.py:206-240).
+- Agent and model paths show only the proof: hook recall (verified, muninn/hook.py:338),
+  `know context` (verified, muninn/cli_know.py:94), `know search`, review model input
+  (verified, review_rounds.py:255).
+- Size: a proof is one or two full messages, each up to 64 KiB (verified, `TEXT_LIMIT`,
+  muninn/event_model.py:37). Context is capped at 12,000 bytes (verified,
+  muninn/review_models.py:185; tools/default_codex_policy.json:11). `knowledge_context`
+  stops at its limit and sets `truncated` (verified, muninn/hook.py:338-350). One long
+  assistant proposal can fill recall and push other memories out (inferred).
+- Proposed cap (owner question): in agent paths, a proof over 2,000 bytes is not cut; the
+  agent gets the memory id and "proof too long: run `muninn know show K_x`". No partial
+  proof, so no lost condition (inferred). Owner views always show the full proof.
 
-### 5. Versions and digests
-- No `PROJECTION_VERSION` bump (verified, voids knowledge, knowledge_read.py:165); no new `Authority`.
-- **Result and round schema digests change**: `corrected` is in `ReviewResult`, and
-  `FinalRequest` embeds it (verified, review_rounds.py:68-72, :82-84; review_json.py:74-76;
-  checked at muninn/review_codex_launch.py:318-324). No table change: bodies live in
-  `content_json` (verified, muninn/store_knowledge_schema.py:128); old rows lack the
-  optional field (inferred).
-- **Prompt digest changes**: copy proofs verbatim, add `corrected`, cite both agreement lines
-  (verified, tools/prepare_codex_policy.py:199-220). **Owner re-approval at install** is
-  accepted (owner decision 2) and covers every change in this section.
-- `owner_instructions` is outside the candidate digest (verified, decision_candidates.py:51-61,
-  :336-342); old displays must be shown again (inferred). Rewrite learning-failure-design.md.
+### 6. Versions and digests (changed 16 Nov)
+- Result schema digest: no change versus main; no new field (verified, main
+  muninn/knowledge_models.py:91-107; muninn/review_json.py:74-76).
+- Round schema digest: no change versus main (verified, review_rounds.py:68-72, :82-84).
+- Prompt digest: changes versus main. One added sentence: "For agreement, cite the owner
+  reply and the final assistant reply directly before it." The branch's verbatim and
+  `corrected` sentences are dropped (verified, branch tools/prepare_codex_policy.py diff).
+  Owner re-approval at install: accepted (owner decision 2).
+- Store, `PROJECTION_VERSION`, `Authority` values, `allow_global`: no change.
+
+## Implementation requirements (changed 16 Nov)
+
+1. Add `<user_action>` and `<send_user_message_question_reply>` to Codex `HARNESS_TAGS`
+   (absent today; verified, grep of muninn/codex_events.py). Refuse owner text that starts
+   with `<name>` and ends with `</name>`.
+2. Check the owner line and the display or agreement line against the indexed `event`
+   table: same `source_id`, `line`, `line_sha256`, and `kind` `prompt` or `reply` (columns
+   verified, muninn/store_schema.py:104-114). Fork and replay copies cannot back a decision.
+3. Tests: agent-facing CLI and hook output never contain the model text; a `<muninn-recall`
+   marker test; Claude Code shape adjacency tests (scratch test:
+   /private/tmp/claude-501/-Users-harrison-Github-muninn/3bd7a8e6-2667-4302-9786-2e2d3177597f/scratchpad/claude_adj_test.py).
+4. Document: in-flight learning requests and pre-upgrade staged candidates fail once after
+   the upgrade, then work normally. Pre-upgrade decision displays must be shown again.
 
 ## Consequences
 
-- Plain-speech and agreement decisions are learned; approvals need no fixed sentence; each
-  memory shows its corrected copy next to the verbatim proof.
+- Plain-speech and agreement decisions are learned. Lists and conditions stay whole,
+  because the proof is the full message. Approvals need no fixed sentence.
+- Agents get the owner's and the assistant's real words, not the model's text.
 - Stored knowledge keeps its authority (verified, knowledge_read.py:239-244).
 - Accepted risks (owner, 2026-11-15):
-  - The agent can read an unclear reply ("ok wait") as approval, on the ADR 0018 path and
-    the agreement path. Code cannot check meaning (section 4).
-  - Text the owner pastes into their own message counts as owner text, as in Hermes
-    77a30e91 (pastes expand inline, no label). No attachment filter.
-  - A Cursor `stop` hook `followup_message` looks like owner text (section 1).
-  - The model can misjudge adversarial text. The unchecked corrected copy can differ from
-    the proof; only owner views show it, beside the proof. Agents get only the proof.
-  - Mitigation: show the verbatim reply or proof; `muninn know retract`.
-- Still rejected: hook, harness, meta, sidechain, delegation text; tool results; markers.
+  - The agent can read an unclear reply ("ok wait") as approval (both paths).
+  - Text the owner pastes into their own message counts as owner text (as Hermes 77a30e91).
+  - A Cursor `stop` hook `followup_message` looks like owner text.
+  - The model can misjudge adversarial text. Its text can differ from the proof; only
+    owner views show it, beside the proof.
+  - Mitigation: show the proof; `muninn know retract`.
+- (changed 16 Nov) Long proofs use recall bytes (section 5).
 
 ## Test impact
 
-- tests/fixtures/learning/cases.json: 0 flip; its 51 `untrusted` entries are 46 tool_result,
-  2 observed_outcome, 2 assistant_report, 1 tool_request (verified, script).
-- tests/test_review_authority.py: 2 of 4 tests, 61 subtests flip (12 adjuncts x 3 providers
-  + 25 of 27 imported texts) (verified by reading :49-108).
-- tests/test_review_authority_commit.py:74-127 stays rejected, now by binding (inferred).
+- tests/fixtures/learning/cases.json: 0 flip (verified, script; its 51 `untrusted` are non-owner).
+- tests/test_review_authority.py: 2 of 4 tests, 61 subtests flip (verified by reading :49-108).
+- tests/test_review_authority_commit.py:74-127: full-field cases (passage `None`) flip to
+  saved; partial-span cases stay rejected (inferred).
 - Decision tests (inferred): test_decision_proof.py:42-70 and :314-329 flip; :156-178
-  depends on the full-message rule; decision_support.py:103-107 and `display_after=True` change.
-- CommitCase owner-kind notes need verbatim content (verified, test_review_commit.py:43, :93).
-- Result-schema fixtures change with `corrected`; recall tests must show it absent (inferred).
+  depends on the full-field rule; decision_support.py:103-107 changes.
+- (changed 16 Nov) Branch tests for verbatim binding and `corrected` are removed (inferred).
+- New: provenance per provider; markers; new harness tags and `<name>` wrappers; event-table
+  check rejects fork copies; partial span gives no owner support; agreement (3617 line 10125
+  after 10118) and question + "yes" save; gap or tool call rejects; one adjacency read per
+  pair; long proof gives the pointer line; decision "yes" saves; foreign `D_` id refuses.
 
-New tests: provenance per provider; markers; mid-message tag; "Use pytest" vs "Use Postgres";
-"Never use pytest." vs "use pytest"; agreement (3617 line 10125 after 10118) and question +
-"yes" save; gap or tool call rejects; `corrected` shown with proof; hook "yes" untrusted;
-decision "yes" saves; gap, foreign `D_` id, or one reply for two decisions refuses.
+## Owner decisions
 
-## Owner decisions (2026-11-15)
-
-1. Keep both: verbatim proof (code-checked) and a corrected copy (not checked).
+1. (2026-11-16) The proof is the full cited message, copied by Muninn; model text unchecked.
 2. Re-approval at install: accepted.
 3. "yes" to an assistant question: accepted; no "?" rule.
-4. Scope: `allow_global` stays `false`; all learning stays project scope for now.
+4. `allow_global` stays `false`; all learning stays project scope for now.
 5. Cursor: trust.
-6. The corrected copy appears only in owner views; recall prints only the proof.
+6. The model text appears only in owner views; agent paths print only the proof.
 
-## Implementation notes (2026-11-15)
+## Open question for the owner
 
-These notes record how the source reads the decision above.
+1. Agent-path cap: a proof over 2,000 bytes becomes a "run `muninn know show`" line.
+   Accept 2,000 bytes, another number, or no cap?
 
-- A claim line can equal a run of consecutive whole sentences inside a bound excerpt, not
-  only the complete excerpt. Initial evidence selects whole fields, so a one-sentence
-  claim from a longer owner line or assistant reply needs this. The excerpt itself must
-  still start and end on sentence boundaries.
-- The claim line is redacted before the comparison, because excerpts are redacted.
-- The paired assistant field must be the last permitted field of its record, and its
-  selection must cover whole sentences of the full field.
-- When a verified ADR 0018 decision is applied, the decision proof (display equals the
-  complete candidate, adjacency, digest) binds the enriched owner reply. Verbatim binding
-  does not apply to that owner reply.
-- A read error or erased line in an agreement gap refuses the pair; an exhausted read
-  allowance refuses the commit with its limit code.
+Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recall, know context, know search, model input). Over the cap the agent gets the memory id and "proof too long: run muninn know show K_x". Owner views show the full proof.
+
+## Implementation notes (2026-11-16)
+
+- Authority: a partial-span selection gets `untrusted`, so it gives no owner support.
+  A whole message wrapped in one tag (`<name>...</name>`, attributes allowed) is refused
+  on every provider. An owner line needs an indexed `prompt` event (`build_record`).
+- Support (`review_binding.owner_supported`): a claim needs a cited full `direct_owner`
+  message; each cited assistant reply must be a full field paired with a cited owner
+  message, or the claim is refused. When a verified ADR 0018 decision is applied, the
+  approval reply that enrichment adds proves each claim it backs; the owner approved the
+  complete display, so other cited replies need no pairing.
+- Adjacency (`review_binding.adjacent_gap`) also needs an indexed `reply` event for the
+  assistant line; the commit caches one result per (assistant, owner) pair.
+- Agent paths (`knowledge_proof.proof_view`) replace the claim text with the proof only
+  for preferences, decisions and global knowledge. Facts and procedures keep the model
+  text, as before. The proof marks each message `[owner]` or `[assistant]`.
+- Owner views: `know list` adds `proofs` (by knowledge ID), `know show` adds `proof`,
+  and the decision display text and `know decision status` add `proof`.
+- A Codex message with scalar `content` has no indexed event, so it cannot be a display.
+- Upgrade: in-flight learning requests and candidates staged before the upgrade fail
+  once (stored evidence authority changes), then work normally. Pre-upgrade decision
+  displays must be shown again (the display text changed).
