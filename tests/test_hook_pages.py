@@ -141,3 +141,41 @@ class PageCliTests(CliLearningCase):
             self.call("know", "context", "--page", "1")
         self.assertNotIn("\x1b", self.last_stdout)
         self.assertIn("[31mred", self.last_stdout)
+
+
+class OrderTests(HookCase):
+    """Put decisions and preferences first, then rules, facts and guides."""
+
+    def test_old_decision_lands_on_page_1_and_order_is_stable(self) -> None:
+        decision = self.add(
+            kind="decision", content="Old decision.", created_at=1.0
+        )
+        constraint = self.add(
+            kind="constraint", content="A constraint.", created_at=2.0
+        )
+        facts = [
+            self.add(
+                content=f"Fact {i}: " + "detail " * 60, created_at=20.0 + i
+            )
+            for i in range(12)
+        ]
+        preference = self.add(
+            kind="preference", content="A preference.", created_at=5.0
+        )
+        start = self.body(self.start_hook())
+        first = [m[2] for m in CODE.finditer(start)]
+        self.assertEqual(first[:3], [preference, decision, constraint])
+        context = knowledge_push.knowledge_context(
+            self.conn, self.scope, None, time.time()
+        )
+        seen: list[str] = []
+        for number in range(1, 20):
+            try:
+                page = hook_frame.render_page(context, "repo", number)
+            except ValueError:
+                break
+            seen += [m[2] for m in CODE.finditer(page)]
+        self.assertEqual(
+            seen,
+            [preference, decision, constraint, *reversed(facts)],
+        )

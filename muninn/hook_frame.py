@@ -142,15 +142,41 @@ def frame(attrs: str, lines: list[str]) -> str:
     return "\n".join([f"{OPEN}{attrs}>", *lines, CLOSE])
 
 
+# Owner decision 2026-11-16: agents read the first page, so the owner's
+# decisions come first. Kinds not named here sort after facts.
+_KIND_ORDER = {
+    "decision": 0,
+    "preference": 0,
+    "constraint": 1,
+    "procedure": 1,
+    "fact": 2,
+}
+
+
 def _items(context: KnowledgeContext) -> list[Item]:
-    """Turn complete notes, then the guide index, into shown items."""
+    """Turn notes by kind group, then the guide index, into shown items.
+
+    Args:
+        context: Eligible notes and guides, each list newest first.
+
+    Returns:
+        Decisions and preferences, then constraints and procedures, then
+        facts and other notes, then guide titles; newest first in each
+        group, because the sort is stable.
+    """
+    notes = sorted(
+        (view for view in context.notes if isinstance(view.body, NoteBody)),
+        key=lambda view: _KIND_ORDER.get(
+            view.body.kind if view.body else "", 3
+        ),
+    )
     items = [
         Item(
             view.id,
             clean(view.body.content, None),
             tuple(clean(c, None) for c in view.body.conditions),
         )
-        for view in context.notes
+        for view in notes
         if isinstance(view.body, NoteBody)
     ]
     items += [

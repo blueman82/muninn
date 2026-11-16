@@ -1640,6 +1640,7 @@ The bar is as wide as the longest line, from 20 to 72 characters.
 The block has no kind, revision, scope JSON, evidence IDs or expiry.
 
 This read-only startup context does not make a learning policy necessary.
+The order is decisions and preferences, then constraints and procedures, then facts and other notes, then guide titles; newest first inside each group. Global memories use the same order.
 Memories are taken in order until the next one does not fit; that one starts page 2.
 A memory larger than a whole page shows `memory too long: run muninn know show K_ID`.
 When memories are left out, the footer `▓ <k> more memories: muninn know context --page 2` points to the next page (Codex adds `--provider codex`).

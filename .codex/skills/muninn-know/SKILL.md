@@ -30,7 +30,7 @@ Historical revisions make explicit `--revision` necessary.
 Context reports `schema_version` and eligible note views in `notes`.
 It also reports compact `guide` IDs, revisions, titles, and scopes in `guides`, with `unresolved_ids` and `truncated`.
 The installed `context_bytes` limits this output.
-`--page N` prints page N of the session-start memories as plain text, in the start block's layout. When the start block ends with `▓ <k> more memories: muninn know context --page 2`, run that command to read the rest. Each memory appears on one page only.
+`--page N` prints page N of the session-start memories as plain text, in the start block's layout. When the start block ends with `▓ <k> more memories: muninn know context --page 2`, run that command to read the rest. Each memory appears on one page only. Decisions and preferences come first, then constraints and procedures, then facts, then guide titles.
 Current retrieval omits withheld/disputed, expired, superseded, retracted, erased, and unsupported guidance.
 
 Explicit show can keep withdrawn content.

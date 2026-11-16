@@ -191,7 +191,11 @@ Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recal
   two `▓` bars (20 to 72 characters wide), text wrapped at 70, a `When:` line for
   conditions, and one `▓ n: K_x` code line for each memory; no kind, revision, scope,
   evidence IDs or expiry. The frame, usage, search and open lines stay.
-- Pages: every eligible memory in reader order is split into consecutive pages that fit
+- Order (owner decision, 2026-11-16): decisions and preferences, then constraints and
+  procedures, then facts and other kinds (lessons), then guide titles; newest first inside
+  each group, the same for global memories. Agents read page 1, so the owner's decisions
+  come first.
+- Pages: every eligible memory in that order is split into consecutive pages that fit
   the provider's start-block limit (Claude and Cursor 4,000 bytes, Codex 2,800). Page 1
   is the start block; `muninn know context --page N [--provider P]` prints page N as
   text. A memory larger than a page is shown alone as "memory too long: run muninn know
