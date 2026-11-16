@@ -7,11 +7,13 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
 from muninn import review_evidence, review_originals
+from muninn.review_evidence_models import JsonlOriginal, OriginalLocator
 from muninn.review_read_budget import ReadBudget
 from muninn.review_selectors import (
     MAX_RECORD_BYTES,
@@ -40,9 +42,13 @@ class PrefixLimitTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def originals(
-        self, content: bytes, number: int, budget: ReadBudget
-    ) -> list[tuple[int, bytes]]:
-        """Write the original and read its line number as a window."""
+        self,
+        content: bytes,
+        number: int,
+        budget: ReadBudget,
+        before: Callable[[int, bytes], None] | None = None,
+    ) -> list[tuple[int, bytes, OriginalLocator]]:
+        """Write the original and read from its line number to the end."""
         (self.root / "s.jsonl").write_bytes(content)
         with closing(sqlite3.connect(":memory:")) as conn:
             conn.row_factory = sqlite3.Row
@@ -50,23 +56,23 @@ class PrefixLimitTests(unittest.TestCase):
                 "SELECT 'claude' AS provider,'claude-projects' AS root,"
                 "'s.jsonl' AS path"
             ).fetchone()
-            records = review_originals.originals(
+            return review_originals.originals(
                 conn,
                 source,
                 number,
-                number,
+                content.count(b"\n"),
                 MAX_SCAN_BYTES,
                 require_cursor=False,
                 budget=budget,
+                before=before,
             )
-        return [(r[0], r[1]) for r in records]
 
     def read(self, prefix: list[bytes], max_bytes: int) -> ReadBudget:
         """Read only the window line after the prefix and check it."""
         budget = ReadBudget(max_bytes)
         number = len(prefix) + 1
         records = self.originals(b"".join(prefix) + WINDOW, number, budget)
-        self.assertEqual(records, [(number, WINDOW)])
+        self.assertEqual([r[:2] for r in records], [(number, WINDOW)])
         self.assertEqual(budget.records_left, MAX_RECORDS - 1)
         self.assertEqual(
             budget.bytes_left, min(max_bytes, MAX_SCAN_BYTES) - len(WINDOW)
@@ -92,6 +98,26 @@ class PrefixLimitTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, "original_unavailable"),
             ):
                 self.originals(content, number, ReadBudget(MAX_SCAN_BYTES))
+
+    def test_lines_before_first_are_passed_on_not_returned(self) -> None:
+        lines = [b'{"n":1}\n', b'{"n":22}\n', WINDOW, b'{"n":4}\n']
+        seen: list[tuple[int, bytes]] = []
+        records = self.originals(
+            b"".join(lines),
+            3,
+            ReadBudget(MAX_SCAN_BYTES),
+            lambda number, raw: seen.append((number, raw)),
+        )
+        self.assertEqual(seen, [(1, lines[0]), (2, lines[1])])
+        self.assertEqual(
+            [r[:2] for r in records], [(3, lines[2]), (4, lines[3])]
+        )
+        offsets = [
+            r[2].byte_offset if isinstance(r[2], JsonlOriginal) else None
+            for r in records
+        ]
+        start = len(lines[0]) + len(lines[1])
+        self.assertEqual(offsets, [start, start + len(WINDOW)])
 
 
 class PrefixPositionTests(unittest.TestCase):

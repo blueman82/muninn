@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, closing
 from io import BufferedReader
 from pathlib import Path
@@ -78,7 +78,7 @@ def _jsonl(
     max_bytes: int = MAX_SCAN_BYTES,
     *,
     budget: ReadBudget,
-    start: int,
+    before: Callable[[int, bytes], None] | None,
 ) -> list[tuple[int, bytes, OriginalLocator]]:
     """Establish physical coordinates from a bounded scan of the origin."""
     root = ingest.default_roots().get(source["root"])
@@ -89,24 +89,21 @@ def _jsonl(
     path = root / source["path"]
     output: list[tuple[int, bytes, OriginalLocator]] = []
     with open_regular(path, root=root) as handle:
-        # Lines before the window only prove line numbers, so only the
-        # one-record cap applies; a far window costs what a near one does.
-        while number < start:
+        # Lines before first are not charged against the read budget; only
+        # the per-record cap applies. They are passed on, never kept.
+        while number < first:
             raw = handle.readline(MAX_RECORD_BYTES)
             if not raw.endswith(b"\n"):
                 raise ValueError("original_unavailable")
-            if number >= first:
-                output.append(_located(number, raw, path, offset))
-            if number == last:
-                return output
+            if before is not None:
+                before(number, raw)
             offset += len(raw)
             number += 1
         handle.seek(offset)
         for count, raw in enumerate(_lines(handle, max_bytes, budget=budget)):
             if count == MAX_RECORDS:
                 raise EvidenceLimitError("evidence_record_limit")
-            if number >= first:
-                output.append(_located(number, raw, path, offset))
+            output.append(_located(number, raw, path, offset))
             if number == last:
                 return output
             offset += len(raw)
@@ -229,6 +226,7 @@ def _cursor(
     max_bytes: int,
     *,
     budget: ReadBudget,
+    before: Callable[[int, bytes], None] | None,
 ) -> list[tuple[int, bytes, OriginalLocator]]:
     """Reproduce imported visible-bubble order within bounded native reads."""
     database, separator, thread = source["path"].rpartition("#")
@@ -266,6 +264,8 @@ def _cursor(
             if not cursor_materialized(record):
                 continue
             number += 1
+            if number < first and before is not None:
+                before(number, raw)
             if first <= number <= last:
                 output.append(
                     (
@@ -293,15 +293,15 @@ def originals(
     *,
     require_cursor: bool = True,
     budget: ReadBudget | None = None,
-    start: int | None = None,
+    before: Callable[[int, bytes], None] | None = None,
 ) -> list[tuple[int, bytes, OriginalLocator]]:
     """Read only bounded admitted coordinates and normalize read failures."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ValueError("evidence_limit")
     budget = budget if budget is not None else ReadBudget(max_bytes)
-    # JSONL lines before start (default first) are read without charges.
-    start = first if start is None else start
-    if last - start >= MAX_RECORDS:
+    # JSONL lines before first are read without charges and given to
+    # before, if set, one at a time.
+    if last - first >= MAX_RECORDS:
         raise EvidenceLimitError("evidence_record_limit")
     if (
         require_cursor
@@ -311,10 +311,12 @@ def originals(
         raise ValueError("original_unavailable")
     try:
         return (
-            _cursor(source, first, last, max_bytes, budget=budget)
+            _cursor(
+                source, first, last, max_bytes, budget=budget, before=before
+            )
             if source["provider"] == "cursor"
             else _jsonl(
-                source, first, last, max_bytes, budget=budget, start=start
+                source, first, last, max_bytes, budget=budget, before=before
             )
         )
     except (OSError, sqlite3.Error) as exc:

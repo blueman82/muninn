@@ -163,16 +163,9 @@ def _verify(
         )
     }
     content = hashlib.sha256()
-    # Hash from line 1, but charge only from the window start.
-    for line, raw, _ in originals(
-        conn,
-        source,
-        1,
-        item.window.through_line,
-        policy.max_input_bytes,
-        budget=budget,
-        start=item.window.from_line,
-    ):
+
+    def bind(line: int, raw: bytes) -> None:
+        """Hash one original line and check its indexed hash."""
         content.update(line.to_bytes(8, "big"))
         content.update(len(raw).to_bytes(8, "big"))
         content.update(raw)
@@ -184,6 +177,18 @@ def _verify(
             raise ValueError("evidence_changed")
         if line in expected and classify.record_hash(raw) != expected[line]:
             raise ValueError("evidence_changed")
+
+    # Lines before the window are hashed as read and not charged.
+    for line, raw, _ in originals(
+        conn,
+        source,
+        item.window.from_line,
+        item.window.through_line,
+        policy.max_input_bytes,
+        budget=budget,
+        before=bind,
+    ):
+        bind(line, raw)
     return item.model_copy(update={"content_digest": content.hexdigest()})
 
 
