@@ -694,8 +694,6 @@ Code checks these facts:
 
 - The display equals the complete display text of the target proposal.
 
-- Every `D_` ID in the display is the intent's `candidate_id` or `replacement_id`.
-
 - One owner reply backs one decision. A second intent with the same owner locator is refused.
 
 - The owner and display lines are indexed `prompt` and `reply` events, so a fork or replay copy cannot back a decision.

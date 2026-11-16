@@ -73,12 +73,12 @@ class DecisionAdjacencyTests(DecisionCase):
                 with self.assertRaisesRegex(ValueError, "display_proof"):
                     self.verify(intent)
 
-    def test_foreign_proposal_id_in_display_refuses(self) -> None:
-        other = "D_" + "1" * 32
-        draft = self.stage(
-            self.result([self.note(content=f"Use Python, not {other}.")])
+    def test_display_of_another_proposal_refuses(self) -> None:
+        other = self.stage(self.result([self.note(content="Other fact.")]))
+        draft = self.stage()
+        intent = self.intent(
+            draft.id, wording="yes", display=self.display(other.id)
         )
-        intent = self.intent(draft.id, wording="yes")
         with self.assertRaisesRegex(ValueError, "display_proof"):
             self.verify(intent)
 
