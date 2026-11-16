@@ -141,7 +141,7 @@ class AgentPathTests(CliLearningCase):
                 self.assertNotIn(OWNER, text)
         for ident in (note, guide):
             self.assertIn(
-                f"proof unavailable: run muninn know show {ident}",
+                f"proof unavailable: run muninn know show --proof {ident}",
                 outputs["know context"]
                 + json.dumps(
                     self.call("know", "search", "zebra")[1], ensure_ascii=False

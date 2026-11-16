@@ -70,7 +70,7 @@ class ProofCliTests(CliLearningCase):
         )
         self.assertEqual(self.call("know", "context")[0], 0)
         self.assertIn(
-            f"proof unavailable: run muninn know show {ident}",
+            f"proof unavailable: run muninn know show --proof {ident}",
             self.last_stdout,
         )
         self.assertNotIn(MODEL, self.last_stdout)

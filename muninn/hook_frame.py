@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import NotRequired, TypedDict
 
 from muninn import classify, query
+from muninn.knowledge_proof import too_long
 
 BLOCK_LIMIT = 4000  # SessionStart block, UTF-8 bytes
 RECALL_LIMIT = 1500  # prompt-time recall block, UTF-8 bytes
@@ -75,6 +76,7 @@ class RecallEntry(TypedDict):
     scope: dict[str, str | None]
     evidence_refs: list[str]
     evidence_sources: NotRequired[list[RecallEvidence]]
+    proof: NotRequired[bool]
 
 
 class RecallHit(TypedDict):
@@ -143,12 +145,16 @@ def frame(attrs: str, lines: list[str]) -> str:
 def _knowledge_line(entry: RecallEntry, cap: int = ENTRY_TEXT) -> str:
     """Format one matched knowledge entry with its citations."""
     refs = ", ".join(clean(ref, 120) for ref in entry["evidence_refs"])
+    text = clean(entry["text"], min(cap, ENTRY_TEXT))
+    # An owner proof is never cut, so a long one gives its look-up line.
+    if entry.get("proof") and text != clean(entry["text"], None):
+        text = clean(too_long(entry["id"]), None)
     return (
         f"- {entry['id']} revision {entry['revision']}"
         f" [{clean(entry['state'], 20)} {clean(entry['form'], 20)}"
         f" {clean(entry['kind'], 20)} preview;"
         f" scope: {clean(json.dumps(entry['scope']), 160)}]"
-        f" {clean(entry['text'], min(cap, ENTRY_TEXT))} (evidence: {refs})"
+        f" {text} (evidence: {refs})"
     )
 
 

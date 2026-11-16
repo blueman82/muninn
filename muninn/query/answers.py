@@ -6,6 +6,7 @@ import sqlite3
 from typing import Any
 
 from muninn.knowledge_models import GuideBody, KnowledgeView, NoteBody, Scope
+from muninn.knowledge_proof import too_long
 from muninn.query.constants import NOTICE
 
 # Answers are plain JSON-serialisable dicts whose shape varies per query.
@@ -69,8 +70,20 @@ def knowledge_scopes(
     ]
 
 
-def knowledge_preview(view: KnowledgeView) -> Answer:
-    """Render a revision-aware preview with governed support identities."""
+def knowledge_preview(view: KnowledgeView, *, proof: bool = False) -> Answer:
+    """Render a revision-aware preview with governed support identities.
+
+    Args:
+        view: The view as agents see it.
+        proof: The text is an owner proof, which is never cut: a long one
+            becomes a look-up line, and the preview is marked ``proof``.
+
+    Returns:
+        The preview answer.
+
+    Raises:
+        ValueError: If the view has no current body.
+    """
     body = view.body
     if isinstance(body, NoteBody):
         text, refs = body.content, body.evidence_refs
@@ -78,7 +91,9 @@ def knowledge_preview(view: KnowledgeView) -> Answer:
         text, refs = body.title, body.summary.evidence_refs
     else:
         raise ValueError("knowledge_ineligible")
-    return {
+    if proof and len(text) > 300:
+        text = too_long(view.id)
+    preview: Answer = {
         "id": view.id,
         "revision": view.revision,
         "state": view.state,
@@ -88,3 +103,4 @@ def knowledge_preview(view: KnowledgeView) -> Answer:
         "scope": body.scope.model_dump(mode="json"),
         "evidence_refs": refs,
     }
+    return preview | {"proof": True} if proof else preview

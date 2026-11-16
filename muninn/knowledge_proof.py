@@ -39,8 +39,8 @@ def proof_text(conn: sqlite3.Connection, refs: list[EvidenceId]) -> str | None:
     whole = [
         row
         for row in rows
-        if json.loads(row["selector_json"]).get("start") is None
-        and json.loads(row["selector_json"]).get("end") is None
+        if (selector := json.loads(row["selector_json"])).get("start") is None
+        and selector.get("end") is None
     ]
     if not any(
         row["evidence_type"] == "owner_statement"
@@ -59,6 +59,18 @@ def proof_text(conn: sqlite3.Connection, refs: list[EvidenceId]) -> str | None:
     )
 
 
+def too_long(ident: str) -> str:
+    """Return the look-up line that replaces a proof too long to show.
+
+    Args:
+        ident: The knowledge ID.
+
+    Returns:
+        A line that points to the command printing only the proof.
+    """
+    return f"proof too long: run muninn know show --proof {ident}"
+
+
 def _proof(
     conn: sqlite3.Connection, refs: list[EvidenceId], ident: str
 ) -> str:
@@ -66,10 +78,10 @@ def _proof(
     text = proof_text(conn, refs)
     # Fail closed: without its proof the model text is not shown either.
     if text is None:
-        return f"proof unavailable: run muninn know show {ident}"
+        return f"proof unavailable: run muninn know show --proof {ident}"
     # A cut proof could lose a condition, so a long one is not shown.
     if len(text.encode()) > PROOF_LIMIT:
-        return f"proof too long: run muninn know show --proof {ident}"
+        return too_long(ident)
     return text
 
 
@@ -90,6 +102,31 @@ def _owner_required(view: KnowledgeView) -> bool:
         body.kind in ("preference", "decision")
         or body.scope.project_id is None
     )
+
+
+def hidden_from_agents(conn: sqlite3.Connection, view: KnowledgeView) -> bool:
+    """Report whether agents get the proof in place of the model text.
+
+    Args:
+        conn: Readable store connection.
+        view: A knowledge view as stored.
+
+    Returns:
+        True for owner-required knowledge that no owner approved as shown.
+    """
+    return _owner_required(view) and not _approved(conn, view)
+
+
+def hidden_line(ident: str) -> str:
+    """Return the line that replaces model text hidden from agents.
+
+    Args:
+        ident: The knowledge ID.
+
+    Returns:
+        A line that points to the command printing only the proof.
+    """
+    return f"not shown to agents: run muninn know show --proof {ident}"
 
 
 def owner_proofs(conn: sqlite3.Connection, view: KnowledgeView) -> list[str]:
@@ -131,9 +168,9 @@ def proof_view(conn: sqlite3.Connection, view: KnowledgeView) -> KnowledgeView:
     """
     body = view.body
     # Only owner-required knowledge has an owner proof to show.
-    if body is None or not _owner_required(view) or _approved(conn, view):
+    if body is None or not hidden_from_agents(conn, view):
         return view
-    hidden = f"not shown to agents: run muninn know show {view.id}"
+    hidden = hidden_line(view.id)
     expiry = view.expiry
     if expiry is not None and expiry.condition is not None:
         expiry = expiry.model_copy(update={"condition": hidden})

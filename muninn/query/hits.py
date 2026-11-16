@@ -8,7 +8,7 @@ from collections import Counter
 from typing import Any
 
 from muninn import knowledge_read
-from muninn.knowledge_proof import proof_view
+from muninn.knowledge_proof import hidden_from_agents, proof_view
 from muninn.query.answers import (
     Answer,
     answer_citable,
@@ -242,7 +242,9 @@ def knowledge(
         )
         # Search previews reach agents, so they show the proof.
         return [
-            knowledge_preview(proof_view(conn, view))
+            knowledge_preview(
+                proof_view(conn, view), proof=hidden_from_agents(conn, view)
+            )
             for view in views[:KNOWLEDGE_HITS]
         ]
 

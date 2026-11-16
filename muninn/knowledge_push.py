@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 from muninn.knowledge_models import (
     GuideBody,
     GuideIndex,
     KnowledgeContext,
+    KnowledgeView,
     NoteBody,
     Scope,
+    UnresolvedId,
 )
-from muninn.knowledge_proof import proof_view
+from muninn.knowledge_proof import hidden_from_agents, hidden_line, proof_view
 from muninn.knowledge_read import (
     candidate_rows,
     eligible_current,
@@ -28,6 +31,24 @@ _SCAN_CAP = 200
 def _size(context: KnowledgeContext) -> int:
     """Count the complete canonical UTF-8 envelope, including metadata."""
     return len(canonical_json(context).encode("utf-8"))
+
+
+def _kept[T](items: list[T], item: T, fits: Callable[[], bool]) -> bool:
+    """Append an item and keep it only while the envelope fits.
+
+    Args:
+        items: The list being built.
+        item: The next item.
+        fits: Whether the envelope with the current lists fits its cap.
+
+    Returns:
+        Whether the item was kept.
+    """
+    items.append(item)
+    if fits():
+        return True
+    items.pop()
+    return False
 
 
 def knowledge_context(
@@ -69,6 +90,26 @@ def knowledge_context(
     ):
         raise ValueError("context_limit")
     omitted = False
+    notes: list[KnowledgeView] = []
+    guides: list[GuideIndex] = []
+    unresolved: list[UnresolvedId] = []
+
+    def fits() -> bool:
+        # Without a cap every item is kept, so no envelope is built.
+        return (
+            max_bytes is None
+            or _size(
+                context.model_copy(
+                    update={
+                        "notes": notes,
+                        "guides": guides,
+                        "unresolved_ids": unresolved,
+                    }
+                )
+            )
+            <= max_bytes
+        )
+
     with read_snapshot(conn):
         for row in candidate_rows(conn, scope, limit=_SCAN_CAP):
             omitted = omitted or row["candidate_total"] > _SCAN_CAP
@@ -76,37 +117,29 @@ def knowledge_context(
                 view, _ = eligible_current(conn, row, scope, now)
             except ValueError:
                 continue
-            notes, guides = list(context.notes), list(context.guides)
             if isinstance(view.body, NoteBody):
-                notes.append(proof_view(conn, view) if proofs else view)
+                note = proof_view(conn, view) if proofs else view
+                omitted = not _kept(notes, note, fits) or omitted
             elif isinstance(view.body, GuideBody):
-                # A guide title is model text too; agents get it hidden.
-                shown = proof_view(conn, view).body
-                guides.append(
-                    GuideIndex(
-                        id=view.id,
-                        revision=view.revision,
-                        title=(
-                            shown.title
-                            if isinstance(shown, GuideBody)
-                            else view.body.title
-                        ),
-                        scope=view.body.scope,
-                    )
+                guide = GuideIndex(
+                    id=view.id,
+                    revision=view.revision,
+                    # A guide title is model text too; agents get it hidden.
+                    title=(
+                        hidden_line(view.id)
+                        if hidden_from_agents(conn, view)
+                        else view.body.title
+                    ),
+                    scope=view.body.scope,
                 )
-            candidate = context.model_copy(
-                update={"notes": notes, "guides": guides}
-            )
-            if max_bytes is None or _size(candidate) <= max_bytes:
-                context = candidate
-            else:
-                omitted = True
+                omitted = not _kept(guides, guide, fits) or omitted
         for ident in unresolved_ids(conn, scope):
-            candidate = context.model_copy(
-                update={"unresolved_ids": [*context.unresolved_ids, ident]}
-            )
-            if max_bytes is None or _size(candidate) <= max_bytes:
-                context = candidate
-            else:
-                omitted = True
-    return context.model_copy(update={"truncated": omitted})
+            omitted = not _kept(unresolved, ident, fits) or omitted
+    return context.model_copy(
+        update={
+            "notes": notes,
+            "guides": guides,
+            "unresolved_ids": unresolved,
+            "truncated": omitted,
+        }
+    )

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from muninn import classify
+from muninn.knowledge_proof import too_long
 from muninn.query.answers import Answer, error
 from muninn.query.index_age import MAX_INDEX_AGE
 
@@ -69,10 +70,22 @@ def _shrink_knowledge(current: Answer) -> None:
     """Halve the longest knowledge text until the page fits or none is left.
 
     Knowledge IDs, revisions and evidence identities stay on page one;
-    only the text previews get shorter.
+    only the text previews get shorter. An owner proof is never cut: it
+    becomes its look-up line instead.
     """
-    while _too_big(current) and any(k["text"] for k in current["knowledge"]):
-        entry = max(current["knowledge"], key=lambda k: len(k["text"]))
+
+    def shorter(entry: Answer) -> bool:
+        if entry.get("proof"):
+            return len(entry["text"]) > len(too_long(entry["id"]))
+        return bool(entry["text"])
+
+    while _too_big(current) and (
+        left := [k for k in current["knowledge"] if shorter(k)]
+    ):
+        entry = max(left, key=lambda k: len(k["text"]))
+        if entry.get("proof"):
+            entry["text"] = too_long(entry["id"])
+            continue
         entry["text"] = entry["text"][: len(entry["text"]) // 2]
         entry["text_truncated"] = True
 
