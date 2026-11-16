@@ -178,6 +178,7 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 | `muninn know search QUERY [--all-projects] [--task TASK]` | SQLite FTS5 search of current permitted knowledge. No embeddings. |
 | `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources` and `proof` (the full owner proofs). This maps each `E_` ID to the transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions need `--revision`. Explicit show can keep withdrawn content. |
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
+| `muninn know context --page N [--provider claude\|codex\|cursor] [--task TASK]` | Plain text, not JSON: page N of the session-start memories in the same layout as the start block, with the header `page N of M · X of Y`. Page 1 is the start block's list. Each page continues where the last one stopped, so each memory appears once. `--provider` (default `claude`) sets the page size: Claude and Cursor 4,000 bytes, Codex 2,800. A missing page reports `page_unavailable`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local `attempt` and `Receipt`. No model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision. Reports `KnowledgeView`. |
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded `request`. Paired `bounds` or activation/uncompleted boundary through the latest complete record. `--task` binds the `request` to one task in the source project. |
@@ -241,6 +242,10 @@ Owner authority comes from provenance (provider prompt label, an indexed `prompt
 The proof is the full cited owner message, plus the paired assistant reply for agreement, as Muninn recorded them.
 `know context`, `know search`, recall, and review model input show the proof in place of the model's claim text for preferences, decisions, and global knowledge.
 A proof over 2,000 bytes is not cut: the agent gets `proof too long: run muninn know show K_ID`.
+If the proof cannot be found, the agent gets `proof unavailable: run muninn know show K_ID`, never the model text.
+`muninn search` knowledge previews follow the same rule.
+Knowledge saved through an ADR 0018 owner approval shows the model text the owner approved.
+Facts and procedures show the model text.
 `know list` (`proofs`, by knowledge ID), `know show` (`proof`), and `know decision show` and `status` (`proof`) show the full proof beside the model text.
 
 A replacement uses `action: replace`, `knowledge_id`, and `expected_revision`.
@@ -1627,9 +1632,17 @@ They make accepted notes and a compact guide index as untrusted data.
 Claude receives up to 4,000 bytes.
 Codex receives up to 2,800 bytes.
 
+The block keeps the frame, the usage line and the search and open lines.
+The memories are one numbered list between two bars of `▓`:
+a header `▓ MUNINN MEMORY · <scope> · <shown> of <total>`, each memory's text wrapped at 70 characters with a `When:` line for conditions, then one code line `▓ <n>: <K_ID>` for each memory.
+A guide shows its title.
+The bar is as wide as the longest line, from 20 to 72 characters.
+The block has no kind, revision, scope JSON, evidence IDs or expiry.
+
 This read-only startup context does not make a learning policy necessary.
-No arbitrary eight-item limit or actor/quote heuristic stays.
-Muninn omits items that do not fit and reports that omission.
+Memories are taken in order until the next one does not fit; that one starts page 2.
+A memory larger than a whole page shows `memory too long: run muninn know show K_ID`.
+When memories are left out, the footer `▓ <k> more memories: muninn know context --page 2` points to the next page (Codex adds `--provider codex`).
 The `usage` text tells agents to check current revisions and open cited `originals`.
 
 Preview eligibility is not a truth guarantee.

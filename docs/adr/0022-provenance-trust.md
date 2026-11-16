@@ -171,12 +171,30 @@ Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recal
   complete display, so other cited replies need no pairing.
 - Adjacency (`review_binding.adjacent_gap`) also needs an indexed `reply` event for the
   assistant line; the commit caches one result per (assistant, owner) pair.
-- Agent paths (`knowledge_proof.proof_view`) replace the claim text with the proof only
-  for preferences, decisions and global knowledge. Facts and procedures keep the model
-  text, as before. The proof marks each message `[owner]` or `[assistant]`.
+- Agent paths (`knowledge_proof.proof_view`: recall, `know context`, `know search`,
+  `muninn search` previews, review reads) replace the claim text with the proof only for
+  owner-supported knowledge: preferences, decisions and global knowledge (team lead Q1,
+  option A). Facts and procedures keep the model text, as before. The proof marks each
+  message `[owner]` or `[assistant]`. A missing proof fails closed:
+  "proof unavailable: run muninn know show K_x".
+- Knowledge saved through an ADR 0018 approval gives agents the model text the owner
+  approved (owner decision Q2, 2026-11-16), found through the knowledge version's
+  application request.
 - Owner views: `know list` adds `proofs` (by knowledge ID), `know show` adds `proof`,
   and the decision display text and `know decision status` add `proof`.
 - A Codex message with scalar `content` has no indexed event, so it cannot be a display.
 - Upgrade: in-flight learning requests and candidates staged before the upgrade fail
   once (stored evidence authority changes), then work normally. Pre-upgrade decision
   displays must be shown again (the display text changed).
+
+- Session start (owner request, 2026-11-16): the memories are one numbered list between
+  two `▓` bars (20 to 72 characters wide), text wrapped at 70, a `When:` line for
+  conditions, and one `▓ n: K_x` code line for each memory; no kind, revision, scope,
+  evidence IDs or expiry. The frame, usage, search and open lines stay.
+- Pages: every eligible memory in reader order is split into consecutive pages that fit
+  the provider's start-block limit (Claude and Cursor 4,000 bytes, Codex 2,800). Page 1
+  is the start block; `muninn know context --page N [--provider P]` prints page N as
+  text. A memory larger than a page is shown alone as "memory too long: run muninn know
+  show K_x". The footer "▓ k more memories: muninn know context --page N+1" replaces the
+  old omission line; Codex adds `--provider codex`. Page 1 now stops at the first memory
+  that does not fit, where the old block skipped it and tried later ones.
