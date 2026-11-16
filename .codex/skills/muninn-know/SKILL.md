@@ -75,7 +75,7 @@ Record an owner decision or preference only when attributable owner `evidence` a
 Cite the full owner message by its evidence ID; a partial span gives no owner support.
 For an agreement reply such as `yes`, also cite the final assistant reply directly before it.
 Write the decision in plain words in the claim text. Muninn does not check that text.
-The proof is the full cited messages. Context, search, and recall show the proof, not the claim text; a proof over 2,000 bytes becomes `proof too long: run muninn know show --proof K_ID`, and a missing proof becomes `proof unavailable: run muninn know show K_ID`. Knowledge saved through an owner approval of a displayed proposal shows the approved text.
+The proof is the full cited messages. Context, search, and recall show the proof, not the claim text; a proof over 2,000 bytes becomes `proof too long: run muninn know show --proof K_ID`, and a missing proof becomes `proof unavailable: run muninn know show --proof K_ID`. A search preview or recall line with less room than the proof gets the `proof too long` line, never part of the proof. Knowledge saved through an owner approval of a displayed proposal shows the approved text.
 List and show print the full proof (`proofs`, `proof`) beside the claim text.
 
 `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and ID coercion have no active interface.
@@ -187,7 +187,7 @@ Each selector has `json_pointer`, `start`, and `end`.
 The verifier needs the complete accepted `original` fields, not a selected substring.
 Only current eligible primary sources and owner messages with `direct_owner` provenance can supply proof.
 The display must be the final assistant message directly before the owner reply, with no message, tool call, or tool result between them.
-Every `D_` ID in the display must be `candidate_id` or `replacement_id`.
+The display must be exactly the `know decision show` text of the target proposal.
 One owner reply backs one decision: a second intent with the same `owner_locator` is refused with `owner_proof`.
 Input files, labels, claimed IDs, and commands cannot supply proof.
 

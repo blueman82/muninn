@@ -243,7 +243,9 @@ Owner authority comes from provenance (provider prompt label, an indexed `prompt
 The proof is the full cited owner message, plus the paired assistant reply for agreement, as Muninn recorded them.
 `know context`, `know search`, recall, and review model input show the proof in place of the model's claim text for preferences, decisions, and global knowledge.
 A proof over 2,000 bytes is not cut: the agent gets `proof too long: run muninn know show --proof K_ID`.
-If the proof cannot be found, the agent gets `proof unavailable: run muninn know show K_ID`, never the model text.
+A search preview or recall line that has less room than the proof also gets that line, never part of the proof; such a preview has `proof: true`.
+If the proof cannot be found, the agent gets `proof unavailable: run muninn know show --proof K_ID`, never the model text.
+A hidden reason, guide title or expiry condition reads `not shown to agents: run muninn know show --proof K_ID`.
 `muninn search` knowledge previews follow the same rule.
 Knowledge saved through an ADR 0018 owner approval shows the model text the owner approved.
 Facts and procedures show the model text.
@@ -408,7 +410,7 @@ Each selector has `json_pointer`, `start`, and `end`.
 The verifier needs the complete accepted `original` fields, not a selected substring.
 Only current eligible primary sources and owner messages with `direct_owner` provenance can supply proof.
 The display must be the final assistant message directly before the owner reply, with no message, tool call, or tool result between them.
-Every `D_` ID in the display must be `candidate_id` or `replacement_id`.
+The display must be exactly the `know decision show` text of the target proposal.
 One owner reply backs one decision: a second intent with the same `owner_locator` is refused with `owner_proof`.
 The owner and display lines must be indexed `prompt` and `reply` events, so a fork or replay copy cannot back a decision.
 
@@ -1643,7 +1645,7 @@ The block has no kind, revision, scope JSON, evidence IDs or expiry.
 This read-only startup context does not make a learning policy necessary.
 The order is decisions and preferences, then constraints and procedures, then facts and other notes, then guide titles; newest first inside each group. Global memories use the same order.
 Memories are taken in order until the next one does not fit; that one starts page 2.
-A memory larger than a whole page shows `memory too long: run muninn know show K_ID`.
+A memory larger than a whole page shows `memory too long: run muninn know show --proof K_ID`.
 When memories are left out, the footer `▓ <k> more memories. Before you write code, run: muninn know context --page 2` points to the next page (Codex adds `--provider codex`).
 The `usage` text tells agents to check current revisions and open cited `originals`.
 

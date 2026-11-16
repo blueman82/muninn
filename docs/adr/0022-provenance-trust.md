@@ -151,6 +151,8 @@ Update `owner_instructions` (decision_words.py:19-33) and both `skills/muninn-kn
 4. `allow_global` stays `false`; all learning stays project scope for now.
 5. Cursor: trust.
 6. The model text appears only in owner views; agent paths print only the proof.
+7. (2026-11-16) Codex `<send_user_message_question_reply>` items labelled `user` are
+   trusted whole, assistant question text included (option A). No code change.
 
 ## Open question for the owner
 
@@ -162,8 +164,12 @@ Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recal
 ## Implementation notes (2026-11-16)
 
 - Authority: a partial-span selection gets `untrusted`, so it gives no owner support.
-  A whole message wrapped in one tag (`<name>...</name>`, attributes allowed) is refused
-  on every provider. An owner line needs an indexed `prompt` event (`build_record`).
+  Trust comes only from the provider's label (Claude `origin.kind` `human`; Codex
+  provenance type `user` on every content item; Cursor user bubbles), with no wording or
+  wrapper rule: a whole message in one tag, such as `<note>yes</note>`, is trusted like
+  any other labelled message. Codex `<send_user_message_question_reply>` items labelled
+  `user` are trusted whole (owner decision 7). An owner line needs an indexed `prompt`
+  event (`build_record`).
 - Support (`review_binding.owner_supported`): a claim needs a cited full `direct_owner`
   message; each cited assistant reply must be a full field paired with a cited owner
   message, or the claim is refused. When a verified ADR 0018 decision is applied, the
@@ -176,7 +182,9 @@ Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recal
   owner-supported knowledge: preferences, decisions and global knowledge (team lead Q1,
   option A). Facts and procedures keep the model text, as before. The proof marks each
   message `[owner]` or `[assistant]`. A missing proof fails closed:
-  "proof unavailable: run muninn know show K_x".
+  "proof unavailable: run muninn know show --proof K_x". Over the 2,000-byte cap, or
+  where a preview or recall line has less room, a proof is never cut; the agent gets
+  "proof too long: run muninn know show --proof K_x", which prints only the proof.
 - Knowledge saved through an ADR 0018 approval gives agents the model text the owner
   approved (owner decision Q2, 2026-11-16), found through the knowledge version's
   application request.
@@ -199,6 +207,7 @@ Owner answer (2026-11-16): accept the 2,000-byte cap for agent paths (hook recal
   the provider's start-block limit (Claude and Cursor 4,000 bytes, Codex 2,800). Page 1
   is the start block; `muninn know context --page N [--provider P]` prints page N as
   text. A memory larger than a page is shown alone as "memory too long: run muninn know
-  show K_x". The footer "▓ k more memories: muninn know context --page N+1" replaces the
+  show --proof K_x". The footer "▓ k more memories. Before you write code, run: muninn
+  know context --page N+1" replaces the
   old omission line; Codex adds `--provider codex`. Page 1 now stops at the first memory
   that does not fit, where the old block skipped it and tried later ones.
