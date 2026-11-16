@@ -9,6 +9,7 @@ import unittest
 
 from muninn import hook, hook_frame, knowledge_push
 from muninn.hook_banner import Item, banner
+from muninn.hook_frame import CLOSE, OPEN, USAGE
 from muninn.knowledge_models import KnowledgeContext
 from tests.hook_support import HookCase
 from tests.test_cli_learning import CliLearningCase
@@ -124,9 +125,19 @@ class PageCliTests(CliLearningCase):
         with self.assertRaises(json.JSONDecodeError):
             self.call("know", "context", "--page", "1")
         page = self.last_stdout
-        self.assertTrue(page.startswith("▓" * 20))
+        self.assertTrue(page.startswith(OPEN))
+        self.assertTrue(page.rstrip("\n").endswith(CLOSE))
+        self.assertIn(USAGE, page)
         self.assertIn("· page 1 of 1 · 1 of 1", page)
         self.assertIn(f"▓ 1: {ident}", page)
         self.assertNotIn("more memories", page)
         code, out = self.call("know", "context", "--page", "2")
         self.assertEqual((code, out["error"]), (2, "page_unavailable"))
+
+    def test_page_text_has_no_control_characters(self) -> None:
+        code, _ = self.propose(content="Use \x1b[31mred\x1b[0m text.")
+        self.assertEqual(code, 0)
+        with self.assertRaises(json.JSONDecodeError):
+            self.call("know", "context", "--page", "1")
+        self.assertNotIn("\x1b", self.last_stdout)
+        self.assertIn("[31mred", self.last_stdout)

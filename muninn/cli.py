@@ -45,6 +45,7 @@ from muninn.cli_core import Env, Handler, Out, Record, Result
 from muninn.cli_hook_contract import PROVIDERS
 from muninn.cli_output import redacted
 from muninn.cli_parser import build_parser
+from muninn.hook_status import printable
 from muninn.review_pause import EraseStatus
 
 __all__ = [
@@ -147,8 +148,9 @@ def _answer(
     ):
         print(out["explanation"], file=sys.stderr)
     if isinstance(out.get("banner"), str):
-        # know context --page prints the session-start layout as text.
-        print(out["banner"])
+        # know context --page prints the session-start layout as text;
+        # stored text must not reach the terminal as control characters.
+        print("\n".join(map(printable, out["banner"].splitlines())))
         return code
     pretty = getattr(args, "pretty", False) or os.environ.get("MUNINN_PRETTY")
     print(json.dumps(out, sort_keys=True, indent=2 if pretty else None))

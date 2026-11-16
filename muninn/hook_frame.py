@@ -265,7 +265,7 @@ def render_page(
         flag: Extra ``know context`` option the footer must repeat.
 
     Returns:
-        The page between its two bars, without the frame.
+        The page between its two bars, inside the untrusted-data frame.
 
     Raises:
         ValueError: If the page does not exist.
@@ -281,7 +281,8 @@ def render_page(
         f" {len(pages)} · {len(page)} of {total}"
     )
     footer = more_line(left, number + 1, flag) if left else None
-    return "\n".join(banner(head, page, footer))
+    # Later pages are the same untrusted data as the start block.
+    return frame("", [USAGE, *banner(head, page, footer)])
 
 
 def _knowledge_line(entry: RecallEntry, cap: int = ENTRY_TEXT) -> str:
