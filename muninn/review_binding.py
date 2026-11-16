@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from contextlib import ExitStack
 
 from muninn import classify
 from muninn.knowledge_models import EvidenceId
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceRecord,
+    JsonlOriginal,
     SourceRef,
 )
-from muninn.review_originals import originals
+from muninn.review_originals import originals, reread
 from muninn.review_progress import source_row
 from muninn.review_read_budget import ReadBudget
 from muninn.review_selectors import (
@@ -121,10 +123,8 @@ def adjacent_gap(
     first = assistant.line + 1 if whole_display else assistant.line
     if first == owner.line:
         return True
-    records = originals(
-        conn, source, first, owner.line - 1, MAX_SCAN_BYTES, budget=budget
-    )
-    for number, raw, _ in records:
+    records = _between(conn, source, assistant, owner, first, budget)
+    for number, raw in records:
         check_tombstones(
             conn,
             source,
@@ -135,7 +135,7 @@ def adjacent_gap(
                 line_sha256=classify.record_hash(raw),
             ),
         )
-    gap = [decode(raw) for _, raw, _ in records]
+    gap = [decode(raw) for _, raw in records]
     if not whole_display:
         if classify.record_hash(records[0][1]) != assistant.line_sha256:
             return False
@@ -146,6 +146,71 @@ def adjacent_gap(
         ):
             return False
     return not any(fields(owner.provider, record) for record in gap)
+
+
+def _between(
+    conn: sqlite3.Connection,
+    source: sqlite3.Row,
+    assistant: EvidenceRecord,
+    owner: EvidenceRecord,
+    first: int,
+    budget: ReadBudget,
+) -> list[tuple[int, bytes]]:
+    """Read the records from ``first`` up to the owner record.
+
+    Args:
+        conn: Caller-owned connection with the indexed source rows.
+        source: Indexed source row of the thread.
+        assistant: Cited assistant record, checked at its stored bytes.
+        owner: Cited owner record, checked at its stored bytes.
+        first: The first line to return.
+        budget: The operation read allowance charged for the read.
+
+    Returns:
+        Each line number and its raw record, in order.
+
+    Raises:
+        ValueError: If the bytes do not hold exactly those records.
+        EvidenceLimitError: If the read allowance is exhausted.
+    """
+    start, end = assistant.original_locator, owner.original_locator
+    if not (
+        isinstance(start, JsonlOriginal)
+        and isinstance(end, JsonlOriginal)
+        and start.path == end.path
+    ):
+        return [
+            (number, raw)
+            for number, raw, _ in originals(
+                conn,
+                source,
+                first,
+                owner.line - 1,
+                MAX_SCAN_BYTES,
+                budget=budget,
+            )
+        ]
+    # The commit has checked both records at their stored offsets, so only
+    # the bytes between them are read, never the transcript from line 1.
+    offset = start.byte_offset
+    if first > assistant.line:
+        offset += start.byte_length
+    if end.byte_offset <= offset:
+        raise ValueError("original_unavailable")
+    span = JsonlOriginal(
+        kind="jsonl",
+        path=start.path,
+        byte_offset=offset,
+        byte_length=end.byte_offset - offset,
+    )
+    with ExitStack() as stack:
+        raw = reread(stack, {}, span, span.byte_length, budget=budget)
+    lines = raw.splitlines(keepends=True)
+    if len(lines) != owner.line - first:
+        raise ValueError("original_unavailable")
+    for _ in lines[1:]:
+        budget.consume_record()
+    return list(enumerate(lines, first))
 
 
 def _thread(record: EvidenceRecord) -> SourceRef:

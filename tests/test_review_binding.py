@@ -6,7 +6,11 @@ from typing import Any
 from unittest import mock
 
 from muninn import review_binding, review_evidence
+from muninn.review_candidates import ProposalRejectedError
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
+from muninn.review_json import canonical_json
+from muninn.review_models import ReviewPolicy
+from muninn.review_read_budget import EvidenceLimitError
 from tests.classify_support import item
 from tests.ingest_support import fc_output, rollout
 from tests.test_classify import function_call, reply, user_msg
@@ -25,18 +29,18 @@ class BindingCase(CommitCase):
     def setUp(self) -> None:
         RequestCase.setUp(self)
 
-    def conversation(self, *records: dict[str, Any]) -> None:
-        """Index records after the metadata line and select all of them."""
+    def conversation(self, *records: dict[str, Any], first: int = 2) -> None:
+        """Index records after the metadata line and select from ``first``."""
         self.records[1:] = list(records)
         self.path = self.write(rollout(), self.records)
         self.run_ingest(full=True)
         last = len(self.records)
         self.evidence = review_evidence.initial_evidence(
-            self.home, self.window(2, last), 65536
+            self.home, self.window(first, last), 65536
         ).excerpts
         for record in self.evidence:
             self.persist(record)
-        self.context = self.start(2, last)
+        self.context = self.start(first, last)
 
     def refs(self, *cited: str) -> list[str]:
         """Return the ids of the named excerpts, or of all of them."""
@@ -135,6 +139,46 @@ class AgreementTests(BindingCase):
         self.refused(
             reply(1, "Use SQLite."), user_msg(2, "yes"), cited=("Use SQLite.",)
         )
+
+    def test_agreement_deep_in_a_long_rollout_saves(self) -> None:
+        # Under the production allowance the window check already reads the
+        # transcript up to here; a second scan from line 1 would exhaust it.
+        data = self.policy.model_dump(mode="json")
+        data["max_input_bytes"] = 1048576
+        self.policy = ReviewPolicy.model_validate(data)
+        self.conn.execute(
+            "UPDATE review_control SET policy_json=?,policy_digest=?",
+            (canonical_json(self.policy), self.digest(self.policy)),
+        )
+        last = 3000
+        self.conversation(
+            *(event(i) for i in range(1, last - 3)),
+            reply(last - 3, "Use SQLite for the store."),
+            event(last - 2),
+            user_msg(last - 1, "i agree"),
+            first=last - 4,
+        )
+        self.assertEqual(self.decide("Use SQLite for the store."), "completed")
+
+    def test_unreadable_pair_refuses_only_its_claim(self) -> None:
+        self.conversation(
+            reply(1, "Use SQLite."), event(2), user_msg(3, "yes")
+        )
+        owner = self.note(
+            kind="decision", content="Say yes.", evidence_refs=self.refs("yes")
+        )
+        agreed = self.note(
+            kind="decision", content="Use SQLite.", evidence_refs=self.refs()
+        )
+        with (
+            mock.patch(
+                "muninn.review_commit.adjacent_gap",
+                side_effect=EvidenceLimitError("evidence_record_limit"),
+            ),
+            self.assertRaises(ProposalRejectedError) as caught,
+        ):
+            self.save(self.result([owner, agreed]))
+        self.assertEqual(caught.exception.feedback.index, 1)
 
     def test_one_adjacency_read_per_pair(self) -> None:
         self.conversation(

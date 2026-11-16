@@ -120,12 +120,9 @@ def _pairs(conn: sqlite3.Connection, budget: ReadBudget) -> Adjacent:
         # One reread per pair and batch, however many claims cite it.
         key = (assistant.id, owner.id)
         if key not in checked:
+            # A pair that cannot be read refuses only the claims citing it.
             try:
                 checked[key] = adjacent_gap(conn, assistant, owner, budget)
-            except EvidenceLimitError as exc:
-                raise CommitRejectedError(
-                    exc.code, "original evidence"
-                ) from None
             except ValueError:
                 checked[key] = False
         return checked[key]
