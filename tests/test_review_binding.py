@@ -77,6 +77,25 @@ class OwnerMessageTests(BindingCase):
             self.decide("Use pytest for tests and avoid mocks."), "completed"
         )
 
+    def test_question_reply_labelled_user_is_trusted_whole(self) -> None:
+        text = (
+            "<send_user_message_question_reply>\n"
+            "Question: Should we use SQLite for the store?\n"
+            "Answer: yes, only on Windows\n"
+            "</send_user_message_question_reply>"
+        )
+        self.conversation(user_msg(1, text))
+        (record,) = self.evidence
+        self.assertEqual(record.authority, "direct_owner")
+        kinds = [
+            row[0]
+            for row in self.conn.execute(
+                "SELECT kind FROM event WHERE line=?", (record.line,)
+            )
+        ]
+        self.assertEqual(kinds, ["prompt"])
+        self.assertEqual(self.decide("Use SQLite on Windows."), "completed")
+
     def test_partial_span_gives_no_owner_support(self) -> None:
         self.conversation(user_msg(1, "Never use pytest. Use Python."))
         window = self.window(2, 2)
