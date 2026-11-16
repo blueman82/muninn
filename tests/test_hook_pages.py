@@ -150,6 +150,8 @@ class PageLimitTests(HookCase):
                         with self.subTest(limit=limit, page=number):
                             self.assertLessEqual(len(page.encode()), limit)
                         number += 1
+                    with self.subTest(limit=limit):
+                        self.assertGreater(number, 1, "no page rendered")
 
 
 class PageCliTests(CliLearningCase):
