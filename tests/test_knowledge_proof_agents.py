@@ -70,6 +70,12 @@ class AgentPathTests(CliLearningCase):
             "UPDATE knowledge_version SET expiry_json=? WHERE knowledge_id=?",
             (json.dumps(expiry), ids[0]),
         )
+        # Long temporary paths (Windows) do not fit the default test cap.
+        self.policy = self.policy.model_copy(update={"context_bytes": 12000})
+        self.conn.execute(
+            "UPDATE review_control SET policy_json=?,policy_digest=?",
+            (self.policy.model_dump_json(), self.digest(self.policy)),
+        )
         return ids[0], ids[1]
 
     def agent_outputs(self) -> dict[str, str]:
