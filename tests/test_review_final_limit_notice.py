@@ -143,3 +143,13 @@ class FinalLimitNoticeTests(unittest.TestCase):
         self.assertLess(sum(len(r.excerpt or "") for r in case.evidence), 100)
         case.claim_inputs(window, 4096)
         self.reconcile("evidence_selection_limit")
+
+    def test_round_deadline_is_recorded_as_deadline(self) -> None:
+        for error in ("budget_deadline", "deadline"):
+            with self.subTest(error=error):
+                self.assertEqual(
+                    review_supervisor_result.failure_code(
+                        ValueError(error), "rejected_validation"
+                    ),
+                    "deadline",
+                )

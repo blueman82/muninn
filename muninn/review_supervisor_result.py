@@ -29,6 +29,9 @@ from muninn.review_supervisor_store import database, mark_correction
 def failure_code(error: ValueError | OSError, fallback: str) -> str:
     """Keep known verification causes without exposing exception text."""
     cause = error.code if isinstance(error, EvidenceLimitError) else str(error)
+    if cause in {"budget_deadline", "deadline"}:
+        # The round clock is the same time limit as the process clock.
+        return "deadline"
     return (
         cause
         if cause

@@ -357,7 +357,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         self.add()
         context = self.context_view()
         hook_start = importlib.import_module("muninn.hook_start")
-        for limit in (300, 350, 400, 500, 600, 720, 900):
+        for limit in (300, 350, 400, 500, 600, 728, 900):
             with self.subTest(limit=limit):
                 text = hook_start.render_block(context, "repo", limit=limit)[0]
                 self.assertIn('trust="untrusted-data"', text)
@@ -366,7 +366,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
                 self.assertLessEqual(len(text.encode()), limit)
                 # Once the header fits, it counts the one memory, and a
                 # memory left out is pointed to by the footer.
-                if limit >= 720:
+                if limit >= 728:
                     self.assertIn("▓ MUNINN MEMORY · repo · ", text)
                     self.assertTrue(
                         "· 1 of 1" in text or "▓ 1 more memories." in text

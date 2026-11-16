@@ -89,7 +89,8 @@ class PromptSkipTests(RecallCase):
             " start with `--kind prompt`; for assistant reports, use"
             " `--kind reply`.\n"
             "open retrievals with `muninn open REF --context 3`. For K_ IDs,"
-            " use `muninn know show K_ID` and open cited originals; E_ IDs"
+            " use `muninn know show --proof K_ID` and open cited originals;"
+            " E_ IDs"
             " are not open refs. Previews only help you navigate—support"
             " past claims with opened originals.\n"
             "If history doesn't matter, skip. If relevant evidence is"
@@ -137,8 +138,8 @@ class PromptRecallTests(RecallCase):
         hint = "Open a hit with " + HINT + "."
         self.assertIn(hint, text)
         self.assertIn(
-            "K_ ID: read the full saved record with "
-            "`muninn know show K_ID`",
+            "K_ ID: read the owner proof with "
+            "`muninn know show --proof K_ID`",
             text,
         )
         self.assertIn(
