@@ -45,6 +45,27 @@ class ProofCliTests(CliLearningCase):
                 self.assertIn(MODEL, self.last_stdout)
                 self.assertIn(f"[owner] {OWNER}", self.last_stdout)
 
+    def test_search_previews_show_proof(self) -> None:
+        self.decide()
+        self.assertEqual(self.call("search", "zebra")[0], 0)
+        self.assertIn(OWNER, self.last_stdout)
+        self.assertNotIn(MODEL, self.last_stdout)
+
+    def test_missing_proof_fails_closed(self) -> None:
+        ident = self.decide()
+        # A stored span selector leaves no full owner message to show.
+        self.conn.execute(
+            "UPDATE review_evidence SET selector_json=json_set(selector_json,"
+            "'$.start',0,'$.end',3) WHERE id=?",
+            (self.evidence[0].id,),
+        )
+        self.assertEqual(self.call("know", "context")[0], 0)
+        self.assertIn(
+            f"proof unavailable: run muninn know show {ident}",
+            self.last_stdout,
+        )
+        self.assertNotIn(MODEL, self.last_stdout)
+
     def test_long_proof_gives_a_pointer_line(self) -> None:
         ident = self.decide()
         long = "Keep every detail. " * 120

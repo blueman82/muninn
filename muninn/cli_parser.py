@@ -215,6 +215,17 @@ def _add_knowledge(cmd: _Commands) -> None:
     p.add_argument("--revision", type=int)
     p = know.add("context")
     p.add_argument("--task")
+    p.add_argument(
+        "--page",
+        type=int,
+        help="print page N of the session-start memories as text",
+    )
+    p.add_argument(
+        "--provider",
+        choices=("claude", "codex", "cursor"),
+        default="claude",
+        help="session-start byte limit that sets the pages",
+    )
     p = know.add("propose")
     p.add_argument("--input", required=True)
     p = know.add("retract")

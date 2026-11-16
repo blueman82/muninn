@@ -15,16 +15,21 @@ from muninn.cli_core import (
     Out,
     Record,
     Result,
+    current_dir,
     read_store,
     write_store,
 )
 from muninn.cli_decision import decision
 from muninn.cli_know_shared import scopes as _scopes
 from muninn.cli_learn import installed_policy, propose
+from muninn.hook import CODEX_BLOCK_LIMIT
+from muninn.hook_frame import BLOCK_LIMIT, render_page
+from muninn.hook_status import scope_label
 from muninn.knowledge_models import KnowledgeView
 from muninn.knowledge_proof import owner_proofs
 from muninn.query.answers import event_ref
 from muninn.review_models import ProposalInput
+from muninn.scope import scope_ids_for_read
 
 
 def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
@@ -92,6 +97,8 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
             "evidence_sources": _evidence_sources(conn, view),
             "proof": owner_proofs(conn, view),
         }
+    if a.page is not None:
+        return _page(conn, a, env)
     policy = installed_policy(conn)
     scopes = _scopes(conn, a, env)
     project = next(
@@ -102,6 +109,32 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     return knowledge_push.knowledge_context(
         conn, project, policy.context_bytes, time.time()
     ).model_dump(mode="json")
+
+
+def _page(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
+    """Return one page of the session-start memories as plain text."""
+    if a.page < 1:
+        raise ValueError("page_unavailable")
+    cwd = current_dir(env)
+    label = scope_label(conn, scope_ids_for_read(conn, cwd), cwd)
+    project = next(
+        (s for s in _scopes(conn, a, env) if s.project_id is not None), None
+    )
+    if project is None:
+        raise ValueError("scope_unavailable")
+    context = knowledge_push.knowledge_context(
+        conn, project, None, time.time()
+    )
+    codex = a.provider == "codex"
+    return {
+        "banner": render_page(
+            context,
+            label,
+            a.page,
+            limit=CODEX_BLOCK_LIMIT if codex else BLOCK_LIMIT,
+            flag=" --provider codex" if codex else "",
+        )
+    }
 
 
 def _proposal(a: Namespace) -> ProposalInput:

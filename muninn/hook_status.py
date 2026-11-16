@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Mapping
 
 from pydantic import TypeAdapter, ValidationError
 
 from muninn.hook_frame import escape_delimiter, frame
-from muninn.knowledge_models import RequestId
+from muninn.knowledge_models import KnowledgeContext, RequestId
 from muninn.review_recovery import explain
 from muninn.review_recovery_codes import CONTAINED
 
@@ -90,6 +91,35 @@ def status_line(
     if omitted:
         head += "; some knowledge omitted by byte limit"
     return "\n".join([head, *shown])
+
+
+# Lines of the session-start list: a numbered memory and its code line.
+_ITEM = re.compile(r"\d+\. ")
+_CODE = re.compile(r"▓ \d+: (K_[0-9a-f]{32})$")
+
+
+def start_trace(
+    text: str, context: KnowledgeContext, trace: dict[str, object]
+) -> None:
+    """Record the shown memory codes and lines of a session-start block.
+
+    Args:
+        text: The rendered block.
+        context: Every eligible memory the block was cut from.
+        trace: Receives ``knowledge_ids``, ``knowledge_omitted`` and the
+            ``shown`` lines for the human status message.
+    """
+    lines = text.splitlines()
+    ids = [match[1] for line in lines if (match := _CODE.match(line))]
+    trace["knowledge_ids"] = ids
+    trace["knowledge_omitted"] = context.truncated or len(ids) < (
+        len(context.notes) + len(context.guides)
+    )
+    firsts = [line for line in lines if _ITEM.match(line)]
+    trace["shown"] = [
+        printable(f"{ident} {line}")
+        for ident, line in zip(ids, firsts, strict=False)
+    ]
 
 
 def printable(text: str) -> str:

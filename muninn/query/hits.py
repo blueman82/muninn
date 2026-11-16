@@ -8,6 +8,7 @@ from collections import Counter
 from typing import Any
 
 from muninn import knowledge_read
+from muninn.knowledge_proof import proof_view
 from muninn.query.answers import (
     Answer,
     answer_citable,
@@ -239,7 +240,11 @@ def knowledge(
             key=lambda view: (view.created_at, view.id),
             reverse=True,
         )
-        return [knowledge_preview(view) for view in views[:KNOWLEDGE_HITS]]
+        # Search previews reach agents, so they show the proof.
+        return [
+            knowledge_preview(proof_view(conn, view))
+            for view in views[:KNOWLEDGE_HITS]
+        ]
 
 
 def expired_omitted(

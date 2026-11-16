@@ -31,14 +31,15 @@ def _size(context: KnowledgeContext) -> int:
 
 
 def knowledge_context(
-    conn: sqlite3.Connection, scope: Scope, max_bytes: int, now: float
+    conn: sqlite3.Connection, scope: Scope, max_bytes: int | None, now: float
 ) -> KnowledgeContext:
     """Return current supported notes and guide labels within a byte cap.
 
     Args:
         conn: Open store connection; existing transactions are preserved.
         scope: Explicit mapped project/task or authorized global scope.
-        max_bytes: Positive cap on the entire canonical UTF-8 envelope.
+        max_bytes: Positive cap on the entire canonical UTF-8 envelope, or
+            None for every eligible item, as session-start pages need.
         now: Explicit finite nonnegative expiry evaluation time.
 
     Returns:
@@ -56,7 +57,9 @@ def knowledge_context(
         unresolved_ids=[],
         truncated=False,
     )
-    if type(max_bytes) is not int or max_bytes < _size(context):
+    if max_bytes is not None and (
+        type(max_bytes) is not int or max_bytes < _size(context)
+    ):
         raise ValueError("context_limit")
     omitted = False
     with read_snapshot(conn):
@@ -81,7 +84,7 @@ def knowledge_context(
             candidate = context.model_copy(
                 update={"notes": notes, "guides": guides}
             )
-            if _size(candidate) <= max_bytes:
+            if max_bytes is None or _size(candidate) <= max_bytes:
                 context = candidate
             else:
                 omitted = True
@@ -89,7 +92,7 @@ def knowledge_context(
             candidate = context.model_copy(
                 update={"unresolved_ids": [*context.unresolved_ids, ident]}
             )
-            if _size(candidate) <= max_bytes:
+            if max_bytes is None or _size(candidate) <= max_bytes:
                 context = candidate
             else:
                 omitted = True

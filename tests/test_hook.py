@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import textwrap
 import time
 from pathlib import Path
 from sqlite3 import Connection
@@ -61,10 +62,12 @@ class SessionStartTests(HookCase):
                 self.assertTrue(text.startswith(OPEN + "\n"))
                 self.assertTrue(text.endswith("\n" + CLOSE))
                 self.assertEqual(len(TAG.findall(text)), 2)
-                self.assertIn(f"{first} revision 1 [decision", text)
-                self.assertIn(json.dumps(self.scope.project_id), text)
-                self.assertIn("[owner] Use Python for this project.", text)
-                self.assertIn(self.evidence[0].id, text)
+                self.assertIn("▓ MUNINN MEMORY · repo · 1 of 1", text)
+                self.assertIn("1. [owner] Use Python for this project.", text)
+                self.assertIn(f"▓ 1: {first}", text)
+                # The list carries no kind, revision, scope or evidence ids.
+                self.assertNotIn("revision 1", text)
+                self.assertNotIn(self.evidence[0].id, text)
                 self.assertIn(USAGE, text)
                 self.assertNotIn("Unsupported entry", text)
                 self.assertNotIn(hidden, text)
@@ -73,8 +76,8 @@ class SessionStartTests(HookCase):
         out = self.start_hook()
         text = self.body(out)
         self.assertIn(USAGE, text)
-        self.assertIn("Project knowledge for repo:", text)
-        self.assertNotIn("- K_", text)
+        self.assertIn("▓ MUNINN MEMORY · repo · 0 of 0", text)
+        self.assertNotIn("▓ 1:", text)
         self.assertIn(
             "no eligible knowledge displayed", str(out["systemMessage"])
         )
@@ -90,10 +93,14 @@ class SessionStartTests(HookCase):
         ]
         out = self.start_hook()
         text = self.body(out)
-        shown = re.findall(r"^- (K_[0-9a-f]{32}) ", text, re.M)
+        shown = re.findall(r"^▓ \d+: (K_[0-9a-f]{32})$", text, re.M)
         self.assertEqual(shown, list(reversed(numbers))[: len(shown)])
         self.assertTrue(0 < len(shown) < len(numbers))
-        self.assertIn("omitted", text)
+        self.assertIn(
+            f"▓ {len(numbers) - len(shown)} more memories:"
+            " muninn know context --page 2",
+            text,
+        )
         self.assertIn(
             f"{len(shown)} knowledge entries", str(out["systemMessage"])
         )
@@ -152,10 +159,13 @@ class SessionStartLimitTests(HookCase):
                 self.assertEqual(len(TAG.findall(text)), 2)
                 self.assertIn(USAGE, text)
                 shown[provider] = re.findall(
-                    r"^- (K_[0-9a-f]{32}) ", text, re.M
+                    r"^▓ \d+: (K_[0-9a-f]{32})$", text, re.M
                 )
                 self.assertEqual(shown[provider][:1], numbers[-1:])
-                self.assertIn("omitted", text)
+                flag = " --provider codex" if provider == "codex" else ""
+                self.assertIn(
+                    f"more memories: muninn know context --page 2{flag}", text
+                )
         self.assertGreater(len(texts["claude"].encode()), 2800)
         self.assertLess(len(shown["codex"]), len(shown["claude"]))
         self.assertGreater(len(shown["codex"]), 0)
@@ -167,7 +177,7 @@ class SessionStartLimitTests(HookCase):
         self.assertLessEqual(len(text.encode()), hook.BLOCK_LIMIT)
         self.assertTrue(text.endswith("\n" + CLOSE))
         self.assertIn(USAGE, text)
-        shown = re.findall(r"^- (K_[0-9a-f]{32}) ", text, re.M)
+        shown = re.findall(r"^▓ \d+: (K_[0-9a-f]{32})$", text, re.M)
         self.assertTrue(0 < len(shown) < 8, shown)
         self.assertEqual(shown[0], numbers[-1])
         self.assertIn(
@@ -179,16 +189,24 @@ class SessionStartLimitTests(HookCase):
         content = "first line\nsecond line " + "x" * 400
         self.replace_text(ident, content)
         text = self.body(self.start_hook())
-        (line,) = re.findall(r"^- K_[0-9a-f]{32} .*$", text, re.M)
-        self.assertIn("first line second line " + "x" * 400, line)
-        self.assertNotIn("…", line)
+        wrapped = textwrap.wrap(
+            "first line second line " + "x" * 400,
+            70,
+            initial_indent="1. ",
+            subsequent_indent="   ",
+        )
+        lines = text.splitlines()
+        first = lines.index(wrapped[0])
+        self.assertEqual(lines[first : first + len(wrapped)], wrapped)
+        self.assertNotIn("…", text)
         self.replace_text(
             ident, "first line " + "条件" * 3000 + "REQUIRED_END"
         )
         text = self.body(self.start_hook())
-        self.assertNotIn(ident, text)
+        self.assertIn(
+            f"1. memory too long: run muninn know show\n   {ident}", text
+        )
         self.assertNotIn("REQUIRED_END", text)
-        self.assertIn("omitted", text)
 
     def test_hook_redacts_fake_key(self) -> None:
         ident = self.add()
@@ -302,7 +320,7 @@ class FailOpenTests(HookCase):
             mock.patch.object(store, "heal_hot_journal", return_value=True),
         ):
             out = self.start_hook()
-        self.assertIn("Project knowledge", self.body(out))
+        self.assertIn("▓ MUNINN MEMORY", self.body(out))
 
     def test_cursor_project_directory_is_provider_scoped(self) -> None:
         env = {"CURSOR_PROJECT_DIR": "/cursor-project"}
@@ -384,7 +402,7 @@ class SuppressionTests(HookCase):
         boom = mock.patch.object(hook, "_subagent", side_effect=KeyError("x"))
         with boom:
             out = self.start_hook()
-        self.assertIn("Project knowledge", self.body(out))
+        self.assertIn("▓ MUNINN MEMORY", self.body(out))
 
     def test_main_and_unknown_transcripts_get_the_block(self) -> None:
         main_codex = self.transcript(

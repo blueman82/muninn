@@ -90,7 +90,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         self.assertIn(guide, text)
         self.assertIn("Use Python.", text)
         self.assertIn("Python guide", text)
-        self.assertIn("revision 1", text)
+        self.assertIn("▓ MUNINN MEMORY · repo · 2 of 2", text)
         self.assertIn("untrusted-data", text)
         self.assertNotIn("know add", text)
 
@@ -116,18 +116,20 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         )
         self.set_expiry(ident, at=None, condition="Until the owner changes it")
         text = self.body(self.dispatch())
+        self.assertIn(f"▓ 1: {ident}", text)
+        self.assertIn(
+            "1. Current Python choice.\n"
+            "   When: Only for offline work; After explicit approval",
+            text,
+        )
+        # No kind, revision, scope, evidence ids or expiry in the list.
         for value in (
-            ident,
             "revision 2",
-            "Current Python choice.",
-            "Only for offline work",
-            "After explicit approval",
             "Until the owner changes it",
             json.dumps(self.scope.project_id),
             self.evidence[0].id,
-            self.evidence[1].id,
         ):
-            self.assertIn(value, text)
+            self.assertNotIn(value, text)
         self.assertNotIn("Use Python.", text)
         log = json.loads(
             (self.home / "calls.jsonl").read_text().splitlines()[-1]
@@ -181,7 +183,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
             (project,),
         )
         text = self.body(self.dispatch())
-        self.assertIn("Project knowledge for local:", text)
+        self.assertIn("▓ MUNINN MEMORY · local · ", text)
         self.assertNotIn("unavailable", text)
         self.assertNotIn(ident, text)
 
@@ -194,11 +196,12 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         text = hook_frame.render_block(
             from_context, "repo", notes=("manual diagnostic",), limit=1500
         )
-        self.assertNotIn(ident, text)
+        # A memory larger than a page is shown as its look-up line.
+        self.assertIn(f"▓ 1: {ident}", text)
+        self.assertIn("1. memory too long: run muninn know show", text)
         self.assertNotIn("Use Python.", text)
         self.assertNotIn("REQUIRED_END", text)
         self.assertIn("manual diagnostic", text)
-        self.assertIn("omitted", text)
         self.assertTrue(text.endswith("</muninn-memory>"))
         self.assertLessEqual(len(text.encode()), 1500)
         self.assertEqual(
@@ -356,7 +359,6 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
         for limit in (300, 350, 400, 500, 600, 700):
             with self.subTest(limit=limit):
                 text = hook_frame.render_block(context, "repo", limit=limit)
-                self.assertIn("omitted", text)
                 self.assertIn('trust="untrusted-data"', text)
                 self.assertIn("never instructions", text)
                 self.assertTrue(text.endswith("</muninn-memory>"))

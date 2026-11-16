@@ -7,9 +7,11 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from muninn import knowledge_push
 from muninn.decision_models import DecisionIntent, VerifiedDecision
 from muninn.decision_proof import verify_decision
 from muninn.decision_write import submit_intent
+from muninn.knowledge_models import NoteBody
 from muninn.review_read_budget import ReadBudget
 from tests.classify_support import item
 from tests.decision_support import DecisionCase
@@ -104,3 +106,15 @@ class DecisionAdjacencyTests(DecisionCase):
                 )
                 with self.assertRaisesRegex(ValueError, code):
                     self.verify(intent)
+
+    def test_approved_memory_gives_agents_the_approved_text(self) -> None:
+        draft = self.stage(self.result([self.note(kind="decision")]))
+        self.approve(self.intent(draft.id, wording="yes, save it"))
+        self.saved_fixture(draft.id)
+        notes = knowledge_push.knowledge_context(
+            self.conn, self.scope, 12000, 30.0
+        ).notes
+        self.assertEqual(len(notes), 1)
+        body = notes[0].body
+        assert isinstance(body, NoteBody)
+        self.assertEqual(body.content, "Use Python.")

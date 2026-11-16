@@ -100,7 +100,7 @@ class LaterProjectIngestTests(seam.HookKnowledgeCase):
             self.run_ingest()
             before = list(self.conn.iterdump())
             text = self.body(self.dispatch())
-            self.assertIn("Project knowledge for", text)
+            self.assertIn("▓ MUNINN MEMORY · ", text)
             self.assertNotIn("no indexed project memory", text)
             self.assertNotIn("OTHER_PROJECT_SENTINEL", text)
             self.assertNotIn(other, text)

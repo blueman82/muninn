@@ -57,13 +57,26 @@ def proof_text(conn: sqlite3.Connection, refs: list[EvidenceId]) -> str | None:
 
 def _proof(
     conn: sqlite3.Connection, refs: list[EvidenceId], ident: str
-) -> str | None:
-    """Return the proof, or a pointer line when it is too long."""
+) -> str:
+    """Return the proof, or a look-up line when it is missing or too long."""
     text = proof_text(conn, refs)
+    # Fail closed: without its proof the model text is not shown either.
+    if text is None:
+        return f"proof unavailable: run muninn know show {ident}"
     # A cut proof could lose a condition, so a long one is not shown.
-    if text is not None and len(text.encode()) > PROOF_LIMIT:
+    if len(text.encode()) > PROOF_LIMIT:
         return f"proof too long: run muninn know show {ident}"
     return text
+
+
+def _approved(conn: sqlite3.Connection, view: KnowledgeView) -> bool:
+    """Report whether the owner approved this exact text (ADR 0018)."""
+    row = conn.execute(
+        "SELECT r.candidate_id FROM knowledge_version v JOIN review_request r "
+        "ON r.id=v.request_id WHERE v.knowledge_id=? AND v.revision=?",
+        (view.id, view.revision),
+    ).fetchone()
+    return row is not None and row[0] is not None
 
 
 def _owner_required(view: KnowledgeView) -> bool:
@@ -106,28 +119,23 @@ def proof_view(conn: sqlite3.Connection, view: KnowledgeView) -> KnowledgeView:
 
     Returns:
         For a preference, a decision or global knowledge, the view with each
-        claim that cites a full owner message showing that message and any
-        paired assistant reply instead of the model's text. Other views and
-        claims keep their text.
+        claim showing its full cited owner message and any paired assistant
+        reply instead of the model's text, or a look-up line when that proof
+        is missing or too long. Facts and procedures, and text the owner
+        approved through an ADR 0018 decision, keep the model's text.
     """
     body = view.body
     # Only owner-required knowledge has an owner proof to show.
-    if body is None or not _owner_required(view):
+    if body is None or not _owner_required(view) or _approved(conn, view):
         return view
     if isinstance(body, NoteBody):
         proof = _proof(conn, body.evidence_refs, view.id)
-        if proof is None:
-            return view
         clean = body.model_copy(update={"content": proof, "conditions": []})
         return view.model_copy(update={"body": clean})
 
     def shown(claim: SupportedClaim) -> SupportedClaim:
         proof = _proof(conn, claim.evidence_refs, view.id)
-        return (
-            claim
-            if proof is None
-            else claim.model_copy(update={"text": proof})
-        )
+        return claim.model_copy(update={"text": proof})
 
     guide = body.model_copy(
         update={

@@ -234,7 +234,7 @@ class SearchAroundTests(QueryCase):
         entries = {e["id"]: e for e in got["knowledge"]}
         self.assertEqual(set(entries), {k1})
         first = entries[k1]
-        self.assertEqual(first["kind"], "decision")
+        self.assertEqual(first["kind"], "fact")
         self.assertEqual(first["scope"], {"project_id": "/repo", "task": None})
         self.assertEqual(
             (first["revision"], first["state"], first["form"]),

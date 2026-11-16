@@ -146,6 +146,10 @@ def _answer(
         out.get("explanation"), str
     ):
         print(out["explanation"], file=sys.stderr)
+    if isinstance(out.get("banner"), str):
+        # know context --page prints the session-start layout as text.
+        print(out["banner"])
+        return code
     pretty = getattr(args, "pretty", False) or os.environ.get("MUNINN_PRETTY")
     print(json.dumps(out, sort_keys=True, indent=2 if pretty else None))
     return code

@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from typing import NotRequired, TypedDict
 
 from muninn import classify, query
+from muninn.hook_banner import BAR, Item, banner, more_line, paginate
 from muninn.knowledge_models import KnowledgeContext, NoteBody
 
 BLOCK_LIMIT = 4000  # SessionStart block, UTF-8 bytes
@@ -141,70 +142,146 @@ def frame(attrs: str, lines: list[str]) -> str:
     return "\n".join([f"{OPEN}{attrs}>", *lines, CLOSE])
 
 
+def _items(context: KnowledgeContext) -> list[Item]:
+    """Turn complete notes, then the guide index, into shown items."""
+    items = [
+        Item(
+            view.id,
+            clean(view.body.content, None),
+            tuple(clean(c, None) for c in view.body.conditions),
+        )
+        for view in context.notes
+        if isinstance(view.body, NoteBody)
+    ]
+    items += [
+        Item(guide.id, clean(guide.title, None), ())
+        for guide in context.guides
+    ]
+    return items
+
+
+def _page_block(
+    label: str,
+    page: list[Item],
+    total: int,
+    footer: str | None,
+) -> str:
+    """Frame one page with the fixed usage and navigation lines."""
+    head = f"{BAR} MUNINN MEMORY · {clean(label, 80)} · {len(page)} of {total}"
+    lines = banner(head, page, footer)
+    return frame("", [USAGE, *lines, SEARCH_HINT, OPEN_HINT])
+
+
+def start_pages(
+    context: KnowledgeContext, label: str, limit: int, flag: str
+) -> list[list[Item]]:
+    """Split every eligible memory into session-start sized pages.
+
+    Args:
+        context: Every eligible note and guide, in reader order.
+        label: Name of the mapped scope shown in the header.
+        limit: The provider's session-start byte limit.
+        flag: Extra ``know context`` option the footer must repeat.
+
+    Returns:
+        Consecutive pages; page 1 is the session-start block.
+    """
+    items = _items(context)
+
+    def fits(page: list[Item], left: int) -> bool:
+        footer = more_line(left, 2, flag) if left else None
+        block = _page_block(label, page, len(items), footer)
+        return len(block.encode()) <= limit
+
+    def too_long(item: Item) -> Item:
+        text = f"memory too long: run muninn know show {item.ident}"
+        return Item(item.ident, text, ())
+
+    return paginate(items, fits, too_long)
+
+
 def render_block(
     context: KnowledgeContext,
     scope_label: str,
     *,
     notes: tuple[str, ...] = (),
     limit: int = BLOCK_LIMIT,
+    flag: str = "",
 ) -> str:
-    """Render complete eligible notes and a navigation-only guide index.
+    """Render the first page of memories as the session-start block.
 
     Args:
-        context: Authoritative current typed context from the reader.
-        scope_label: Name of the mapped scope shown in the heading.
-        notes: Extra diagnostic lines retained independently of knowledge.
+        context: Every eligible note and guide index entry, in order.
+        scope_label: Name of the mapped scope shown in the header.
+        notes: Extra diagnostic lines, kept only when they fit.
         limit: Maximum UTF-8 bytes, including the complete frame.
+        flag: Extra ``know context`` option the footer must repeat.
 
     Returns:
-        Bounded untrusted evidence, omitting whole items that cannot fit.
+        Bounded untrusted evidence with whole memories only, or an empty
+        string when even the empty frame does not fit.
     """
-    head = [f"Project knowledge for {clean(scope_label, 80)}:", USAGE]
-    tail = [SEARCH_HINT, OPEN_HINT, *(clean(note, 200) for note in notes)]
-    items: list[str] = []
-    for view in context.notes:
-        body = view.body
-        if not isinstance(body, NoteBody):
-            continue
-        expiry = (
-            clean(view.expiry.model_dump_json(), None)
-            if view.expiry
-            else "none"
+    total = len(_items(context))
+    pages = start_pages(context, scope_label, limit, flag)
+    extra = [clean(note, 200) for note in notes]
+    # Under a very small limit, keep the count and the pointer to the
+    # memories before the optional help lines.
+    for page in (pages[0] if pages else [], []):
+        left = total - len(page)
+        footer = more_line(left, 1 if not page else 2, flag) if left else None
+        head = (
+            f"{BAR} MUNINN MEMORY · {clean(scope_label, 80)} ·"
+            f" {len(page)} of {total}"
         )
-        items.append(
-            f"- {view.id} revision {view.revision} [{body.kind};"
-            f" scope: {clean(json.dumps(body.scope.model_dump()), None)}]"
-            f" {clean(body.content, None)}"
-            f" (conditions: {clean(json.dumps(body.conditions), None)};"
-            f" evidence: {', '.join(body.evidence_refs)};"
-            f" expiry: {expiry})"
-        )
-    items.extend(
-        f"- {guide.id} revision {guide.revision} [guide index;"
-        f" scope: {clean(json.dumps(guide.scope.model_dump()), None)}]"
-        f" {clean(guide.title, None)}"
-        for guide in context.guides
-    )
-    shown: list[str] = []
-    for item in items:
-        if len(frame("", head + shown + [item] + tail).encode()) <= limit:
-            shown.append(item)
-    omitted = (
-        ["Knowledge omitted by byte limit."]
-        if context.truncated or len(shown) < len(items)
-        else []
-    )
-    block = frame("", head + shown + omitted + tail)
-    while len(block.encode()) > limit and tail:
-        tail.pop(0)
-        block = frame("", head + shown + omitted + tail)
-    while len(block.encode()) > limit and shown:
-        shown.pop()
-        omitted = ["Knowledge omitted by byte limit."]
-        block = frame("", head + shown + omitted)
-    if len(block.encode()) > limit and omitted:
-        block = frame("", [USAGE, *omitted])
+        lines = [USAGE, *banner(head, page, footer)]
+        for tail in (
+            [SEARCH_HINT, OPEN_HINT, *extra],
+            [SEARCH_HINT, OPEN_HINT],
+            [SEARCH_HINT],
+            [],
+        ):
+            block = frame("", [*lines, *tail])
+            if len(block.encode()) <= limit:
+                return block
+    block = frame("", [USAGE])
     return block if len(block.encode()) <= limit else ""
+
+
+def render_page(
+    context: KnowledgeContext,
+    scope_label: str,
+    number: int,
+    *,
+    limit: int = BLOCK_LIMIT,
+    flag: str = "",
+) -> str:
+    """Render one page of memories for ``muninn know context --page``.
+
+    Args:
+        context: Every eligible note and guide index entry, in order.
+        scope_label: Name of the mapped scope shown in the header.
+        number: The 1-based page; page 1 matches the session-start block.
+        limit: The provider's session-start byte limit that sets the pages.
+        flag: Extra ``know context`` option the footer must repeat.
+
+    Returns:
+        The page between its two bars, without the frame.
+
+    Raises:
+        ValueError: If the page does not exist.
+    """
+    pages = start_pages(context, scope_label, limit, flag) or [[]]
+    if not 1 <= number <= len(pages):
+        raise ValueError("page_unavailable")
+    total = len(_items(context))
+    page = pages[number - 1]
+    left = total - sum(len(p) for p in pages[:number])
+    head = (
+        f"{BAR} MUNINN MEMORY · {clean(scope_label, 80)} · page {number} of"
+        f" {len(pages)} · {len(page)} of {total}"
+    )
+    footer = more_line(left, number + 1, flag) if left else None
+    return "\n".join(banner(head, page, footer))
 
 
 def _knowledge_line(entry: RecallEntry, cap: int = ENTRY_TEXT) -> str:
