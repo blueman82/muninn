@@ -169,11 +169,14 @@ class ReviewCommitBudgetTests(CommitCase):
         self.assertTrue(
             all(c.kwargs["budget"] is budget for c in selected.call_args_list)
         )
+        # The window starts at line 2, so line 1 is not charged.
         self.assertEqual(
             budget.bytes_left,
-            4096 - len(source) - sum(len(line(r)) for r in self.records[1:]),
+            4096
+            - (len(source) - len(line(self.records[0])))
+            - sum(len(line(r)) for r in self.records[1:]),
         )
-        self.assertEqual(budget.records_left, 4091)
+        self.assertEqual(budget.records_left, 4092)
         self.assertEqual(self.path.read_bytes(), source)
         self.assertEqual(
             self.row("SELECT policy_json,policy_digest FROM review_request")[
@@ -186,11 +189,13 @@ class ReviewCommitBudgetTests(CommitCase):
         exact = len(self.path.read_bytes()) + sum(
             len(line(r)) for r in self.records[1:]
         )
+        # Line 1 is an unselected window line, so window bytes overflow.
+        window = self.window(1, 3)
         for limit in (exact - 1, exact):
             with self.subTest(limit=limit):
-                self.claim_inputs(self.window(), limit)
+                self.claim_inputs(window, limit)
                 review_evidence.validate_window_boundary(
-                    self.conn, self.window(), limit
+                    self.conn, window, limit
                 )
                 review_evidence.validate_evidence(
                     self.conn,
@@ -231,7 +236,8 @@ class ReviewCommitBudgetTests(CommitCase):
     def test_combined_records_refuse_then_exact_fit_succeeds(self) -> None:
         self.evidence = self.evidence[:1]
         originals = self.records[:2]
-        for count in (4096, 4095):
+        # Line 1 is before the window and is not charged.
+        for count in (4097, 4096):
             self.records = originals + [{"type": "noop"}] * (count - 2)
             self.path.write_bytes(b"".join(line(r) for r in self.records))
             self.run_ingest(full=True)
@@ -245,7 +251,7 @@ class ReviewCommitBudgetTests(CommitCase):
                     review_evidence, "reread", wraps=review_evidence.reread
                 ) as selected,
             ):
-                if count == 4095:
+                if count == 4096:
                     self.assertEqual(
                         self.save(self.result([self.note()])).outcome,
                         "completed",

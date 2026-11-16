@@ -109,7 +109,7 @@ def validate_cursor_boundary(
     records = originals(
         conn,
         source,
-        first,
+        window.from_line,
         window.through_line,
         max_bytes,
         require_cursor=False,
@@ -117,7 +117,7 @@ def validate_cursor_boundary(
     )
     if classify.record_hash(records[-1][1]) != window.boundary_hash:
         raise ValueError("evidence_changed")
-    return records[0]
+    return records[first - window.from_line]
 
 
 def select_evidence(

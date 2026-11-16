@@ -343,7 +343,8 @@ class ReviewSupportBudgetTests(unittest.TestCase):
         )
         used_bytes = case.policy.max_input_bytes - account.bytes_left
         used_records = 4096 - account.records_left
-        self.assertGreater(used_records, 4)
+        # Support reads add records beyond the one charged window line.
+        self.assertGreater(used_records, 1)
         for dimension in ("bytes", "records"):
             case.policy_limit(policy_id="bounded-" + dimension)
             restricted = ReadBudget(case.policy.max_input_bytes)

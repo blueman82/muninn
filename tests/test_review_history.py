@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from muninn import review_history, review_state
 from muninn.review_progress import source_progress
+from tests.ingest_support import line
 from tests.test_review_requests import RequestCase
 
 
@@ -154,3 +155,17 @@ class LearningHistoryTests(RequestCase):
                     preview.digest,
                 )
             )
+
+    def test_window_after_one_mebibyte_prefix_is_confirmed(self) -> None:
+        pad = {"type": "noop", "pad": "x" * (600 * 1024)}
+        self.records = [self.records[0], pad, pad, *self.records[1:]]
+        self.path.write_bytes(b"".join(line(r) for r in self.records))
+        self.run_ingest(full=True)
+        # Boundary check and hash pass each charge the window; one more
+        # byte than that leaves no room for any line before the window.
+        window = sum(len(line(r)) for r in self.records[3:])
+        limit = {"max_input_bytes": 2 * window + 1}
+        policy = self.policy.model_copy(update=limit)
+        scan = review_history.scan(self.conn, policy, self.scope.project_id)
+        self.assertEqual(scan.excluded, [])
+        self.assertEqual([i.window.from_line for i in scan.items], [4])

@@ -235,10 +235,11 @@ class DecisionApplicationTests(ApplicationCase):
         candidate = candidate_view(self.conn, ident).candidate
         assert candidate is not None
         result = enrich_support(candidate, self.proof.owner_evidence_id)
+        # Window reads charge no prefix; the last one stops at its line.
         exact = (
-            3 * len(self.path.read_bytes())
+            3 * len(line(self.records[-1]))
+            + 2 * len(line(self.records[-2]))
             + len(line(self.records[1]))
-            + len(line(self.records[-2]))
         )
         budgets: list[ReadBudget] = []
         for allowance in (exact - 1, exact):

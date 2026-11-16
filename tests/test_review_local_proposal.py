@@ -53,8 +53,8 @@ class LocalProposalTests(CommitCase):
             deadline=72.0,
         )
 
-    def install_policy(self) -> None:
-        """Install explicit synthetic policy changes before tested claims."""
+    def install_policy(self, first: int = 2) -> None:
+        """Install policy changes and enqueue a window from line first."""
         self.transaction(
             lambda: review_requests.cancel_request(
                 self.conn, self.context.request_id, 14.0
@@ -64,7 +64,7 @@ class LocalProposalTests(CommitCase):
         self.conn.execute(
             "UPDATE review_control SET policy_json=?,policy_digest=?", values
         )
-        request = self.enqueue()
+        request = self.enqueue(self.window(first))
         self.conn.executemany(
             "INSERT INTO review_input VALUES(?,?)",
             [(request.id, ident) for ident in self.context.evidence_ids],
@@ -364,7 +364,7 @@ class LocalProposalTests(CommitCase):
             self.policy = self.policy.model_copy(
                 update={"max_input_bytes": cap}
             )
-            self.install_policy()
+            self.install_policy(1)
             before = self.state()
             with (
                 mock.patch.object(

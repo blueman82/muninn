@@ -94,16 +94,18 @@ class FinalLimitNoticeTests(unittest.TestCase):
         exact = len(case.path.read_bytes()) + sum(
             len(line(r)) for r in case.records[1:]
         )
-        case.claim_inputs(case.window(), exact - 1)
+        # Line 1 is an unselected window line, so window bytes overflow.
+        case.claim_inputs(case.window(1, 3), exact - 1)
         self.reconcile("evidence_byte_limit")
 
     def test_final_record_limit_notice_matches_durable_attempt(self) -> None:
         case = self.case
         case.evidence = case.evidence[:1]
-        case.records = case.records[:2] + [{"type": "noop"}] * 4094
+        # Line 1 is before the window and is not charged.
+        case.records = case.records[:2] + [{"type": "noop"}] * 4095
         case.path.write_bytes(b"".join(line(r) for r in case.records))
         case.run_ingest(full=True)
-        case.claim_inputs(case.window(2, 4096), 100_000)
+        case.claim_inputs(case.window(2, 4097), 100_000)
         self.reconcile("evidence_record_limit")
 
     def test_final_native_work_notice_matches_durable_attempt(self) -> None:

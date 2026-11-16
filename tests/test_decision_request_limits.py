@@ -12,6 +12,9 @@ from muninn.review_json import canonical_json
 from muninn.review_supervisor import Supervisor
 from tests.decision_support import DecisionCase
 
+# An unselected field makes the repeated owner reads exceed the policy.
+PAD = {"pad": "x" * 2500}
+
 
 class DecisionRequestLimitTests(DecisionCase):
     """Exercise historic attempts without simulating successful application."""
@@ -223,7 +226,7 @@ class DecisionRequestLimitTests(DecisionCase):
         )
         self.context = self.start()
         blocked, ready = self.stage(), self.stage()
-        proof = self.approve(self.intent(blocked.id))
+        proof = self.approve(self.intent(blocked.id, owner_updates=PAD))
         self.transaction(
             lambda: review_requests.cancel_request(
                 self.conn, self.context.request_id, 20.0
