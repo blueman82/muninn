@@ -13,7 +13,6 @@ from muninn.decision_models import (
     DecisionView,
     VerifiedDecision,
 )
-from muninn.decision_proof import decision_words
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceRecord,
@@ -76,6 +75,27 @@ def submit_intent(
             or replacement.candidate.scope != view.candidate.scope
         ):
             raise ValueError("decision_invalid")
+    key = _key(intent, view.digest)
+    owner = intent.owner_locator
+    # One owner reply backs one decision; a replay keeps the same key.
+    if conn.execute(
+        "SELECT 1 FROM memory_decision WHERE intent_key!=? "
+        "AND json_extract(locator_json,'$.owner_locator.source.provider')=? "
+        "AND json_extract(locator_json,'$.owner_locator.source.thread_id')=? "
+        "AND json_extract(locator_json,'$.owner_locator.line')=? "
+        "AND json_extract(locator_json,'$.owner_locator.part')=? "
+        "AND json_extract(locator_json,'$.owner_locator.line_sha256')=? "
+        "LIMIT 1",
+        (
+            key,
+            owner.source.provider,
+            owner.source.thread_id,
+            owner.line,
+            owner.part,
+            owner.line_sha256,
+        ),
+    ).fetchone():
+        raise ValueError("owner_proof")
     conn.execute(
         "INSERT OR IGNORE INTO memory_decision(id,candidate_id,"
         "candidate_digest,"
@@ -86,7 +106,7 @@ def submit_intent(
             f"D_{uuid4().hex}",
             view.id,
             view.digest,
-            _key(intent, view.digest),
+            key,
             intent.action,
             intent.replacement_id,
             canonical_json(intent),
@@ -174,7 +194,6 @@ def _checked_intent(
         or not _matches(display, intent, owner=False)
         or owner.authority != "direct_owner"
         or owner.evidence_type != "owner_statement"
-        or owner.excerpt != decision_words(intent)
         or display.evidence_type != "assistant_report"
         or display.excerpt
         != show_candidate(conn, target.id, context_bytes).text

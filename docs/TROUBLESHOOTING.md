@@ -249,8 +249,8 @@ A related unresolved question or explicit `review` can start its own checked pro
 | `waiting_verification` with `waiting_index` | Muninn has not checked the `original` reply. Current background work can continue when indexing makes the record eligible. It has not recorded the memory. |
 | `approved_pending` | Approval is checked. The memory has not committed. The agent can run the bounded targeted application. |
 | `decision_display_limit` | The complete proposal and instructions exceed the recorded display limit. Muninn accepted no shortened display. The agent must prepare a complete proposal that fits. |
-| `display_proof`, `owner_proof`, `owner_intent` | The complete unchanged `original` fields did not satisfy proof checks. A wrapper, cropped field, or agent claim cannot supply consent. |
-| `decision_reference_required` | A bare `approved` does not identify the complete proposal. Use the unchanged sentence from the complete display. |
+| `display_proof`, `owner_proof` | The complete unchanged `original` fields did not satisfy proof checks. The owner reply must come directly after the one display, with no message or tool call between. One reply backs one decision. A reply without the provider's owner label, a cropped field, or an agent claim cannot supply consent. |
+| `owner_intent`, `decision_reference_required` | Older releases gave these for an owner reply that was not the fixed sentence. Current releases do not check the reply wording (ADR 0022). |
 | `rejected_revision` | A target changed. Application refuses. The agent can prepare a new proposal when checked `evidence` permits it. |
 | `rejected_evidence`, `rejected_erased` | Necessary `evidence` changed, is unavailable, or was erased. The agent must examine the specified finite refusal. It must not reconstruct erased content. |
 | `learning_paused` | Views do not start learning again. Application keeps the pause in force. |

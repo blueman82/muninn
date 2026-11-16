@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 from muninn.knowledge_models import (
     GuideBody,
     GuideIndex,
     KnowledgeContext,
+    KnowledgeView,
     NoteBody,
     Scope,
+    UnresolvedId,
 )
+from muninn.knowledge_proof import hidden_from_agents, hidden_line, proof_view
 from muninn.knowledge_read import (
     candidate_rows,
     eligible_current,
@@ -29,16 +33,42 @@ def _size(context: KnowledgeContext) -> int:
     return len(canonical_json(context).encode("utf-8"))
 
 
+def _kept[T](items: list[T], item: T, fits: Callable[[], bool]) -> bool:
+    """Append an item and keep it only while the envelope fits.
+
+    Args:
+        items: The list being built.
+        item: The next item.
+        fits: Whether the envelope with the current lists fits its cap.
+
+    Returns:
+        Whether the item was kept.
+    """
+    items.append(item)
+    if fits():
+        return True
+    items.pop()
+    return False
+
+
 def knowledge_context(
-    conn: sqlite3.Connection, scope: Scope, max_bytes: int, now: float
+    conn: sqlite3.Connection,
+    scope: Scope,
+    max_bytes: int | None,
+    now: float,
+    *,
+    proofs: bool = True,
 ) -> KnowledgeContext:
     """Return current supported notes and guide labels within a byte cap.
 
     Args:
         conn: Open store connection; existing transactions are preserved.
         scope: Explicit mapped project/task or authorized global scope.
-        max_bytes: Positive cap on the entire canonical UTF-8 envelope.
+        max_bytes: Positive cap on the entire canonical UTF-8 envelope, or
+            None for every eligible item, as session-start pages need.
         now: Explicit finite nonnegative expiry evaluation time.
+        proofs: Show notes as agents see them. False leaves notes as
+            stored, for a caller that shows only the notes it uses.
 
     Returns:
         Complete eligible notes and compact guide IDs/revisions. Oversized
@@ -55,9 +85,31 @@ def knowledge_context(
         unresolved_ids=[],
         truncated=False,
     )
-    if type(max_bytes) is not int or max_bytes < _size(context):
+    if max_bytes is not None and (
+        type(max_bytes) is not int or max_bytes < _size(context)
+    ):
         raise ValueError("context_limit")
     omitted = False
+    notes: list[KnowledgeView] = []
+    guides: list[GuideIndex] = []
+    unresolved: list[UnresolvedId] = []
+
+    def fits() -> bool:
+        # Without a cap every item is kept, so no envelope is built.
+        return (
+            max_bytes is None
+            or _size(
+                context.model_copy(
+                    update={
+                        "notes": notes,
+                        "guides": guides,
+                        "unresolved_ids": unresolved,
+                    }
+                )
+            )
+            <= max_bytes
+        )
+
     with read_snapshot(conn):
         for row in candidate_rows(conn, scope, limit=_SCAN_CAP):
             omitted = omitted or row["candidate_total"] > _SCAN_CAP
@@ -65,31 +117,29 @@ def knowledge_context(
                 view, _ = eligible_current(conn, row, scope, now)
             except ValueError:
                 continue
-            notes, guides = list(context.notes), list(context.guides)
             if isinstance(view.body, NoteBody):
-                notes.append(view)
+                note = proof_view(conn, view) if proofs else view
+                omitted = not _kept(notes, note, fits) or omitted
             elif isinstance(view.body, GuideBody):
-                guides.append(
-                    GuideIndex(
-                        id=view.id,
-                        revision=view.revision,
-                        title=view.body.title,
-                        scope=view.body.scope,
-                    )
+                guide = GuideIndex(
+                    id=view.id,
+                    revision=view.revision,
+                    # A guide title is model text too; agents get it hidden.
+                    title=(
+                        hidden_line(view.id)
+                        if hidden_from_agents(conn, view)
+                        else view.body.title
+                    ),
+                    scope=view.body.scope,
                 )
-            candidate = context.model_copy(
-                update={"notes": notes, "guides": guides}
-            )
-            if _size(candidate) <= max_bytes:
-                context = candidate
-            else:
-                omitted = True
+                omitted = not _kept(guides, guide, fits) or omitted
         for ident in unresolved_ids(conn, scope):
-            candidate = context.model_copy(
-                update={"unresolved_ids": [*context.unresolved_ids, ident]}
-            )
-            if _size(candidate) <= max_bytes:
-                context = candidate
-            else:
-                omitted = True
-    return context.model_copy(update={"truncated": omitted})
+            omitted = not _kept(unresolved, ident, fits) or omitted
+    return context.model_copy(
+        update={
+            "notes": notes,
+            "guides": guides,
+            "unresolved_ids": unresolved,
+            "truncated": omitted,
+        }
+    )

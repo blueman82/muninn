@@ -343,9 +343,9 @@ class DecisionRaceTests(ResolutionCase):
         question, refs = self.question()
         draft = self.disposition(question, refs)
         self.approve(self.intent(draft.id))
-        negative = self.intent(
-            draft.id, action="reject", wording="unverified rejection"
-        )
+        # A message between display and reply leaves the reject unverified.
+        self.between = [user_msg(6, "other message")]
+        negative = self.intent(draft.id, action="reject", wording="no")
         self.transaction(lambda: submit_intent(self.conn, negative, 23.0))
         view = decision_requests.request_application(self.home, draft.id, 25.0)
         self.assertEqual(view.state, "saved")

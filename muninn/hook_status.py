@@ -7,8 +7,9 @@ from collections.abc import Mapping
 
 from pydantic import TypeAdapter, ValidationError
 
+from muninn.hook_banner import Item, item_lines
 from muninn.hook_frame import escape_delimiter, frame
-from muninn.knowledge_models import RequestId
+from muninn.knowledge_models import KnowledgeContext, RequestId
 from muninn.review_recovery import explain
 from muninn.review_recovery_codes import CONTAINED
 
@@ -90,6 +91,27 @@ def status_line(
     if omitted:
         head += "; some knowledge omitted by byte limit"
     return "\n".join([head, *shown])
+
+
+def start_trace(
+    shown: list[Item], context: KnowledgeContext, trace: dict[str, object]
+) -> None:
+    """Record the shown memory codes and lines of a session-start block.
+
+    Args:
+        shown: The memories the block shows, in order.
+        context: Every eligible memory the block was cut from.
+        trace: Receives ``knowledge_ids``, ``knowledge_omitted`` and the
+            ``shown`` lines for the human status message.
+    """
+    trace["knowledge_ids"] = [item.ident for item in shown]
+    trace["knowledge_omitted"] = context.truncated or len(shown) < (
+        len(context.notes) + len(context.guides)
+    )
+    trace["shown"] = [
+        printable(f"{item.ident} {item_lines(number, item)[0]}")
+        for number, item in enumerate(shown, 1)
+    ]
 
 
 def printable(text: str) -> str:

@@ -261,8 +261,11 @@ class DecisionPresentationTests(DecisionCase):
     def test_exact_codex_block_saves(self) -> None:
         self.save_exact("codex", scalar=False)
 
-    def test_exact_codex_scalar_saves(self) -> None:
-        self.save_exact("codex", scalar=True)
+    def test_unindexed_codex_scalar_display_refuses(self) -> None:
+        # The indexer keeps no reply event for a scalar Codex message, so
+        # the display cannot be told apart from a fork or replay copy.
+        with self.assertRaisesRegex(ValueError, "display_proof"):
+            self.save_exact("codex", scalar=True)
 
     def test_exact_claude_block_saves(self) -> None:
         self.save_exact("claude", scalar=False)

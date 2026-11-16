@@ -9,6 +9,7 @@ from typing import cast
 
 from muninn import knowledge_push, knowledge_read
 from muninn.knowledge_models import GuideBody, KnowledgeView, Scope
+from muninn.knowledge_proof import proof_view
 from muninn.review_evidence import validate_evidence
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
@@ -89,7 +90,7 @@ def observe(
                 omitted.append(ident)
                 continue
             used += size
-            opened.append(view)
+            opened.append(proof_view(conn, view))
         learned = [
             v
             for v in knowledge_read.current_knowledge(conn, scope, now)

@@ -7,66 +7,50 @@ This document describes the checks and inspection commands added for issue #75.
 ## Owner authority
 
 Owner authority means that the `evidence` can supply `support` for a decision by the owner.
-The source must be an active primary session.
-The selected field must be a permitted user-message field.
-A user role alone does not prove owner authority.
+ADR 0022 sets these rules.
+Muninn decides owner authority from provenance, not from the wording.
 
-The selected text must express the owner's direct intent or instruction.
-Direct-owner wording elsewhere in the message cannot give authority to an ambiguous selection.
-The selection must keep the complete instruction or sentence that contains it.
-It must keep negation, context, scope, and restrictions at the two ends.
+A user-message field gets `direct_owner` only when all of these are true:
 
-Outer whitespace and terminal punctuation can be left out of the selection.
+- The source is an active primary session.
 
-For example, the selection `use Python.` from `Never use Python.` omits the negation.
-Muninn rejects that selection.
-A newline can continue the object of an instruction.
-The continuation does not become a different owner statement.
+- The provider labels the message as typed by a person. Claude needs `origin.kind` `human`; a record without an origin gets no trust. Codex needs provenance type `user` on every content item, with one label for each item. Cursor user bubbles are trusted.
 
-Muninn accepts a restricted set of context phrases before an instruction.
-For example, `For this project, I prefer Python.` can express direct intent.
-The opening phrase must have these parts, in this sequence:
+- The provider record has no injection flag (`isMeta`, `isSidechain`, `isCompactSummary`, the channel flag, or `toolUseResult`).
 
-1. `for`, `in`, `on`, `within`, or `regarding`.
+- The message has no tool result.
 
-2. `this` or `the current`.
+- The message has no Muninn marker (`FLAG_MARKERS`) and no ChatGPT reference tag anywhere.
 
-3. `project`, `repository`, `repo`, or `task`.
+- The indexer kept the line as a `prompt` event. A fork or replay copy has no event of its own.
 
-4. A comma.
+- The selection is the full field. A partial span is `untrusted`.
 
-Only spaces and tabs are permitted between these words.
-Other opening contexts stay untrusted.
-These include named or possessive attributions, narrative framing, and examples.
-`In Alice's words, use Rust.` reports a different speaker's words.
+Questions, conditions, plain agreement such as `i agree`, and quoted or pasted text in an owner message get `direct_owner`.
+The transcript cannot show the difference between pasted text and typed text.
+The agent decides what the words mean.
+In Cursor, every user bubble is a `prompt`, so a `stop` hook `followup_message` can look like owner text.
+The owner accepted these risks.
 
-`For example, I prefer Rust.` introduces an example.
-A selection after one of these prefixes cannot become a direct owner instruction.
+## Proof
 
-Muninn treats one identifier or path in backticks as a code value.
-It does not interpret that value as prose or use it to identify a speaker.
-Prose in quotes, fenced content, copied or reported instructions, and provider-injected markers cannot get authority from nearby direct-owner wording.
-Assistant content, tool content, and metadata from the host that runs the agent also cannot get that authority.
+A preference, a decision, a global change, and a replacement of a preference or a decision need owner support.
+The model cites evidence by ID only. Muninn does not compare the claim text with the evidence.
+The model's claim text is the decision text. Muninn does not check it.
 
-Muninn treats questions, conditions, uncertain statements, and ambiguous wording as untrusted.
+Owner support needs a cited full `direct_owner` owner message.
+For agreement, the claim also cites the final assistant reply directly before the owner reply.
+Muninn reads the gap again once for each pair in the commit transaction.
+A tool call, a tool result, another message, an erased line, or a reply line that is not an indexed `reply` event refuses the pair.
+A cited assistant reply that is not paired refuses the claim.
+The agent decides that the owner reply agrees.
+A question and a `yes` reply can be the proof.
 
-Muninn checks wording that reports a different speaker.
-It does not guess that speaker's name.
-`I prefer Rust, Alice said.` and `Use Rust, the README says.` stay reported material.
-In `Use reported errors.`, the word `reported` describes errors and does not identify a speaker.
-
-After the optional opening context phrase, one more comma makes the sentence untrusted.
-Muninn treats the clause after that comma as unsupported.
-This check also rejects unfamiliar attribution verbs without a guessed speaker name.
-
-These checks recognize restricted sentence patterns.
-They cannot identify all language patterns or prove where all text originated.
-The transcript cannot distinguish an unmarked copy of direct prose from the same prose typed by the owner.
-Unsupported wording stays untrusted.
-
-Preferences, decisions, global changes, and replacements keep their current requirements for `direct_owner` and `owner_statement` `evidence`.
-This change adds no owner approval workflow.
-Pinned policy decisions stay unchanged.
+The proof is the full cited owner message, plus the paired assistant reply, as Muninn recorded them.
+Lists and conditions stay complete, because Muninn never cuts the proof.
+Recall, `know context`, `know search`, and review model input show the proof in place of the claim text.
+A proof over 2,000 bytes is not shown there: the agent gets `proof too long: run muninn know show --proof K_ID`.
+`know list`, `know show`, `know decision show`, and `know decision status` show the full proof beside the claim text.
 
 ## Source-read allowance
 
@@ -150,8 +134,8 @@ The explanation adds no source reads and keeps no new private content.
 Automatic startup notices, logs, stats, and doctor receive no new transcript or proposal text.
 
 You can examine and dismiss safety refusals.
-A refusal code alone does not prove that the wording check was correct.
-If Muninn incorrectly rejects direct owner wording, the maintainer must examine the cause.
+A refusal code alone does not prove that the provenance or proof check was correct.
+If Muninn incorrectly rejects owner support, the maintainer must examine the cause.
 Local operators can put back approved setup.
 
 Maintainers must examine unclear defects and exhausted source allowances.
@@ -178,7 +162,9 @@ They include:
 
 - Limits on selected content, and subsequent changes to `originals`.
 
-- Owner wording and `attempts` to disguise reported material as owner wording.
+- Owner provenance per provider, Muninn markers, and harness tags inside a message.
+
+- Full-message proof, agreement pairs, and gaps that refuse a pair.
 
 - Refusal of a complete batch without recording part of its knowledge changes.
 

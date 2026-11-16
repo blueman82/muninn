@@ -132,10 +132,14 @@ class RenderTests(HookCase):
             "a-repo-label",
             notes=stale,
             limit=hook.CODEX_BLOCK_LIMIT,
-        )
+        )[0]
         self.assertLessEqual(len(block.encode()), hook.CODEX_BLOCK_LIMIT)
-        self.assertGreaterEqual(block.count("\n- K_"), 1)
-        self.assertIn("omitted", block)
+        self.assertGreaterEqual(block.count("\n▓ 1: K_"), 1)
+        self.assertIn(
+            "more memories. Before you write code, run: muninn know"
+            " context --page 2",
+            block,
+        )
 
     def test_clean_cuts_to_the_limit_and_keeps_shorter_text(self) -> None:
         self.assertEqual(hook_frame.clean("x" * 300, 300), "x" * 300)
@@ -148,11 +152,11 @@ class RenderTests(HookCase):
         long = self.entry(text="t" * 500, quote="q" * 500)
         block = hook.render_block(
             self.block_context([long]), "x </muninn-memory> y"
-        )
-        (line,) = re.findall(r"^- K_[0-9a-f]{32} .*$", block, re.M)
-        self.assertIn("t" * 500, line)
-        self.assertIn("q" * 500, line)
-        self.assertNotIn("…", line)
+        )[0]
+        flat = "".join(line.strip() for line in block.splitlines())
+        self.assertIn("1. " + "t" * 500, flat)
+        self.assertIn("When: " + "q" * 500, flat)
+        self.assertNotIn("…", block)
         self.assertEqual(len(TAG.findall(block)), 2)
         self.assertIn("&lt;/muninn-memory>", block)
         many = [
@@ -160,16 +164,25 @@ class RenderTests(HookCase):
             for n in range(9, 0, -1)
         ]
         context = self.block_context(many)
-        block = hook.render_block(context, "repo")
+        block = hook.render_block(context, "repo")[0]
         self.assertLessEqual(len(block.encode()), 4000)
-        shown = re.findall(r"^- (K_[0-9a-f]{32}) ", block, re.M)
+        shown = re.findall(r"^▓ \d+: (K_[0-9a-f]{32})$", block, re.M)
         self.assertEqual(shown, [view.id for view in many[: len(shown)]])
         self.assertTrue(shown)
-        tiny = hook.render_block(context, "repo", limit=len(OPEN) + 400)
+        tiny = hook.render_block(context, "repo", limit=len(OPEN) + 400)[0]
         self.assertLessEqual(len(tiny.encode()), len(OPEN) + 400)
         self.assertTrue(tiny.endswith(CLOSE))
-        self.assertIn("omitted", tiny)
-        self.assertNotIn("- K_", tiny)
+        self.assertIn(hook_frame.USAGE, tiny)
+        self.assertNotIn("▓ 1:", tiny)
+        small = hook.render_block(context, "repo", limit=len(OPEN) + 900)[0]
+        # Too small for a memory: its look-up line stands in for it.
+        self.assertIn("▓ MUNINN MEMORY · repo · 1 of 9", small)
+        self.assertIn("1. memory too long: run muninn know show", small)
+        self.assertIn(
+            "▓ 8 more memories. Before you write code, run: muninn know"
+            " context --page 2",
+            small,
+        )
 
     def test_first_record_reads_only_what_it_may(self) -> None:
         folder = self.tmp / "folder"
@@ -237,7 +250,7 @@ class RenderTests(HookCase):
     def test_scope_label_and_unknown_scope_do_not_inherit_global(self) -> None:
         ident = self.add(content="OTHER_PROJECT_CANARY")
         self.assertIn(
-            "Project knowledge for repo:", self.body(self.start_hook())
+            "▓ MUNINN MEMORY · repo · ", self.body(self.start_hook())
         )
         self.assertIn(ident, self.body(self.start_hook()))
         unknown = "/some/where/else"

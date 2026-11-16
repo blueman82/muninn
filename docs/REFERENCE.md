@@ -174,10 +174,12 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 
 | Command | Meaning/output |
 |---|---|
-| `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first. |
+| `muninn know list [--all-projects] [--task TASK]` | Current eligible `KnowledgeView` objects, newest first, and `proofs`: full owner proofs by knowledge ID. |
 | `muninn know search QUERY [--all-projects] [--task TASK]` | SQLite FTS5 search of current permitted knowledge. No embeddings. |
-| `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources`. This maps each `E_` ID to the transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions need `--revision`. Explicit show can keep withdrawn content. |
+| `muninn know show K_ID [--revision N]` | `KnowledgeView` fields plus `evidence_sources` and `proof` (the full owner proofs). This maps each `E_` ID to the transcript `ref` and `line_sha256` for that revision. Unavailable sources have null locators. Historical revisions need `--revision`. Explicit show can keep withdrawn content. |
+| `muninn know show --proof K_ID [--revision N]` | Only `id`, `revision` and `proof` (the full owner proofs), with no model text. Agents use it for a proof too long for their context. |
 | `muninn know context [--task TASK]` | `KnowledgeContext`: `schema_version`, complete note views in `notes`, compact `guides` (`id`, `revision`, `title`, `scope`), `unresolved_ids`, `truncated`. Bound by installed policy's `context_bytes`. |
+| `muninn know context --page N [--provider claude\|codex\|cursor]` | Plain text, not JSON: page N of the session-start memories in the same untrusted-data frame and layout as the start block, with control characters replaced. The header says `page N · X of Y`, and `page N of N · X of Y` on the last page. Page 1 is the start block's list. Each page continues where the last one stopped, so each memory appears once. `--provider` (default `claude`) sets the page size: Claude and Cursor 4,000 bytes, Codex 2,800. `--page` with `--task` reports `page_task_unsupported`; `--provider` without `--page` reports `provider_needs_page`; page 0 or a missing page reports `page_unavailable`. |
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local `attempt` and `Receipt`. No model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision. Reports `KnowledgeView`. |
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded `request`. Paired `bounds` or activation/uncompleted boundary through the latest complete record. `--task` binds the `request` to one task in the source project. |
@@ -229,6 +231,25 @@ A guide change uses `form: guide`, `title`, `summary`, `applicability`, `steps`,
 Each accepted claim has `text` and `evidence_refs`.
 Each guide step has `key`, `claim`, and `depends_on`.
 Dependencies can refer only to steps before that step.
+
+A preference, a decision, a global change, or a replacement of a preference or decision needs owner support (ADR 0022).
+The model cites evidence by ID only. Muninn does not compare the claim text with the evidence.
+Owner support needs a cited `direct_owner` owner message with a full-field selector (`start` and `end` null).
+A partial span gives no owner support.
+For agreement, the claim also cites the final assistant reply directly before the owner reply.
+Muninn reads the gap again once for each pair; a tool call, tool result, or other message between them refuses the batch with `rejected_authority`.
+Owner authority comes from provenance (provider prompt label, an indexed `prompt` event, no injection flag, no tool result, no harness tag, and no Muninn marker), not from wording.
+
+The proof is the full cited owner message, plus the paired assistant reply for agreement, as Muninn recorded them.
+`know context`, `know search`, recall, and review model input show the proof in place of the model's claim text for preferences, decisions, and global knowledge.
+A proof over 2,000 bytes is not cut: the agent gets `proof too long: run muninn know show --proof K_ID`.
+A search preview or recall line that has less room than the proof also gets that line, never part of the proof; such a preview has `proof: true`.
+If the proof cannot be found, the agent gets `proof unavailable: run muninn know show --proof K_ID`, never the model text.
+A hidden reason, guide title or expiry condition reads `not shown to agents: run muninn know show --proof K_ID`.
+`muninn search` knowledge previews follow the same rule.
+Knowledge saved through an ADR 0018 owner approval shows the model text the owner approved.
+Facts and procedures show the model text.
+`know list` (`proofs`, by knowledge ID), `know show` (`proof`), and `know decision show` and `status` (`proof`) show the full proof beside the model text.
 
 A replacement uses `action: replace`, `knowledge_id`, and `expected_revision`.
 `unresolved` entries have `claim`, `affected` (knowledge/revision pairs), `evidence_refs` and a specified missing-evidence `question`.
@@ -347,7 +368,7 @@ It gives no owner authority.
 A canonical display is the stable text Muninn generates from the recorded proposal.
 A digest checks the integrity of its unchanged fields.
 Show reports `DecisionDisplay`: `id`, `digest`, `text`, and `complete: true`.
-The canonical `text` contains `candidate`, `enrichment`, and `owner_decision`.
+The canonical `text` contains `candidate`, `enrichment`, `owner_decision`, and `proof` (the full owner messages the candidate cites).
 
 The complete candidate keeps content, scope, targets, `original` `supports`, versions, `disposition`, and digest.
 `disposition` describes the proposed answer to an originating question.
@@ -359,22 +380,22 @@ That unchanged rule appends owner `evidence` without changing the proposal's oth
 | Field | Meaning |
 |---|---|
 | `meaning` | Identifies this complete proposal and says viewing gives no approval. |
-| `approve` | The unchanged sentence `Please approve memory D_ID.` with the actual ID. |
-| `reject` | The unchanged sentence `Please reject memory D_ID.` with the actual ID. |
-| `edit` | Tells the agent to prepare and display a new complete proposal with its own approval. |
-| `reply` | Makes a complete plain chat sentence necessary, with unchanged capitalization, spaces, and last period. |
-| `agent` | Gives commands and checks to the agent. A reply alone does not prove recorded memory. |
+| `reply` | Tells the owner to reply in their own words straight after this display. |
+| `edit` | Tells the owner that a change needs a new complete proposal with its own reply. |
+| `agent` | Says the agent reads the reply and records the action. A reply alone does not prove recorded memory. |
 
 The agent sends the unchanged decoded `text` as its full `original` last message.
 It adds no Markdown fence, prose, or newline external to that text.
-The owner sends the unchanged approval or refusal sentence as a full plain chat message.
-A bare `approved`, copied wrapper, tool response, or agent statement gives no approval.
+It shows only one proposal in that message.
+The owner replies in their own words in the next message.
+The agent decides whether the reply means approve, reject, or edit (ADR 0022).
+If the reply is unclear, ask again; do not submit.
+A tool response, hook text, or agent statement gives no approval.
 
 Viewing and status checks do not check or accept a decision.
 
 For an edit, the agent prepares and displays a new complete proposal.
-The unchanged replacement sentence is `Please replace memory D_OLD with memory D_NEW.`.
-It uses the actual IDs and the new proposal's complete display.
+The owner replies to the new proposal's complete display.
 Checked replacement supersedes the previous draft.
 
 It gives no approval to the new draft.
@@ -387,7 +408,14 @@ Each locator has `source` (`provider`, `thread_id`), `line`, `part`, and `line_s
 
 Each selector has `json_pointer`, `start`, and `end`.
 The verifier needs the complete accepted `original` fields, not a selected substring.
-Only current eligible primary sources and direct-owner wording can supply proof.
+Only current eligible primary sources and owner messages with `direct_owner` provenance can supply proof.
+The display must be the final assistant message directly before the owner reply, with no message, tool call, or tool result between them.
+The display must be exactly the `know decision show` text of the target proposal.
+One owner reply backs one decision: a second intent with the same `owner_locator` is refused with `owner_proof`.
+The owner and display lines must be indexed `prompt` and `reply` events, so a fork or replay copy cannot back a decision.
+
+After an upgrade to ADR 0022, a learning request that was in progress and a candidate staged before the upgrade fail once, then work normally.
+Show a pre-upgrade decision display again before the owner replies.
 Input files, labels, claimed IDs, and commands cannot supply proof.
 
 `Stage`, submit, status, and apply report `DecisionView`.
@@ -1607,9 +1635,18 @@ They make accepted notes and a compact guide index as untrusted data.
 Claude receives up to 4,000 bytes.
 Codex receives up to 2,800 bytes.
 
+The block keeps the frame, the usage line and the search and open lines.
+The memories are one numbered list between two bars of `▓`:
+a header `▓ MUNINN MEMORY · <scope> · <shown> of <total>`, each memory's text wrapped at 70 characters with a `When:` line for conditions, then one code line `▓ <n>: <K_ID>` for each memory.
+A guide shows its title.
+The bar is as wide as the longest line, from 20 to 72 characters.
+The block has no kind, revision, scope JSON, evidence IDs or expiry.
+
 This read-only startup context does not make a learning policy necessary.
-No arbitrary eight-item limit or actor/quote heuristic stays.
-Muninn omits items that do not fit and reports that omission.
+The order is decisions and preferences, then constraints and procedures, then facts and other notes, then guide titles; newest first inside each group. Global memories use the same order.
+Memories are taken in order until the next one does not fit; that one starts page 2.
+A memory larger than a whole page shows `memory too long: run muninn know show --proof K_ID`.
+When memories are left out, the footer `▓ <k> more memories. Before you write code, run: muninn know context --page 2` points to the next page (Codex adds `--provider codex`).
 The `usage` text tells agents to check current revisions and open cited `originals`.
 
 Preview eligibility is not a truth guarantee.

@@ -213,8 +213,23 @@ def _add_knowledge(cmd: _Commands) -> None:
     p = know.add("show")
     p.add_argument("kid", type=knowledge_argument)
     p.add_argument("--revision", type=int)
+    p.add_argument(
+        "--proof",
+        action="store_true",
+        help="print only the full proof, without the model text",
+    )
     p = know.add("context")
     p.add_argument("--task")
+    p.add_argument(
+        "--page",
+        type=int,
+        help="print page N of the session-start memories as text",
+    )
+    p.add_argument(
+        "--provider",
+        choices=("claude", "codex", "cursor"),
+        help="with --page: the session-start byte limit (default claude)",
+    )
     p = know.add("propose")
     p.add_argument("--input", required=True)
     p = know.add("retract")

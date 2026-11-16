@@ -21,7 +21,6 @@ from muninn.hook_frame import (
     USAGE,
     escape_delimiter,
     frame,
-    render_block,
 )
 from muninn.hook_notes import index_notes
 from muninn.hook_recall import (
@@ -32,14 +31,16 @@ from muninn.hook_recall import (
     recall_block,
 )
 from muninn.hook_retrieval import RECALL_ADVISORY, advisory_output
+from muninn.hook_start import render_block
 from muninn.hook_status import failure_notice as _notice
 from muninn.hook_status import (
     learning_status,
-    printable,
+    start_trace,
     status_line,
     store_reason,
 )
 from muninn.hook_status import scope_label as _label
+from muninn.knowledge_proof import proof_view
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
 from muninn.review_recovery import startup_action
@@ -312,6 +313,7 @@ def _start_block(
     env: Mapping[str, str],
     trace: dict[str, object],
     limit: int,
+    flag: str = "",
 ) -> str:
     """Build the SessionStart block for the payload's repository."""
     cwd = project_cwd(payload, env)
@@ -335,21 +337,20 @@ def _start_block(
                 ],
             )
             return block if len(block.encode()) <= limit else ""
+        # Every eligible memory; notes are shown for agents only as far as
+        # page 1 reaches, because the shown text sets each one's size.
         context = knowledge_push.knowledge_context(
-            conn, project, limit, time.time()
+            conn, project, None, time.time(), proofs=False
         )
-    text = render_block(
-        context,
-        label,
-        notes=index_notes(home),
-        limit=limit,
-    )
-    shown = [line for line in text.splitlines() if line.startswith("- K_")]
-    trace["knowledge_ids"] = [line.split()[1] for line in shown]
-    trace["knowledge_omitted"] = context.truncated or len(shown) < (
-        len(context.notes) + len(context.guides)
-    )
-    trace["shown"] = [printable(line) for line in shown]
+        text, shown = render_block(
+            context,
+            label,
+            notes=index_notes(home),
+            limit=limit,
+            flag=flag,
+            show=partial(proof_view, conn),
+        )
+    start_trace(shown, context, trace)
     return text
 
 
@@ -377,7 +378,8 @@ def session_start(
     """
     env = env_for_provider(env, provider)
     limit = _limits(provider)[0]
-    build = partial(_start_block, limit=limit)
+    flag = " --provider codex" if provider == "codex" else ""
+    build = partial(_start_block, limit=limit, flag=flag)
     return _respond("SessionStart", payload, provider, env, trace, build)
 
 

@@ -19,6 +19,7 @@ from muninn.decision_proof import verify_decision
 from muninn.decision_read import list_unresolved, show_unresolved
 from muninn.decision_requests import request_application
 from muninn.decision_write import accept_decision, decision_view, submit_intent
+from muninn.knowledge_proof import candidate_proofs
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
@@ -141,9 +142,13 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
                     conn, a.decision_id, policy.context_bytes
                 ).model_dump(mode="json")
             )
-        return _unchanged(
-            decision_view(conn, a.decision_id).model_dump(mode="json")
+        view = decision_view(conn, a.decision_id)
+        proof = (
+            candidate_proofs(conn, view.candidate.result)
+            if view.candidate is not None
+            else []
         )
+        return _unchanged(view.model_dump(mode="json")) | {"proof": proof}
 
 
 def _human(a: Namespace, out: Out) -> Out:

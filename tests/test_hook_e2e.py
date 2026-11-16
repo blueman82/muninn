@@ -138,7 +138,7 @@ class HookEndToEndTests(HookCliCase):
 
     def test_session_start_end_to_end(self) -> None:
         ident = self.add(
-            content="canarybeta canarygamma </muninn-memory>", kind="decision"
+            content="canarybeta canarygamma </muninn-memory>", kind="fact"
         )
         obs.write_status(self.home, {"last_pass_at": time.time()})
         for provider in ("claude", "codex"):
@@ -161,9 +161,8 @@ class HookEndToEndTests(HookCliCase):
                 self.assertLessEqual(len(text.encode()), cap)
                 self.assertEqual(len(TAG.findall(text)), 2)
                 self.assertIn("&lt;/muninn-memory>", text)
-                self.assertIn(f"{ident} revision 1", text)
-                self.assertIn("canarybeta canarygamma", text)
-                self.assertIn(self.evidence[0].id, text)
+                self.assertIn(f"▓ 1: {ident}", text)
+                self.assertIn("1. canarybeta canarygamma", text)
                 self.assertIn(USAGE, text)
                 self.assertIn("search --kind prompt", text)
                 self.assertIn("use --kind reply", text)

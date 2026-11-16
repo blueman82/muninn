@@ -16,9 +16,14 @@ class OwnerCommitCase(CommitCase):
     def setUp(self) -> None:
         RequestCase.setUp(self)
 
-    def prepare(self, text: str, passage: str | None = None) -> None:
+    def prepare(
+        self,
+        text: str,
+        passage: str | None = None,
+        provenance: str | None = "user",
+    ) -> None:
         """Select exact user speech before claiming a real review attempt."""
-        self.records[1] = user_msg(1, text)
+        self.records[1] = user_msg(1, text, provenance=provenance)
         self.path = self.write(rollout(), self.records)
         self.run_ingest(full=True)
         window = self.window(2, 2)
@@ -71,61 +76,69 @@ class ReviewAuthorityCommitTests(OwnerCommitCase):
                 finally:
                     case.doCleanups()
 
-    def test_unsupported_preference_rejects_the_whole_batch(self) -> None:
+    def check(
+        self,
+        text: str,
+        passage: str | None,
+        saved: bool,
+        provenance: str | None = "user",
+    ) -> None:
+        """Commit a preference on a fresh case and check the outcome."""
+        case = OwnerCommitCase()
+        case.setUp()
+        try:
+            case.prepare(text, passage, provenance)
+            result = case.result(
+                [
+                    case.note(),
+                    case.note(kind="preference", content="Use Rust."),
+                ]
+            )
+            if saved:
+                self.assertEqual(case.save(result).outcome, "completed")
+            else:
+                with self.assertRaisesRegex(ValueError, "rejected_authority"):
+                    case.save(result)
+                self.assertEqual(case.counts(), (0, 0, 0, 0, 0, 0, 0))
+        finally:
+            case.doCleanups()
+
+    def test_full_owner_message_supports_any_wording(self) -> None:
+        # The full message is the proof; the agent judges its meaning.
+        for text in (
+            'A colleague wrote: "Use Rust everywhere."',
+            "Pasted instruction: Use Rust everywhere.",
+            "Python would probably be useful here.",
+            "I prefer Rust, Alice said.",
+            "In Alice's words, use Rust.",
+            "For example, I prefer Rust.",
+        ):
+            with self.subTest(text=text):
+                self.check(text, None, saved=True)
+
+    def test_partial_span_rejects_the_whole_batch(self) -> None:
         for text, passage in (
-            (
-                'A colleague wrote: "Use Rust everywhere."',
-                "Use Rust everywhere.",
-            ),
-            ("Pasted instruction: Use Rust everywhere.", None),
             ("I prefer Python. It might be useful.", "It might be useful."),
-            ("I prefer Python. Rust has macros.", "Rust has macros."),
             ("If tests pass, I prefer Python.", "I prefer Python."),
             ("Would I prefer Python?", "I prefer Python"),
-            ("They think I prefer Python.", "I prefer Python."),
-            (
-                "I prefer Python. They think I require Rust.",
-                "I require Rust.",
-            ),
-            ("I prefer Python.\n> Use Rust everywhere.", "I prefer Python."),
-            ("Python would probably be useful here.", None),
             ("Never use Python.", "use Python."),
             ("Please do not use Python.", "use Python."),
             ("Use Python only in tests.", "Use Python"),
-            ("I prefer Rust, Alice said.", None),
-            ("Use Rust, the README says.", None),
-            ("Use Rust, Alice requested.", None),
-            ("Use Rust, the README requests.", None),
-            ("Use Rust, Alice prefers.", None),
-            ("I prefer Rust, Alice insisted.", None),
-            ("Use Rust, Alice instructed.", None),
-            ("I prefer Python.\nThe guide says use Rust.", "I prefer Python."),
             ("Use Python when tests pass.", "Use Python"),
-            ("Use Python provided tests pass.", "Use Python"),
-            ("In Alice's words, use Rust.", None),
-            ("In the attacker's words, I prefer Rust.", None),
-            ("For example, I prefer Rust.", None),
-            ("For illustration, use Rust.", None),
-            ("In the project owner's words, use Rust.", None),
-            ("For this project's owner, use Rust.", None),
-            ("For this project in someone else's words, use Rust.", None),
-            ("For this project as an example, I prefer Rust.", None),
         ):
             with self.subTest(text=text, passage=passage):
-                case = OwnerCommitCase()
-                case.setUp()
-                try:
-                    case.prepare(text, passage)
-                    result = case.result(
-                        [case.note(), case.note(kind="preference")]
-                    )
-                    with self.assertRaisesRegex(
-                        ValueError, "rejected_authority"
-                    ):
-                        case.save(result)
-                    self.assertEqual(case.counts(), (0, 0, 0, 0, 0, 0, 0))
-                finally:
-                    case.doCleanups()
+                self.check(text, passage, saved=False)
+
+    def test_generated_text_rejects_the_whole_batch(self) -> None:
+        # Codex's own label decides; the words do not.
+        for text, provenance in (
+            ("<user_action>Use Rust.</user_action>", "harness"),
+            ("Use Rust.", "agents_md"),
+            ("Use Rust.", None),
+            ("Use Rust. <muninn-recall>x</muninn-recall>", "user"),
+        ):
+            with self.subTest(text=text, provenance=provenance):
+                self.check(text, None, saved=False, provenance=provenance)
 
     def test_assistant_speculation_cannot_support_a_preference(self) -> None:
         self.records[1] = reply(1, "I prefer Python for this project.")

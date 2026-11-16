@@ -137,7 +137,9 @@ class QueryCase(unittest.TestCase):
             max_bytes=65536,
             allow_global=True,
             extra_windows=(),
-            **updates,
+            # A fact keeps its model text in previews; a decision would
+            # show its owner proof instead.
+            **({"kind": "fact"} | updates),
         )
 
     def add_scope(

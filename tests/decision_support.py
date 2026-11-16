@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from copy import deepcopy
+from typing import Any
 
 from muninn import classify, ingest, review_requests
 from muninn.decision_apply import enrich_support
@@ -39,6 +40,9 @@ from tests.test_review_commit import CommitCase
 
 class DecisionCase(CommitCase):
     """Reuse the real review preparation without granting owner decisions."""
+
+    # Records placed between the display and the owner reply.
+    between: Sequence[dict[str, Any]] = ()
 
     def setUp(self) -> None:
         super().setUp()
@@ -115,13 +119,17 @@ class DecisionCase(CommitCase):
         presented = reply(4, shown)
         start = len(self.records) + 1
         self.records.extend(
-            [owner, presented] if display_after else [presented, owner]
+            [owner, presented]
+            if display_after
+            else [presented, *self.between, owner]
         )
         self.path = self.write(rollout(), self.records)
         self.run_ingest()
         source = SourceRef(provider="codex", thread_id=TID)
         display_line, owner_line = (
-            (start + 1, start) if display_after else (start, start + 1)
+            (start + 1, start)
+            if display_after
+            else (start, start + 1 + len(self.between))
         )
 
         def locator(number: int) -> EvidenceLocator:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from argparse import Namespace
+from functools import partial
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -15,15 +16,22 @@ from muninn.cli_core import (
     Out,
     Record,
     Result,
+    current_dir,
     read_store,
     write_store,
 )
 from muninn.cli_decision import decision
 from muninn.cli_know_shared import scopes as _scopes
 from muninn.cli_learn import installed_policy, propose
+from muninn.hook import CODEX_BLOCK_LIMIT
+from muninn.hook_frame import BLOCK_LIMIT
+from muninn.hook_start import render_page
+from muninn.hook_status import scope_label
 from muninn.knowledge_models import KnowledgeView
+from muninn.knowledge_proof import owner_proofs, proof_view
 from muninn.query.answers import event_ref
 from muninn.review_models import ProposalInput
+from muninn.scope import scope_ids_for_read
 
 
 def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
@@ -37,16 +45,22 @@ def _views(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
                 else knowledge_read.current_knowledge(conn, scope, time.time())
             )
             views.update((view.id, view) for view in found)
-    return {
-        "knowledge": [
-            view.model_dump(mode="json")
-            for view in sorted(
-                views.values(),
-                key=lambda view: (view.created_at, view.id),
-                reverse=True,
-            )
-        ]
+    ordered = sorted(
+        views.values(),
+        key=lambda view: (view.created_at, view.id),
+        reverse=True,
+    )
+    out: Out = {
+        "knowledge": [view.model_dump(mode="json") for view in ordered]
     }
+    # Search is an agent path; only the owner's list shows the full proof.
+    if a.know_cmd == "list":
+        out["proofs"] = {
+            view.id: proof
+            for view in ordered
+            if (proof := owner_proofs(conn, view))
+        }
+    return out
 
 
 def _evidence_sources(
@@ -81,9 +95,24 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
         return _views(conn, a, env)
     if a.know_cmd == "show":
         view = knowledge_read.show_knowledge(conn, a.kid, a.revision)
+        # Agents are sent here for a long proof, so no model text.
+        if a.proof:
+            return {
+                "id": view.id,
+                "revision": view.revision,
+                "proof": owner_proofs(conn, view),
+            }
         return view.model_dump(mode="json") | {
-            "evidence_sources": _evidence_sources(conn, view)
+            "evidence_sources": _evidence_sources(conn, view),
+            "proof": owner_proofs(conn, view),
         }
+    # Pages follow the session-start block, which has no task scope.
+    if a.page is not None and a.task is not None:
+        raise ValueError("page_task_unsupported")
+    if a.page is None and a.provider is not None:
+        raise ValueError("provider_needs_page")
+    if a.page is not None:
+        return _page(conn, a, env)
     policy = installed_policy(conn)
     scopes = _scopes(conn, a, env)
     project = next(
@@ -94,6 +123,33 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     return knowledge_push.knowledge_context(
         conn, project, policy.context_bytes, time.time()
     ).model_dump(mode="json")
+
+
+def _page(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
+    """Return one page of the session-start memories as plain text."""
+    if a.page < 1:
+        raise ValueError("page_unavailable")
+    cwd = current_dir(env)
+    label = scope_label(conn, scope_ids_for_read(conn, cwd), cwd)
+    project = next(
+        (s for s in _scopes(conn, a, env) if s.project_id is not None), None
+    )
+    if project is None:
+        raise ValueError("scope_unavailable")
+    context = knowledge_push.knowledge_context(
+        conn, project, None, time.time(), proofs=False
+    )
+    codex = a.provider == "codex"
+    return {
+        "banner": render_page(
+            context,
+            label,
+            a.page,
+            limit=CODEX_BLOCK_LIMIT if codex else BLOCK_LIMIT,
+            flag=" --provider codex" if codex else "",
+            show=partial(proof_view, conn),
+        )
+    }
 
 
 def _proposal(a: Namespace) -> ProposalInput:

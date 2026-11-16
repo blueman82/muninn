@@ -13,13 +13,16 @@ Read current revisions and open cited `originals` before relying on it.
 muninn know list [--all-projects] [--task TASK]
 muninn know search QUERY [--all-projects] [--task TASK]
 muninn know show K_ID [--revision N]
+muninn know show --proof K_ID [--revision N]
 muninn know context [--task TASK]
+muninn know context --page N [--provider claude|codex|cursor]
 ```
 
 IDs use `K_` plus 32 lowercase hexadecimal characters.
 Muninn rejects numeric aliases.
-List/search report `knowledge: [KnowledgeView, ...]`.
+List/search report `knowledge: [KnowledgeView, ...]`; list also reports `proofs` by knowledge ID.
 Show reports one view with UUID, revision, `state`, body, `origin`, expiry and retraction metadata, and `evidence_sources`.
+`--proof` reports only `id`, `revision` and the full `proof`, with no claim text.
 
 Find the `E_` ID in `evidence_sources[].evidence_id` and open its `ref`.
 Compare the opened original's hash with `line_sha256`.
@@ -29,6 +32,7 @@ Historical revisions make explicit `--revision` necessary.
 Context reports `schema_version` and eligible note views in `notes`.
 It also reports compact `guide` IDs, revisions, titles, and scopes in `guides`, with `unresolved_ids` and `truncated`.
 The installed `context_bytes` limits this output.
+`--page N` prints page N of the session-start memories as plain text, in the start block's layout. When the start block ends with `▓ <k> more memories. Before you write code, run: muninn know context --page 2`, run that command to read the rest. Each memory appears on one page only. `--page` refuses `--task` and page 0; `--provider` needs `--page`. Decisions and preferences come first, then constraints and procedures, then facts, then guide titles.
 Current retrieval omits withheld/disputed, expired, superseded, retracted, erased, and unsupported guidance.
 
 Explicit show can keep withdrawn content.
@@ -68,6 +72,11 @@ Correct knowledge through an accepted replacement in a proposal.
 Use `action: replace`, `knowledge_id`, and `expected_revision`.
 Retraction makes the current expected revision and an explicit nonempty `reason` necessary.
 Record an owner decision or preference only when attributable owner `evidence` authorizes it.
+Cite the full owner message by its evidence ID; a partial span gives no owner support.
+For an agreement reply such as `yes`, also cite the final assistant reply directly before it.
+Write the decision in plain words in the claim text. Muninn does not check that text.
+The proof is the full cited messages. Context, search, and recall show the proof, not the claim text; a proof over 2,000 bytes becomes `proof too long: run muninn know show --proof K_ID`, and a missing proof becomes `proof unavailable: run muninn know show --proof K_ID`. A search preview or recall line with less room than the proof gets the `proof too long` line, never part of the proof. Knowledge saved through an owner approval of a displayed proposal shows the approved text.
+List and show print the full proof (`proofs`, `proof`) beside the claim text.
 
 `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and ID coercion have no active interface.
 A missing installed admitted frozen policy refuses with `review_policy_required`.
@@ -135,7 +144,7 @@ It gives no owner authority.
 A canonical display is the stable text Muninn generates from the recorded proposal.
 A digest checks the integrity of its unchanged fields.
 Show reports `DecisionDisplay`: `id`, `digest`, `text`, and `complete: true`.
-The canonical `text` contains `candidate`, `enrichment`, and `owner_decision`.
+The canonical `text` contains `candidate`, `enrichment`, `owner_decision`, and `proof` (the full owner messages the candidate cites).
 
 The complete candidate keeps content, scope, targets, `original` `supports`, versions, `disposition`, and digest.
 `disposition` describes the proposed answer to an originating question.
@@ -147,22 +156,22 @@ That unchanged rule appends owner `evidence` without changing the proposal's oth
 | Field | Meaning |
 |---|---|
 | `meaning` | Identifies this complete proposal and says viewing gives no approval. |
-| `approve` | The unchanged sentence `Please approve memory D_ID.` with the actual ID. |
-| `reject` | The unchanged sentence `Please reject memory D_ID.` with the actual ID. |
-| `edit` | Tells the agent to prepare and display a new complete proposal with its own approval. |
-| `reply` | Makes a complete plain chat sentence necessary, with unchanged capitalization, spaces, and last period. |
-| `agent` | Gives commands and checks to the agent. A reply alone does not prove recorded memory. |
+| `reply` | Tells the owner to reply in their own words straight after this display. |
+| `edit` | Tells the owner that a change needs a new complete proposal with its own reply. |
+| `agent` | Says the agent reads the reply and records the action. A reply alone does not prove recorded memory. |
 
 The agent sends the unchanged decoded `text` as its full `original` `final` message.
 It adds no Markdown fence, prose, or newline external to that text.
-The owner sends the unchanged approval or refusal sentence as a full plain chat message.
-A bare `approved`, copied wrapper, tool response, or agent statement gives no approval.
+It shows only one proposal in that message.
+The owner replies in their own words in the next message.
+The agent decides whether the reply means approve, reject, or edit (ADR 0022).
+If the reply is unclear, ask again; do not submit.
+A tool response, hook text, or agent statement gives no approval.
 
 Viewing and status checks do not check or accept a decision.
 
 For an edit, the agent prepares and displays a new complete proposal.
-The unchanged replacement sentence is `Please replace memory D_OLD with memory D_NEW.`.
-It uses the actual IDs and the new proposal's complete display.
+The owner replies to the new proposal's complete display.
 Checked replacement supersedes the previous draft.
 
 It gives no approval to the new draft.
@@ -176,7 +185,10 @@ Each locator has `source` (`provider`, `thread_id`), `line`, `part`, and `line_s
 
 Each selector has `json_pointer`, `start`, and `end`.
 The verifier needs the complete accepted `original` fields, not a selected substring.
-Only current eligible primary sources and direct-owner wording can supply proof.
+Only current eligible primary sources and owner messages with `direct_owner` provenance can supply proof.
+The display must be the final assistant message directly before the owner reply, with no message, tool call, or tool result between them.
+The display must be exactly the `know decision show` text of the target proposal.
+One owner reply backs one decision: a second intent with the same `owner_locator` is refused with `owner_proof`.
 Input files, labels, claimed IDs, and commands cannot supply proof.
 
 `Stage`, submit, status, and apply report `DecisionView`.

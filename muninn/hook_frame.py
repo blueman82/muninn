@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import NotRequired, TypedDict
 
 from muninn import classify, query
-from muninn.knowledge_models import KnowledgeContext, NoteBody
+from muninn.knowledge_proof import too_long
 
 BLOCK_LIMIT = 4000  # SessionStart block, UTF-8 bytes
 RECALL_LIMIT = 1500  # prompt-time recall block, UTF-8 bytes
@@ -76,6 +76,7 @@ class RecallEntry(TypedDict):
     scope: dict[str, str | None]
     evidence_refs: list[str]
     evidence_sources: NotRequired[list[RecallEvidence]]
+    proof: NotRequired[bool]
 
 
 class RecallHit(TypedDict):
@@ -141,81 +142,19 @@ def frame(attrs: str, lines: list[str]) -> str:
     return "\n".join([f"{OPEN}{attrs}>", *lines, CLOSE])
 
 
-def render_block(
-    context: KnowledgeContext,
-    scope_label: str,
-    *,
-    notes: tuple[str, ...] = (),
-    limit: int = BLOCK_LIMIT,
-) -> str:
-    """Render complete eligible notes and a navigation-only guide index.
-
-    Args:
-        context: Authoritative current typed context from the reader.
-        scope_label: Name of the mapped scope shown in the heading.
-        notes: Extra diagnostic lines retained independently of knowledge.
-        limit: Maximum UTF-8 bytes, including the complete frame.
-
-    Returns:
-        Bounded untrusted evidence, omitting whole items that cannot fit.
-    """
-    head = [f"Project knowledge for {clean(scope_label, 80)}:", USAGE]
-    tail = [SEARCH_HINT, OPEN_HINT, *(clean(note, 200) for note in notes)]
-    items: list[str] = []
-    for view in context.notes:
-        body = view.body
-        if not isinstance(body, NoteBody):
-            continue
-        expiry = (
-            clean(view.expiry.model_dump_json(), None)
-            if view.expiry
-            else "none"
-        )
-        items.append(
-            f"- {view.id} revision {view.revision} [{body.kind};"
-            f" scope: {clean(json.dumps(body.scope.model_dump()), None)}]"
-            f" {clean(body.content, None)}"
-            f" (conditions: {clean(json.dumps(body.conditions), None)};"
-            f" evidence: {', '.join(body.evidence_refs)};"
-            f" expiry: {expiry})"
-        )
-    items.extend(
-        f"- {guide.id} revision {guide.revision} [guide index;"
-        f" scope: {clean(json.dumps(guide.scope.model_dump()), None)}]"
-        f" {clean(guide.title, None)}"
-        for guide in context.guides
-    )
-    shown: list[str] = []
-    for item in items:
-        if len(frame("", head + shown + [item] + tail).encode()) <= limit:
-            shown.append(item)
-    omitted = (
-        ["Knowledge omitted by byte limit."]
-        if context.truncated or len(shown) < len(items)
-        else []
-    )
-    block = frame("", head + shown + omitted + tail)
-    while len(block.encode()) > limit and tail:
-        tail.pop(0)
-        block = frame("", head + shown + omitted + tail)
-    while len(block.encode()) > limit and shown:
-        shown.pop()
-        omitted = ["Knowledge omitted by byte limit."]
-        block = frame("", head + shown + omitted)
-    if len(block.encode()) > limit and omitted:
-        block = frame("", [USAGE, *omitted])
-    return block if len(block.encode()) <= limit else ""
-
-
 def _knowledge_line(entry: RecallEntry, cap: int = ENTRY_TEXT) -> str:
     """Format one matched knowledge entry with its citations."""
     refs = ", ".join(clean(ref, 120) for ref in entry["evidence_refs"])
+    text = clean(entry["text"], min(cap, ENTRY_TEXT))
+    # An owner proof is never cut, so a long one gives its look-up line.
+    if entry.get("proof") and text != clean(entry["text"], None):
+        text = clean(too_long(entry["id"]), None)
     return (
         f"- {entry['id']} revision {entry['revision']}"
         f" [{clean(entry['state'], 20)} {clean(entry['form'], 20)}"
         f" {clean(entry['kind'], 20)} preview;"
         f" scope: {clean(json.dumps(entry['scope']), 160)}]"
-        f" {clean(entry['text'], min(cap, ENTRY_TEXT))} (evidence: {refs})"
+        f" {text} (evidence: {refs})"
     )
 
 

@@ -205,6 +205,8 @@ def policy(
             "and authorized read results. Propose only supported same-scope "
             "changes; otherwise return final with no_change_reason. "
             "Never invent evidence identifiers or unsupported claims. "
+            "For agreement, cite the owner reply and the final assistant "
+            "reply directly before it. "
             "Use at most one read before returning the final result. "
             + review_codex_launch.JSON_ONLY_INSTRUCTION
         ),

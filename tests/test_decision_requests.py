@@ -10,6 +10,7 @@ from muninn.review_history import _covered, replacements
 from muninn.review_progress import advance_completed, unsuppressed_window
 from muninn.review_state import LearningSelection
 from tests.decision_support import DecisionCase
+from tests.test_classify import user_msg
 
 
 class DecisionRequestTests(DecisionCase):
@@ -104,6 +105,8 @@ class DecisionRequestTests(DecisionCase):
     def test_unaccepted_negative_preserves_active_approval(self) -> None:
         candidate = self.stage()
         self.approve(self.intent(candidate.id))
+        # A message between display and reply leaves the reject unverified.
+        self.between = [user_msg(6, "other message")]
         negative = self.intent(candidate.id, action="reject", wording="No.")
         self.transaction(lambda: submit_intent(self.conn, negative, 24.0))
         result = decision_requests.request_application(

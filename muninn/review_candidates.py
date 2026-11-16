@@ -14,9 +14,21 @@ from muninn.knowledge_models import (
     UnresolvedProposal,
 )
 from muninn.knowledge_write import body_of, claims, target
+from muninn.review_binding import Adjacent, owner_supported
 from muninn.review_correction import CorrectionFeedback
 from muninn.review_diagnostics import FailurePhase
 from muninn.review_evidence_models import EvidenceRecord
+from muninn.review_read_budget import EvidenceLimitError
+
+
+class OwnerSupport(NamedTuple):
+    """Carry how a claim's owner support is checked."""
+
+    adjacent: Adjacent | None = None
+    approved_owner: EvidenceId | None = None
+
+
+_NO_OWNER = OwnerSupport()
 
 
 class CandidateChecks(NamedTuple):
@@ -24,6 +36,7 @@ class CandidateChecks(NamedTuple):
 
     defer_failure: bool
     allow_missing_owner: bool
+    owner: OwnerSupport
 
 
 class CommitRejectedError(ValueError):
@@ -48,8 +61,17 @@ class ProposalRejectedError(CommitRejectedError):
         ],
         collection: Literal["changes", "unresolved"],
         index: int,
+        limit: str | None = None,
     ) -> None:
-        """Build finite feedback without candidate content or diagnostics."""
+        """Build finite feedback without candidate content or diagnostics.
+
+        Args:
+            code: The removal reason given to the model.
+            collection: The list that holds the item.
+            index: The item's position in that list.
+            limit: An exhausted read allowance code to record in place of
+                the code that ``code`` maps to.
+        """
         self.feedback = CorrectionFeedback(
             kind="reduction", code=code, collection=collection, index=index
         )
@@ -59,6 +81,7 @@ class ProposalRejectedError(CommitRejectedError):
             "duplicate_target": "rejected_revision",
             "target_overlap": "rejected_revision",
         }[code]
+        self.code = limit or self.code
         super().__init__(self.code, "candidate validation")
 
 
@@ -83,17 +106,12 @@ def _target(
         raise CommitRejectedError(str(exc), "candidate validation") from None
 
 
-def _support(
+def _known(
     refs: list[EvidenceId], records: dict[EvidenceId, EvidenceRecord]
-) -> bool:
-    """Reject unknown references and report attributable owner support."""
+) -> None:
+    """Reject references outside the revalidated evidence."""
     if not set(refs) <= records.keys():
         raise CommitRejectedError("rejected_evidence", "candidate validation")
-    return any(
-        records[r].authority == "direct_owner"
-        and records[r].evidence_type == "owner_statement"
-        for r in refs
-    )
 
 
 def _change(
@@ -134,10 +152,24 @@ def _change(
         )
         owner = owner or old["kind"] in {"preference", "decision"}
     for _, _, refs, _ in claims(body_of(change)):
-        supported = _support(refs, records)
-        if owner and not supported and not checks.allow_missing_owner:
+        _known(refs, records)
+        if (
+            not owner
+            or checks.allow_missing_owner
+            or checks.owner.approved_owner in refs
+        ):
+            continue
+        limit = None
+        try:
+            supported = owner_supported(refs, records, checks.owner.adjacent)
+        except EvidenceLimitError as exc:
+            # A pair that could not be read is a limit, not a wrong owner.
+            supported, limit = False, exc.code
+        if not supported:
             failure = failure or _candidate_failure(
-                ProposalRejectedError("owner_support", "changes", index),
+                ProposalRejectedError(
+                    "owner_support", "changes", index, limit
+                ),
                 checks.defer_failure,
             )
     return failure
@@ -153,7 +185,7 @@ def _unresolved(
     defer_candidate_failure: bool,
 ) -> ProposalRejectedError | None:
     """Keep overlap removable only after terminal affected-target checks."""
-    _support(proposal.evidence_refs, records)
+    _known(proposal.evidence_refs, records)
     seen: set[str] = set()
     failure = None
     for affected in proposal.affected:
@@ -179,8 +211,24 @@ def validate_batch(
     *,
     defer_candidate_failure: bool,
     allow_missing_owner: bool = False,
+    owner: OwnerSupport = _NO_OWNER,
 ) -> None:
-    """Defer eligible failures for a terminal scan only when opted in."""
+    """Defer eligible failures for a terminal scan only when opted in.
+
+    Args:
+        conn: Caller-owned transaction with knowledge and source rows.
+        result: Proposed changes and unresolved questions.
+        scope: The request scope every change must keep.
+        evidence: Revalidated evidence cited by the result.
+        defer_candidate_failure: Keep removable refusals for a final scan.
+        allow_missing_owner: Stage a candidate before any owner decision.
+        owner: Agreement gap reader, and the owner reply of a verified
+            owner-approved decision being applied, which proves the claims it
+            backs.
+
+    Raises:
+        CommitRejectedError: If evidence, targets or owner support fail.
+    """
     records = {r.id: r for r in evidence}
     replaced: set[str] = set()
     failure = None
@@ -192,7 +240,9 @@ def validate_batch(
             records,
             replaced,
             index,
-            CandidateChecks(defer_candidate_failure, allow_missing_owner),
+            CandidateChecks(
+                defer_candidate_failure, allow_missing_owner, owner
+            ),
         )
         failure = failure or candidate
     for index, proposal in enumerate(result.unresolved):
