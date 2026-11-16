@@ -7,6 +7,8 @@ import io
 import json
 import os
 import sqlite3
+import sys
+import unittest
 from contextlib import closing, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -30,6 +32,7 @@ from tests.installer_support import World, git
 from tests.unknown_recovery_support import UnknownRecoveryCase
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX")
 class UnknownLifecycleTests(UnknownRecoveryCase):
     """Exercise the public surface and retained governed metadata."""
 

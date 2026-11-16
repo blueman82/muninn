@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
+import unittest
 from collections.abc import Mapping
 from unittest import mock
 
@@ -15,6 +17,7 @@ from tests.test_review_pause import PauseCase
 VOLUME = "f5a5fb75-3af2-4f3f-a7b2-5744e5a0b339"
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX")
 class WitnessSerializationTests(PauseCase):
     """Check canonical bytes, copies and the actual witness publisher."""
 

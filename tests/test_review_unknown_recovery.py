@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
+import unittest
 from contextlib import closing
 from unittest import mock
 
@@ -23,6 +25,7 @@ from muninn.review_unknown_state import UnknownAcknowledgement
 from tests.unknown_recovery_support import UnknownRecoveryCase
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX")
 class UnknownRecoveryTests(UnknownRecoveryCase):
     """Preserve failed history while fencing one explicitly named unknown."""
 

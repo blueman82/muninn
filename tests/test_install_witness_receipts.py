@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import unittest
 from collections.abc import Mapping
 from typing import Any
@@ -28,6 +29,7 @@ def signed_digest(value: dict[str, Any]) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX")
 class InterfaceWitnessReceiptTests(unittest.TestCase):
     """Keep strict interface approval checks across historical wire shapes."""
 
@@ -123,6 +125,7 @@ class InterfaceWitnessReceiptTests(unittest.TestCase):
         self.assertNotEqual(changed.digest, original.digest)
 
 
+@unittest.skipIf(sys.platform == "win32", "requires POSIX")
 class HostWitnessReceiptTests(unittest.TestCase):
     """Keep the second digest-bearing witness consumer compatible."""
 
