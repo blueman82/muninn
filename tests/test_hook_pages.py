@@ -6,6 +6,7 @@ import json
 import re
 import time
 import unittest
+from functools import partial
 from unittest import mock
 
 from muninn import hook, hook_start, knowledge_push, knowledge_write
@@ -202,6 +203,62 @@ class PageLookupTests(HookCase):
         packed = len(CODE.findall(text))
         self.assertTrue(0 < packed < 12)
         self.assertEqual(shown.call_count, packed + 1)
+
+
+class LazyEqualsEagerTests(HookCase):
+    """Show notes lazily with the same output as showing all first."""
+
+    def test_lazy_pages_equal_eager_pages(self) -> None:
+        # A proof longer than the model text changes how pages pack.
+        self.conn.execute(
+            "UPDATE review_evidence SET excerpt=? WHERE id=?",
+            ("Use Python here. " * 40, self.evidence[0].id),
+        )
+        for i in range(6):
+            self.add(
+                kind="decision", content=f"Model {i}.", created_at=1.0 + i
+            )
+        for i in range(8):
+            self.add(content=f"Fact {i}: " + "detail " * 40, created_at=9.0)
+        now = time.time()
+        eager = knowledge_push.knowledge_context(
+            self.conn, self.scope, None, now
+        )
+        lazy = knowledge_push.knowledge_context(
+            self.conn, self.scope, None, now, proofs=False
+        )
+        show = partial(hook.proof_view, self.conn)
+        for limit in (hook.BLOCK_LIMIT, hook.CODEX_BLOCK_LIMIT):
+            with self.subTest(limit=limit):
+                self.assertEqual(
+                    hook_start.render_block(
+                        lazy, "repo", limit=limit, show=show
+                    ),
+                    hook_start.render_block(eager, "repo", limit=limit),
+                )
+                pages: list[str] = []
+                while True:
+                    try:
+                        page = hook_start.render_page(
+                            eager, "repo", len(pages) + 1, limit=limit
+                        )
+                    except ValueError:
+                        break
+                    self.assertEqual(
+                        hook_start.render_page(
+                            lazy,
+                            "repo",
+                            len(pages) + 1,
+                            limit=limit,
+                            show=show,
+                        ),
+                        page,
+                    )
+                    self.assertLessEqual(len(page.encode()), limit)
+                    pages.append(page)
+                # A decision reaches page 2 as its owner proof.
+                self.assertIn("[owner] Use Python here.", pages[1])
+                self.assertNotIn("Model ", "".join(pages))
 
 
 class PageCliManyTests(CliLearningCase):

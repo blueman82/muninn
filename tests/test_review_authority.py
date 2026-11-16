@@ -75,6 +75,11 @@ class LabelTests(unittest.TestCase):
         meta = mixed["payload"]["internal_chat_message_metadata_passthrough"]
         meta["content_item_metadata"][0]["provenance"]["type"] = "harness"
         self.assertEqual(judged("codex", mixed), "untrusted")
+        # One label for two content items leaves one item unlabelled.
+        short = user_msg(1, "x", "yes")
+        meta = short["payload"]["internal_chat_message_metadata_passthrough"]
+        meta["content_item_metadata"].pop()
+        self.assertEqual(judged("codex", short), "untrusted")
 
 
 class ReviewAuthorityTests(unittest.TestCase):
