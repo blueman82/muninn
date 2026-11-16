@@ -26,11 +26,14 @@ The model judges meaning and writes the decision text. Code checks only provable
 who typed the message, and which messages are the proof. Muninn copies the proof itself.
 
 ### 1. Provenance decides owner authority
-An `owner_statement` gets `direct_owner` when: primary thread (verified,
-muninn/review_evidence.py:40-52); `classify.user_text_kind == "prompt"` (branch f765855);
-`injected()` false (verified, review_authority.py:63-80); no tool result in the message
-(verified, review_selectors.py:275-276); no harness tag, Claude prefix or ChatGPT tag
-anywhere (verified, review_authority.py:92-99); no `FLAG_MARKERS` string (event_model.py:28-33).
+Trust comes only from the provider's own label (owner decision 2026-11-16, "label only").
+An `owner_statement` gets `direct_owner` when: the provider label says a person typed it
+(review_authority.py:14-46: Claude `origin.kind == "human"`, a record without `origin` gets
+no trust; Codex `provenance.type == "user"` on every content item; Cursor always);
+primary thread (review_selectors.py:265-271); the line is indexed as a `prompt` event
+(review_selectors.py:289); `injected()` false, including no tool result in the message
+(review_authority.py:49-66); no `FLAG_MARKERS` or ChatGPT reference tag in the message
+(review_authority.py:69-90). No wording, wrapper or start-word rule decides trust.
 Remove the wording checks: `_DIRECT`, `_UNCERTAIN`, comma rule, `_CONTEXT`, `_IMPORTED`,
 `_reported`, `_QUOTED`, fence rule (verified, review_authority.py:15-60, :87-110, :134).
 Cursor (owner decision 5): bubbles are always `prompt`, so Cursor owner lines are trusted.
