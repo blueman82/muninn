@@ -114,18 +114,24 @@ def _evidence(
 
 def _pairs(conn: sqlite3.Connection, budget: ReadBudget) -> Adjacent:
     """Reread agreement gaps in the commit transaction and fail closed."""
-    checked: dict[tuple[str, str], bool] = {}
+    checked: dict[tuple[str, str], bool | EvidenceLimitError] = {}
 
     def adjacent(assistant: EvidenceRecord, owner: EvidenceRecord) -> bool:
         # One reread per pair and batch, however many claims cite it.
         key = (assistant.id, owner.id)
         if key not in checked:
-            # A pair that cannot be read refuses only the claims citing it.
+            # A pair that cannot be read refuses only the claims citing it;
+            # an exhausted allowance keeps its own code for those claims.
             try:
                 checked[key] = adjacent_gap(conn, assistant, owner, budget)
+            except EvidenceLimitError as exc:
+                checked[key] = exc
             except ValueError:
                 checked[key] = False
-        return checked[key]
+        result = checked[key]
+        if isinstance(result, EvidenceLimitError):
+            raise result
+        return result
 
     return adjacent
 

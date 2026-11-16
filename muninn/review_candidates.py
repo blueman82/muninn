@@ -18,6 +18,7 @@ from muninn.review_binding import Adjacent, owner_supported
 from muninn.review_correction import CorrectionFeedback
 from muninn.review_diagnostics import FailurePhase
 from muninn.review_evidence_models import EvidenceRecord
+from muninn.review_read_budget import EvidenceLimitError
 
 
 class OwnerSupport(NamedTuple):
@@ -60,8 +61,17 @@ class ProposalRejectedError(CommitRejectedError):
         ],
         collection: Literal["changes", "unresolved"],
         index: int,
+        limit: str | None = None,
     ) -> None:
-        """Build finite feedback without candidate content or diagnostics."""
+        """Build finite feedback without candidate content or diagnostics.
+
+        Args:
+            code: The removal reason given to the model.
+            collection: The list that holds the item.
+            index: The item's position in that list.
+            limit: An exhausted read allowance code to record in place of
+                the code that ``code`` maps to.
+        """
         self.feedback = CorrectionFeedback(
             kind="reduction", code=code, collection=collection, index=index
         )
@@ -71,6 +81,7 @@ class ProposalRejectedError(CommitRejectedError):
             "duplicate_target": "rejected_revision",
             "target_overlap": "rejected_revision",
         }[code]
+        self.code = limit or self.code
         super().__init__(self.code, "candidate validation")
 
 
@@ -143,13 +154,22 @@ def _change(
     for _, _, refs, _ in claims(body_of(change)):
         _known(refs, records)
         if (
-            owner
-            and not checks.allow_missing_owner
-            and checks.owner.approved_owner not in refs
-            and not owner_supported(refs, records, checks.owner.adjacent)
+            not owner
+            or checks.allow_missing_owner
+            or checks.owner.approved_owner in refs
         ):
+            continue
+        limit = None
+        try:
+            supported = owner_supported(refs, records, checks.owner.adjacent)
+        except EvidenceLimitError as exc:
+            # A pair that could not be read is a limit, not a wrong owner.
+            supported, limit = False, exc.code
+        if not supported:
             failure = failure or _candidate_failure(
-                ProposalRejectedError("owner_support", "changes", index),
+                ProposalRejectedError(
+                    "owner_support", "changes", index, limit
+                ),
                 checks.defer_failure,
             )
     return failure

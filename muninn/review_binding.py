@@ -51,6 +51,9 @@ def owner_supported(
         user text, and each cited assistant reply is a full field directly
         before one of the owner messages.
         The model's claim text is not compared with the proof.
+
+    Raises:
+        EvidenceLimitError: If ``adjacent`` exhausts the read allowance.
     """
     cited = [records[r] for r in refs]
     owners = [

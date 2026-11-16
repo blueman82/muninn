@@ -153,6 +153,26 @@ class AgreementTests(BindingCase):
                     cited=("Use SQLite.", "yes"),
                 )
 
+    def test_cited_reply_part_must_be_the_last_part(self) -> None:
+        two = reply(1, "Use SQLite.")
+        two["payload"]["content"].append(
+            {"type": "output_text", "text": "Or use Postgres."}
+        )
+        self.refused(two, user_msg(2, "yes"), cited=("Use SQLite.", "yes"))
+
+    def test_unindexed_reply_copy_cannot_back_an_agreement(self) -> None:
+        self.conversation(
+            user_msg(1, "Which store?"),
+            reply(2, "Use SQLite."),
+            user_msg(3, "yes"),
+        )
+        # Fork and replay copies keep no reply event of their own.
+        (line,) = {e.line for e in self.evidence if e.excerpt == "Use SQLite."}
+        self.conn.execute("DELETE FROM event WHERE line=?", (line,))
+        with self.assertRaisesRegex(ValueError, "rejected_authority"):
+            self.decide("Use SQLite for the store.", "Use SQLite.", "yes")
+        self.assertEqual(self.counts(), (0, 0, 0, 0, 0, 0, 0))
+
     def test_reply_after_owner_or_alone_refuses(self) -> None:
         self.refused(user_msg(1, "yes"), reply(2, "Use SQLite."), cited=())
         self.refused(
@@ -197,7 +217,18 @@ class AgreementTests(BindingCase):
             self.assertRaises(ProposalRejectedError) as caught,
         ):
             self.save(self.result([owner, agreed]))
-        self.assertEqual(caught.exception.feedback.index, 1)
+        failure = caught.exception
+        self.assertEqual(failure.feedback.index, 1)
+        # The model is told to remove the claim; the record keeps the limit.
+        self.assertEqual(failure.feedback.code, "owner_support")
+        self.assertEqual(failure.code, "evidence_record_limit")
+        self.assertEqual(
+            self.row(
+                "SELECT error_code FROM review_attempt WHERE id=?",
+                (self.context.attempt_id,),
+            )[0],
+            "evidence_record_limit",
+        )
 
     def test_one_adjacency_read_per_pair(self) -> None:
         self.conversation(
