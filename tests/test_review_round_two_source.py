@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest import mock
+from unittest import mock, skipIf
 
 from pydantic import ValidationError
 
@@ -12,34 +12,16 @@ from muninn import review_round_launch, review_supervisor_result
 from muninn.review_models import ReviewContext
 from muninn.review_round_state import Round
 from tests.ingest_support import line
-from tests.test_review_managed_supervisor import ManagedSupervisorTests
-from tests.test_review_source_cause import SECRET_MARKER, _validation_error
-
-_GOOD = (
-    "{'action':'add','form':'note','kind':'fact','scope':data['scope'],"
-    "'content':'Keep this fact.','conditions':[],"
-    "'evidence_refs':[data['evidence_ids'][0]],'reason':'Supported.'}"
+from tests.managed_supervisor_base import (
+    REDUCTION_BODIES,
+    ManagedSupervisorBase,
 )
-_BAD = (
-    "{'action':'add','form':'note','kind':'fact',"
-    "'scope':{'project_id':'wrong','task':None},'content':'Bad.',"
-    "'conditions':[],'evidence_refs':[data['evidence_ids'][0]],"
-    "'reason':'Supported.'}"
-)
-_BODIES = (
-    "{'op':'final','result':{'schema_version':1,'changes':["
-    + _GOOD
-    + ","
-    + _BAD
-    + "],'unresolved':[],'no_change_reason':None}}",
-    "{'op':'final','result':{'schema_version':1,'changes':["
-    + _GOOD
-    + "],'unresolved':[],'no_change_reason':None}}",
-)
+from tests.secret_support import SECRET_MARKER, validation_error
 
 
-class RoundTwoSourceTests(ManagedSupervisorTests):
-    """Reuse the managed fixture; only the new tests below matter."""
+@skipIf(os.name == "nt", "Darwin managed route uses POSIX test stand-ins")
+class RoundTwoSourceTests(ManagedSupervisorBase):
+    """Round two after a reduction request when the source changes."""
 
     def _stored(self) -> tuple[str, str]:
         """Return the attempt error code and the setup issue code."""
@@ -55,7 +37,7 @@ class RoundTwoSourceTests(ManagedSupervisorTests):
     def _between_rounds(self, change: object) -> None:
         """Run a change once round 1 has been replaced by round 2."""
         original = review_supervisor_result._advance
-        self.install("0.166.0", bodies=_BODIES)
+        self.install("0.166.0", bodies=REDUCTION_BODIES)
 
         def advance(pending: Round, context: ReviewContext) -> None:
             original(pending, context)
@@ -101,7 +83,7 @@ class RoundTwoSourceTests(ManagedSupervisorTests):
                 self.assertNotIn(SECRET_MARKER.encode(), path.read_bytes())
 
     def test_validation_error_in_launch_leaves_no_secret(self) -> None:
-        self._leak_check(_validation_error())
+        self._leak_check(validation_error())
 
     def test_os_error_in_launch_leaves_no_secret(self) -> None:
         self._leak_check(OSError(SECRET_MARKER))

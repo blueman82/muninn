@@ -76,7 +76,9 @@ def _covered(
         "OR (r.state='failed' AND (r.policy_digest=? OR "
         "NOT EXISTS(SELECT 1 FROM review_attempt a WHERE a.request_id=r.id "
         "AND a.error_code IN "
-        "('config','unavailable','deadline','rejected_revision')) "
+        "('config','source_unavailable','review_policy_required',"
+        "'incomplete_window','budget_clock_reversed',"
+        "'unavailable','deadline','rejected_revision')) "
         "OR EXISTS(SELECT 1 FROM review_call c JOIN review_attempt a "
         "ON a.id=c.attempt_id "
         "WHERE a.request_id=r.id AND c.state!='completed'))))",

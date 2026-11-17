@@ -805,6 +805,9 @@ Muninn keeps no source text between operations.
 | `unavailable` | The runner did not finish successfully. Muninn uses a remaining `attempt`. |
 | `config` | Muninn has no safe cause code for this setup failure. The recorded `stage` cannot identify the cause more accurately. Run `muninn doctor --pretty` for current checks. Give unresolved safe diagnostics to the maintainer. |
 | `source_unavailable` | The source transcript is no longer an indexed active primary source. Run `muninn doctor --pretty` or index the transcript again. Do not retry the `request` unchanged. |
+| `review_policy_required` | The review policy changed while the `request` waited. Do not retry the `request` unchanged. Muninn admits new requests under the current policy. |
+| `incomplete_window` | The indexed source no longer holds the whole admitted window. Do not retry the `request` unchanged. Index the transcript again or wait for the next window. |
+| `budget_clock_reversed` | The review budget clock moved backwards. Do not retry the `request` unchanged. Check the system clock, then run `muninn doctor --pretty`. |
 | `prompt_limit` | The complete `review` prompt exceeded its input byte limit. Tell the maintainer to examine its prompt budget. Do not retry unchanged. Configured limits stay unchanged. |
 | `evidence_limit` | Original-source verification exceeded its byte, record, or database-work limit. Do not retry the `request` unchanged. Tell the maintainer to examine its source-read budget. For JSONL sources, records before the window start do not count against these limits. Cursor sources count all records from the first record. Muninn fails the `request` without an automatic retry, with limits and learning admission unchanged. Earlier `config` records cannot repair a cause that Muninn did not keep. |
 | `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit`, `evidence_selection_limit` | Diagnostics identify physical bytes, physical records, database work, and accumulated selected content, in that sequence. These allowances limit source verification. For JSONL sources, lines before the window start are read to prove line numbers, but they do not count against these allowances. Cursor sources count all records from the first record. They are different from memory storage capacity and model context limits. Tell the maintainer to examine the allowance. Do not retry unchanged. Without a historical record, Muninn cannot reconstruct configured limits or measured counters. |
@@ -832,6 +835,7 @@ Muninn keeps no source text between operations.
 | `rejected_evidence` | Necessary source `evidence` is unavailable, changed, or cannot be checked. Muninn excludes the `request`. |
 | `rejected_scope` | The proposed change is external to the admitted project scope. Muninn rejects it and continues. |
 | `rejected_erased` | An erase record excludes the `evidence`. Muninn excludes the `request`. |
+| `rejected_fenced` | Another worker took over the `request` before the `review` finished. Muninn excludes this result. Verified requests can continue. |
 | `process_identity_unverified` | Muninn cannot check that an earlier `process` stopped. Learning stays blocked. |
 | `native_tool_event` | Codex reported a tool step. Examine that step before enabling learning again. |
 

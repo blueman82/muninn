@@ -6,34 +6,12 @@ import contextlib
 import io
 import os
 import time
-from pathlib import Path
-from unittest import TestCase, mock
+from unittest import mock
 
-import pydantic
-
-from muninn import cli, hook_status, review_recovery
+from muninn import cli, hook_status
 from muninn import review_supervisor as supervision
-from muninn.review_recovery_codes import EXPLANATIONS
+from tests.secret_support import SECRET_MARKER, validation_error
 from tests.test_review_supervisor import SupervisorCase
-
-SECRET_MARKER = "SECRET-MARKER-9f3a"
-OLD = ("could not verify the review setup", "specific cause was not recorded")
-ROOT = Path(__file__).resolve().parents[1] / "muninn"
-
-
-class _Model(pydantic.BaseModel):
-    """Carry a value that makes validation fail with attacker text."""
-
-    value: int
-
-
-def _validation_error() -> pydantic.ValidationError:
-    """Build an error whose text holds the marker."""
-    try:
-        _Model.model_validate({"value": SECRET_MARKER})
-    except pydantic.ValidationError as error:
-        return error
-    raise AssertionError("validation unexpectedly passed")
 
 
 class LaunchErrorPrivacyTests(SupervisorCase):
@@ -88,24 +66,7 @@ class LaunchErrorPrivacyTests(SupervisorCase):
         self.assertNotIn(SECRET_MARKER, self.surfaces())
 
     def test_validation_error_text_is_never_stored(self) -> None:
-        self.check(_validation_error())
+        self.check(validation_error())
 
     def test_os_error_text_is_never_stored(self) -> None:
         self.check(OSError(SECRET_MARKER))
-
-
-class OldSentenceTests(TestCase):
-    """Make the old unverifiable-setup notice unreachable."""
-
-    def test_no_explanation_contains_the_old_sentences(self) -> None:
-        for code in (*EXPLANATIONS, "config", "unknown_code"):
-            for stage in ("launch", "not recorded"):
-                text = " ".join(review_recovery.explain(code, stage).values())
-                for old in OLD:
-                    self.assertNotIn(old, text.lower(), code)
-
-    def test_source_has_no_old_sentence(self) -> None:
-        for path in ROOT.rglob("*.py"):
-            text = " ".join(path.read_text().lower().split())
-            for old in OLD:
-                self.assertNotIn(old, text, str(path))

@@ -35,6 +35,21 @@ EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Run muninn doctor --pretty or index the transcript again. "
         "Do not retry this request unchanged.",
     ),
+    "review_policy_required": (
+        "The review policy changed while this request waited.",
+        "Do not retry this request unchanged. "
+        "Muninn will admit new requests under the current policy.",
+    ),
+    "incomplete_window": (
+        "The indexed source no longer holds the whole admitted window.",
+        "Do not retry this request unchanged. "
+        "Index the transcript again or wait for the next window.",
+    ),
+    "budget_clock_reversed": (
+        "The review budget clock moved backwards.",
+        "Do not retry this request unchanged. "
+        "Check the system clock, then run muninn doctor --pretty.",
+    ),
     "prompt_limit": (
         "The complete review prompt exceeded its input byte limit.",
         "Do not retry this request unchanged. "
@@ -93,6 +108,10 @@ EXPLANATIONS: dict[str, tuple[str, str]] = {
     ),
     "rejected_evidence": (
         "Source evidence is missing, changed, or unverifiable.",
+        "Muninn excluded this request. Verified requests can continue.",
+    ),
+    "rejected_fenced": (
+        "Another worker took over this request before the review finished.",
         "Muninn excluded this request. Verified requests can continue.",
     ),
     "rejected_erased": (

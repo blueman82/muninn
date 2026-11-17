@@ -101,6 +101,8 @@ _REVIEW_ERRORS = RUNTIME_CODES | frozenset(
         "auth",
         "config",
         "source_unavailable",
+        "incomplete_window",
+        "budget_clock_reversed",
         "evidence_limit",
         "prompt_limit",
         "evidence_byte_limit",
