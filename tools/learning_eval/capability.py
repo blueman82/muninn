@@ -17,6 +17,7 @@ from muninn.review_models import ReviewContext
 from muninn.review_output import output_contract_digest
 from muninn.review_rounds import check_round, round_schema
 from muninn.review_runner import (
+    EXECUTABLE_LIMIT,
     RunnerCapability,
     check_private_path,
     config_fingerprint,
@@ -147,7 +148,7 @@ def prepare_capability_trial(
     environment = candidate_environment(
         candidate, authorization.disposable_home
     )
-    hashed, _ = file_digest(Path(requested.executable), 256 * 1024 * 1024)
+    hashed, _ = file_digest(Path(requested.executable), EXECUTABLE_LIMIT)
     if (
         hashed != candidate.executable_sha256
         or not os.access(requested.executable, os.X_OK)
@@ -233,7 +234,7 @@ def validate_pilot_manifest(manifest: PilotManifest) -> bytes:
                 or candidate.executable_sha256
                 != file_digest(
                     Path(require_legacy_runner(policy.runner).executable),
-                    256 * 1024 * 1024,
+                    EXECUTABLE_LIMIT,
                 )[0]
                 or any(
                     getattr(capability, key) != value

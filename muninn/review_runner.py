@@ -56,7 +56,7 @@ _RECIPE = "claude-static-posix-v1"
 _COVERAGE = {"cwd", "ancestors", "project", "plugins", "managed", "auth"}
 _DISABLED = {"tools", "mcp", "hooks", "plugins", "session_persistence"}
 _MIB = 1024 * 1024
-# Codex 0.169 ships a 268 MiB binary; leave room for later releases.
+# Codex 0.169 ships a 268 MiB binary; the managed route keeps 384 MiB.
 EXECUTABLE_LIMIT = 1024 * _MIB
 
 

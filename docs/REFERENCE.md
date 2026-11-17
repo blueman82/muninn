@@ -1965,6 +1965,7 @@ The initial bridge contains at maximum 1,024 unique `request` IDs.
 These `bounds` do not change model input/output, time, read, worker or `attempt` limits.
 
 Generic executable verification has a 1 GiB bound.
+Managed packages keep the 384 MiB file bound.
 
 The installer keeps a typed `codex-managed-interface-receipt-v1` with a minimum runtime requirement.
 It records approval, inert artifacts, unchanged commit intent, the committed grant, and completed cleanup.
