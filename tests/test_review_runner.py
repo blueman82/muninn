@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import sys
@@ -11,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from muninn import review_output, review_runner
+from muninn import review_codex_launch, review_output, review_runner
 from muninn.review_json import result_schema
 from muninn.review_models import RunnerConfig
 from muninn.review_rounds import round_schema
@@ -361,13 +362,22 @@ class ReviewRunnerTests(unittest.TestCase):
             os.utime(path, ns=(1, path.stat().st_mtime_ns))
         self.assertEqual(self.prepare().prompt, b"prompt")
 
+    def test_verifier_default_limit_matches_runner(self) -> None:
+        """The launch verifier and runner share one executable bound."""
+        default = (
+            inspect.signature(review_codex_launch.verify_codex_executable)
+            .parameters["limit"]
+            .default
+        )
+        self.assertEqual(default, review_runner.EXECUTABLE_LIMIT)
+
     def test_aggregate_config_and_executable_caps_refuse(self) -> None:
         for number in range(17):
             (self.config / str(number)).write_bytes(b"x" * (1024 * 1024))
         with self.assertRaisesRegex(ValueError, "capability_limit"):
             self.prepare()
         with self.executable.open("wb") as stream:
-            stream.truncate(256 * 1024 * 1024 + 1)
+            stream.truncate(review_runner.EXECUTABLE_LIMIT + 1)
         with self.assertRaisesRegex(ValueError, "capability_limit"):
             self.prepare()
 

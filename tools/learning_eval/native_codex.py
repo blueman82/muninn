@@ -24,6 +24,7 @@ from muninn.review_json import canonical_json
 from muninn.review_launch_spec import codex_cli_argv
 from muninn.review_models import require_pilot_budget
 from muninn.review_runner import (
+    EXECUTABLE_LIMIT,
     RunnerCapability,
     check_private_path,
     config_fingerprint,
@@ -225,7 +226,7 @@ def create_binding(
                 "budget_account_id": assessment.budget.account_id,
                 "requested": requested.model_dump(mode="json"),
                 "executable_sha256": file_digest(
-                    Path(requested.executable), 256 * 1024 * 1024
+                    Path(requested.executable), EXECUTABLE_LIMIT
                 )[0],
                 "schema_digest": hashlib.sha256(
                     canonical_schema(protocol)

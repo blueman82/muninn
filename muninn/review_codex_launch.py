@@ -114,7 +114,7 @@ def _check_executable_storage(executable: Path) -> None:
 def verify_codex_executable(
     executable: Path,
     *,
-    limit: int = 256 * 1024 * 1024,
+    limit: int = 1024 * 1024 * 1024,
     deadline: float | None = None,
 ) -> tuple[Path, str]:
     """Return the signed canonical target and digest of a Codex CLI path."""

@@ -56,6 +56,8 @@ _RECIPE = "claude-static-posix-v1"
 _COVERAGE = {"cwd", "ancestors", "project", "plugins", "managed", "auth"}
 _DISABLED = {"tools", "mcp", "hooks", "plugins", "session_persistence"}
 _MIB = 1024 * 1024
+# Codex 0.169 ships a 268 MiB binary; the managed route keeps 384 MiB.
+EXECUTABLE_LIMIT = 1024 * _MIB
 
 
 class RunnerCapability(StrictModel):
@@ -257,7 +259,7 @@ def _configuration(
             raise ValueError("capability_changed")
         environment[key] = value
     executable = Path(requested.executable)
-    hashed, _ = file_digest(executable, 256 * _MIB)
+    hashed, _ = file_digest(executable, EXECUTABLE_LIMIT)
     if hashed != proof.executable_sha256 or not os.access(executable, os.X_OK):
         raise ValueError("capability_changed")
     if (
