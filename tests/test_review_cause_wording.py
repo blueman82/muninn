@@ -12,7 +12,15 @@ _OLD = (
     "could not verify the review setup",
     "specific cause was not recorded",
 )
-_SOURCE = Path(__file__).resolve().parents[1] / "muninn"
+_ROOT = Path(__file__).resolve().parents[1]
+_TREES = (
+    "muninn",
+    "docs",
+    ".claude/skills",
+    ".codex/skills",
+    "integrations",
+)
+_SUFFIXES = {".py", ".md", ".json", ".toml", ".txt", ".sh", ".yaml", ".yml"}
 
 
 def _has_old(text: str) -> bool:
@@ -38,16 +46,20 @@ class CauseWordingTests(unittest.TestCase):
         self.assertIn("no safe cause code", detail["cause"])
 
     def test_cli_config_action_is_reworded(self) -> None:
-        action = vars(cli_learn_explain)["_action"]
+        action = getattr(cli_learn_explain, "_action")
         text = str(action("config", "request-1", "failed"))
         self.assertFalse(_has_old(text))
         self.assertIn("muninn doctor", text)
 
-    def test_source_text_never_carries_the_old_sentence(self) -> None:
-        for path in sorted(_SOURCE.rglob("*.py")):
-            self.assertFalse(
-                _has_old(path.read_text(encoding="utf-8")), str(path)
-            )
+    def test_no_shipped_text_carries_the_old_sentence(self) -> None:
+        seen = 0
+        for tree in _TREES:
+            for path in sorted((_ROOT / tree).rglob("*")):
+                if path.is_file() and path.suffix in _SUFFIXES:
+                    seen += 1
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    self.assertFalse(_has_old(text), str(path))
+        self.assertGreater(seen, 20)
 
 
 if __name__ == "__main__":

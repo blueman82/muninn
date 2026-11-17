@@ -1,76 +1,99 @@
-"""Check the named source cause and that no error text is kept."""
+"""Check recorded causes, replay and that no error text is kept."""
 
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
-from muninn import obs_log, review_recovery, review_requests
-from muninn.review_recovery_codes import CONTAINED, EXPLANATIONS, SHARED
+from pydantic import BaseModel, ValidationError, field_validator
+
+from muninn import obs_log, review_history, review_recovery, review_requests
+from muninn.review_read_budget import EVIDENCE_LIMIT_CODES
+from muninn.review_recovery_codes import (
+    CONTAINED,
+    EXPLANATIONS,
+    RUNTIME_CODES,
+    SHARED,
+)
 from muninn.review_supervisor_result import failure_code
-from tests.secret_support import SECRET_MARKER, validation_error
+from tests.test_review_requests import RequestCase
 
-
-class SourceCauseTests(unittest.TestCase):
-    """source_unavailable has its own code and explanation."""
-
-    def test_failure_code_keeps_source_unavailable(self) -> None:
-        self.assertEqual(
-            failure_code(ValueError("source_unavailable"), "config"),
-            "source_unavailable",
-        )
-
-    def test_explanation_is_specific(self) -> None:
-        detail = review_recovery.explain("source_unavailable", "launch")
-        self.assertEqual(detail["code"], "source_unavailable")
-        self.assertNotEqual(detail["cause"], EXPLANATIONS["config"][0])
-        self.assertIn("source", detail["cause"].lower())
-
-    def test_code_is_stored_and_counted(self) -> None:
-        errors: frozenset[str] = vars(review_requests)["_ERRORS"]
-        self.assertIn("source_unavailable", errors)
-        logged: frozenset[str] = vars(obs_log)["_REVIEW_ERRORS"]
-        self.assertIn("source_unavailable", logged)
-
-    def test_decision_sets_are_unchanged(self) -> None:
-        retry: frozenset[str] = vars(review_requests)["_RETRYABLE"]
-        self.assertEqual(
-            retry, frozenset({"deadline", "unavailable", "rejected_revision"})
-        )
-        self.assertNotIn("source_unavailable", CONTAINED)
-        self.assertNotIn("source_unavailable", SHARED)
-        self.assertNotIn("config", CONTAINED)
-        self.assertIn("config", SHARED)
-
-
+SECRET_MARKER = "SECRET-MARKER-7f3a"
 NEW_CODES = (
     "source_unavailable",
     "review_policy_required",
     "incomplete_window",
     "budget_clock_reversed",
 )
+_KEPT = (
+    *NEW_CODES,
+    "rejected_authority",
+    "rejected_evidence",
+    "rejected_erased",
+    "rejected_fenced",
+    "rejected_revision",
+    "rejected_scope",
+    "rejected_validation",
+    "prompt_limit",
+    "deadline",
+    *sorted(EVIDENCE_LIMIT_CODES),
+    *sorted(RUNTIME_CODES),
+)
+_DOCS = Path(__file__).resolve().parents[1] / "docs" / "REFERENCE.md"
 
 
-class KeptCodeTests(unittest.TestCase):
-    """Each kept code has an explanation and no new decision."""
+class _Model(BaseModel):
+    """Raise a validation error that carries the secret in its text."""
 
-    def test_failure_code_keeps_each_code_with_an_explanation(self) -> None:
+    value: int
+
+    @field_validator("value")
+    @classmethod
+    def _leak(cls, value: int) -> int:
+        raise ValueError(SECRET_MARKER)
+
+
+def validation_error() -> ValidationError:
+    """Build a real pydantic error whose text holds the marker."""
+    try:
+        _Model(value=1)
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("validator did not raise")
+
+
+class CodeCoverageTests(unittest.TestCase):
+    """Every kept code is explained, stored and counted."""
+
+    def test_kept_codes_survive_and_have_explanations(self) -> None:
+        for code in _KEPT:
+            kept = failure_code(ValueError(code), "config")
+            self.assertEqual(kept, code)
+            self.assertIn(kept, EXPLANATIONS, code)
+            detail = review_recovery.explain(kept, "launch")
+            self.assertEqual(detail["code"], code)
+            self.assertNotEqual(detail["cause"], EXPLANATIONS["config"][0])
+
+    def test_new_codes_are_stored_and_counted(self) -> None:
+        stored: frozenset[str] = getattr(review_requests, "_ERRORS")
+        logged: frozenset[str] = getattr(obs_log, "_REVIEW_ERRORS")
         for code in NEW_CODES:
-            self.assertEqual(failure_code(ValueError(code), "config"), code)
-            self.assertNotEqual(
-                review_recovery.explain(code, "launch")["code"], "config"
-            )
-        self.assertIn("rejected_fenced", EXPLANATIONS)
+            self.assertIn(code, stored, code)
+            self.assertIn(code, logged, code)
 
-    def test_codes_are_stored_but_not_retried_or_contained(self) -> None:
-        errors: frozenset[str] = vars(review_requests)["_ERRORS"]
-        logged: frozenset[str] = vars(obs_log)["_REVIEW_ERRORS"]
+    def test_new_codes_keep_existing_decisions(self) -> None:
+        retry: frozenset[str] = getattr(review_requests, "_RETRYABLE")
         for code in NEW_CODES:
-            self.assertIn(code, errors)
-            self.assertIn(code, logged)
-            self.assertNotIn(code, CONTAINED)
-            self.assertNotIn(code, SHARED)
-        retry: frozenset[str] = vars(review_requests)["_RETRYABLE"]
-        self.assertFalse(retry.intersection(NEW_CODES))
+            self.assertNotIn(code, retry, code)
+            self.assertNotIn(code, CONTAINED, code)
+            self.assertNotIn(code, SHARED, code)
+        self.assertNotIn("config", CONTAINED)
+        self.assertIn("config", SHARED)
+
+    def test_docs_have_a_row_for_each_new_code(self) -> None:
+        text = _DOCS.read_text(encoding="utf-8")
+        for code in NEW_CODES:
+            self.assertIn(f"| `{code}` |", text, code)
 
 
 class PrivacyTests(unittest.TestCase):
@@ -82,15 +105,43 @@ class PrivacyTests(unittest.TestCase):
             OSError(SECRET_MARKER),
             ValueError(SECRET_MARKER),
         ):
-            code = failure_code(error, "config")
-            self.assertEqual(code, "config")
-            self.assertNotIn(SECRET_MARKER, code)
+            self.assertEqual(failure_code(error, "config"), "config")
 
     def test_explain_never_echoes_error_text(self) -> None:
         for error in (validation_error(), OSError(SECRET_MARKER)):
             detail = review_recovery.explain(str(error), "launch")
             self.assertEqual(detail["code"], "config")
             self.assertNotIn(SECRET_MARKER, "".join(detail.values()))
+
+
+class ReplayTests(RequestCase):
+    """A failed request with a new cause replays like one with config."""
+
+    def _covered(self, code: str) -> list[tuple[int, int]]:
+        self.conn.execute(
+            "UPDATE review_request SET state='failed',policy_digest='old'"
+        )
+        self.conn.execute(
+            "INSERT INTO review_attempt(id,request_id,generation,"
+            "observed_json,started_at,progress_at,ended_at,outcome,"
+            "error_code) VALUES('a1',?,1,'{}',1,1,2,'failed',?)",
+            (self.request.id, code),
+        )
+        source = self.conn.execute("SELECT * FROM source").fetchone()
+        covered = getattr(review_history, "_covered")
+        return list(covered(self.conn, source, self.policy))
+
+    def test_old_and_new_causes_are_replayable(self) -> None:
+        self.request = self.enqueue()
+        for code in ("config", *NEW_CODES):
+            with self.subTest(code=code):
+                self.conn.execute("DELETE FROM review_attempt")
+                self.assertEqual(self._covered(code), [], code)
+                self.conn.execute("DELETE FROM review_attempt")
+
+    def test_other_causes_stay_covered(self) -> None:
+        self.request = self.enqueue()
+        self.assertNotEqual(self._covered("rejected_scope"), [])
 
 
 if __name__ == "__main__":

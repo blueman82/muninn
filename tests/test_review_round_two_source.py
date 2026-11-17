@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest import mock, skipIf
+from unittest import mock
 
 from pydantic import ValidationError
 
@@ -16,12 +16,11 @@ from tests.managed_supervisor_base import (
     REDUCTION_BODIES,
     ManagedSupervisorBase,
 )
-from tests.secret_support import SECRET_MARKER, validation_error
+from tests.test_review_source_cause import SECRET_MARKER, validation_error
 
 
-@skipIf(os.name == "nt", "Darwin managed route uses POSIX test stand-ins")
 class RoundTwoSourceTests(ManagedSupervisorBase):
-    """Round two after a reduction request when the source changes."""
+    """Round 2 after a change of source state; no inherited tests."""
 
     def _stored(self) -> tuple[str, str]:
         """Return the attempt error code and the setup issue code."""
@@ -29,10 +28,7 @@ class RoundTwoSourceTests(ManagedSupervisorBase):
             "SELECT error_code FROM review_attempt"
         ).fetchone()
         issue = self.conn.execute("SELECT code FROM review_issue").fetchone()
-        return (
-            (attempt[0] or "") if attempt else "",
-            (issue[0] or "") if issue else "",
-        )
+        return (attempt[0] if attempt else "", issue[0] if issue else "")
 
     def _between_rounds(self, change: object) -> None:
         """Run a change once round 1 has been replaced by round 2."""
@@ -61,6 +57,8 @@ class RoundTwoSourceTests(ManagedSupervisorBase):
         ).fetchone()[0]
         self.assertEqual(state, "completed")
         self.assertEqual(self._stored(), ("", ""))
+        calls = self.conn.execute("SELECT count(*) FROM review_call")
+        self.assertEqual(calls.fetchone()[0], 2)
 
     def test_source_loss_records_its_own_cause(self) -> None:
         self._between_rounds(
