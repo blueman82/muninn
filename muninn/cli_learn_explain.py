@@ -219,10 +219,11 @@ def _action(code: str, ident: str, state: str) -> str:
         )
     if code == "config":
         return (
-            "The specific cause was not recorded. Inspect muninn doctor "
-            "--pretty for current checks and give its safe diagnostics to "
-            "the Muninn maintainer. The old stage cannot recover the cause. "
-            "Do not retry solely to recover discarded diagnostics."
+            "Muninn has no safe cause code for this setup failure. "
+            "Inspect muninn doctor --pretty for current checks and give "
+            "its safe diagnostics to the Muninn maintainer. The old stage "
+            "cannot recover the cause. Do not retry solely to recover "
+            "discarded diagnostics."
         )
     if code in _EXPECTED:
         return (
