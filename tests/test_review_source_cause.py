@@ -50,6 +50,7 @@ class _Model(BaseModel):
     @field_validator("value")
     @classmethod
     def _leak(cls, value: int) -> int:
+        """Always reject the value with the secret marker in the text."""
         raise ValueError(SECRET_MARKER)
 
 
@@ -75,14 +76,14 @@ class CodeCoverageTests(unittest.TestCase):
             self.assertNotEqual(detail["cause"], EXPLANATIONS["config"][0])
 
     def test_new_codes_are_stored_and_counted(self) -> None:
-        stored: frozenset[str] = getattr(review_requests, "_ERRORS")
-        logged: frozenset[str] = getattr(obs_log, "_REVIEW_ERRORS")
+        stored: frozenset[str] = review_requests._ERRORS
+        logged: frozenset[str] = obs_log._REVIEW_ERRORS
         for code in NEW_CODES:
             self.assertIn(code, stored, code)
             self.assertIn(code, logged, code)
 
     def test_new_codes_keep_existing_decisions(self) -> None:
-        retry: frozenset[str] = getattr(review_requests, "_RETRYABLE")
+        retry: frozenset[str] = review_requests._RETRYABLE
         for code in NEW_CODES:
             self.assertNotIn(code, retry, code)
             self.assertNotIn(code, CONTAINED, code)
@@ -118,6 +119,10 @@ class ReplayTests(RequestCase):
     """A failed request with a new cause replays like one with config."""
 
     def _covered(self, code: str) -> list[tuple[int, int]]:
+        """Return the covered ranges after a failed attempt with code."""
+        self.conn.execute(
+            "DROP TRIGGER IF EXISTS review_request_policy_immutable"
+        )
         self.conn.execute(
             "UPDATE review_request SET state='failed',policy_digest='old'"
         )
@@ -128,7 +133,7 @@ class ReplayTests(RequestCase):
             (self.request.id, code),
         )
         source = self.conn.execute("SELECT * FROM source").fetchone()
-        covered = getattr(review_history, "_covered")
+        covered = review_history._covered
         return list(covered(self.conn, source, self.policy))
 
     def test_old_and_new_causes_are_replayable(self) -> None:

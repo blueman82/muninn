@@ -28,7 +28,10 @@ class RoundTwoSourceTests(ManagedSupervisorBase):
             "SELECT error_code FROM review_attempt"
         ).fetchone()
         issue = self.conn.execute("SELECT code FROM review_issue").fetchone()
-        return (attempt[0] if attempt else "", issue[0] if issue else "")
+        return (
+            (attempt[0] if attempt else None) or "",
+            issue[0] if issue else "",
+        )
 
     def _between_rounds(self, change: object) -> None:
         """Run a change once round 1 has been replaced by round 2."""

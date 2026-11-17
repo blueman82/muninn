@@ -46,7 +46,7 @@ class CauseWordingTests(unittest.TestCase):
         self.assertIn("no safe cause code", detail["cause"])
 
     def test_cli_config_action_is_reworded(self) -> None:
-        action = getattr(cli_learn_explain, "_action")
+        action = cli_learn_explain._action
         text = str(action("config", "request-1", "failed"))
         self.assertFalse(_has_old(text))
         self.assertIn("muninn doctor", text)
