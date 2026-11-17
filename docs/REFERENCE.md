@@ -1964,7 +1964,7 @@ Cache and initial bridge files are at maximum 256 KiB.
 The initial bridge contains at maximum 1,024 unique `request` IDs.
 These `bounds` do not change model input/output, time, read, worker or `attempt` limits.
 
-Generic executable verification uses the same 384 MiB file bound.
+Generic executable verification has a 1 GiB bound.
 
 The installer keeps a typed `codex-managed-interface-receipt-v1` with a minimum runtime requirement.
 It records approval, inert artifacts, unchanged commit intent, the committed grant, and completed cleanup.
