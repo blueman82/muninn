@@ -367,7 +367,7 @@ class ReviewRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "capability_limit"):
             self.prepare()
         with self.executable.open("wb") as stream:
-            stream.truncate(256 * 1024 * 1024 + 1)
+            stream.truncate(review_runner.EXECUTABLE_LIMIT + 1)
         with self.assertRaisesRegex(ValueError, "capability_limit"):
             self.prepare()
 
