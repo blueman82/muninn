@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest import mock
+from unittest import mock, skipIf
 
 from pydantic import ValidationError
 
@@ -19,6 +19,7 @@ from tests.managed_supervisor_base import (
 from tests.test_review_source_cause import SECRET_MARKER, validation_error
 
 
+@skipIf(os.name == "nt", "Darwin managed route uses POSIX test stand-ins")
 class RoundTwoSourceTests(ManagedSupervisorBase):
     """Round 2 after a change of source state; no inherited tests."""
 
