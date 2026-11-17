@@ -36,6 +36,32 @@ from tests.review_pause_support import initialize
 from tests.test_review_codex_production import experimental_policy
 from tests.test_review_requests import RequestCase
 
+_EMPTY_FINAL = (
+    "{'op':'final','result':{'schema_version':1,'changes':[],"
+    "'unresolved':[],'no_change_reason':'No supported changes'}}"
+)
+_GOOD = (
+    "{'action':'add','form':'note','kind':'fact','scope':data['scope'],"
+    "'content':'Keep this fact.','conditions':[],"
+    "'evidence_refs':[data['evidence_ids'][0]],'reason':'Supported.'}"
+)
+_BAD = (
+    "{'action':'add','form':'note','kind':'fact',"
+    "'scope':{'project_id':'wrong','task':None},'content':'Bad.',"
+    "'conditions':[],'evidence_refs':[data['evidence_ids'][0]],"
+    "'reason':'Supported.'}"
+)
+REDUCTION_BODIES = (
+    "{'op':'final','result':{'schema_version':1,'changes':["
+    + _GOOD
+    + ","
+    + _BAD
+    + "],'unresolved':[],'no_change_reason':None}}",
+    "{'op':'final','result':{'schema_version':1,'changes':["
+    + _GOOD
+    + "],'unresolved':[],'no_change_reason':None}}",
+)
+
 
 @skipIf(os.name == "nt", "Darwin managed route uses POSIX test stand-ins")
 class ManagedSupervisorTests(RequestCase):
@@ -134,19 +160,24 @@ class ManagedSupervisorTests(RequestCase):
         self.supervisor.start(12.0)
         self.addCleanup(self.supervisor.stop, 30.0)
 
-    def install(self, version: str, *, two_rounds: bool = False) -> None:
+    def install(
+        self,
+        version: str,
+        *,
+        two_rounds: bool = False,
+        bodies: tuple[str, str] | None = None,
+    ) -> None:
         """Create only a tiny Python stand-in in the synthetic manager."""
         release = package(self.root, version)
+        if bodies is None:
+            search = "{'op':'search','query':'missing','scope':data['scope']}"
+            bodies = (search if two_rounds else _EMPTY_FINAL, _EMPTY_FINAL)
         source = (
             f"#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n"
             f"with Path({str(self.marker)!r}).open('a') as marker: "
             f"marker.write({version!r}+'\\n')\n"
             "data=json.load(sys.stdin)['data']\n"
-            "body={'op':'search','query':'missing','scope':data['scope']} "
-            f"if {two_rounds!r} and data['round_index']==1 else "
-            "{'op':'final','result':{'schema_version'"
-            ":1,'changes':[],'unresolved':[],'no_chan"
-            "ge_reason':'No supported changes'}}\n"
+            f"body={bodies[0]} if data['round_index']==1 else {bodies[1]}\n"
             "events=[{'type':'thread.started','thread"
             "_id':'fixture'},{'type':'turn.started'},"
             "{'type':'item.completed','item':{'id':'i"

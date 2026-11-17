@@ -44,6 +44,7 @@ _ERRORS = (
     | {
         "auth",
         "config",
+        "source_unavailable",
         "evidence_limit",
         "prompt_limit",
         "evidence_byte_limit",

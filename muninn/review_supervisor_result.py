@@ -44,6 +44,7 @@ def failure_code(error: ValueError | OSError, fallback: str) -> str:
             "rejected_scope",
             "rejected_validation",
             "prompt_limit",
+            "source_unavailable",
         }
         or cause in EVIDENCE_LIMIT_CODES
         or cause in RUNTIME_CODES

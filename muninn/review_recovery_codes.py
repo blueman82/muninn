@@ -25,10 +25,15 @@ EXPLANATIONS: dict[str, tuple[str, str]] = {
         "Muninn will retry within the request limit.",
     ),
     "config": (
-        "Muninn could not verify the review setup. "
-        "The specific cause was not recorded.",
+        "Muninn has no safe cause code for this setup failure.",
         "Run muninn doctor --pretty for current setup checks. "
         "Give unresolved safe diagnostics to the Muninn maintainer.",
+    ),
+    "source_unavailable": (
+        "The source transcript is no longer an indexed active primary "
+        "source.",
+        "Run muninn doctor --pretty or index the transcript again. "
+        "Do not retry this request unchanged.",
     ),
     "prompt_limit": (
         "The complete review prompt exceeded its input byte limit.",

@@ -127,7 +127,7 @@ class LearningExplanationTests(CliLearningCase):
         _, out = self.call("learn", "explain", ident)
         text = out["explanation"]
         self.assertIn("historical attempt failure", text)
-        self.assertIn("specific cause was not recorded", text)
+        self.assertIn("no safe cause code for this setup failure", text)
         self.assertIn("old stage cannot recover the cause", text)
         self.assertNotIn("Inspect the recorded setup stage", text)
 
