@@ -126,6 +126,10 @@ Do not retry that `request` unchanged.
 Tell the maintainer to examine its source-read budget.
 For JSONL sources, records before the window start do not count against these limits.
 Cursor sources count all records from the first record.
+Muninn splits a Codex or Claude history window at a turn boundary when its original bytes would pass the read limit.
+The later window repeats the last owner turn as context, shortened so a full new turn still fits.
+Only a single line over the limit stays `evidence_limit`.
+Cursor history windows are not split.
 
 The operation limit includes traversal of the counted records, not only selected text.
 Capture, catch-up and `attempt` logs keep this code without transcript text.
