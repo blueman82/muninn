@@ -161,10 +161,11 @@ class LearningHistoryTests(RequestCase):
         self.records = [self.records[0], pad, pad, *self.records[1:]]
         self.path.write_bytes(b"".join(line(r) for r in self.records))
         self.run_ingest(full=True)
-        # Boundary check and hash pass each charge the window; one more
-        # byte than that leaves no room for any line before the window.
+        # Boundary check and hash pass each charge the window; the safe
+        # limit keeps 8192 spare bytes per pass, so the window just fits
+        # and leaves no room for any line before it.
         window = sum(len(line(r)) for r in self.records[3:])
-        limit = {"max_input_bytes": 2 * window + 1}
+        limit = {"max_input_bytes": 2 * window + 2 * 8192 + 1}
         policy = self.policy.model_copy(update=limit)
         scan = review_history.scan(self.conn, policy, self.scope.project_id)
         self.assertEqual(scan.excluded, [])

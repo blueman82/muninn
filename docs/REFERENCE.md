@@ -1504,7 +1504,7 @@ The two results are warnings.
 The history, backlog, coverage, and required-input checks stay available independently.
 
 Capture-gap counts do not identify refusal causes or prove unrecorded lifecycle `events`.
-New hook, catch-up and `attempt` logs keep `evidence_limit` when source verification exceeds its shared byte, record or database-work allowance.
+New hook, catch-up and `attempt` logs keep `evidence_limit` when source verification exceeds its shared byte, record or database-work allowance. Muninn splits a Codex or Claude history window at a turn boundary when its original bytes would pass the read limit; the later window repeats the last owner turn as context, shortened so a full new turn still fits. Only a single line over the limit stays `evidence_limit`.
 These limits include source traversal, not only selected text.
 Older capture logs can contain only `unavailable`.
 
