@@ -54,9 +54,13 @@ class MeasureTests(RequestCase):
         self.assertEqual(
             set(result["windows"]),
             {
-                "parts", "excluded_evidence_limit", "cuts",
-                "cuts_with_full_previous_turn", "cuts_shortened",
-                "bytes_new", "bytes_sent",
+                "parts",
+                "excluded_evidence_limit",
+                "cuts",
+                "cuts_with_full_previous_turn",
+                "cuts_shortened",
+                "bytes_new",
+                "bytes_sent",
             },
         )
 
@@ -119,12 +123,8 @@ class MeasureTests(RequestCase):
         )
         self.assertEqual(len(view["line_bytes"]), view["lines"])
         self.assertEqual(view["indexed"], sorted(set(view["indexed"])))
-        self.assertTrue(
-            all(1 <= n <= view["lines"] for n in view["indexed"])
-        )
-        self.assertTrue(
-            set(view["turn_starts"]) <= set(view["indexed"])
-        )
+        self.assertTrue(all(1 <= n <= view["lines"] for n in view["indexed"]))
+        self.assertTrue(set(view["turn_starts"]) <= set(view["indexed"]))
         for win in view["windows"]:
             self.assertIn(win["from"], view["indexed"])
             self.assertIn(win["through"], view["indexed"])
@@ -134,7 +134,11 @@ class MeasureTests(RequestCase):
         self.assertEqual(
             set(first),
             {
-                "from", "through", "new_from", "cut", "excluded",
+                "from",
+                "through",
+                "new_from",
+                "cut",
+                "excluded",
                 "limited",
             },
         )

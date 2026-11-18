@@ -25,8 +25,10 @@ SAFE = (LIMIT - 2 * 8192) // 2
 def turn(ordinal: int, lines: int, size: int) -> list[Record]:
     """Build one owner turn of `lines` records: prompt, tools, reply."""
     records: list[Record] = [user_msg(ordinal, "q")]
-    for step in range(lines - 2):
-        records.append(custom_call(ordinal + 1 + step, "run", "x" * size))
+    records.extend(
+        custom_call(ordinal + 1 + step, "run", "x" * size)
+        for step in range(lines - 2)
+    )
     records.append(reply(ordinal + lines - 1, "a"))
     return records
 
@@ -70,8 +72,12 @@ class HistorySplitTests(RequestCase):
         """Enqueue one history item as configure does."""
         self.transaction(
             lambda: review_history.enqueue_review(
-                self.conn, item.window, item.scope, self.scanned,
-                "history", 11.0,
+                self.conn,
+                item.window,
+                item.scope,
+                self.scanned,
+                "history",
+                11.0,
             )
         )
 
@@ -140,9 +146,7 @@ class HistorySplitTests(RequestCase):
             records.append(user_msg(ordinal, "q"))
             records.append(reply(ordinal + 1, "a"))
         scan = self.load(records)
-        self.assertEqual(
-            self.spans(scan), [(2, 201), (202, 401), (402, 451)]
-        )
+        self.assertEqual(self.spans(scan), [(2, 201), (202, 401), (402, 451)])
         self.assertEqual(scan.excluded, [])
 
     def test_no_selected_cap_constant_exists(self) -> None:

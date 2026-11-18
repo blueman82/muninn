@@ -267,8 +267,12 @@ class MinimalCloseTests(CutRules):
     def win(self, first: int, last: int) -> dict[str, Any]:
         """Return a plain verified window with no overlap."""
         return {
-            "from": first, "through": last, "new_from": first,
-            "cut": False, "excluded": False, "limited": False,
+            "from": first,
+            "through": last,
+            "new_from": first,
+            "cut": False,
+            "excluded": False,
+            "limited": False,
         }
 
     def test_closing_at_every_prompt_fails(self) -> None:
@@ -341,8 +345,7 @@ class SyntheticCutRuleTests(CutRules, RequestCase):
             base = 1 + index * 34
             records.append(user_msg(base, "q"))
             records.extend(
-                custom_call(base + 1 + n, "run", "x" * 3000)
-                for n in range(32)
+                custom_call(base + 1 + n, "run", "x" * 3000) for n in range(32)
             )
             records.append(reply(base + 33, "a"))
         self.path.write_bytes(b"".join(line(r) for r in records))
