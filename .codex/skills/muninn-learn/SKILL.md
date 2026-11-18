@@ -126,10 +126,13 @@ Do not retry that `request` unchanged.
 Tell the maintainer to examine its source-read budget.
 For JSONL sources, records before the window start do not count against these limits.
 Cursor sources count all records from the first record.
-Muninn splits a Codex or Claude history window at a turn boundary when its original bytes would pass the read limit.
-The later window repeats the last owner turn as context, shortened so a full new turn still fits.
-Only a single line over the limit stays `evidence_limit`.
-Cursor history windows are not split.
+
+Muninn cuts a large Codex or Claude history window into smaller windows.
+It cuts between two turns when the bytes of the window would go above the read limit.
+The next window starts with the last owner turn again, as context.
+Muninn makes that turn shorter if necessary, so that a full new turn fits.
+Only a single line above the limit stays `evidence_limit`.
+Muninn does not cut Cursor history windows.
 
 The operation limit includes traversal of the counted records, not only selected text.
 Capture, catch-up and `attempt` logs keep this code without transcript text.
@@ -377,34 +380,50 @@ Unfinished or uncertain `calls` refuse restart.
 muninn learn recover-unknown --attempt A_ID --round N --accept-uncertainty
 ```
 
-This explicit owner action accepts uncertainty for one named historical call.
-It does not prove that no process launched, that a native process stopped, or
-that provider charges stopped. The call must remain `unknown`, with no recorded
-launch or process identity, under an ended failed attempt and a failed request.
-The installed supported v3 Codex policy and any managed grant must validate.
-Other unacknowledged uncertain calls, unended attempts and running requests
-refuse recovery. Pending requests are preserved.
+This command is a step that only the owner does.
+It accepts that Muninn cannot know what occurred in one named historical call.
+It does not prove that no `process` started, that a native `process` stopped, or
+that the provider stopped its charges.
 
-The command atomically records an acknowledgement, advances the generation and
-opens the same policy. It preserves the call, its conservative reservation and
-usage, and the failed request and attempt. It starts no model and retries no
-historical request. Output contains `acknowledgement_id` (`UA_` plus 32 hex
+The call must stay `unknown`.
+It must have no recorded launch and no recorded `process` identity.
+Its `attempt` must have ended as `failed`, and its `request` must be `failed`.
+The installed v3 Codex policy must be correct, and each managed grant must also be correct.
+
+The command refuses when other `unknown` calls have no acknowledgement.
+It also refuses when an `attempt` has not ended or a `request` is `running`.
+The command keeps all `pending` `requests`.
+
+The command records an acknowledgement and makes the generation one higher, in one transaction.
+Then it opens the same policy.
+It keeps the call, its conservative reservation and its use.
+It also keeps the `failed` `request` and its `attempt`.
+It starts no model and does not try the historical `request` again.
+
+Output contains `acknowledgement_id` (`UA_` plus 32 hex
 characters), `attempt_id`, `round_index`, `request_id`, `call_digest`,
 `attempt_digest`, `request_digest`, `request_policy_digest`, `call_policy_digest`,
 `policy_digest`, `old_generation`, `resulting_generation`, `acknowledged_at` and
-`accept_uncertainty: true`. Policy digests describe separate historical and
-current authorities; a checked legacy-to-managed bridge can make them differ.
+`accept_uncertainty: true`.
 
-A repeat returns the same acknowledgement without changing admission or the
-generation, including after a later pause or policy change. Its resulting
-generation describes the original recovery, not current service status. Changed
-historical records refuse with `recovery_refused`. Malformed typed values return
-`rejected_validation`; normal store and contention errors keep their existing
-CLI codes. The installer and supervisor exempt only the exact unchanged
-acknowledged call behind its generation fence. New uncertain work still blocks.
-The unknown count does not become zero: its state and charge remain recorded.
+The policy digests show two different authorities: the historical authority and the current authority.
+A checked legacy-to-managed bridge can make them different.
 
-When installing this command to recover an older paused store, upgrade without
-`--enable-learning` and decline the separate restart prompt. The upgrade keeps
-admission closed and snapshots a store before adding acknowledgement metadata.
-Run the installed recovery command, then restart the service. See ADR 0020.
+If you do the command again, it gives the same acknowledgement.
+It does not change admission or the generation.
+This also applies after a subsequent pause or policy change.
+Its `resulting_generation` shows the first recovery, not the current service status.
+
+Changed historical records refuse with `recovery_refused`.
+Typed values with a bad format give `rejected_validation`.
+Usual store errors and contention errors keep their current CLI codes.
+The installer and the supervisor let through only the same unchanged acknowledged call behind its generation fence.
+New uncertain work continues to block.
+The `unknown` count does not become zero, because Muninn keeps its recorded condition and its charge.
+
+To use this command on a paused store from an earlier release, upgrade without `--enable-learning`.
+Say no to the restart question.
+The upgrade keeps admission closed.
+It makes a copy of the store before it adds the acknowledgement data.
+Run the installed recovery command, and then start the service again.
+See ADR 0020.
