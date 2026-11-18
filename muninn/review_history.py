@@ -6,12 +6,13 @@ import hashlib
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from muninn import classify, review_state
 from muninn.knowledge_models import Digest, Scope, StrictModel
 from muninn.review_estimate import estimate
 from muninn.review_evidence_models import EvidenceWindow, SourceRef
+from muninn.review_history_plan import plan
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_originals import originals
@@ -87,6 +88,51 @@ def _covered(
     return [(row[0], row[1]) for row in rows]
 
 
+class Planned(NamedTuple):
+    """Pair a candidate window with how its range was shaped."""
+
+    item: HistoryItem
+    new_from: int
+    cut: bool
+    limited: bool
+
+
+def _planned(
+    conn: sqlite3.Connection,
+    source: sqlite3.Row,
+    policy: ReviewPolicy,
+    project: str | None,
+    bounds: tuple[int, int] | None = None,
+) -> list[Planned]:
+    """Plan the candidate windows of one source, split to fit the limit."""
+    parts = plan(
+        conn,
+        source,
+        policy.max_input_bytes,
+        project,
+        _covered(conn, source, policy),
+        bounds,
+    )
+    ref = SourceRef(provider=source["provider"], thread_id=source["thread_id"])
+    return [
+        Planned(
+            HistoryItem(
+                window=EvidenceWindow(
+                    source=ref,
+                    from_line=part.first,
+                    through_line=part.last,
+                    boundary_hash=part.sha,
+                ),
+                scope=Scope(project_id=part.key, task=None),
+            ),
+            part.new_from,
+            part.cut,
+            part.limited,
+        )
+        for part in parts
+    ]
+
+
 def _windows(
     conn: sqlite3.Connection,
     source: sqlite3.Row,
@@ -94,58 +140,8 @@ def _windows(
     project: str | None,
     bounds: tuple[int, int] | None = None,
 ) -> list[HistoryItem]:
-    """Group same-scope indexed lines into intervals of at most 200 lines."""
-    rows = conn.execute(
-        "SELECT e.line,e.line_sha256,sc.key,sc.kind,max(e.kind IN "
-        "('prompt','reply')) AS candidate "
-        "FROM event e JOIN scope sc ON sc.id=e.scope_id WHERE e.source_id=? "
-        "AND e.line BETWEEN ? AND ? "
-        "GROUP BY e.line,sc.id ORDER BY e.line",
-        (source["id"], *(bounds or (1, 2**63 - 1))),
-    ).fetchall()
-    lines: dict[int, list[sqlite3.Row]] = defaultdict(list)
-    for row in rows:
-        lines[row["line"]].append(row)
-    covered = _covered(conn, source, policy)
-    output: list[HistoryItem] = []
-    group: list[sqlite3.Row] = []
-
-    def flush() -> None:
-        if group and any(row["candidate"] for row in group):
-            first, last = group[0], group[-1]
-            output.append(
-                HistoryItem(
-                    window=EvidenceWindow(
-                        source=SourceRef(
-                            provider=source["provider"],
-                            thread_id=source["thread_id"],
-                        ),
-                        from_line=first["line"],
-                        through_line=last["line"],
-                        boundary_hash=last["line_sha256"],
-                    ),
-                    scope=Scope(project_id=first["key"], task=None),
-                )
-            )
-        group.clear()
-
-    for line, parts in lines.items():
-        row = parts[0]
-        if (
-            len(parts) != 1
-            or row["kind"] == "global"
-            or (project is not None and row["key"] != project)
-            or any(a <= line <= b for a, b in covered)
-        ):
-            flush()
-            continue
-        if group and (
-            row["key"] != group[0]["key"] or line - group[0]["line"] >= 200
-        ):
-            flush()
-        group.append(row)
-    flush()
-    return output
+    """List the candidate windows of one source."""
+    return [p.item for p in _planned(conn, source, policy, project, bounds)]
 
 
 def _verify(
@@ -192,6 +188,23 @@ def _verify(
     ):
         bind(line, raw)
     return item.model_copy(update={"content_digest": content.hexdigest()})
+
+
+def trace(
+    conn: sqlite3.Connection, policy: ReviewPolicy, project: str | None
+) -> list[tuple[Planned, str | None]]:
+    """Pair each candidate window with the cause that excludes it, if any."""
+    output: list[tuple[Planned, str | None]] = []
+    for source in conn.execute(
+        "SELECT * FROM source ORDER BY provider,thread_id"
+    ).fetchall():
+        for planned in _planned(conn, source, policy, project):
+            try:
+                _verify(conn, policy, planned.item)
+                output.append((planned, None))
+            except ValueError as exc:
+                output.append((planned, str(exc)))
+    return output
 
 
 def _inspect(
