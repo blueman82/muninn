@@ -175,33 +175,27 @@ To hide a notice, run `muninn learn dismiss R_ID`, with the ID of the task. This
 - **Steps:** none.
 - **Result:** Muninn keeps one correct result for the task.
 
-### Tell your maintainer about a read limit
+### Do nothing about a read limit
 
 `evidence_limit`
 
-- **What you see:** a learning task stopped with the code `evidence_limit`.
-- **What caused it:** to check a note, Muninn had to read more of your chat file than its limit.
-- **What happens if you do nothing:** Muninn does not learn from that part of the chat. Other tasks continue.
-- **How to repair it:** you cannot repair this. The person who looks after your Muninn install must change the limit.
-- **Steps:**
-  1. Run `muninn learn explain R_ID --human`, with the ID of the task.
-  2. Send the output to the person who looks after your Muninn install.
-  3. Do not start the same task again. It stops again with the same code.
-- **Result:** that person can make a decision about the limit.
+- **What you see:** a learning task shows the code `evidence_limit`. Muninn can also write this code in its log when it skips a part of a chat.
+- **What caused it:** a part of your chat was larger than the read limit of Muninn. Now Muninn makes each task small enough to read, or it skips a part that is too large.
+- **What happens if you do nothing:** no problem occurs. Muninn learns from the other parts of the chat. A task that stopped with this code before an upgrade stays stopped.
+- **How to repair it:** you do not have to do anything.
+- **Steps:** none.
+- **Result:** Muninn continues to learn from your chats.
 
-### Tell your maintainer which read limit stopped a task
+### See which read limit skipped a part of a chat
 
 `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit` and `evidence_selection_limit`
 
-- **What you see:** a learning task stopped with the code `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit` or `evidence_selection_limit`.
-- **What caused it:** to check a note, Muninn had to read more than one of its limits. The four limits count bytes, records, database work and selected text. The code names the limit that stopped the task.
-- **What happens if you do nothing:** Muninn does not learn from that part of the chat. Other tasks continue.
-- **How to repair it:** you cannot repair this. The person who looks after your Muninn install must change the limit.
-- **Steps:**
-  1. Run `muninn learn explain R_ID --human`, with the ID of the task.
-  2. Send the output to the person who looks after your Muninn install.
-  3. Do not start the same task again. It stops again with the same code.
-- **Result:** that person can make a decision about the limit.
+- **What you see:** a learning task or a log line shows the code `evidence_byte_limit`, `evidence_record_limit`, `evidence_work_limit` or `evidence_selection_limit`.
+- **What caused it:** a part of your chat was larger than one of the read limits of Muninn. The four limits count bytes, lines, database work and selected text. The code names the limit.
+- **What happens if you do nothing:** no problem occurs. Muninn cuts a large part to fit, or it skips that part one time. If a task stops with one of these codes, Muninn does not learn from that part only. Muninn learns from the other parts of the chat.
+- **How to repair it:** you do not have to do anything.
+- **Steps:** none.
+- **Result:** Muninn continues to learn from your chats.
 
 ### Tell your maintainer about a size limit
 

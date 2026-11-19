@@ -220,13 +220,12 @@ class HookLearningTests(RequestCase):
         self.conn.execute("UPDATE review_control SET admission=0")
         self.assertEqual(self.capture().code, "review_policy_required")
 
-    def test_one_nonrefundable_original_budget_rolls_back_all_windows(
-        self,
-    ) -> None:
+    def test_each_window_gets_its_own_original_budget(self) -> None:
+        """A sum of windows above the limit does not stop a capture."""
         self.set_policy(len(self.path.read_bytes()) + 10)
-        self.assertEqual(self.capture().code, "evidence_limit")
-        self.assertEqual(self.count("review_request"), 0)
-        self.assertEqual(self.count("review_source"), 0)
+        result = self.capture()
+        self.assertEqual(result.code, "persisted")
+        self.assertEqual(len(result.request_ids), self.count("review_request"))
 
     def test_cancelled_and_erased_windows_do_not_revive(self) -> None:
         result = self.capture()

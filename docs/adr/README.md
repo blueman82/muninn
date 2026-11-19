@@ -28,3 +28,4 @@ Each `exception` or deferred decision has an explicit status.
 | [0022](0022-provenance-trust.md) | Trust owner lines by provenance, not wording. The proof is the full cited owner message, plus the assistant reply directly before an agreement. Accepted 2026-11-15, revised 2026-11-16. |
 | [0023](0023-no-read-limit-before-the-window.md) | Lines before the window start do not count against the source read limits. Accepted 2026-11-16. |
 | [0024](0024-leave-unfinished-start.md) | Leave an unfinished first-policy upgrade start with one record mark, after a safety proof and a yes. Print a plain explanation after each installer failure code. Proposed. |
+| [0025](0025-own-budget-for-each-window.md) | Each live or catch-up window gets its own read budget. The identity read and the boundary read charge nothing. A window that does not fit is cut or skipped with one log record. Proposed. |
