@@ -86,8 +86,8 @@ private history and is unchanged by snapshot restore.
 
 `bin/muninn-install --leave-unfinished [--check]` is one more form
 (ADR 0024). The wrapper finds `--leave-unfinished` in any position, before
-the mode detection and the half-install check. It does the runtime check
-(with `--check` when `--check` or `--dry-run` is there), asks for no
-Git-hook setup, and sends only the arguments of the person to
+the case on the first argument and the half-install check. It does the
+runtime check (with `--check` when `--check` or `--dry-run` is there), asks
+for no Git-hook setup, and sends only the arguments of the person to
 `install.installer`. The `--check` form writes no file. `--help` shows the
 form.

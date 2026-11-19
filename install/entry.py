@@ -241,7 +241,7 @@ def leave_main(argv: Sequence[str]) -> int:
     Returns:
         0 for each result of the leave, 1 for a refusal.
     """
-    ap = argparse.ArgumentParser(prog="install.installer")
+    ap = argparse.ArgumentParser(prog="install.installer", allow_abbrev=False)
     ap.add_argument(LEAVE, action="store_true")
     ap.add_argument(
         "--check", "--dry-run", dest="dry_run", action="store_true"
