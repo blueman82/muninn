@@ -24,7 +24,7 @@ Automatic recall keeps separate private review metadata. Everything it returns i
 - Uninstall: `bin/muninn-uninstall --dry-run` previews; `bin/muninn-uninstall` stops the poller and
   removes the hooks, the Codex plugin and the release. Your index and knowledge ledger are moved to
   `~/.local/share/muninn-removed-<ts>`; `--purge-data` deletes them instead.
-- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, Cursor lifecycle hooks) and `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`, and `docs/TROUBLESHOOTING.md`.
+- Templates: `integrations/` (Claude hooks, hooks-only Codex plugin, Cursor lifecycle hooks) and `launchd/com.muninn.plist` (poller, `muninn serve --interval 60`). See `docs/QUICKSTART.md`, `docs/REFERENCE.md`, `docs/TROUBLESHOOTING.md`, and the [user guide: what each Muninn message means and what to do](docs/USER-GUIDE.md).
 
 ## What it stores
 
