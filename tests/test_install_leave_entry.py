@@ -130,6 +130,7 @@ class LeaveEntryTests(unittest.TestCase):
         self.assertTrue(leave.call_args.args[0].dry_run)
 
 
+@unittest.skipIf(os.name == "nt", "the wrapper is a POSIX sh script")
 class LeaveWrapperTests(unittest.TestCase):
     """The shell wrapper sends the leave flag on without other setup."""
 
