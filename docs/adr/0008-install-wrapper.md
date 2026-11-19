@@ -81,3 +81,13 @@ Native upgrades pause before snapshot/publication. SQLite snapshots and selectio
 publication use atomic replacement without deleting the live file first; uncertain
 copies remain private. The durable HMAC tombstone key is never recreated over existing
 private history and is unchanged by snapshot restore.
+
+## Leave an unfinished start (2026-11-19, proposed)
+
+`bin/muninn-install --leave-unfinished [--check]` is one more form
+(ADR 0024). The wrapper finds `--leave-unfinished` in any position, before
+the case on the first argument and the half-install check. It does the
+runtime check (with `--check` when `--check` or `--dry-run` is there), asks
+for no Git-hook setup, and sends only the arguments of the person to
+`install.installer`. The `--check` form writes no file. `--help` shows the
+form.

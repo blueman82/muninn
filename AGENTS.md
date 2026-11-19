@@ -18,7 +18,7 @@ These are instructions for coding agents that work in this repository. Also use 
 
 - `bin/muninn` is a launcher that finds the interpreter. Do not write a path in the code.
 
-- `bin/muninn-install` is an sh wrapper for `install/installer.py`. It accepts bare, `--check`, `--status` and `--uninstall`. Other arguments pass through.
+- `bin/muninn-install` is an sh wrapper for `install/installer.py`. It accepts bare, `--check`, `--status`, `--uninstall` and `--leave-unfinished [--check]`. Other arguments pass through.
 
 - `bin/muninn-uninstall` calls `bin/muninn-install --uninstall`. It accepts `--dry-run` and `--purge-data`. Agents run only `--dry-run`.
 

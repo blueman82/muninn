@@ -18,15 +18,18 @@ from install import (
     host_renewal_recovery,
     installer,
     learning_scope,
+    leave_start,
     uninstall,
 )
 from install import configedit as ce
 from install.constants import GIT_ENV, PRIVATE_UMASK, TS_FORMAT
 from install.context import Ctx, StepFailedError, run_real
+from install.failure_text import explain
 from install.host_renewal_preview import preview
 from muninn.platform_paths import read_selection
 
 ROOT = Path(__file__).resolve().parent.parent
+LEAVE = "--leave-unfinished"
 
 
 def _head() -> str:
@@ -56,6 +59,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return installer.main(args)
     if args in (["--help"], ["-h"]):
         print("usage: muninn-install [--check | --status | --uninstall]")
+        print("Leave an unfinished start: --leave-unfinished [--check]")
         print("Other arguments pass through to install.installer.")
         print(
             "Custom first policy: --repo DIR --sha SHA "
@@ -129,6 +133,10 @@ def install_main(argv: Sequence[str] | None = None) -> int:
     Raises:
         sqlite3.Error: If an ordinary install raises a database error.
     """
+    if argv is None:
+        argv = sys.argv[1:]
+    if LEAVE in argv:
+        return leave_main(argv)
     ap = parser()
     args = ap.parse_args(argv)
     if args.renew_codex_host == "preview" or args.codex_interface == "preview":
@@ -162,6 +170,22 @@ def install_main(argv: Sequence[str] | None = None) -> int:
         codex_interface=args.codex_interface,
     )
     ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
+    return _run(ctx, args)
+
+
+def _run(ctx: Ctx, args: argparse.Namespace) -> int:
+    """Run one parsed install and print a failure with its explanation.
+
+    Args:
+        ctx: The context of the run.
+        args: The parsed installer arguments.
+
+    Returns:
+        0 on success, 1 when the install failed or was refused.
+
+    Raises:
+        sqlite3.Error: If an ordinary install raises a database error.
+    """
     try:
         if args.codex_interface is not None:
             _interface_input(ctx, args)
@@ -175,12 +199,10 @@ def install_main(argv: Sequence[str] | None = None) -> int:
             return 1
     except sqlite3.Error:
         if ctx.codex_interface is not None:
-            print("FAILED: codex_interface_recovery_required")
-            return 1
+            return fail("codex_interface_recovery_required")
         if ctx.renew_codex_host is None:
             raise
-        print("FAILED: host_renewal_recovery_required")
-        return 1
+        return fail("host_renewal_recovery_required")
     except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
         detail = (
             _interface_detail(exc)
@@ -191,8 +213,55 @@ def install_main(argv: Sequence[str] | None = None) -> int:
                 else str(exc)
             )
         )
-        print(f"FAILED: {detail}")
-        return 1
+        return fail(detail)
+    return 0
+
+
+def fail(detail: str) -> int:
+    """Print one failure code and its fixed plain explanation.
+
+    Args:
+        detail: The printed failure detail.
+
+    Returns:
+        The failure exit code 1.
+    """
+    print(f"FAILED: {detail}")
+    for line in explain(detail):
+        print(line)
+    return 1
+
+
+def leave_main(argv: Sequence[str]) -> int:
+    """Leave one unfinished upgrade start from the command line.
+
+    Args:
+        argv: The arguments; they hold ``--leave-unfinished``.
+
+    Returns:
+        0 for each result of the leave, 1 for a refusal.
+    """
+    ap = argparse.ArgumentParser(prog="install.installer", allow_abbrev=False)
+    ap.add_argument(LEAVE, action="store_true")
+    ap.add_argument(
+        "--check", "--dry-run", dest="dry_run", action="store_true"
+    )
+    args = ap.parse_args(argv)
+    os.umask(PRIVATE_UMASK)
+    ts = time.strftime(TS_FORMAT, time.gmtime())
+    ctx = Ctx(
+        Path.home(),
+        run_real,
+        ts,
+        dry_run=args.dry_run,
+        say=print,
+        default_home=True,
+    )
+    prompt = input if sys.stdin.isatty() else None
+    try:
+        leave_start.leave(ctx, prompt)
+    except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
+        return fail(str(exc))
     return 0
 
 
