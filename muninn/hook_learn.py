@@ -21,14 +21,9 @@ from muninn.obs_log import log_call
 from muninn.review_evidence_models import CursorOriginal, SourceRef
 from muninn.review_models import ReviewPolicy
 from muninn.review_originals import originals, reread
-from muninn.review_progress import (
-    mark_eligible,
-    reconciliation_windows,
-    source_row,
-    unsuppressed_window,
-)
-from muninn.review_read_budget import ReadBudget
-from muninn.review_requests import enqueue_review
+from muninn.review_progress import reconciliation_windows, source_row
+from muninn.review_read_budget import ReadBudget, uncharged
+from muninn.review_window_fit import admit_window
 
 _EVENTS = {
     "session-start": "SessionStart",
@@ -252,9 +247,7 @@ def validated_source(
             )
     else:
         source = _jsonl_source(conn, provider, data)
-        raw = originals(conn, source, 1, 1, budget.bytes_left, budget=budget)[
-            0
-        ][1]
+        raw = originals(conn, source, 1, 1, budget=uncharged())[0][1]
     if classify.record_hash(raw) != source["first_line_sha256"]:
         raise ValueError("evidence_changed")
     first = as_payload(json.loads(raw))
@@ -296,21 +289,23 @@ def _persist(
     """Recheck active policy and admit complete windows in one transaction."""
     if installed_policy(conn) != policy:
         raise ValueError("review_policy_required")
-    budget = ReadBudget(policy.max_input_bytes)
-    source = validated_source(conn, provider, data, budget)
+    source = validated_source(
+        conn, provider, data, ReadBudget(policy.max_input_bytes)
+    )
     now = time.time()
     ids: list[RequestId] = []
     for window, scope in reconciliation_windows(
-        conn, policy, now, source, budget=budget
+        conn,
+        policy,
+        now,
+        source,
+        budget=ReadBudget(policy.max_input_bytes),
+        free_boundary=True,
     ):
-        permitted = unsuppressed_window(conn, window)
-        if permitted is None:
-            mark_eligible(conn, window, now)
-            continue
-        request = enqueue_review(
-            conn, permitted, scope, policy, "hook", now, budget=budget
+        request = admit_window(
+            conn, source, window, scope, policy, "hook", now
         )
-        if request.state != "cancelled":
+        if request is not None and request.state != "cancelled":
             ids.append(request.id)
     return tuple(ids)
 

@@ -87,6 +87,7 @@ _REVIEW_EVENTS = frozenset(
         "review_call_unknown",
         "review_unknown_accepted",
         "review_commit_rejected",
+        "review_skipped",
     }
 )
 _REVIEW_ERRORS = RUNTIME_CODES | frozenset(
@@ -157,6 +158,7 @@ _REVIEW_INTS = {
     "observed_enqueue_busy": 0,
     "missed_acknowledgments": 0,
     "recovery_gaps": 0,
+    "skipped_lines": 1,
 }
 _REVIEW_TIMES = frozenset(
     {

@@ -13,16 +13,14 @@ from muninn.knowledge_models import Provider
 from muninn.review_models import ReviewPolicy
 from muninn.review_originals import originals
 from muninn.review_progress import (
-    mark_eligible,
     reconciliation_windows,
     require_transaction,
     source_admission,
     source_progress,
-    unsuppressed_window,
 )
-from muninn.review_read_budget import ReadBudget
-from muninn.review_requests import enqueue_review
+from muninn.review_read_budget import ReadBudget, uncharged
 from muninn.review_selectors import decode
+from muninn.review_window_fit import admit_window
 
 
 def _native(
@@ -57,7 +55,7 @@ def _native(
         or (saved is not None and saved.mode == "all")
     ):
         return True
-    raw = originals(conn, source, 1, 1, budget=budget)[0][1]
+    raw = originals(conn, source, 1, 1, budget=uncharged())[0][1]
     if classify.record_hash(raw) != source["first_line_sha256"]:
         raise ValueError("evidence_changed")
     try:
@@ -102,22 +100,18 @@ def _admit(
         conn.execute("SAVEPOINT review_catchup_window")
         try:
             for window, scope in reconciliation_windows(
-                conn, policy, now, source, budget=budget, limit=1
+                conn,
+                policy,
+                now,
+                source,
+                budget=budget,
+                limit=1,
+                free_boundary=True,
             ):
                 candidate = window.through_line
-                permitted = unsuppressed_window(conn, window)
-                if permitted is None:
-                    mark_eligible(conn, window, now)
-                else:
-                    enqueue_review(
-                        conn,
-                        permitted,
-                        scope,
-                        policy,
-                        "reconcile",
-                        now,
-                        budget=budget,
-                    )
+                admit_window(
+                    conn, source, window, scope, policy, "reconcile", now
+                )
         except ValueError as exc:
             conn.execute("ROLLBACK TO review_catchup_window")
             if str(exc) not in {"rejected_scope", "evidence_erased"}:

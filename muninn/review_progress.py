@@ -39,8 +39,8 @@ from muninn.review_evidence_models import (
 )
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
-from muninn.review_read_budget import ReadBudget
-from muninn.review_selectors import check_tombstones
+from muninn.review_read_budget import ReadBudget, uncharged
+from muninn.review_selectors import MAX_SCAN_BYTES, check_tombstones
 from muninn.review_state import baseline as setup_baseline
 from muninn.review_windows import candidate_rows, resume_line
 
@@ -247,6 +247,7 @@ def reconciliation_windows(
     *,
     budget: ReadBudget,
     limit: int | None = None,
+    free_boundary: bool = False,
 ) -> tuple[tuple[EvidenceWindow, Scope], ...]:
     """Expose one source's complete new intervals by mapped scope."""
     require_transaction(conn, now)
@@ -264,6 +265,7 @@ def reconciliation_windows(
         validate = (
             validate_cursor_boundary if limit else validate_window_boundary
         )
+        # ADR 0025: a free boundary read charges no bytes and no records.
         validate(
             conn,
             EvidenceWindow(
@@ -275,14 +277,10 @@ def reconciliation_windows(
                 through_line=progress["eligible_line"],
                 boundary_hash=progress["boundary_hash"],
             ),
-            policy.max_input_bytes,
-            budget=budget,
+            MAX_SCAN_BYTES if free_boundary else policy.max_input_bytes,
+            budget=uncharged() if free_boundary else budget,
         )
-    first = (
-        resume_line(conn, source, progress, budget)
-        if limit is not None
-        else progress["eligible_line"]
-    ) + 1
+    first = resume_line(conn, source, progress, budget) + 1
     rows = candidate_rows(conn, source["id"], first - 1, last, budget, limit)
     for row in rows:
         output.append(

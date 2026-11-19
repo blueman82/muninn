@@ -108,3 +108,15 @@ class ReadBudget:
         self._active = False
         self._partitionable = False
         return tuple(children)
+
+
+def uncharged() -> ReadBudget:
+    """Open a separate account for one uncharged identity or boundary read.
+
+    ADR 0025: the line-1 identity read and the eligible boundary read do
+    not charge the window budget. The per-record cap still applies.
+
+    Returns:
+        A new account with the full scan grant.
+    """
+    return ReadBudget(MAX_SCAN_BYTES)

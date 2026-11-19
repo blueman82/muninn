@@ -197,6 +197,7 @@ class ReviewCatchupTests(RequestCase):
     def test_oversized_source_does_not_consume_the_next_sources_grant(
         self,
     ) -> None:
+        """Each window of a large source gets its own budget (ADR 0025)."""
         self.append(self.path, [{"type": "noop"}] * 500)
         self.write(
             rollout("other"),
@@ -209,9 +210,9 @@ class ReviewCatchupTests(RequestCase):
             (canonical_json(self.policy), self.digest(self.policy)),
         )
         self.step()
-        self.assertEqual(self.windows(), [])
-        self.step()
         self.assertEqual(self.windows(), [(1, 2)])
+        self.step()
+        self.assertEqual(self.windows(), [(1, 2), (1, 2)])
 
     def test_recall_modes_do_not_control_learning_admission(self) -> None:
         for mode in ("off", "advisory", "on"):
