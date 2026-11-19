@@ -288,13 +288,10 @@ def _plan(ctx: Ctx, rec: Record, case: Case) -> None:
         "Muninn will mark it as left. It keeps the install record, and it"
         " removes no file."
     )
+    changes = "It changes no link, no settings file and no service."
     if case == "no_policy":
-        ctx.say(
-            "It changes no link, no settings file and no service. Learning"
-            " stays off."
-        )
-    else:
-        ctx.say("It changes no link, no settings file and no service.")
+        changes += " Learning stays off."
+    ctx.say(changes)
     if case == "earlier_policy":
         ctx.say(
             "A learning policy was on before the unfinished upgrade, and"
