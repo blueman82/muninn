@@ -73,7 +73,54 @@ happened or what to do.
 - The next `bin/muninn-install` does a normal upgrade. It records the
   provider files again, writes its own hook entries and takes over the
   links.
-- Learning stays off. A new install asks for `--enable-learning` again
+- Learning stays as it was before the leave. A new install asks for
+  `--enable-learning` again when learning was off
   (ADR 0017 does not change).
 - The flag adds and removes no release (ADR 0001 does not change).
 - `--fresh` and `--upgrade` stay the only install modes (ADR 0002).
+
+## Learning on before the start (2026-11-19, proposed)
+
+The first proof refused each store with a policy or admission. A person
+who had learning on, or whose start committed its policy, could not
+install or upgrade. This part changes the `leave_policy_active` rule of
+the proof and the consequence "Learning stays off". The owner must accept
+or change the case B rule below.
+
+- Method, read-only and with no model call: Muninn compares the
+  `review_control` row of the store with the control snapshot of the
+  record (`policy_activation.intent.control`).
+  - `no_policy`: admission 0, and `policy_json`, `policy_digest` and
+    `activated_at` are NULL (the first case of this ADR).
+  - `own_policy` (case B): `policy_json`, `policy_digest` and
+    `activated_at` are each equal to the values of the snapshot.
+  - `earlier_policy` (case A): not `own_policy`; `policy_json` is a
+    valid policy, `policy_digest` is its digest, and `activated_at` is a
+    finite number less than `activated_at` of the snapshot.
+  - Each other row agrees with no case and gives `leave_policy_active`.
+- A record at phase `intent` comes only from the first bootstrap, which
+  requires a store with no policy. Thus a store with a policy and a record
+  at phase `intent` is case B, unless something outside the start changed
+  the store (for example a restored or copied store). Case B is the likely
+  case.
+- Case B: Muninn marks the start as left with the same mark, after the
+  same question. It keeps the committed policy, admission, generation and
+  every other part of the store. Learning stays on. A refusal keeps the
+  person stuck, and a mark `complete` says that steps ran that did not
+  run. Other choices: mark the start as complete, or refuse.
+- Case A and case B keep admission as it is (on stays on, paused stays
+  paused). Admission and `generation` are not part of the comparison.
+- The proof under the lock must find the same case as the first proof.
+  A different case gives `leave_record_changed`.
+- A record at a phase that is not `intent`, or with `policy_status`
+  `active`, still refuses with `leave_policy_active`.
+- Learning scope in case B: the start stopped after its policy commit and
+  before it saved the learning scope, and the record does not hold the
+  scope choice. Muninn cannot recover it and does not invent one. The
+  next `bin/muninn-install` asks the scope question again, or takes
+  `--learning-scope now|all`. With no terminal and no flag, it stops with
+  `learning_scope_required` and changes nothing. In case A the saved
+  scope stays, and the upgrade keeps it.
+- No case compares `intent.store` (the device and inode of the store
+  file). A restored or copied store has a new inode with the same row.
+  The link, release and provider proofs stay.

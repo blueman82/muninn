@@ -1024,7 +1024,7 @@ The installer runs a last health check after service startup.
 |---|---|
 | `bin/muninn-install` | Installs a new release or upgrades an installed release. See installer behavior below. |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | The same as `bin/muninn-install --uninstall`. See uninstall behavior below. |
-| `bin/muninn-install --leave-unfinished [--check]` | Leaves one unfinished upgrade start that turned on no policy. See "Leave an unfinished start" below. |
+| `bin/muninn-install --leave-unfinished [--check]` | Leaves one unfinished upgrade start whose store has no policy, a policy from before the start, or the policy that the start turned on. See "Leave an unfinished start" below. |
 
 ### Installer behavior
 
@@ -1068,11 +1068,13 @@ Each later install tries to finish it first, and stops with `legacy_candidate_ch
 It installs nothing, starts and stops no service, and changes no link, provider file or store.
 A later upgrade takes over the links and hook entries that the start wrote.
 
-- Proof: the start has activation phase `intent`, and the store has no committed policy and no admission. Each recorded link has its before-value or the value of the start, and the release of the start exists. Each provider file that exists can be parsed.
+- Proof: the start has activation phase `intent`, and the store is in one of three cases. No policy: no policy and no admission. Earlier policy: a valid policy with its digest and an activation time before the start. Own policy: the policy, digest and activation time of the record of the start. The leave keeps admission and the policy as they are. Each recorded link has its before-value or the value of the start, and the release of the start exists. Each provider file that exists can be parsed.
 - Plan: before the question, it shows the time stamp and the short commit of the start. It shows no path.
 - Answer: it asks one `[y/N]` question. Only `y` or `yes` in any case continues. No terminal or end of input is a no.
 - Mark: under the installer lock, it reads the record again, does the proof again, and adds `"superseded_by": "left_unfinished"`. It keeps all other keys and removes no file.
 - `--check` (or `--dry-run`) shows the plan and a `DRY-RUN:` line, asks nothing and writes nothing.
+- The plan and `--check` say the case in plain words.
+- After a leave in the own policy case, the next install asks the learning scope again, because the start did not save it. `--learning-scope now|all` answers it with no terminal.
 - With no unfinished start, it prints one sentence and exits 0.
 
 Other arguments with `--leave-unfinished` give a usage error (exit 2).
@@ -1081,7 +1083,7 @@ A refusal prints `FAILED: <code>` and its explanation, and exits 1:
 | Code | Cause |
 |---|---|
 | `leave_record_unsupported` | The pending record is a fresh start, a legacy record, a host renewal record or a Codex interface record, or the platform is Windows. |
-| `leave_policy_active` | The start committed a policy, or Muninn cannot read the store. |
+| `leave_policy_active` | The learning policy in the store does not agree with the install record or with the state before the install, or the record is not at phase `intent`, or Muninn cannot read the store. |
 | `leave_links_changed` | A recorded link has a third value, or the release of the start is missing. |
 | `leave_provider_unreadable` | A Claude Code, Cursor or Codex settings file exists and cannot be parsed. |
 | `leave_confirmation_required` | The answer was not `y` or `yes`, or no terminal was available. |
