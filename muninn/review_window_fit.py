@@ -184,8 +184,12 @@ def admit_window(
         conn.execute("ROLLBACK TO review_window_fit")
         if str(exc) != "evidence_limit":
             raise
-        limit = exc.code if isinstance(exc, EvidenceLimitError) else None
-        _skip(conn, permitted, limit or "evidence_limit", now)
+        limit = (
+            exc.code
+            if isinstance(exc, EvidenceLimitError)
+            else "evidence_limit"
+        )
+        _skip(conn, permitted, limit, now)
         return None
     finally:
         conn.execute("RELEASE review_window_fit")
