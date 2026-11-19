@@ -91,7 +91,9 @@ class InterfaceEntryTests(InterfacePreviewTests):
                     ]
                 )
             self.assertEqual(result, 1)
-            self.assertEqual(output.getvalue().strip(), "FAILED: " + code)
+            self.assertEqual(
+                output.getvalue().splitlines()[0], "FAILED: " + code
+            )
 
     def test_shell_preview_forwards_checkout_without_setup(self) -> None:
         script = self.repo / "bin/muninn-install"

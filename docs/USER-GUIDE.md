@@ -88,12 +88,14 @@ Muninn shows a code or a message when you must do something. Find the code or th
 - **What you see:** `bin/muninn-install` stops with `FAILED: legacy_candidate_changed` or `FAILED: review_activation_configuration_changed`.
 - **What caused it:** an earlier install started to turn on learning, and it did not finish. Each new install tries to finish it first. It must use the same Muninn version and the same settings files as before. Your version or your settings files changed, so the install stops.
 - **What happens if you do nothing:** you cannot install a new version of Muninn. Your installed Muninn continues to work, with learning off.
-- **How to repair it:** at this time, Muninn has no command that cancels the unfinished install. Do not edit or remove the install records.
+- **How to repair it:** you can leave the unfinished install when it changed nothing that must be undone. Muninn examines this first. It keeps the install records, and it removes no file. Do not edit or remove the install records.
 - **Steps:**
-  1. Run `bin/muninn-install --check`, and copy the output.
-  2. Run `muninn doctor --pretty`, and copy the output.
-  3. Send the two outputs to the person who looks after your Muninn install.
-- **Result:** that person can repair the install safely.
+  1. Run `bin/muninn-install --leave-unfinished --check`, and read the plan.
+  2. Run `bin/muninn-install --leave-unfinished`, and type `y`.
+  3. Run `bin/muninn-install`.
+  4. If a command stops with `FAILED:`, run `bin/muninn-install --check` and `muninn doctor --pretty`.
+  5. Send the two outputs to the person who looks after your Muninn install.
+- **Result:** the new install continues. If Muninn cannot leave the unfinished install, that person can repair the install safely.
 
 ### Find out why a learning task stopped
 

@@ -1024,6 +1024,7 @@ The installer runs a last health check after service startup.
 |---|---|
 | `bin/muninn-install` | Installs a new release or upgrades an installed release. See installer behavior below. |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | The same as `bin/muninn-install --uninstall`. See uninstall behavior below. |
+| `bin/muninn-install --leave-unfinished [--check]` | Leaves one unfinished upgrade start that turned on no policy. See "Leave an unfinished start" below. |
 
 ### Installer behavior
 
@@ -1052,6 +1053,39 @@ A newer installed revision tells you to update the checkout before installation.
 
 Unknown or divergent history reports `versions differ` and tells you to examine the revisions before installation.
 Status does no fetch or installation.
+
+Each installer `FAILED: <code>` line has a plain explanation after it: `What happened:`, `Why:`, `What to do:` and numbered steps.
+The first line stays `FAILED: <code>`.
+A fixed table gives the explanation from the code before the first `:`. It prints no path, no file content and no exception text.
+A code that is not in the table gets a default text with the steps `bin/muninn-install --check` and `muninn doctor --pretty`.
+
+### Leave an unfinished start
+
+An install with a first review policy can stop after its activation intent.
+Each later install tries to finish it first, and stops with `legacy_candidate_changed` or `review_activation_configuration_changed` when the commit or a provider file changed.
+
+`bin/muninn-install --leave-unfinished` leaves one such upgrade start on macOS or Linux.
+It installs nothing, starts and stops no service, and changes no link, provider file or store.
+A later upgrade takes over the links and hook entries that the start wrote.
+
+- Proof: the start has activation phase `intent`, and the store has no committed policy and no admission. Each recorded link has its before-value or the value of the start, and the release of the start exists. Each provider file that exists can be parsed.
+- Plan: before the question, it shows the time stamp and the short commit of the start. It shows no path.
+- Answer: it asks one `[y/N]` question. Only `y` or `yes` in any case continues. No terminal or end of input is a no.
+- Mark: under the installer lock, it reads the record again, does the proof again, and adds `"superseded_by": "left_unfinished"`. It keeps all other keys and removes no file.
+- `--check` (or `--dry-run`) shows the plan and a `DRY-RUN:` line, asks nothing and writes nothing.
+- With no unfinished start, it prints one sentence and exits 0.
+
+Other arguments with `--leave-unfinished` give a usage error (exit 2).
+A refusal prints `FAILED: <code>` and its explanation, and exits 1:
+
+| Code | Cause |
+|---|---|
+| `leave_record_unsupported` | The pending record is a fresh start, a legacy record, a host renewal record or a Codex interface record, or the platform is Windows. |
+| `leave_policy_active` | The start committed a policy, or Muninn cannot read the store. |
+| `leave_links_changed` | A recorded link has a third value, or the release of the start is missing. |
+| `leave_provider_unreadable` | A Claude Code, Cursor or Codex settings file exists and cannot be parsed. |
+| `leave_confirmation_required` | The answer was not `y` or `yes`, or no terminal was available. |
+| `leave_record_changed` | The record changed before the mark. |
 
 ### Uninstall behavior
 

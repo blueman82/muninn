@@ -22,3 +22,11 @@ from its `rollback-record.json`.
 
 Installer operations are exercised with a temporary HOME in `tests/test_installer.py`. A
 fresh install on a second physical machine remains unverified.
+
+## Record operation to leave an unfinished start (2026-11-19, proposed)
+
+The installer also has the record operation `--leave-unfinished`
+(ADR 0024). It is not a third mode. It writes one mark in one rollback
+record and installs nothing. It starts and stops no service, and it changes
+no link, provider file or store. `--fresh` and `--upgrade` stay the only
+install modes.
