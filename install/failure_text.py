@@ -61,8 +61,10 @@ LEAVE_TEXTS: dict[str, Text] = {
     ),
     "leave_policy_active": entry(
         NOT_LEFT,
-        "The unfinished install turned on a learning policy, or Muninn"
-        " cannot read its data. An install must finish that change.",
+        "The learning policy in the data does not agree with the install"
+        " record or with the state before the install, or the install"
+        " record is not at its first step, or Muninn cannot read its"
+        " data. An install must finish that change.",
         KEEP_RECORDS,
         *FACTS,
     ),
