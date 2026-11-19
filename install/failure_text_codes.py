@@ -15,13 +15,14 @@ FACTS = (
     " install.",
 )
 
-AGAIN = (
-    "Run `bin/muninn-install` again.",
+REPORT = (
     "If it stops again, run `bin/muninn-install --check` and"
     " `muninn doctor --pretty`.",
     "Send the two outputs to the person who looks after your Muninn"
     " install.",
 )
+
+AGAIN = ("Run `bin/muninn-install` again.", *REPORT)
 
 KEEP_RECORDS = "Do not edit or remove the install records."
 
@@ -124,10 +125,7 @@ POLICY_FILE = entry(
     " version cannot use.",
     "Examine the policy file that you gave with `--review-policy`.",
     "Correct the file, and run the same install command again.",
-    "If it stops again, run `bin/muninn-install --check` and"
-    " `muninn doctor --pretty`.",
-    "Send the two outputs to the person who looks after your Muninn"
-    " install.",
+    *REPORT,
 )
 
 POLICY_STATE = entry(
@@ -143,10 +141,7 @@ PREVIEW = entry(
     " Muninn read it.",
     "Wait until other Muninn commands stop.",
     "Run the same install command again.",
-    "If it stops again, run `bin/muninn-install --check` and"
-    " `muninn doctor --pretty`.",
-    "Send the two outputs to the person who looks after your Muninn"
-    " install.",
+    *REPORT,
 )
 
 CONSENT = entry(

@@ -7,8 +7,14 @@ into the explanation (ADR 0004).
 
 from __future__ import annotations
 
-from install import failure_text_codes as codes
-from install.failure_text_codes import FACTS, Text, entry
+from install.failure_text_codes import (
+    FACTS,
+    KEEP_RECORDS,
+    REPORT,
+    Text,
+    entry,
+    table,
+)
 
 LEAVE = (
     "Run `bin/muninn-install --leave-unfinished --check`, and read the plan.",
@@ -21,17 +27,20 @@ LEAVE = (
     " install.",
 )
 
-UNFINISHED = entry(
+NOT_CONTINUED = (
     "An earlier install did not finish, and this install cannot continue"
-    " it.",
+    " it."
+)
+
+UNFINISHED = entry(
+    NOT_CONTINUED,
     "An earlier install started to turn on learning, and it stopped. The"
     " Muninn version or a settings file changed after that start.",
     *LEAVE,
 )
 
 UNFINISHED_CHANGED = entry(
-    "An earlier install did not finish, and this install cannot continue"
-    " it.",
+    NOT_CONTINUED,
     "An earlier install started to turn on learning, and it stopped. Its"
     " release, its policy, or the Muninn data changed after that start.",
     *LEAVE,
@@ -47,14 +56,14 @@ LEAVE_TEXTS: dict[str, Text] = {
         "The command can only leave an unfinished upgrade on macOS or"
         " Linux. This unfinished install is a new install, a move from an"
         " older Muninn install, or a Codex change.",
-        "Do not edit or remove the install records.",
+        KEEP_RECORDS,
         *FACTS,
     ),
     "leave_policy_active": entry(
         NOT_LEFT,
         "The unfinished install turned on a learning policy, or Muninn"
         " cannot read its data. An install must finish that change.",
-        "Do not edit or remove the install records.",
+        KEEP_RECORDS,
         *FACTS,
     ),
     "leave_links_changed": entry(
@@ -62,7 +71,7 @@ LEAVE_TEXTS: dict[str, Text] = {
         "A Muninn link or the release folder of the unfinished install"
         " changed after that install. Muninn cannot prove that a new install"
         " can use them.",
-        "Do not edit or remove the install records.",
+        KEEP_RECORDS,
         *FACTS,
     ),
     "leave_provider_unreadable": entry(
@@ -72,10 +81,7 @@ LEAVE_TEXTS: dict[str, Text] = {
         "Make sure that each of these settings files is correct JSON or"
         " TOML.",
         "Run `bin/muninn-install --leave-unfinished --check` again.",
-        "If it stops again, run `bin/muninn-install --check` and"
-        " `muninn doctor --pretty`.",
-        "Send the two outputs to the person who looks after your Muninn"
-        " install.",
+        *REPORT,
     ),
     "leave_confirmation_required": entry(
         NOT_LEFT,
@@ -102,7 +108,7 @@ DEFAULT = entry(
 )
 
 TABLE: dict[str, Text] = {
-    **codes.table(),
+    **table(),
     "legacy_candidate_changed": UNFINISHED,
     "review_activation_configuration_changed": UNFINISHED,
     "review_activation_runtime_changed": UNFINISHED_CHANGED,
