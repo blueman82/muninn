@@ -16,6 +16,7 @@ OLD = (
 )
 BEFORE = [
     "Get help when an upgrade cannot finish",
+    "Fix an unfinished Codex interface change",
     "Find out why a learning task stopped",
     "Find out what a learning notice means",
     "Fix a clock error",
