@@ -17,13 +17,13 @@ from install.constants import GIT_ENV, INSTALL_RECORD
 from install.context import Ctx, StepFailedError, must
 from install.host_renewal_binding_models import BindingInputs, Configuration
 from install.host_renewal_files import lock_identity
+from install.host_renewal_frame import metadata_frame, notice_digest
 from install.host_renewal_models import (
     HostPlan,
     PendingFacts,
     SetupNotice,
 )
 from install.host_renewal_operation import HeldOperation, validate_operation
-from install.host_renewal_scan import metadata_frame
 from install.policy_record_models import FileState
 from install.preflight import check_repo as checked_repo
 from install.provider_apps import installed
@@ -226,11 +226,7 @@ def capture_setup_notice(ctx: Ctx, plan: HostPlan) -> SetupNotice | None:
             if exists
             else None
         )
-        found = (
-            hashlib.sha256(metadata_frame(dict(row))).hexdigest()
-            if row
-            else None
-        )
+        found = notice_digest(dict(row)) if row else None
         if found != plan.containment.setup_before_digest:
             raise StepFailedError("host_renewal_setup_changed")
         if row is None or row["code"] not in {
@@ -238,8 +234,10 @@ def capture_setup_notice(ctx: Ctx, plan: HostPlan) -> SetupNotice | None:
             "codex_experimental_boundary",
         }:
             return None
-        assert found is not None
-        return SetupNotice(code=row["code"], row_digest=found)
+        return SetupNotice(
+            code=row["code"],
+            row_digest=hashlib.sha256(metadata_frame(dict(row))).hexdigest(),
+        )
 
 
 def clear_host_notice(

@@ -245,11 +245,6 @@ class ReceiptBase(StrictModel):
             or self.containment_started_at < self.approval.approved_at
         ):
             raise ValueError("host_renewal_authority_invalid")
-        if self.setup_notice is not None and (
-            self.setup_notice.row_digest
-            != self.plan.containment.setup_before_digest
-        ):
-            raise ValueError("host_renewal_setup_changed")
         return self
 
 

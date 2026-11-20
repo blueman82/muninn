@@ -20,6 +20,7 @@ from typing import Literal, cast
 from install import (
     codex_interface_recovery,
     host_renewal_recovery,
+    leave_interface,
     legacy_state,
     policy_records,
     record,
@@ -31,7 +32,7 @@ from muninn import store
 from muninn.review_activation import checked_policy, digest
 from muninn.review_models import ReviewPolicy
 
-Case = Literal["no_policy", "earlier_policy", "own_policy"]
+Case = Literal["no_policy", "earlier_policy", "own_policy", "interface"]
 MARK = "left_unfinished"
 QUESTION = "Leave this unfinished install? [y/N] "
 
@@ -72,6 +73,9 @@ def leave(ctx: Ctx, prompt: Callable[[str], str] | None) -> str:
             raise StepFailedError("leave_record_changed")
         check()
         record.save(active, {**rec, "superseded_by": MARK})
+    if case == "interface":
+        leave_interface.done(ctx)
+        return "left"
     ctx.say(
         "Muninn left the unfinished install. Run bin/muninn-install again"
         " to install Muninn."
@@ -96,10 +100,14 @@ def _find(ctx: Ctx) -> tuple[Ctx, Record] | None:
     if (
         legacy_state.pending(ctx) is not None
         or host_renewal_recovery.pending(ctx) is not None
-        or codex_interface_recovery.pending(ctx) is not None
     ):
         raise StepFailedError("leave_record_unsupported")
+    interface = codex_interface_recovery.pending(ctx)
     found = review_policy.pending(ctx)
+    if interface is not None:
+        if found is not None:
+            raise StepFailedError("leave_record_unsupported")
+        return interface
     if found is None:
         return None
     rec = found[1]
@@ -121,13 +129,18 @@ def _prove(active: Ctx, rec: Record) -> Case:
         rec: Its rollback record.
 
     Returns:
-        The policy case of the store.
+        The policy case of the store, or ``interface`` for a stopped
+        Codex interface change.
 
     Raises:
         StepFailedError: For a policy that agrees with no case, a changed
             link, or an unreadable provider file.
     """
-    case = policy_case(active, rec)
+    case: Case = "interface"
+    if "codex_interface" in rec:
+        leave_interface.prove(active, rec)
+    else:
+        case = policy_case(active, rec)
     _links(active, rec)
     _providers(active)
     return case
@@ -280,6 +293,9 @@ def _plan(ctx: Ctx, rec: Record, case: Case) -> None:
         rec: The record of the unfinished start.
         case: The policy case of the store.
     """
+    if case == "interface":
+        leave_interface.plan(ctx, rec)
+        return
     ctx.say(
         f"Muninn found an unfinished upgrade from {rec['ts']}, for commit"
         f" {rec['sha'][:7]}."

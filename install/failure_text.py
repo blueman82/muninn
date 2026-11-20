@@ -55,7 +55,8 @@ LEAVE_TEXTS: dict[str, Text] = {
         NOT_LEFT,
         "The command can only leave an unfinished upgrade on macOS or"
         " Linux. This unfinished install is a new install, a move from an"
-        " older Muninn install, or a Codex change.",
+        " older Muninn install, or a Codex host change. Or there is more"
+        " than one unfinished install.",
         KEEP_RECORDS,
         *FACTS,
     ),
@@ -64,7 +65,8 @@ LEAVE_TEXTS: dict[str, Text] = {
         "The learning policy in the data does not agree with the install"
         " record or with the state before the install, or the install"
         " record is not at its first step, or Muninn cannot read its"
-        " data. An install must finish that change.",
+        " data. Or a Codex interface change started to change the"
+        " learning rule. An install must finish that change.",
         KEEP_RECORDS,
         *FACTS,
     ),
