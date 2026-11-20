@@ -20,6 +20,7 @@ from install.host_renewal_frame import (
 from install.host_renewal_frame import (
     metadata_frame,
     notice_digest,
+    notice_meaning,
 )
 from install.host_renewal_history import CompletedHistory, attempt_view
 from install.host_renewal_jobs import RetryLimits, jobs_match
@@ -238,7 +239,7 @@ class _Scan:
             }
             target.update(
                 _row(
-                    {k: v for k, v in data.items() if k != "created_at"}
+                    notice_meaning(data)
                     if table == "review_issue" and data["id"] == "setup"
                     else data
                 )

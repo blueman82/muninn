@@ -136,9 +136,9 @@ def _prove(active: Ctx, rec: Record) -> Case:
         StepFailedError: For a policy that agrees with no case, a changed
             link, or an unreadable provider file.
     """
-    case: Case = "interface"
     if "codex_interface" in rec:
         leave_interface.prove(active, rec)
+        case: Case = "interface"
     else:
         case = policy_case(active, rec)
     _links(active, rec)
