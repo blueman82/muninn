@@ -175,6 +175,25 @@ INTERFACE = entry(
     *FACTS,
 )
 
+INTERFACE_OPEN = entry(
+    "An earlier Codex interface change did not finish, and this command"
+    " cannot continue it.",
+    "The change stopped before it finished. Only the approved plan digest"
+    " from the same commit can continue it.",
+    KEEP_RECORDS,
+    "From the same commit, run `bin/muninn-install --upgrade"
+    " --codex-interface PLAN_DIGEST` with the approved digest.",
+    "If the commit changed or it stops again, run `bin/muninn-install"
+    " --leave-unfinished --check`, and read the plan.",
+    "Run `bin/muninn-install --leave-unfinished`, and type `y`.",
+    "Run `bin/muninn-install --upgrade --codex-interface preview --check`"
+    " to make a new plan.",
+    "If a command stops with `FAILED:`, run `bin/muninn-install --check`"
+    " and `muninn doctor --pretty`.",
+    "Send the two outputs to the person who looks after your Muninn"
+    " install.",
+)
+
 INTERNAL = entry(
     "The install stopped at an internal check.",
     "A step of the install ran without the lock that it must have.",
@@ -347,7 +366,6 @@ FAMILIES: tuple[tuple[Text, tuple[str, ...]], ...] = (
             "codex_interface_plan_changed",
             "codex_interface_record_changed",
             "codex_interface_record_invalid",
-            "codex_interface_recovery_required",
             "codex_interface_runtime_required",
             "codex_interface_state_changed",
             "codex_platform_changed",
@@ -358,6 +376,7 @@ FAMILIES: tuple[tuple[Text, tuple[str, ...]], ...] = (
             "runtime_structure_limit",
         ),
     ),
+    (INTERFACE_OPEN, ("codex_interface_recovery_required",)),
     (INTERNAL, ("install_operation_required",)),
 )
 

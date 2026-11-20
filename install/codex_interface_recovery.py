@@ -47,7 +47,10 @@ def pending(ctx: Ctx) -> tuple[Ctx, Record] | None:
             if not path.exists():
                 continue
             rec = legacy_state.read(path)
-            if "codex_interface" not in rec:
+            if (
+                "codex_interface" not in rec
+                or rec.get("superseded_by") == "left_unfinished"
+            ):
                 continue
             value = policy_records.codex_interface(rec["codex_interface"])
             active = dataclasses.replace(ctx, ts=value.operation)

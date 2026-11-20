@@ -1024,7 +1024,7 @@ The installer runs a last health check after service startup.
 |---|---|
 | `bin/muninn-install` | Installs a new release or upgrades an installed release. See installer behavior below. |
 | `bin/muninn-uninstall [--dry-run] [--purge-data]` | The same as `bin/muninn-install --uninstall`. See uninstall behavior below. |
-| `bin/muninn-install --leave-unfinished [--check]` | Leaves one unfinished upgrade start whose store has no policy, a policy from before the start, or the policy that the start turned on. See "Leave an unfinished start" below. |
+| `bin/muninn-install --leave-unfinished [--check]` | Leaves one unfinished upgrade start whose store has no policy, a policy from before the start, or the policy that the start turned on. Also leaves one Codex interface change that stopped before it changed the rule. See "Leave an unfinished start" below. |
 
 ### Installer behavior
 
@@ -1069,6 +1069,7 @@ It installs nothing, starts and stops no service, and changes no link, provider 
 A later upgrade takes over the links and hook entries that the start wrote.
 
 - Proof: the start has activation phase `intent`, and the store is in one of three cases. No policy: no policy and no admission. Earlier policy: a valid policy with its digest and an activation time before the start. Own policy: the policy, digest and activation time of the record of the start. The leave keeps admission and the policy as they are. Each recorded link has its before-value or the value of the start, and the release of the start exists. Each provider file that exists can be parsed.
+- Codex interface proof: the record has phase `approved_intent`, no owner control and no contained state. The store has the old rule of the plan (policy text and digest), and no request uses the candidate digest. The link, release and provider checks are the same. The service stays stopped until the next install. After the leave, run `bin/muninn-install --upgrade --codex-interface preview --check`.
 - Plan: before the question, it shows the time stamp and the short commit of the start. It shows no path.
 - Answer: it asks one `[y/N]` question. Only `y` or `yes` in any case continues. No terminal or end of input is a no.
 - Mark: under the installer lock, it reads the record again, does the proof again, and adds `"superseded_by": "left_unfinished"`. It keeps all other keys and removes no file.
@@ -1082,8 +1083,8 @@ A refusal prints `FAILED: <code>` and its explanation, and exits 1:
 
 | Code | Cause |
 |---|---|
-| `leave_record_unsupported` | The pending record is a fresh start, a legacy record, a host renewal record or a Codex interface record, or the platform is Windows. |
-| `leave_policy_active` | The learning policy in the store does not agree with the install record or with the state before the install, or the record is not at phase `intent`, or Muninn cannot read the store. |
+| `leave_record_unsupported` | The pending record is a fresh start, a legacy record or a host renewal record, a Codex interface record and a first-policy start are both pending, or the platform is Windows. |
+| `leave_policy_active` | The learning policy in the store does not agree with the install record or with the state before the install, or the record is not at phase `intent`, or Muninn cannot read the store. For a Codex interface record: the phase is not `approved_intent`, the owner control or contained state is set, the store does not have the old rule, or a request uses the candidate digest. |
 | `leave_links_changed` | A recorded link has a third value, or the release of the start is missing. |
 | `leave_provider_unreadable` | A Claude Code, Cursor or Codex settings file exists and cannot be parsed. |
 | `leave_confirmation_required` | The answer was not `y` or `yes`, or no terminal was available. |
@@ -1966,6 +1967,18 @@ The initial operation checks the complete eligible previous queue before commit.
 Its one finite capsule keeps immutable `request` snapshots and `original` inputs.
 It refuses unaccepted pending decision work or a changed queue.
 It does not cancel or recreate previous `requests`.
+
+The plan binds the `setup` notice by its code, stage, cause and action, not by its time.
+The running service can write the same notice again with a new time.
+That does not change the plan digest and does not stop the apply.
+A notice with a different code, stage, cause or action, a new notice, or a removed notice stops the apply before the rule changes.
+Host renewal uses the same rule.
+
+An apply that stops leaves its record, and each later install stops with `codex_interface_recovery_required`.
+From the same commit, `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST` with the approved digest continues it with no new question.
+A different commit cannot continue it.
+When the change stopped before its owner control (phase `approved_intent`), run `bin/muninn-install --leave-unfinished --check`, then `bin/muninn-install --leave-unfinished`.
+Then make a new preview and give a new approval.
 
 New inputs need the usual source, scope and erasure checks.
 Future compatible Codex updates need no capsule or new approval.

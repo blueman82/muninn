@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import json
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -15,6 +14,14 @@ from pydantic import TypeAdapter
 
 from install.context import StepFailedError
 from install.host_renewal_files import capture_files, requires_key
+from install.host_renewal_frame import (
+    frame_row as _row,
+)
+from install.host_renewal_frame import (
+    metadata_frame,
+    notice_digest,
+    notice_meaning,
+)
 from install.host_renewal_history import CompletedHistory, attempt_view
 from install.host_renewal_jobs import RetryLimits, jobs_match
 from install.host_renewal_models import (
@@ -47,26 +54,6 @@ class StateScan:
     request_ids: tuple[RequestId, ...]
     attempt_ids: tuple[AttemptId, ...]
     containment: ContainmentPlan
-
-
-def metadata_frame(value: object) -> bytes:
-    """Length-frame scalar types and values with the existing copy encoding."""
-    raw = json.dumps(value, separators=(",", ":"), ensure_ascii=True).encode()
-    return len(raw).to_bytes(8, "big") + raw
-
-
-def _row(row: dict[str, object]) -> bytes:
-    """Frame exact columns, scalar types and values for one complete row."""
-    return metadata_frame(
-        [
-            (
-                key,
-                type(value).__name__,
-                value.hex() if isinstance(value, bytes) else value,
-            )
-            for key, value in row.items()
-        ]
-    )
 
 
 class _Scan:
@@ -191,9 +178,7 @@ class _Scan:
         elif table == "review_attempt" and data["id"] in self.named.values():
             excluded = {"ended_at", "progress_at", "outcome"}
         elif table == "review_issue" and data["id"] == "setup":
-            self.setup_digest = hashlib.sha256(
-                metadata_frame(data)
-            ).hexdigest()
+            self.setup_digest = notice_digest(data)
             safe = {
                 "id": "setup",
                 **review_recovery.explain(
@@ -252,7 +237,13 @@ class _Scan:
                 for key in dict(row)
                 if not (table == "review_request" and key == "policy_json")
             }
-            target.update(_row(data))
+            target.update(
+                _row(
+                    notice_meaning(data)
+                    if table == "review_issue" and data["id"] == "setup"
+                    else data
+                )
+            )
             invariant = self.invariant(table, data)
             if invariant is not None:
                 self.hashes["invariant"].update(_row(invariant))

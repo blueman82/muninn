@@ -97,6 +97,24 @@ Muninn shows a code or a message when you must do something. Find the code or th
   5. Send the two outputs to the person who looks after your Muninn install.
 - **Result:** the new install continues. If Muninn cannot leave the unfinished install, that person can repair the install safely.
 
+### Fix an unfinished Codex interface change
+
+`codex_interface_recovery_required`
+
+- **What you see:** `bin/muninn-install` stops with `FAILED: codex_interface_recovery_required`.
+- **What caused it:** an earlier Codex interface change started, and it did not finish. Only the approved plan digest from the same commit can continue it.
+- **What happens if you do nothing:** you cannot install a new version of Muninn. The Muninn service can stay stopped, and learning does not run.
+- **How to repair it:** continue the change with the same digest. If the commit changed, leave the change and make a new plan. Do not edit or remove the install records.
+- **Steps:**
+  1. From the same commit, run `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST` with the approved digest.
+  2. If the commit changed or it stops again, run `bin/muninn-install --leave-unfinished --check`, and read the plan.
+  3. Run `bin/muninn-install --leave-unfinished`, and type `y`.
+  4. Run `bin/muninn-install --upgrade --codex-interface preview --check` to make a new plan.
+  5. Run `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST` with the new digest, and type `y`.
+  6. If a command stops with `FAILED:`, run `bin/muninn-install --check` and `muninn doctor --pretty`.
+  7. Send the two outputs to the person who looks after your Muninn install.
+- **Result:** the Codex interface change finishes, and the Muninn service starts again.
+
 ### Find out why a learning task stopped
 
 Muninn learns from your chats in small tasks. When a task stops, Muninn shows a short code.

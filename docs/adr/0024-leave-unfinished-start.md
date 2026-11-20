@@ -40,8 +40,10 @@ happened or what to do.
 - `bin/muninn-install --leave-unfinished [--check]` acts only on one
   first-policy activation record of an upgrade start that
   `install.review_policy.pending` finds, on macOS or Linux.
-- A fresh start record, a legacy record (ADR 0016), a host renewal record,
-  a Codex interface record or Windows gets `leave_record_unsupported`.
+- A fresh start record, a legacy record (ADR 0016), a host renewal record
+  or Windows gets `leave_record_unsupported`. A Codex interface record
+  follows the part "Codex interface change before its owner control"
+  below.
   After a fresh start, neither `--fresh` nor `--upgrade` can continue.
 - Take-over rule: a link or provider entry that the start wrote, and that a
   later upgrade takes over as its own before-value, is not a change that
@@ -124,3 +126,34 @@ or change the case B rule below.
 - No case compares `intent.store` (the device and inode of the store
   file). A restored or copied store has a new inode with the same row.
   The link, release and provider proofs stay.
+
+## Codex interface change before its owner control (2026-11-20, proposed)
+
+A Codex interface change (ADR 0019) binds its retained operation to the
+repository and the commit of its record. When the change stops and the
+commit changes, each install stops with
+`codex_interface_recovery_required`, and no command lets the person go
+on. This part changes the rule "a Codex interface record gets
+`leave_record_unsupported`".
+
+- `--leave-unfinished` accepts one pending Codex interface record at
+  phase `approved_intent` with `owner_control` null and `contained` null.
+  At that phase the change did not change the learning rule, the control
+  row or the published grant files.
+- The proof reads the store read-only. It refuses with
+  `leave_policy_active` when the phase is not `approved_intent`, when
+  `owner_control` or `contained` is set, when `review_control` does not
+  have the old policy text and digest of the plan, when a
+  `review_request` row has the candidate digest, or when Muninn cannot
+  read the store.
+- The link, release and provider proofs, the question, the lock, the
+  second read and the mark are the same as above.
+- A pending Codex interface record together with a pending first-policy
+  start gives `leave_record_unsupported`. Host renewal and legacy records
+  keep `leave_record_unsupported`.
+- The plan says that the change did not change the learning rule, that
+  the leave changes no link, settings file, service or store, and that
+  the service stays stopped until the next install. After the leave,
+  Muninn tells the person to make a new preview with
+  `bin/muninn-install --upgrade --codex-interface preview --check`.
+- `codex_interface_recovery.pending` skips a record with the mark.

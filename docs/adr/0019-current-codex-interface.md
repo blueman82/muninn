@@ -101,3 +101,32 @@ Same-user compromise, auxiliary `origin` and actual billing stay unverified.
 Help output proves advertised arguments, not future model behavior or full `isolation`.
 Usual result validation, containment and all prior limits stay.
 Private kept recovery copies keep their current limits on erasure and restoration.
+
+## Setup notice by meaning, and leave before owner control (2026-11-20, proposed)
+
+The running service can write the `review_issue` row `setup` again with
+the same code, stage, cause and action and only a new `created_at`. The
+apply compared the full row, so a new time stopped the change at the
+store with `host_renewal_state_changed`.
+
+- The plan binds the meaning of the notice. The notice digest is the
+  SHA-256 digest of the framed `setup` row without `created_at`.
+  `setup_before_digest` keeps its name and type, and holds the notice
+  digest or null. The record schema does not change.
+- The `work` hash frames the `setup` row without `created_at`. A new
+  time of the same notice does not change the plan digest of a Codex
+  interface change or of a host renewal.
+- A different code, stage, cause or action, a new notice or a removed
+  notice still stops the change. The exact safe row
+  `process_identity_unverified` with time 0 stays permitted.
+- Host renewal uses the same rule. `SetupNotice.row_digest` holds the
+  full-row digest of the row that the capture read, and the clean-up
+  removes only that exact row.
+- A retained operation stays bound to the repository and the commit of
+  its record. The same digest continues it only from the same commit. A
+  plan of an older version holds the full-row digest, so the new code
+  cannot prove that a rewritten row has the same meaning.
+- A change that stopped at phase `approved_intent`, with no owner control
+  and no contained state, did not change the rule. The person can leave
+  it with `bin/muninn-install --leave-unfinished` (ADR 0024), then make a
+  new preview and give a new approval.
