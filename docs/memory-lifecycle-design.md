@@ -278,7 +278,7 @@ Show startup `action` only when needed.
 
 Keep ordinary safely contained errors available for checks.
 
-Muninn source anchors: [knowledge models](../muninn/knowledge_models.py), [bounded startup context](../muninn/knowledge_push.py), [scoped recall](../muninn/hook_recall.py), [capture](../muninn/hook_learn.py), [history admission](../muninn/review_history.py), [`original` `evidence`](../muninn/review_evidence.py), [atomic commit](../muninn/review_commit.py), and [erasure](../muninn/knowledge_erase.py).
+Muninn source anchors: [knowledge models](../muninn/knowledge_models.py), [bounded startup context](../muninn/knowledge_push.py), [scoped recall](../muninn/hook_recall.py), [capture](../muninn/hook_learn.py), [`original` `evidence`](../muninn/review_evidence.py), [atomic commit](../muninn/review_commit.py), and [erasure](../muninn/knowledge_erase.py).
 
 These are comparable functions.
 Their policies, coverage, and live verification can be different.

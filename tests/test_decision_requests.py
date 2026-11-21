@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from muninn import decision_requests, review_requests
+from muninn import decision_requests
 from muninn.decision_write import submit_intent
-from muninn.review_history import _covered, replacements
-from muninn.review_progress import advance_completed, unsuppressed_window
-from muninn.review_state import LearningSelection
+from muninn.review_progress import advance_completed
 from tests.decision_support import DecisionCase
 from tests.test_classify import user_msg
 
@@ -121,37 +119,6 @@ class DecisionRequestTests(DecisionCase):
             )[0]
         )
 
-    def test_application_is_not_source_coverage_or_cancellation(self) -> None:
-        candidate = self.stage()
-        self.approve(self.intent(candidate.id))
-        application = self.application(candidate.id)
-        window = self.row(
-            "SELECT from_line,through_line FROM review_request WHERE id=?",
-            (application,),
-        )
-        owner_window = self.window(window[0], window[1])
-        source = self.need_source()
-        progress = tuple(self.row("SELECT * FROM review_source"))
-        self.assertNotIn(
-            tuple(window), _covered(self.conn, source, self.policy)
-        )
-        self.transaction(
-            lambda: review_requests.cancel_request(
-                self.conn, application, 26.0
-            )
-        )
-        self.assertEqual(
-            unsuppressed_window(self.conn, owner_window), owner_window
-        )
-        self.assertNotIn(
-            tuple(window), _covered(self.conn, source, self.policy)
-        )
-        self.transaction(
-            lambda: advance_completed(self.conn, owner_window.source, 27.0)
-        )
-        after = self.row("SELECT * FROM review_source")
-        self.assertEqual(tuple(after)[:-1], progress[:-1])
-
     def test_approval_revisions_have_separate_requests(self) -> None:
         candidate = self.stage()
         self.approve(self.intent(candidate.id))
@@ -204,35 +171,6 @@ class DecisionRequestTests(DecisionCase):
                 (candidate.id,),
             )[0],
             application,
-        )
-
-    def test_policy_replacement_does_not_turn_application_into_ordinary_work(
-        self,
-    ) -> None:
-        candidate = self.stage()
-        self.approve(self.intent(candidate.id))
-        self.application(candidate.id)
-        self.conn.execute(
-            "UPDATE review_request SET "
-            "state='cancelled',cancel_code='policy_replaced'"
-        )
-        changed = self.policy.model_copy(update={"context_bytes": 1200})
-        scan = replacements(
-            self.conn,
-            changed,
-            LearningSelection(
-                mode="all",
-                project_id=self.scope.project_id,
-                selected_at=30.0,
-                scan_digest=None,
-            ),
-        )
-        self.assertEqual(
-            [
-                (item.window.from_line, item.window.through_line)
-                for item in scan.items
-            ],
-            [(2, 3)],
         )
 
     def test_changed_current_target_blocks_application_admission(self) -> None:
