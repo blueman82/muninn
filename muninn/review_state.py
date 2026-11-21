@@ -12,9 +12,6 @@ CREATE TABLE IF NOT EXISTS learning_setup (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
  mode TEXT NOT NULL CHECK(mode IN ('now','all')),
  project_id TEXT, selected_at REAL NOT NULL, scan_digest TEXT);
-CREATE TABLE IF NOT EXISTS review_issue (
- id TEXT PRIMARY KEY, code TEXT NOT NULL, stage TEXT NOT NULL,
- cause TEXT NOT NULL, action TEXT NOT NULL, created_at REAL NOT NULL);
 """
 
 

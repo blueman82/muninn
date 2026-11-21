@@ -47,6 +47,7 @@ _SHAPES = {
         {
             "ec7fd6d4a91b3ac65fe10b54ecdd36372213a0427cb6cab0d4e2400f613be1e9",
             "37baee7221debd915fe5ba1ee2ba88ff3dea7f3f3a8bf6c219f5b7d6df01f06f",
+            "6f6dc97dce9dd9ce09ef4429b10f7d70245826b2d4b132c28e4676e21bdf91c8",
         }
     ),
     1: frozenset(
@@ -155,10 +156,10 @@ def _empty(conn: sqlite3.Connection) -> None:
     """Accept only untouched current bootstrap rows and no governed content."""
     if _shape(conn) != 2:
         raise ValueError("cutover_target_mismatch")
-    optional = tuple(
-        name
-        for name in ("learning_setup", "review_issue", "review_unknown_ack")
-        if review_state.available(conn, name)
+    optional = (
+        ("learning_setup",)
+        if review_state.available(conn, "learning_setup")
+        else ()
     )
     for table in BASE_TABLES + GOVERNED_TABLES + optional:
         if table in ("store_meta", "review_control"):
@@ -337,16 +338,10 @@ def copy_governed_state(
                 if version == 2 or not table.startswith("memory_")
             )
             tables = BASE_TABLES + (governed if version in (1, 2) else ())
-            if version in (1, 2):
-                tables += tuple(
-                    name
-                    for name in (
-                        "learning_setup",
-                        "review_issue",
-                        "review_unknown_ack",
-                    )
-                    if review_state.available(source, name)
-                )
+            if version in (1, 2) and review_state.available(
+                source, "learning_setup"
+            ):
+                tables += ("learning_setup",)
             result = _copy(source, target, tables, version)
             if version == 2:
                 result["review_request"] = _application_requests(
