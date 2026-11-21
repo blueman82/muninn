@@ -35,7 +35,7 @@ class RecallStressTests(RecallCase):
         self.assertEqual(len(rows), 2)
         self.assertIn(self.ref(passing), rows[1])  # found on the second page
 
-    def test_min_terms_default_is_three_and_a_lower_floor_keeps_more(
+    def test_a_two_term_event_is_below_the_floor(
         self,
     ) -> None:
         self.talk("two", "rareone raretwo filler")
@@ -49,18 +49,16 @@ class RecallStressTests(RecallCase):
             limit=4000,
         )
 
-        def kept(**kw: int) -> list[object]:
+        def kept() -> list[object]:
             """Return the event ids a recall with these knobs keeps."""
             trace: dict[str, object] = {}
             with closing(store.connect_ro(store.db_path(self.home))) as conn:
                 hook_recall.recall_block(
-                    conn, payload, self.env, trace, request, **kw
+                    conn, payload, self.env, trace, request
                 )
             return cast("list[object]", trace["returned_ids"])
 
         self.assertEqual(kept(), [])
-        self.assertEqual(kept(min_terms=3), [])
-        self.assertEqual(len(kept(min_terms=2)), 1)
 
     def test_recall_stops_paging_when_the_results_end(self) -> None:
         self.talk("a", "alphaterm betaterm gammaterm deltaterm all here")

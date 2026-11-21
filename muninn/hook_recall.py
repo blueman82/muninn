@@ -71,18 +71,16 @@ def _terms(fts: str | None) -> list[str]:
 def prompt_terms(
     payload: Mapping[str, object],
     trace: dict[str, object],
-    min_terms: int = MIN_TERMS,
 ) -> list[str] | None:
     """Extract the query terms of the prompt.
 
     Args:
         payload: The provider's hook payload.
         trace: Receives ``skipped`` and ``n_terms`` for the stage log.
-        min_terms: The term floor (default ``MIN_TERMS``); below 1 acts as 1.
 
     Returns:
         The terms, or None when the prompt recalls nothing: no prompt, a
-        slash command, or fewer than ``min_terms`` terms.
+        slash command, or fewer than ``MIN_TERMS`` terms.
     """
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or prompt.lstrip().startswith("/"):
@@ -90,7 +88,7 @@ def prompt_terms(
         return None
     terms = _terms(query.build_fts_query(prompt))
     trace["n_terms"] = len(terms)
-    if len(terms) < max(1, min_terms):
+    if len(terms) < MIN_TERMS:
         trace["skipped"] = "short"
         return None
     return terms
@@ -147,13 +145,12 @@ def _pool(
     env: Mapping[str, str],
     cwd: str,
     terms: list[str],
-    min_terms: int,
 ) -> tuple[list[RecallEntry], list[RecallHit], int, dict[str, int], bool]:
     """Page through search results for events that pass the term floor.
 
     Returns:
         The eligible current previews, events matching at least
-        ``min_terms`` terms (possibly more than ``MAX_EVENTS``), how many
+        ``MIN_TERMS`` terms (possibly more than ``MAX_EVENTS``), how many
         events the floor dropped, page 1's stage counts (empty when page 1
         failed), and whether any page errored, leaving later events unread.
     """
@@ -172,7 +169,7 @@ def _pool(
             stages = found.get("stages", {})  # whole-query, same per page
         counts = _matched(conn, terms, [h["id"] for h in found["hits"]])
         for hit in found["hits"]:
-            if counts[hit["id"]] >= min_terms:
+            if counts[hit["id"]] >= MIN_TERMS:
                 hits.append(hit)
             else:
                 dropped += 1
@@ -235,7 +232,6 @@ def recall_block(
     env: Mapping[str, str],
     trace: dict[str, object],
     request: RecallRequest,
-    min_terms: int = MIN_TERMS,
 ) -> str:
     """Build the recall block for the prompt.
 
@@ -245,15 +241,13 @@ def recall_block(
         env: Environment, for the caller's own session.
         trace: Receives ids and stage counts for the stage log.
         request: Terms, scope, notes and size limit.
-        min_terms: The term floor (default ``MIN_TERMS``); below 1 acts
-            as 1, so the hook never raises on it.
 
     Returns:
         The framed block, or an empty string when nothing qualifies.
     """
     with knowledge_read.read_snapshot(conn):
         entries, hits, dropped, page1, unread = _pool(
-            conn, payload, env, request.cwd, request.terms, max(1, min_terms)
+            conn, payload, env, request.cwd, request.terms
         )
         _evidence_sources(conn, entries)
     hits = hits[:MAX_EVENTS]
