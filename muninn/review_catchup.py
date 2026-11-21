@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import cast
 
 from muninn import classify, hook_learn, ingest, review_state
-from muninn.cli_learn import installed_policy
 from muninn.hook_context import as_payload
 from muninn.knowledge_models import Provider
 from muninn.review_models import ReviewPolicy
@@ -135,12 +134,6 @@ def catch_up(
 ) -> int:
     """Give one indexed source a turn under the exact installed policy."""
     require_transaction(conn, now)
-    try:
-        current = installed_policy(conn)
-    except ValueError:
-        return after_id
-    if current != policy:
-        return after_id
     if (
         conn.execute("SELECT activated_at FROM review_control").fetchone()[0]
         is None

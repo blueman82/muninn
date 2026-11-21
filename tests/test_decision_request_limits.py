@@ -8,9 +8,9 @@ from unittest import mock
 from muninn import decision_requests, review_originals, review_requests
 from muninn.decision_candidates import candidate_view
 from muninn.decision_write import submit_intent
-from muninn.review_json import canonical_json
 from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
+from tests.policy_patch import use_policy
 
 # An unselected field makes the repeated owner reads exceed the policy.
 PAD = {"pad": "x" * 2500}
@@ -38,10 +38,7 @@ class DecisionRequestLimitTests(DecisionCase):
                 "retry_backoff_seconds": [5.0, 30.0],
             }
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
 
     def test_four_shared_workers_prevent_a_fifth_application_claim(
@@ -57,7 +54,6 @@ class DecisionRequestLimitTests(DecisionCase):
                     review_requests.claim_attempt,
                     self.conn,
                     request.id,
-                    1,
                     25.0,
                 )
             )
@@ -73,7 +69,7 @@ class DecisionRequestLimitTests(DecisionCase):
         with self.assertRaisesRegex(ValueError, "review_concurrency"):
             self.transaction(
                 lambda: review_requests.claim_attempt(
-                    self.conn, application, 1, 27.0
+                    self.conn, application, 27.0
                 )
             )
         self.assertEqual(
@@ -82,7 +78,7 @@ class DecisionRequestLimitTests(DecisionCase):
         with self.assertRaisesRegex(ValueError, "rejected_fenced"):
             self.transaction(
                 lambda: review_requests.claim_proposal(
-                    self.conn, application, 1, 27.0
+                    self.conn, application, 27.0
                 )
             )
 
@@ -102,13 +98,11 @@ class DecisionRequestLimitTests(DecisionCase):
             (candidate.id,),
         )[0]
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, application, 1, 26.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, application, 26.0)
         )
         self.conn.execute("UPDATE review_control SET generation=2")
         self.transaction(
-            lambda: review_requests.recover_attempts(self.conn, 2, 27.0)
+            lambda: review_requests.recover_attempts(self.conn, 27.0)
         )
         row = self.row(
             "SELECT state,retry_at FROM review_request WHERE id=?",
@@ -129,8 +123,8 @@ class DecisionRequestLimitTests(DecisionCase):
                 self.conn, self.context.request_id, 28.0
             )
         )
-        self.assertIsNone(Learner(self.home)._claim(self.policy, 2, 31.0))
-        decision_requests.continue_decisions(self.home, 2, 31.0)
+        self.assertIsNone(Learner(self.home)._claim(31.0))
+        decision_requests.continue_decisions(self.home, 31.0)
         self.assertEqual(
             self.row(
                 "SELECT count(*) FROM review_attempt WHERE request_id=?",
@@ -166,7 +160,6 @@ class DecisionRequestLimitTests(DecisionCase):
                     review_requests.claim_attempt,
                     self.conn,
                     application,
-                    1,
                     started,
                 )
             )
@@ -187,7 +180,6 @@ class DecisionRequestLimitTests(DecisionCase):
                             review_requests.claim_attempt,
                             self.conn,
                             application,
-                            1,
                             expected - 1.0,
                         )
                     )
@@ -197,7 +189,7 @@ class DecisionRequestLimitTests(DecisionCase):
         with self.assertRaisesRegex(ValueError, "review_attempt_limit"):
             self.transaction(
                 lambda: review_requests.claim_attempt(
-                    self.conn, application, 1, 71.0
+                    self.conn, application, 71.0
                 )
             )
         decision_requests.request_application(self.home, candidate.id, 72.0)
@@ -218,10 +210,7 @@ class DecisionRequestLimitTests(DecisionCase):
             )
         )
         self.policy = self.policy.model_copy(update={"max_input_bytes": 11000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
         blocked, ready = self.stage(), self.stage()
         proof = self.approve(self.intent(blocked.id, owner_updates=PAD))
@@ -283,7 +272,7 @@ class DecisionRequestLimitTests(DecisionCase):
         )
         self.assertIsNotNone(reads.call_args.kwargs["budget"])
         self.approve(self.fork_intent(ready.id, pending=False))
-        later = decision_requests.continue_decisions(self.home, 1, 100000.0)
+        later = decision_requests.continue_decisions(self.home, 100000.0)
         self.assertEqual(
             [(item.id, item.state) for item in later], [(ready.id, "saved")]
         )

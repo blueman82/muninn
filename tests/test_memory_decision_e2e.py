@@ -131,7 +131,7 @@ class MemoryDecisionE2ETests(DecisionCliCase):
             "waiting_verification",
         )
 
-    def test_indexing_wait_then_approve_while_paused_and_refused_apply(
+    def test_indexing_wait_then_approve_and_apply(
         self,
     ) -> None:
         ident = str(self.stage_cli()["id"])
@@ -161,15 +161,17 @@ class MemoryDecisionE2ETests(DecisionCliCase):
             "UPDATE source SET cursor_line=? WHERE thread_id=?",
             (cursor, intent.owner_locator.source.thread_id),
         )
-        self.conn.execute("UPDATE review_control SET admission=0")
         code, accepted = self.call(
             "know", "decision", "submit", "--input", str(path)
         )
         self.assertEqual(
             (code, accepted["state"]), (0, "approved_pending"), accepted
         )
-        code, blocked = self.call("know", "decision", "apply", ident)
-        self.assertEqual(
-            (code, blocked["code"]), (0, "learning_paused"), blocked
+        self.transaction(
+            lambda: review_requests.cancel_request(
+                self.conn, self.context.request_id, 20.0
+            )
         )
-        self.assertIsNone(blocked["receipt"])
+        code, saved = self.call("know", "decision", "apply", ident)
+        self.assertEqual((code, saved["state"]), (0, "saved"), saved)
+        self.assertIsNotNone(saved["receipt"])

@@ -26,6 +26,7 @@ from muninn.review_models import RequestView, ReviewContext
 from muninn.review_progress import digest
 from muninn.review_read_budget import ReadBudget
 from tests import test_review_window_boundary as boundary_tests
+from tests.policy_patch import use_policy
 
 
 class NativeConsumerReadBudgetTests(unittest.TestCase):
@@ -52,10 +53,9 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
         )
         self.case.persist(self.record)
         self.policy = self.case.policy(self.record)
+        use_policy(self.case, self.policy)
         self.conn.execute(
-            "UPDATE review_control SET admission=1,generation=1,"
-            "policy_json=?,policy_digest=?,activated_at=10.0",
-            (canonical_json(self.policy), digest(self.policy)),
+            "UPDATE review_control SET generation=1,activated_at=10.0"
         )
         self.seen: list[tuple[ReadBudget, sqlite3.Connection, Path]] = []
         connect = review_originals._cursor_connection
@@ -120,9 +120,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
         request = self.enqueue()
         grants = [self.checked_reads(1)]
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         grants.append(self.checked_reads(2))
         self.transaction(
@@ -133,9 +131,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
         )
         grants.append(self.checked_reads(2))
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 15.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 15.0)
         )
         grants.append(self.checked_reads(2))
         context = ReviewContext(
@@ -200,7 +196,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
                 if operation == "claim":
                     self.transaction(
                         lambda: review_requests.claim_attempt(
-                            self.conn, request.id, 1, 14.0
+                            self.conn, request.id, 14.0
                         )
                     )
                 else:
@@ -248,9 +244,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
             "INSERT INTO review_input VALUES(?,?)", (request.id, record.id)
         )
         self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         self.assertEqual({item[2] for item in self.seen}, {self.path, other})
         self.assertEqual(self.checked_reads(3).records_left, 4087)

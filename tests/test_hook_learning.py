@@ -10,8 +10,16 @@ import sqlite3
 from typing import Any
 from unittest import mock
 
-from muninn import cli_hook, cursor_import, hook_learn, review_requests, store
+from muninn import (
+    cli_hook,
+    cursor_import,
+    hook_learn,
+    review_requests,
+    review_settings,
+    store,
+)
 from tests.ingest_support import SEG, TID, line, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import codex_meta, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -89,13 +97,7 @@ class HookLearningTests(RequestCase):
     def set_policy(self, size: int) -> None:
         """Install an explicit byte grant without introducing a default."""
         self.policy = self.policy.model_copy(update={"max_input_bytes": size})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (
-                json.dumps(self.policy.model_dump(mode="json")),
-                self.digest(self.policy),
-            ),
-        )
+        use_policy(self, self.policy)
 
     def capture(self, **changes: Any) -> hook_learn.HookCapture:
         """Run the public internal boundary with the actual isolated policy."""
@@ -207,18 +209,15 @@ class HookLearningTests(RequestCase):
         )
         self.assertFalse(self.capture().accepted)
 
-    def test_stale_policy_and_missing_policy_refuse(self) -> None:
-        changed = self.policy.model_copy(update={"policy_id": "changed"})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (
-                json.dumps(changed.model_dump(mode="json")),
-                self.digest(changed),
-            ),
-        )
-        self.assertEqual(self.capture().code, "review_policy_required")
-        self.conn.execute("UPDATE review_control SET admission=0")
-        self.assertEqual(self.capture().code, "review_policy_required")
+    def test_learning_off_refuses(self) -> None:
+        review_settings.save(self.home, review_settings.Settings())
+        trace: dict[str, object] = {}
+        with mock.patch.dict(os.environ, self.env, clear=True):
+            hook_learn.capture_event(
+                self.payload(), "codex", "session-end", self.env, trace
+            )
+        self.assertEqual(trace["error"], "unavailable")
+        self.assertEqual(self.count("review_request"), 0)
 
     def test_each_window_gets_its_own_original_budget(self) -> None:
         """A sum of windows above the limit does not stop a capture."""

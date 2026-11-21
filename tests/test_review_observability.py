@@ -36,9 +36,7 @@ class ReviewObservabilityTests(ReviewReceiptCase):
         """Claim and reserve a real request using an explicit policy."""
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         context = ReviewContext(
             request_id=request.id,
@@ -252,7 +250,7 @@ class ReviewObservabilityTests(ReviewReceiptCase):
         first = self.enqueue(self.window(2, 2))
         second = self.enqueue(self.window(3, 3))
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(self.conn, first.id, 1, 12.0)
+            lambda: review_requests.claim_attempt(self.conn, first.id, 12.0)
         )
         self.transaction(
             lambda: review_requests.fail_attempt(
@@ -331,13 +329,11 @@ class ReviewObservabilityTests(ReviewReceiptCase):
             "SELECT id FROM review_request"
         ).fetchone()[0]
         self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request_id, 1, 16.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request_id, 16.0)
         )
         self.conn.execute("UPDATE review_control SET generation=2")
         self.transaction(
-            lambda: review_requests.recover_attempts(self.conn, 2, 17.0)
+            lambda: review_requests.recover_attempts(self.conn, 17.0)
         )
         self.assertIs(self.checks()["review_abandoned"]["ok"], False)
 

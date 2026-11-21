@@ -15,6 +15,7 @@ from muninn.review_evidence_models import EvidenceWindow, SourceRef
 from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewPolicy
 from tests.ingest_support import TID, IngestCase, line, primary, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import PARENT, codex_meta, reply, user_msg
 from tests.test_review_shared_models import policy_data
 
@@ -47,10 +48,9 @@ class RequestCase(IngestCase):
             "LIMIT 1"
         ).fetchone()[0]
         self.scope = Scope(project_id=key, task=None)
+        use_policy(self, self.policy)
         self.conn.execute(
-            "UPDATE review_control SET admission=1,generation=1,"
-            "policy_json=?,policy_digest=?,activated_at=10.0",
-            (canonical_json(self.policy), self.digest(self.policy)),
+            "UPDATE review_control SET generation=1,activated_at=10.0"
         )
 
     def digest(self, policy: ReviewPolicy) -> str:
@@ -95,9 +95,7 @@ class RequestCase(IngestCase):
     def receipt(self, request_id: RequestId) -> None:
         """Emulate a downstream atomic successful commit, without knowledge."""
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request_id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request_id, 12.0)
         )
         self.conn.execute(
             "INSERT INTO review_receipt VALUES(?,?, '[]','[]',13.0,"
@@ -171,7 +169,7 @@ class ReviewRequestTests(RequestCase):
         first = self.enqueue(self.window(2, 2))
         second = self.enqueue(self.window(3, 3))
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(self.conn, first.id, 1, 12.0)
+            lambda: review_requests.claim_attempt(self.conn, first.id, 12.0)
         )
         self.transaction(
             lambda: review_requests.fail_attempt(
@@ -209,19 +207,15 @@ class ReviewRequestTests(RequestCase):
     def test_restart_fences_attempt_not_request(self) -> None:
         request = self.enqueue()
         old = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         self.conn.execute("UPDATE review_control SET generation=2")
         recovered = self.transaction(
-            lambda: review_requests.recover_attempts(self.conn, 2, 14.0)
+            lambda: review_requests.recover_attempts(self.conn, 14.0)
         )
         self.assertEqual(recovered, (request.id,))
         new = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 2, 16.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 16.0)
         )
         self.assertNotEqual(old.id, new.id)
         self.assertEqual(new.request_id, request.id)
@@ -234,9 +228,7 @@ class ReviewRequestTests(RequestCase):
     def test_cancelled_window_suppressed_until_explicit_retry(self) -> None:
         request = self.enqueue()
         old = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         self.transaction(
             lambda: review_requests.cancel_request(self.conn, request.id, 13.0)
@@ -247,14 +239,14 @@ class ReviewRequestTests(RequestCase):
         )
         self.conn.execute("UPDATE review_control SET generation=2")
         self.transaction(
-            lambda: review_requests.recover_attempts(self.conn, 2, 14.0)
+            lambda: review_requests.recover_attempts(self.conn, 14.0)
         )
         self.assertEqual(self.enqueue().state, "cancelled")
         retry = self.transaction(
             lambda: review_requests.retry_request(self.conn, request.id, 15.0)
         )
         new = self.transaction(
-            lambda: review_requests.claim_attempt(self.conn, retry.id, 2, 16.0)
+            lambda: review_requests.claim_attempt(self.conn, retry.id, 16.0)
         )
         self.assertEqual(retry.id, request.id)
         self.assertNotEqual(old.id, new.id)
@@ -328,9 +320,7 @@ class ReviewRequestTests(RequestCase):
     def test_auth_fault_has_no_automatic_retry(self) -> None:
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         failed = self.transaction(
             lambda: review_requests.fail_attempt(
@@ -341,7 +331,7 @@ class ReviewRequestTests(RequestCase):
         with self.assertRaises(ValueError):
             self.transaction(
                 lambda: review_requests.claim_attempt(
-                    self.conn, request.id, 1, 100.0
+                    self.conn, request.id, 100.0
                 )
             )
 
@@ -421,8 +411,6 @@ class ReviewRequestTests(RequestCase):
         self.append(self.path, [user_msg(5, "new record")])
         self.run_ingest()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         self.assertEqual(attempt.request_id, request.id)

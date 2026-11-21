@@ -16,6 +16,7 @@ from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewContext
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import line
+from tests.policy_patch import use_policy
 from tests.test_review_requests import RequestCase
 
 
@@ -59,10 +60,7 @@ class ConsumerReadBudgetTests(RequestCase):
     def cap(self, limit: int) -> None:
         """Install the same validated policy bytes in fixture control/rows."""
         self.policy = self.policy.model_copy(update={"max_input_bytes": limit})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
 
     def observe(self, action: Callable[[], object]) -> ReadBudget:
         """Observe one root's actual prefix and selected read accounts."""
@@ -114,7 +112,7 @@ class ConsumerReadBudgetTests(RequestCase):
         grants.append(
             self.observe(
                 lambda: review_requests.claim_attempt(
-                    self.conn, request.id, 1, 12.0
+                    self.conn, request.id, 12.0
                 )
             )
         )
@@ -129,9 +127,7 @@ class ConsumerReadBudgetTests(RequestCase):
             )
         )
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 15.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 15.0)
         )
         context = ReviewContext(
             request_id=request.id,
@@ -180,7 +176,7 @@ class ConsumerReadBudgetTests(RequestCase):
                 action = (
                     (
                         lambda r=request: review_requests.claim_attempt(
-                            self.conn, r.id, 1, 14.0
+                            self.conn, r.id, 14.0
                         )
                     )
                     if operation == "claim"
@@ -302,7 +298,7 @@ class ConsumerReadBudgetTests(RequestCase):
                 if count == 4096:
                     self.transaction(
                         lambda r=request: review_requests.claim_attempt(
-                            self.conn, r.id, 1, 12.0
+                            self.conn, r.id, 12.0
                         )
                     )
                     self.transaction(
@@ -314,7 +310,7 @@ class ConsumerReadBudgetTests(RequestCase):
                     with self.assertRaisesRegex(ValueError, "evidence_limit"):
                         self.transaction(
                             lambda r=request: review_requests.claim_attempt(
-                                self.conn, r.id, 1, 12.0
+                                self.conn, r.id, 12.0
                             )
                         )
                     self.assertEqual(
@@ -355,7 +351,7 @@ class ConsumerReadBudgetTests(RequestCase):
             self.assertEqual(self.enqueue().state, "completed")
             self.transaction(
                 lambda: review_requests.claim_attempt(
-                    self.conn, request.id, 1, 15.0
+                    self.conn, request.id, 15.0
                 )
             )
             self.transaction(

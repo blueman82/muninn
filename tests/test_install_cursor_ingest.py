@@ -26,9 +26,7 @@ from muninn.review_evidence_models import (
     EvidenceWindow,
     SourceRef,
 )
-from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
-from muninn.review_progress import digest
 from tests import test_install_ingest
 from tests.classify_claude_support import claude_rec, text_block
 from tests.ingest_support import line
@@ -143,9 +141,7 @@ class FreshCursorReplayTests(unittest.TestCase):
         )
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "UPDATE review_control SET admission=1,generation=1,"
-            "policy_json=?,policy_digest=?,activated_at=10.0",
-            (canonical_json(policy), digest(policy)),
+            "UPDATE review_control SET generation=1,activated_at=10.0"
         )
         request = review_requests.enqueue_review(
             conn, self.window, self.selected[0].scope, policy, "explicit", 11.0
@@ -163,7 +159,7 @@ class FreshCursorReplayTests(unittest.TestCase):
                 "INSERT INTO review_input VALUES(?,?)",
                 (request.id, evidence.id),
             )
-        attempt = review_requests.claim_attempt(conn, request.id, 1, 12.0)
+        attempt = review_requests.claim_attempt(conn, request.id, 12.0)
         conn.execute("UPDATE review_control SET admission=0")
         conn.execute("COMMIT")
         self.work = self.ctx.data / "review-work" / attempt.id

@@ -15,10 +15,9 @@ from muninn import (
     review_runtime_authority,
 )
 from muninn import review_runtime_bridge as bridge
-from muninn.review_commit_state import checked_request_policy
 from muninn.review_json import canonical_json
 from muninn.review_learner_result import mark_correction
-from muninn.review_models import ReviewContext
+from muninn.review_models import ReviewContext, ReviewPolicy
 from muninn.review_read_budget import ReadBudget
 from tests.managed_codex_support import (
     host_enrollment,
@@ -28,6 +27,7 @@ from tests.managed_codex_support import (
     private_authority_fixture,
     publish_authority,
 )
+from tests.policy_patch import use_policy
 from tests.test_review_codex_production import experimental_policy
 from tests.test_review_requests import RequestCase
 
@@ -38,10 +38,7 @@ class RuntimeBridgeTests(RequestCase):
     def setUp(self) -> None:
         super().setUp()
         self.policy = experimental_policy(self.home)
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        self.store_policy(self.policy)
         self.request = self.enqueue()
         self.old = self.policy
         self.new = managed_policy(self.old, self.tmp / "manager")
@@ -52,10 +49,7 @@ class RuntimeBridgeTests(RequestCase):
             host_enrollment=host_enrollment(self.old, self.new),
         )
         publish_authority(self.home, self.old, self.new, capsule)
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.new), self.digest(self.new)),
-        )
+        self.store_policy(self.new)
         if sys.platform == "win32":
             self.enterContext(private_authority_fixture(self.home))
         self.enterContext(
@@ -63,6 +57,15 @@ class RuntimeBridgeTests(RequestCase):
                 "muninn.review_managed_host.observe",
                 return_value=physical_host(),
             )
+        )
+
+    def store_policy(self, policy: ReviewPolicy) -> None:
+        """Write the control row the bridge itself still reads."""
+        use_policy(self, policy)
+        self.conn.execute(
+            "UPDATE review_control SET admission=1,"
+            "policy_json=?,policy_digest=?",
+            (canonical_json(policy), self.digest(policy)),
         )
 
     def row(self) -> sqlite3.Row:
@@ -82,7 +85,6 @@ class RuntimeBridgeTests(RequestCase):
             lambda: review_claims.claim(
                 self.conn,
                 self.request.id,
-                1,
                 12.0,
                 proposal=False,
             )
@@ -138,7 +140,6 @@ class RuntimeBridgeTests(RequestCase):
             lambda: review_claims.claim(
                 self.conn,
                 self.request.id,
-                1,
                 12.0,
                 proposal=False,
             )
@@ -167,9 +168,6 @@ class RuntimeBridgeTests(RequestCase):
             )
         )
         self.assertEqual(call.policy_digest, self.digest(self.new))
-        self.assertEqual(
-            checked_request_policy(self.conn, self.row()), self.new
-        )
         self.conn.execute(
             "UPDATE review_call SET state='completed',ended_at=14.0"
         )
@@ -178,8 +176,3 @@ class RuntimeBridgeTests(RequestCase):
             self.conn.execute("SELECT outcome FROM review_call").fetchone()[0],
             "correction_format_requested",
         )
-        self.conn.execute("UPDATE review_control SET generation=2")
-        with self.assertRaisesRegex(ValueError, "rejected_fenced"):
-            self.transaction(
-                lambda: mark_correction(self.conn, context, "format")
-            )

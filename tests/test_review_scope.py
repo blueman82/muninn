@@ -10,6 +10,7 @@ from muninn.knowledge_scope import scope_applies
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_json import canonical_json
 from tests.ingest_support import rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
 from tests.test_review_commit import CommitCase
 from tests.test_review_requests import RequestCase
@@ -224,10 +225,7 @@ class GlobalScopeTests(ScopeCommitCase):
     def allow_global(self) -> None:
         """Enable the explicit policy in both snapshot and active control."""
         self.policy = self.policy.model_copy(update={"allow_global": True})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
 
     def test_exact_global_relation_does_not_bypass_policy(self) -> None:
         self.assertTrue(scope_applies(self.evidence[0].scope, self.scope))
@@ -266,15 +264,12 @@ class GlobalScopeTests(ScopeCommitCase):
         )
         self.assertEqual(self.counts(), (1, 1, 1, 1, 0, 1, 1))
 
-    def test_global_commit_requires_current_enabled_policy(self) -> None:
+    def test_global_commit_requires_global_permission(self) -> None:
         self.allow_global()
         self.context = self.start()
         self.policy = self.policy.model_copy(update={"allow_global": False})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
-        with self.assertRaisesRegex(ValueError, "rejected_validation"):
+        use_policy(self, self.policy)
+        with self.assertRaisesRegex(ValueError, "rejected_scope"):
             self.save(self.result([self.note()]))
         self.assertEqual(self.counts(), (0, 0, 0, 0, 0, 0, 0))
 

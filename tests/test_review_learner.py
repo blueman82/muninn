@@ -6,9 +6,13 @@ import sys
 import time
 from unittest import mock
 
-from muninn import review_provider_claude, review_requests, review_settings
-from muninn.review_json import canonical_json
+from muninn import (
+    review_provider_claude,
+    review_requests,
+    review_settings,
+)
 from muninn.review_learner import Learner
+from tests.policy_patch import patched_policy
 from tests.test_review_requests import RequestCase
 
 FINAL = (
@@ -35,13 +39,10 @@ class LearnerCase(RequestCase):
         super().setUp()
         self.settings = review_settings.Settings(enabled=True)
         review_settings.save(self.home, self.settings)
-        self.policy = review_settings.policy_for(self.settings).model_copy(
+        policy = review_settings.POLICY.model_copy(
             update={"deadline_seconds": 2.0}
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        self.enterContext(patched_policy(policy))
         self.request = self.enqueue()
         self.exe = self.home / "fake-claude"
         self.fake(final())
@@ -96,6 +97,14 @@ class LearnerTests(LearnerCase):
         self.assertEqual(self.attempt(), (None, "completed"))
         self.assertEqual(self.count("review_receipt"), 1)
         self.assertEqual(self.count("knowledge"), 1)
+
+    def test_model_change_still_claims_pending_request(self) -> None:
+        review_settings.save(
+            self.home, self.settings.model_copy(update={"model": "opus"})
+        )
+        self.fake(final(NOTE))
+        self.learner.tick(13.0)
+        self.assertEqual(self.attempt(), (None, "completed"))
 
     def test_disabled_settings_make_no_call(self) -> None:
         review_settings.save(
@@ -160,7 +169,7 @@ class LearnerTests(LearnerCase):
     def test_running_attempt_of_a_stopped_process_is_interrupted(self) -> None:
         attempt = self.transaction(
             lambda: review_requests.claim_attempt(
-                self.conn, self.request.id, 1, 12.0
+                self.conn, self.request.id, 12.0
             )
         )
         self.exe.unlink()

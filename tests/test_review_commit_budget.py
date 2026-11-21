@@ -21,9 +21,9 @@ from muninn.review_evidence_models import (
     EvidenceWindow,
     SourceRef,
 )
-from muninn.review_json import canonical_json
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import line
+from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
 from tests.test_review_commit import CommitCase
 
@@ -44,15 +44,10 @@ class ReviewCommitBudgetTests(CommitCase):
                 "policy_id": self.context.request_id,
             }
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         request = self.enqueue(window)
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 15.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 15.0)
         )
         self.conn.executemany(
             "INSERT INTO review_input VALUES(?,?)",

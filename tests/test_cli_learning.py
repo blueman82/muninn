@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import cli, cli_core, query, review_requests
+from muninn import cli, cli_core, query, review_requests, review_settings
 from muninn.knowledge_models import KnowledgeContext, KnowledgeView, Scope
 from muninn.review_models import Receipt, RequestView, ReviewDetail
+from tests.policy_patch import use_policy
 from tests.test_review_commit import CommitCase
 
 
@@ -165,9 +166,6 @@ class CliLearningTests(CliLearningCase):
         code, out = self.propose()
         self.assertEqual(code, 0)
         self.assertNotEqual(out["attempt_id"], previous)
-        self.assertEqual(
-            self.row("SELECT generation FROM review_control")[0], 1
-        )
         self.assertIsNotNone(
             self.row(
                 "SELECT ended_at FROM review_attempt WHERE id=?", (previous,)
@@ -249,9 +247,7 @@ class CliLearningTests(CliLearningCase):
             "learn", "request", "--session", session, "--from-line", "2"
         )
         self.assertEqual((code, out["error"]), (2, "paired_bounds_required"))
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=NULL,policy_digest=NULL"
-        )
+        review_settings.save(self.home, review_settings.Settings())
         code, out = self.call("learn", "request", "--session", session)
         self.assertEqual((code, out["error"]), (2, "review_policy_required"))
 
@@ -271,14 +267,6 @@ class CliLearningTests(CliLearningCase):
         out = query.search(self.conn, "Python", cwd=cwd, env={})
         self.assertEqual(out["knowledge"], [])
         self.assertTrue(out["hits"])
-
-    def test_policy_digest_and_context_limits_are_explicit(self) -> None:
-        self.conn.execute(
-            "UPDATE review_control SET policy_digest=?", ("f" * 64,)
-        )
-        code, out = self.call("know", "context")
-        self.assertEqual((code, out["error"]), (2, "review_policy_required"))
-        self.assertEqual(self.row("SELECT count(*) FROM review_request")[0], 1)
 
     def test_proposal_invalid_input_returns_content_free_code(self) -> None:
         path = self.tmp / "invalid-proposal.json"
@@ -415,10 +403,7 @@ class CliLearningTests(CliLearningCase):
             (self.scope.model_dump_json(),),
         )
         self.policy = self.policy.model_copy(update={"allow_global": True})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
         ident = self.save(self.result([self.note()])).applied[0].knowledge_id
         code, out = self.call("know", "list")

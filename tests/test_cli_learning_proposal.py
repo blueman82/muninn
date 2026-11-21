@@ -90,15 +90,6 @@ class CliLearningProposalTests(CliLearningCase):
             0,
         )
 
-    def test_intervening_generation_wins(self) -> None:
-        def generation() -> None:
-            self.conn.execute("UPDATE review_control SET generation=2")
-
-        self.check_race(generation)
-        self.assertEqual(
-            self.row("SELECT generation FROM review_control")[0], 2
-        )
-
     def test_failed_claim_rolls_back_old_worker_and_origin(self) -> None:
         self.conn.execute(
             "CREATE TRIGGER reject_local BEFORE INSERT ON review_attempt "

@@ -6,7 +6,6 @@ import os
 import sqlite3
 import tempfile
 import time
-from contextlib import closing
 from pathlib import Path
 
 from muninn import (
@@ -24,8 +23,7 @@ from muninn.review_instructions import artifact
 from muninn.review_json import canonical_json_value
 from muninn.review_learner_result import execute, failure_code
 from muninn.review_learner_round import Round
-from muninn.review_models import RequestView, ReviewContext, ReviewPolicy
-from muninn.review_progress import digest
+from muninn.review_models import RequestView, ReviewContext
 from muninn.review_request_views import request_view
 from muninn.review_requests import (
     claim_or_refuse_attempt,
@@ -33,7 +31,7 @@ from muninn.review_requests import (
     recover_attempts,
 )
 from muninn.review_rounds import round_schema
-from muninn.review_settings import Settings, load
+from muninn.review_settings import POLICY, Settings, load
 
 _PROVIDERS = {
     "claude": review_provider_claude,
@@ -96,7 +94,7 @@ class Learner:
             return
         try:
             self._tick(settings, now)
-        except store.BusyError:
+        except (store.BusyError, store.StoreUnavailableError):
             return
         except sqlite3.OperationalError as exc:
             if not is_contention(exc):
@@ -104,71 +102,47 @@ class Learner:
 
     def _tick(self, settings: Settings, now: float) -> None:
         """Recover once, continue decisions, then review one request."""
-        try:
-            with closing(store.connect_ro(store.db_path(self.home))) as conn:
-                row = conn.execute(
-                    "SELECT admission,policy_json FROM review_control"
-                ).fetchone()
-        except store.StoreUnavailableError:
-            return
-        if not row[0] or row[1] is None:
-            return
-        policy = ReviewPolicy.model_validate_json(row[1])
         if not self._recovered:
             self._recover(now)
-        generation = self._generation()
-        self._catchup = catch_up_due(self.home, policy, now, self._catchup)
-        continue_decisions(self.home, generation, now)
-        pending = self._claim(policy, generation, now)
+        self._catchup = catch_up_due(self.home, POLICY, now, self._catchup)
+        continue_decisions(self.home, now)
+        pending = self._claim(now)
         while pending is not None and self._round(settings, pending, now):
             pass
 
     def _recover(self, now: float) -> None:
         """Fence attempts that a stopped process left running."""
         with database(self.home) as conn:
-            generation = conn.execute(
-                "UPDATE review_control SET generation=generation+1 "
-                "RETURNING generation"
-            ).fetchone()[0]
-            recover_attempts(conn, generation, now)
+            recover_attempts(conn, now)
         self._recovered = True
 
-    def _generation(self) -> int:
-        """Read the current generation."""
-        with closing(store.connect_ro(store.db_path(self.home))) as conn:
-            return conn.execute(
-                "SELECT generation FROM review_control"
-            ).fetchone()[0]
-
-    def _claim(
-        self, policy: ReviewPolicy, generation: int, now: float
-    ) -> Round | None:
+    def _claim(self, now: float) -> Round | None:
         """Claim the oldest ready request, new work before history."""
         with database(self.home) as conn:
             row = conn.execute(
                 "SELECT * FROM review_request WHERE candidate_id IS NULL "
                 "AND state IN ('pending','waiting') "
-                "AND (retry_at IS NULL OR retry_at<=?) AND policy_digest=? "
+                "AND (retry_at IS NULL OR retry_at<=?) "
                 "ORDER BY CASE WHEN trigger='history' "
                 "THEN 1 ELSE 0 END,created_at,id LIMIT 1",
-                (now, digest(policy)),
+                (now,),
             ).fetchone()
             if row is None:
                 return None
             view = request_view(row)
-            attempt = claim_or_refuse_attempt(conn, view.id, generation, now)
+            attempt = claim_or_refuse_attempt(conn, view.id, now)
             if isinstance(attempt, RequestView):
                 return None
         context = ReviewContext(
             request_id=view.id,
             attempt_id=attempt.id,
-            generation=generation,
+            generation=1,
             scope=view.scope,
-            policy=policy,
+            policy=POLICY,
             admitted_windows=(view.window,),
             evidence_ids=(),
             round_index=1,
-            deadline=time.monotonic() + policy.deadline_seconds,
+            deadline=time.monotonic() + POLICY.deadline_seconds,
         )
         return Round(context, {}, {})
 

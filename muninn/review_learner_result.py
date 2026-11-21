@@ -25,7 +25,6 @@ from muninn.review_progress import digest
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
 from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
-from muninn.review_runtime_bridge import effective_policy
 
 
 class Outcome(Protocol):
@@ -198,37 +197,20 @@ def mark_correction(
     """Mark one completed call under the caller's fenced transaction."""
     if not conn.in_transaction:
         raise ValueError("transaction_required")
-    row = conn.execute(
-        "SELECT * FROM review_request WHERE id=?", (context.request_id,)
-    ).fetchone()
-    try:
-        if row is None or effective_policy(conn, row) != context.policy:
-            raise ValueError("rejected_fenced")
-    except (ValueError, OSError):
-        raise ValueError("rejected_fenced") from None
-    policy = row["policy_json"]
     changed = conn.execute(
         "UPDATE review_call SET outcome=? WHERE attempt_id=? "
         "AND round_index=? AND state='completed' AND ended_at IS NOT NULL "
         "AND policy_digest=? AND EXISTS ("
         "SELECT 1 FROM review_request r JOIN review_attempt a "
-        "ON a.id=r.current_attempt_id CROSS JOIN review_control c "
+        "ON a.id=r.current_attempt_id "
         "WHERE r.id=? AND a.id=review_call.attempt_id AND a.request_id=r.id "
-        "AND r.state='running' AND a.ended_at IS NULL "
-        "AND a.generation=? AND c.generation=a.generation "
-        "AND c.admission=1 AND r.policy_digest=? "
-        "AND c.policy_digest=? "
-        "AND r.policy_json=?)",
+        "AND r.state='running' AND a.ended_at IS NULL)",
         (
             f"correction_{kind}_requested",
             context.attempt_id,
             context.round_index,
             digest(context.policy),
             context.request_id,
-            context.generation,
-            row["policy_digest"],
-            digest(context.policy),
-            policy,
         ),
     ).rowcount
     if changed != 1:

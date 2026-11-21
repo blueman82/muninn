@@ -22,7 +22,6 @@ from muninn.review_rounds import (
     execute_read,
     prepare_context,
 )
-from muninn.review_runtime_bridge import effective_policy
 
 
 def refresh(home: Path, context: ReviewContext) -> ReviewContext:
@@ -30,12 +29,9 @@ def refresh(home: Path, context: ReviewContext) -> ReviewContext:
     check_round(context)
     with closing(store.connect_ro(store.db_path(home))) as conn:
         row = conn.execute(
-            "SELECT r.*,a.generation,a.ended_at,"
-            "c.generation AS active_generation,"
-            "c.admission,c.policy_digest AS active_policy "
-            "FROM review_request r "
+            "SELECT r.*,a.ended_at FROM review_request r "
             "JOIN review_attempt a ON a.id=r.current_attempt_id "
-            "CROSS JOIN review_control c WHERE r.id=?",
+            "WHERE r.id=?",
             (context.request_id,),
         ).fetchone()
         if (
@@ -43,12 +39,8 @@ def refresh(home: Path, context: ReviewContext) -> ReviewContext:
             or row["current_attempt_id"] != context.attempt_id
             or row["state"] != "running"
             or row["ended_at"] is not None
-            or row["generation"] != context.generation
-            or row["active_generation"] != context.generation
         ):
             raise ValueError("rejected_fenced")
-        if effective_policy(conn, row) != context.policy:
-            raise ValueError("review_policy_required")
         ids = tuple(
             row[0]
             for row in conn.execute(

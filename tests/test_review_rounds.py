@@ -218,9 +218,7 @@ class ReviewReadAdmissionTests(RequestCase):
     def test_evidence_content_follows_durable_admission(self) -> None:
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         admitted = ReviewContext(
             request_id=request.id,
@@ -271,9 +269,7 @@ class NativeReviewReadTests(unittest.TestCase):
         self.addCleanup(case.doCleanups)
         request = case.enqueue()
         attempt = case.transaction(
-            lambda: review_requests.claim_attempt(
-                case.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(case.conn, request.id, 12.0)
         )
         admitted = ReviewContext(
             request_id=request.id,

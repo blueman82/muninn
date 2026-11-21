@@ -20,6 +20,7 @@ from muninn.review_evidence_models import (
 from muninn.review_json import canonical_json
 from muninn.review_models import ProposalInput, ReviewPolicy
 from muninn.review_progress import digest
+from tests.policy_patch import patched_policy
 from tests.test_review_shared_models import policy_data
 
 
@@ -143,8 +144,9 @@ def window_note(
                 "no_change_reason": None,
             }
         )
-        receipt = cli_learn.propose(
-            home, ProposalInput(request_id=request.id, result=result)
-        )
+        with patched_policy(policy):
+            receipt = cli_learn.propose(
+                home, ProposalInput(request_id=request.id, result=result)
+            )
         assert receipt.outcome == "completed" and len(receipt.applied) == 1
         return receipt.applied[0].knowledge_id

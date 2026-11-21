@@ -17,7 +17,6 @@ from muninn import (
 from muninn.knowledge_models import ReviewResult
 from muninn.review_commit import CommitContext
 from muninn.review_evidence_models import EvidenceRecord
-from muninn.review_json import canonical_json
 from muninn.review_models import Receipt
 from tests.ingest_support import primary, rollout
 from tests.test_classify import user_msg
@@ -70,9 +69,7 @@ class CommitCase(RequestCase):
             [(request.id, ident) for ident in ids],
         )
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         return CommitContext(
             home=self.home,
@@ -173,9 +170,8 @@ class ReviewCommitTests(CommitCase):
         self.assertEqual(receipt.request_id, self.context.request_id)
         self.assertEqual(self.counts(), (1, 1, 1, 1, 0, 1, 1))
 
-    def test_stale_revision_generation_scope_or_evidence_refused(self) -> None:
+    def test_stale_revision_scope_or_evidence_refused(self) -> None:
         for fault, code in (
-            ("generation", "rejected_fenced"),
             ("scope", "rejected_scope"),
             ("evidence", "rejected_evidence"),
             ("revision", "rejected_revision"),
@@ -185,11 +181,7 @@ class ReviewCommitTests(CommitCase):
                 case.setUp()
                 try:
                     change = case.note()
-                    if fault == "generation":
-                        case.conn.execute(
-                            "UPDATE review_control SET generation=2"
-                        )
-                    elif fault == "scope":
+                    if fault == "scope":
                         change["scope"] = {"project_id": "wrong", "task": None}
                     elif fault == "evidence":
                         case.path.write_bytes(
@@ -406,18 +398,6 @@ class ReviewCommitTests(CommitCase):
             self.save(self.result([self.note()]))
         self.assertTrue(self.conn.in_transaction)
         self.conn.rollback()
-
-    def test_policy_change_rejects_without_mutating_snapshot(self) -> None:
-        original = canonical_json(self.policy)
-        self.conn.execute(
-            "UPDATE review_control SET policy_digest=?", ("f" * 64,)
-        )
-        with self.assertRaisesRegex(ValueError, "rejected_validation"):
-            self.save(self.result([self.note()]))
-        self.assertEqual(
-            self.row("SELECT policy_json FROM review_request")[0],
-            original,
-        )
 
     def test_commit_does_not_reacquire_writer(self) -> None:
         with (

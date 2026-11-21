@@ -13,9 +13,9 @@ from muninn import (
     review_requests,
     store,
 )
-from muninn.review_json import canonical_json
 from muninn.review_models import AttemptView, ReviewContext
 from tests.ingest_support import TID, line
+from tests.policy_patch import use_policy
 from tests.test_review_commit import CommitCase
 
 
@@ -30,7 +30,6 @@ class LocalProposalTests(CommitCase):
             lambda: review_requests.claim_proposal(
                 self.conn,
                 request_id or self.context.request_id,
-                generation,
                 15.0,
             )
         )
@@ -60,10 +59,7 @@ class LocalProposalTests(CommitCase):
                 self.conn, self.context.request_id, 14.0
             )
         )
-        values = (canonical_json(self.policy), self.digest(self.policy))
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?", values
-        )
+        use_policy(self, self.policy)
         request = self.enqueue(self.window(first))
         self.conn.executemany(
             "INSERT INTO review_input VALUES(?,?)",
@@ -169,18 +165,6 @@ class LocalProposalTests(CommitCase):
             self.policy.max_attempts,
         )
 
-    def test_current_generation_and_caller_transaction_required(self) -> None:
-        before = self.state()
-        with self.assertRaisesRegex(ValueError, "caller_transaction_required"):
-            review_requests.claim_proposal(
-                self.conn, self.context.request_id, 1, 15.0
-            )
-        for generation in (0, 2, True):
-            with self.subTest(generation=generation):
-                with self.assertRaisesRegex(ValueError, "rejected_fenced"):
-                    self.claim(generation)
-                self.assertEqual(self.state(), before)
-
     def test_concurrency_refusal_does_not_fence_another_request(self) -> None:
         other = self.enqueue(self.window(2, 2))
         before = self.state()
@@ -227,7 +211,7 @@ class LocalProposalTests(CommitCase):
         self.install_policy()
         worker = self.transaction(
             lambda: review_requests.claim_attempt(
-                self.conn, self.context.request_id, 1, 12.0
+                self.conn, self.context.request_id, 12.0
             )
         )
         self.context = self.context.model_copy(
@@ -293,18 +277,10 @@ class LocalProposalTests(CommitCase):
             (2, 13.0),
         )
 
-    def test_policy_source_erasure_and_authority_refuse_before_fencing(
+    def test_source_erasure_and_authority_refuse_before_fencing(
         self,
     ) -> None:
         faults = (
-            (
-                "UPDATE review_control SET admission=0",
-                "review_policy_required",
-            ),
-            (
-                "UPDATE review_control SET policy_digest='changed'",
-                "review_policy_required",
-            ),
             ("UPDATE source SET status='missing'", "source_unavailable"),
             (
                 "UPDATE review_evidence SET state='erased',excerpt=NULL",
@@ -324,7 +300,7 @@ class LocalProposalTests(CommitCase):
                     before = self.state()
                     with self.assertRaisesRegex(ValueError, code):
                         review_requests.claim_proposal(
-                            self.conn, self.context.request_id, 1, 15.0
+                            self.conn, self.context.request_id, 15.0
                         )
                     self.assertEqual(self.state(), before)
                 finally:
@@ -401,7 +377,7 @@ class LocalProposalTests(CommitCase):
             other.execute("PRAGMA busy_timeout=0")
             self.conn.execute("BEGIN IMMEDIATE")
             local = review_requests.claim_proposal(
-                self.conn, self.context.request_id, 1, 15.0
+                self.conn, self.context.request_id, 15.0
             )
             self.assertNotEqual(
                 other.execute(

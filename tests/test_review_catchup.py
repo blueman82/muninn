@@ -13,9 +13,9 @@ from muninn import (
     review_requests,
     scope,
 )
-from muninn.review_json import canonical_json
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import TID, line, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import codex_meta, turn_context, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -26,10 +26,7 @@ class ReviewCatchupTests(RequestCase):
     def setUp(self) -> None:
         super().setUp()
         self.policy = self.policy.model_copy(update={"max_input_bytes": 65536})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.after_id = 0
 
     def step(self) -> None:
@@ -82,19 +79,6 @@ class ReviewCatchupTests(RequestCase):
             "UPDATE review_control SET activated_at=1800000000.0"
         )
         self.conn.execute("UPDATE source SET first_seen=1800000001.0")
-        self.step()
-        self.assertEqual(self.windows(), [])
-
-    def test_disabled_or_changed_policy_admits_nothing(self) -> None:
-        self.conn.execute("UPDATE review_control SET admission=0")
-        self.step()
-        self.assertEqual(self.windows(), [])
-        changed = self.policy.model_copy(update={"policy_id": "changed"})
-        self.conn.execute(
-            "UPDATE review_control SET admission=1,policy_json=?,"
-            "policy_digest=?",
-            (canonical_json(changed), self.digest(changed)),
-        )
         self.step()
         self.assertEqual(self.windows(), [])
 
@@ -205,10 +189,7 @@ class ReviewCatchupTests(RequestCase):
         )
         self.run_ingest()
         self.policy = self.policy.model_copy(update={"max_input_bytes": 4000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.step()
         self.assertEqual(self.windows(), [(1, 2)])
         self.step()
@@ -357,10 +338,7 @@ class ReviewCatchupTests(RequestCase):
         self,
     ) -> None:
         self.policy = self.policy.model_copy(update={"allow_global": False})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.transaction(
             lambda: review_progress.activate_sources(self.conn, 10.0)
         )
@@ -389,10 +367,7 @@ class ReviewCatchupTests(RequestCase):
         )
         self.run_ingest()
         self.policy = self.policy.model_copy(update={"allow_global": True})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.after_id = 0
         self.step()
         self.assertEqual(self.windows(), [(3, 5)])

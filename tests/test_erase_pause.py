@@ -169,7 +169,6 @@ class InterruptedEraseTests(CommitCase):
                     lambda: review_requests.claim_proposal(
                         self.conn,
                         self.context.request_id,
-                        1,
                         15.0,
                     )
                 )

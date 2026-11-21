@@ -91,9 +91,7 @@ def _fence(conn: sqlite3.Connection) -> sqlite3.Row:
         conn.execute(
             "UPDATE review_control SET admission=0,generation=generation+1"
         )
-        review_requests.recover_attempts(
-            conn, control["generation"] + 1, time.time()
-        )
+        review_requests.recover_attempts(conn, time.time())
         conn.execute("COMMIT")
     except BaseException:
         with contextlib.suppress(BaseException):

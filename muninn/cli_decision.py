@@ -11,7 +11,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from muninn import knowledge_read, query
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
-from muninn.cli_know_shared import saved_policy, scopes
+from muninn.cli_know_shared import scopes
 from muninn.cli_output import redacted
 from muninn.decision_candidates import show_candidate, stage_candidate
 from muninn.decision_models import CandidateInput, DecisionCode, DecisionIntent
@@ -23,6 +23,7 @@ from muninn.knowledge_proof import candidate_proofs
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
+from muninn.review_settings import POLICY
 
 
 def _input[T: CandidateInput | DecisionIntent](path: str, model: type[T]) -> T:
@@ -99,14 +100,13 @@ def _write(
     """Own the SQL transaction inside the one CLI writer root."""
     conn.execute("BEGIN IMMEDIATE")
     try:
-        policy = saved_policy(conn)
         now = time.time()
         if isinstance(value, CandidateInput):
             out = stage_candidate(conn, home, value, now).model_dump(
                 mode="json"
             )
         else:
-            out = _submit(conn, home, value, now, policy)
+            out = _submit(conn, home, value, now, POLICY)
         _unchanged(out)
         conn.commit()
         return out
@@ -119,7 +119,6 @@ def _write(
 def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     """Return explicit views without admitting evidence or changing rows."""
     with knowledge_read.read_snapshot(conn):
-        policy = saved_policy(conn)
         if a.know_cmd == "unresolved":
             if a.unresolved_id is not None:
                 return show_unresolved(conn, a.unresolved_id).model_dump(
@@ -139,7 +138,7 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
         if a.decision_cmd == "show":
             return _unchanged(
                 show_candidate(
-                    conn, a.decision_id, policy.context_bytes
+                    conn, a.decision_id, POLICY.context_bytes
                 ).model_dump(mode="json")
             )
         view = decision_view(conn, a.decision_id)

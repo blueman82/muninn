@@ -11,13 +11,11 @@ from muninn.review_json import canonical_json
 from muninn.review_models import (
     CallView,
     ReviewContext,
-    ReviewPolicy,
     Usage,
 )
 from muninn.review_progress import check_window, digest, require_transaction
 from muninn.review_read_budget import ReadBudget
 from muninn.review_requests import UNKNOWN_CONFIG, request_row, request_view
-from muninn.review_runtime_bridge import effective_policy
 from muninn.review_runtime_models import (
     ManagedCallRecord,
     ManagedCodexSelection,
@@ -39,7 +37,6 @@ def check_context(
 ) -> None:
     """Require the current running attempt and exact admitted policy/window."""
     row = request_row(conn, context.request_id)
-    control = conn.execute("SELECT * FROM review_control").fetchone()
     attempt = conn.execute(
         "SELECT * FROM review_attempt WHERE id=?", (context.attempt_id,)
     ).fetchone()
@@ -49,12 +46,8 @@ def check_context(
         or attempt is None
         or attempt["ended_at"] is not None
         or attempt["request_id"] != context.request_id
-        or attempt["generation"] != context.generation
-        or control["generation"] != context.generation
     ):
         raise ValueError("rejected_fenced")
-    if effective_policy(conn, row) != context.policy:
-        raise ValueError("review_policy_required")
     view = request_view(row)
     if context.scope != view.scope or context.admitted_windows != (
         view.window,
@@ -63,20 +56,6 @@ def check_context(
     if context.round_index > context.policy.max_rounds:
         raise ValueError("budget_round_limit")
     check_window(conn, view.window, view.scope, context.policy, budget=budget)
-
-
-def _policies(
-    conn: sqlite3.Connection, account: str
-) -> tuple[ReviewPolicy, ...]:
-    """Reload account snapshots so policy changes cannot reset caps."""
-    rows = conn.execute(
-        "SELECT DISTINCT r.policy_json FROM review_call c JOIN "
-        "review_attempt a "
-        "ON a.id=c.attempt_id JOIN review_request r ON r.id=a.request_id "
-        "WHERE c.budget_account_id=?",
-        (account,),
-    )
-    return tuple(ReviewPolicy.model_validate_json(row[0]) for row in rows)
 
 
 def reserve_call(
@@ -110,11 +89,7 @@ def reserve_call(
     charge = context.policy.budget.conservative_call_cost_decimal
     if any(call.currency != context.policy.budget.currency for call in calls):
         raise ValueError("budget_currency_mismatch")
-    for policy in (
-        *_policies(conn, context.policy.budget.account_id),
-        context.policy,
-    ):
-        limits([_charge(c) for c in calls], policy.budget, charge, now)
+    limits([_charge(c) for c in calls], context.policy.budget, charge, now)
     limits(
         [_charge(c) for c in calls if c.policy_digest == policy_digest],
         context.policy.budget,

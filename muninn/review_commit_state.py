@@ -15,10 +15,8 @@ from muninn.knowledge_models import (
     UtcSeconds,
 )
 from muninn.knowledge_write import json_value
-from muninn.review_candidates import CommitRejectedError
 from muninn.review_evidence_models import PositiveInt
-from muninn.review_models import Receipt, ReviewPolicy
-from muninn.review_runtime_bridge import effective_policy
+from muninn.review_models import Receipt
 
 
 class CommitContext(StrictModel):
@@ -75,13 +73,3 @@ def stored_receipt(
             }
         )
     )
-
-
-def checked_request_policy(
-    conn: sqlite3.Connection, row: sqlite3.Row
-) -> ReviewPolicy:
-    """Check immutable admission identities without calling admission reads."""
-    try:
-        return effective_policy(conn, row)
-    except (ValueError, OSError):
-        raise CommitRejectedError("rejected_validation") from None

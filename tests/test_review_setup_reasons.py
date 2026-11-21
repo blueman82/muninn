@@ -158,7 +158,6 @@ class PausedLearningRenderingTests(CliLearningCase):
                                 review_requests.claim_attempt,
                                 self.conn,
                                 request.id,
-                                1,
                                 22.0,
                             )
                         )

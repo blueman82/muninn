@@ -212,7 +212,7 @@ class SearchAroundTests(QueryCase):
     def test_knowledge_hits_first(self) -> None:
         wide = scope.global_scope_id(self.rw)
         k1 = self.add_note(self.repo, "use zebra caching for lookups")
-        k2 = self.add_note(wide, "global zebra preference", kind="fact")
+        self.add_note(wide, "global zebra preference", kind="fact")
         old = self.add_note(self.repo, "old zebra decision")
         self.add_note(
             self.repo,
@@ -249,7 +249,7 @@ class SearchAroundTests(QueryCase):
         self.assertEqual(len(got["hits"]), 1)
         self.assertEqual(self.search("zebra", page=2)["knowledge"], [])
         every = self.search("zebra", all_projects=True)["knowledge"]
-        self.assertEqual({entry["id"] for entry in every}, {k1, k2, beta})
+        self.assertEqual({entry["id"] for entry in every}, {k1, beta})
         self.assertEqual(
             self.rw.execute(
                 "SELECT count(*) FROM knowledge_version WHERE knowledge_id=?",

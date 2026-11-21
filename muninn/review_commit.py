@@ -30,9 +30,6 @@ from muninn.review_commit_state import (
     CommitContext as CommitContext,
 )
 from muninn.review_commit_state import (
-    checked_request_policy as checked_request_policy,
-)
-from muninn.review_commit_state import (
     stored_receipt as stored_receipt,
 )
 from muninn.review_evidence import validate_evidence
@@ -47,6 +44,7 @@ from muninn.review_progress import (
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_recovery import clear as clear_issue
 from muninn.review_requests import fail_attempt, request_view
+from muninn.review_settings import POLICY
 from muninn.review_snapshot import snapshot
 from muninn.tombstones import require_current_tombstones
 
@@ -55,11 +53,10 @@ def _current(conn: sqlite3.Connection, context: CommitContext) -> sqlite3.Row:
     """Fence obsolete, ended, cancelled, and cross-request attempts."""
     row = conn.execute(
         "SELECT r.* FROM review_request r JOIN review_attempt a "
-        "ON a.id=r.current_attempt_id JOIN review_control c ON c.singleton=1 "
+        "ON a.id=r.current_attempt_id "
         "WHERE r.id=? AND r.state='running' AND a.id=? AND a.request_id=r.id "
-        "AND a.ended_at IS NULL AND a.generation=? "
-        "AND c.generation=a.generation",
-        (context.request_id, context.attempt_id, context.generation),
+        "AND a.ended_at IS NULL",
+        (context.request_id, context.attempt_id),
     ).fetchone()
     if row is None:
         raise CommitRejectedError("rejected_fenced")
@@ -245,7 +242,7 @@ def commit_review(
             require_current_tombstones(conn, context.home)
             require_transaction(conn, context.now)
             row = _current(conn, context)
-            policy = checked_request_policy(conn, row)
+            policy = POLICY
             if (
                 context.knowledge_digest is not None
                 and context.knowledge_digest

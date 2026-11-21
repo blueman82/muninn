@@ -25,9 +25,7 @@ class ReviewPromptTests(RequestCase):
         """Claim a disposable request and retain the monotonic deadline."""
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         return ReviewContext(
             request_id=request.id,

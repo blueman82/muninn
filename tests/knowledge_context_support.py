@@ -7,6 +7,7 @@ import json
 from muninn import knowledge_push, knowledge_read, knowledge_write
 from muninn.knowledge_models import KnowledgeContext, KnowledgeView, Scope
 from muninn.review_json import canonical_json
+from tests.policy_patch import use_policy
 from tests.test_review_commit import CommitCase
 from tests.test_review_scope import ScopeCommitCase
 
@@ -81,10 +82,7 @@ class KnowledgeContextCase(CommitCase):
             "UPDATE review_evidence SET scope_json=?", (canonical_json(scope),)
         )
         policy = self.policy.model_copy(update={"allow_global": True})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(policy), self.digest(policy)),
-        )
+        use_policy(self, policy)
         return scope
 
     def search(
@@ -124,10 +122,7 @@ class KnowledgeScopeCase(ScopeCommitCase):
     def global_policy(self, *, enabled: bool) -> None:
         """Set explicit fixture policy and current control without defaults."""
         self.policy = self.policy.model_copy(update={"allow_global": enabled})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
 
     def admit_support(self, ident: str) -> tuple[str, ...]:
         """Persist program-resolved support into this fixture's request."""

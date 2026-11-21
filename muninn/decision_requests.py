@@ -30,25 +30,12 @@ from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewPolicy
 from muninn.review_progress import (
     check_window,
-    checked_policy,
     digest,
     require_transaction,
 )
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_request_views import request_row, request_view
-
-
-def _policy(conn: sqlite3.Connection) -> ReviewPolicy:
-    """Load the current presentation and physical limits even while paused."""
-    row = conn.execute("SELECT * FROM review_control").fetchone()
-    if row is None or row["policy_json"] is None:
-        raise ValueError("rejected_validation")
-    policy = checked_policy(
-        ReviewPolicy.model_validate_json(row["policy_json"])
-    )
-    if digest(policy) != row["policy_digest"]:
-        raise ValueError("rejected_validation")
-    return policy
+from muninn.review_settings import POLICY
 
 
 def _approval(
@@ -145,19 +132,12 @@ def _admit(
         "decision_revision=?",
         (view.id, view.revision),
     ).fetchone()
-    control = conn.execute("SELECT * FROM review_control").fetchone()
-    if not control["admission"]:
-        raise ValueError("learning_paused")
     preparation = conn.execute(
         "SELECT r.* FROM review_request r JOIN memory_candidate c "
         "ON c.request_id=r.id WHERE c.id=?",
         (view.id,),
     ).fetchone()
-    if (
-        preparation is None
-        or preparation["policy_digest"] != digest(policy)
-        or preparation["policy_json"] != canonical_json(policy)
-    ):
+    if preparation is None:
         raise ValueError("rejected_validation")
     proof = proof or verify_decision(
         conn,
@@ -200,8 +180,6 @@ def _admit(
         }
         or request_view(existing).window != proof.owner_window
         or existing["scope_json"] != canonical_json(candidate.scope)
-        or existing["policy_json"] != canonical_json(policy)
-        or existing["policy_digest"] != digest(policy)
         or existing["session_root"] != source["session_root"]
     ):
         raise ValueError("rejected_fenced")
@@ -231,15 +209,14 @@ def admit_application(
         ValueError: If approval, current policy or evidence is unavailable.
     """
     require_transaction(conn, now)
-    policy = _policy(conn)
     _approval(conn, ident, revision)
     return _admit(
         conn,
         home,
         decision_view(conn, ident),
         now,
-        policy,
-        ReadBudget(policy.max_input_bytes),
+        POLICY,
+        ReadBudget(POLICY.max_input_bytes),
     )
 
 
@@ -339,15 +316,11 @@ def request_application(
         view = decision_view(conn, ident)
         if view.state == "saved":
             return _saved(conn, view, now)
-        policy = _policy(conn)
-        generation = conn.execute(
-            "SELECT generation FROM review_control"
-        ).fetchone()[0]
         view = _step(
-            conn, home, ident, now, policy, ReadBudget(policy.max_input_bytes)
+            conn, home, ident, now, POLICY, ReadBudget(POLICY.max_input_bytes)
         )
     return (
-        execute_application(home, ident, now, generation)
+        execute_application(home, ident, now)
         if view.state == "approved_pending"
         else view
     )
@@ -355,26 +328,16 @@ def request_application(
 
 def continue_decisions(
     home: Path,
-    generation: int,
     now: float,
     *,
     limit: int = 1,
 ) -> tuple[DecisionView, ...]:
-    """Continue bounded deterministic work under the existing owner's fence."""
+    """Continue bounded deterministic work for waiting decisions."""
+    policy = POLICY
     with database(home) as conn:
         require_transaction(conn, now)
-        control = conn.execute("SELECT * FROM review_control").fetchone()
-        if (
-            type(generation) is not int
-            or generation < 1
-            or generation != control["generation"]
-        ):
-            raise ValueError("rejected_fenced")
-        policy = _policy(conn)
         if type(limit) is not int or not 1 <= limit <= policy.concurrency:
             raise ValueError("decision_invalid")
-        if not control["admission"]:
-            return ()
         rows = conn.execute(
             "SELECT c.id FROM memory_candidate c WHERE "
             "c.state IN "
@@ -404,7 +367,7 @@ def continue_decisions(
             )
     return tuple(
         (
-            execute_application(home, view.id, now, generation)
+            execute_application(home, view.id, now)
             if view.state == "approved_pending"
             else view
         )

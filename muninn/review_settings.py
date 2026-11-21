@@ -69,16 +69,8 @@ def save(home: Path, settings: Settings) -> None:
     file_sync.sync_path(home)
 
 
-def policy_for(settings: Settings) -> ReviewPolicy:
-    """Build the constant review policy for the chosen model and effort.
-
-    Args:
-        settings: Learner settings.
-
-    Returns:
-        The policy; only the runner depends on the settings.
-    """
-    codex = settings.provider == "codex"
+def _policy() -> ReviewPolicy:
+    """Build the constant review policy."""
     return ReviewPolicy(
         schema_version=1,
         policy_id="muninn-learner",
@@ -88,11 +80,11 @@ def policy_for(settings: Settings) -> ReviewPolicy:
             canonical_json_value(result_schema()).encode()
         ).hexdigest(),
         runner=RunnerConfig(
-            runner="codex_cli" if codex else "claude_cli",
-            executable="codex" if codex else "claude",
+            runner="claude_cli",
+            executable="claude",
             version="unversioned",
-            model=settings.model,
-            reasoning=settings.effort,
+            model="sonnet",
+            reasoning="low",
         ),
         max_rounds=2,
         max_input_bytes=1_048_576,
@@ -116,3 +108,7 @@ def policy_for(settings: Settings) -> ReviewPolicy:
             approved_at=0.0,
         ),
     )
+
+
+# The provider, model and effort come from the settings file at call time.
+POLICY = _policy()

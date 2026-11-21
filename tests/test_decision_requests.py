@@ -121,34 +121,6 @@ class DecisionRequestTests(DecisionCase):
             )[0]
         )
 
-    def test_current_policy_change_never_rebinds_existing_pair(self) -> None:
-        candidate = self.stage()
-        self.approve(self.intent(candidate.id))
-        application = self.application(candidate.id)
-        before = tuple(
-            self.row("SELECT * FROM review_request WHERE id=?", (application,))
-        )
-        self.conn.execute("UPDATE review_control SET admission=0")
-        view = decision_requests.request_application(
-            self.home, candidate.id, 26.0
-        )
-        self.assertEqual(view.code, "learning_paused")
-        self.assertEqual(
-            tuple(
-                self.row(
-                    "SELECT * FROM review_request WHERE id=?", (application,)
-                )
-            ),
-            before,
-        )
-        self.assertEqual(
-            self.row(
-                "SELECT count(*) FROM review_request WHERE candidate_id=?",
-                (candidate.id,),
-            )[0],
-            1,
-        )
-
     def test_application_is_not_source_coverage_or_cancellation(self) -> None:
         candidate = self.stage()
         self.approve(self.intent(candidate.id))
@@ -212,41 +184,6 @@ class DecisionRequestTests(DecisionCase):
             lambda: advance_completed(self.conn, self.window().source, 30.0)
         )
         self.assertEqual(completed, 1)
-
-    def test_changed_policy_preserves_historical_application(self) -> None:
-        candidate = self.stage()
-        self.approve(self.intent(candidate.id))
-        application = self.application(candidate.id)
-        before = tuple(
-            self.row("SELECT * FROM review_request WHERE id=?", (application,))
-        )
-        changed = self.policy.model_copy(update={"context_bytes": 1200})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (changed.model_dump_json(), self.digest(changed)),
-        )
-        result = decision_requests.request_application(
-            self.home, candidate.id, 30.0
-        )
-        self.assertEqual(
-            (result.state, result.code),
-            ("approved_pending", "rejected_validation"),
-        )
-        self.assertEqual(
-            tuple(
-                self.row(
-                    "SELECT * FROM review_request WHERE id=?", (application,)
-                )
-            ),
-            before,
-        )
-        self.assertEqual(
-            self.row(
-                "SELECT count(*) FROM review_request WHERE candidate_id=?",
-                (candidate.id,),
-            )[0],
-            1,
-        )
 
     def test_verified_reject_fences_older_application(self) -> None:
         candidate = self.stage()

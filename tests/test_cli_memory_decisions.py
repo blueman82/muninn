@@ -20,6 +20,7 @@ from muninn.decision_requests import admit_application, request_application
 from muninn.knowledge_erase import erase_review_support
 from muninn.review_models import Receipt
 from tests.decision_support import DecisionCase
+from tests.policy_patch import use_policy
 from tests.test_cli_learning import CliLearningCase
 
 
@@ -68,50 +69,6 @@ class DecisionCliTests(DecisionCliCase):
         self.assertEqual(self.call("know", "unresolved")[1]["unresolved"], [])
         self.assertEqual(self.projection(), before)
 
-    def test_paused_view_uses_actual_policy_ceiling_and_strict_digest(
-        self,
-    ) -> None:
-        ident = str(self.stage_cli()["id"])
-        question = {
-            "claim": "Choose",
-            "question": "Which rule?",
-            "affected": [],
-            "evidence_refs": [],
-        }
-        uid = self.save(self.result([], [question])).unresolved_ids[0]
-        commands = (
-            ("decision", "show", ident),
-            ("decision", "status", ident),
-            ("unresolved",),
-            ("unresolved", uid),
-        )
-        for admission in (1, 0):
-            self.conn.execute(
-                "UPDATE review_control SET admission=?", (admission,)
-            )
-            before = self.projection()
-            for args in commands:
-                self.assertEqual(self.call("know", *args)[0], 0)
-            self.assertEqual(self.projection(), before)
-        self.conn.execute(
-            "UPDATE review_control SET policy_digest=?", ("f" * 64,)
-        )
-        for args in commands:
-            self.assertEqual(
-                self.call("know", *args)[1]["error"], "review_policy_required"
-            )
-        for value in ("{}", None):
-            self.conn.execute(
-                "UPDATE review_control SET policy_json=?", (value,)
-            )
-            before = self.projection()
-            for args in commands:
-                self.assertEqual(
-                    self.call("know", *args)[1]["error"],
-                    "review_policy_required",
-                )
-            self.assertEqual(self.projection(), before)
-
     def test_invalid_input_ids_and_missing_files_are_safe(self) -> None:
         for args in (
             ("decision", "show", "D_bad"),
@@ -141,10 +98,7 @@ class DecisionCliTests(DecisionCliCase):
             self.policy = original.model_copy(
                 update={"context_bytes": ceiling}
             )
-            self.conn.execute(
-                "UPDATE review_control SET policy_json=?,policy_digest=?",
-                (self.policy.model_dump_json(), self.digest(self.policy)),
-            )
+            use_policy(self, self.policy)
             code, result = self.call("know", "decision", "show", view.id)
             self.assertEqual(code, expected, result)
             if expected:
@@ -258,7 +212,6 @@ class DecisionReadSnapshotTests(DecisionCliCase):
             return read
 
         names = (
-            "saved_policy",
             "scopes",
             "show_candidate",
             "decision_view",
@@ -272,19 +225,15 @@ class DecisionReadSnapshotTests(DecisionCliCase):
                         cli_decision, name, side_effect=observer(name)
                     )
                 )
-            for admission in (1, 0):
-                self.conn.execute(
-                    "UPDATE review_control SET admission=?", (admission,)
-                )
-                before = self.projection()
-                for args in (
-                    ("decision", "show", ident),
-                    ("decision", "status", ident),
-                    ("unresolved",),
-                    ("unresolved", uid),
-                ):
-                    self.assertEqual(self.call("know", *args)[0], 0)
-                self.assertEqual(self.projection(), before)
+            before = self.projection()
+            for args in (
+                ("decision", "show", ident),
+                ("decision", "status", ident),
+                ("unresolved",),
+                ("unresolved", uid),
+            ):
+                self.assertEqual(self.call("know", *args)[0], 0)
+            self.assertEqual(self.projection(), before)
         self.assertEqual({name for name, _ in observed}, set(names))
         self.assertTrue(all(active for _, active in observed), observed)
 

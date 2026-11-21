@@ -17,7 +17,7 @@ from muninn.review_requests import claim_attempt
 
 
 def execute_application(
-    home: Path, ident: DecisionId, now: float, generation: int
+    home: Path, ident: DecisionId, now: float
 ) -> DecisionView:
     """Claim normal bounded work and call the single checked commit owner."""
     try:
@@ -42,13 +42,13 @@ def execute_application(
             if owner is None:
                 return decision_view(conn, ident)
             conn.execute("BEGIN IMMEDIATE")
-            attempt = claim_attempt(conn, row["id"], generation, now)
+            attempt = claim_attempt(conn, row["id"], now)
             conn.commit()
             context = CommitContext(
                 home=home,
                 request_id=row["id"],
                 attempt_id=attempt.id,
-                generation=generation,
+                generation=1,
                 evidence_ids=tuple(
                     r[0]
                     for r in conn.execute(
@@ -89,7 +89,6 @@ def _refusal(home: Path, ident: DecisionId, exc: ValueError) -> DecisionView:
         "rejected_erased",
         "rejected_fenced",
         "evidence_limit",
-        "learning_paused",
         "evidence_byte_limit",
         "evidence_record_limit",
         "evidence_work_limit",

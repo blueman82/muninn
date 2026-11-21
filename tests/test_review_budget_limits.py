@@ -9,9 +9,9 @@ from typing import Any
 from unittest import mock
 
 from muninn import review_budget, review_progress, review_requests, store
-from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewContext
 from tests.ingest_support import rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import codex_meta, reply, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -27,18 +27,13 @@ class ReviewBudgetLimitTests(RequestCase):
                 "budget": self.policy.budget.model_copy(update=budget),
             }
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
 
     def context(self) -> ReviewContext:
         """Claim a synthetic request and bind the exact immutable policy."""
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         return ReviewContext(
             request_id=request.id,
@@ -108,7 +103,7 @@ class ReviewBudgetLimitTests(RequestCase):
         )
         attempt = self.transaction(
             lambda: review_requests.claim_attempt(
-                self.conn, first.request_id, 1, 81.0
+                self.conn, first.request_id, 81.0
             )
         )
         with self.assertRaisesRegex(ValueError, "budget_wall_limit"):
@@ -127,11 +122,11 @@ class ReviewBudgetLimitTests(RequestCase):
         self.addCleanup(self.conn.close)
         self.conn.execute("UPDATE review_control SET generation=2")
         self.transaction(
-            lambda: review_requests.recover_attempts(self.conn, 2, 75.0)
+            lambda: review_requests.recover_attempts(self.conn, 75.0)
         )
         attempt = self.transaction(
             lambda: review_requests.claim_attempt(
-                self.conn, first.request_id, 2, 76.0
+                self.conn, first.request_id, 76.0
             )
         )
         with self.assertRaisesRegex(ValueError, "budget_wall_limit"):
@@ -308,10 +303,7 @@ class ReviewProgressEdgeTests(RequestCase):
 
     def test_one_refused_source_does_not_starve_other_sources(self) -> None:
         self.policy = self.policy.model_copy(update={"max_input_bytes": 8192})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.append(self.path, [{"type": "noop"}] * 400)
         self.run_ingest()
         self.transaction(

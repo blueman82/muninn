@@ -16,6 +16,7 @@ from muninn import (
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_models import ReviewContext
 from tests.ingest_support import TID
+from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
 from tests.test_review_requests import RequestCase
 
@@ -27,9 +28,7 @@ class ReviewBudgetTests(RequestCase):
         """Claim a request and construct its explicit runtime context."""
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         return ReviewContext(
             request_id=request.id,
@@ -58,34 +57,7 @@ class ReviewBudgetTests(RequestCase):
                 ),
             }
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
-
-    def test_shared_cost_caps_keep_unknown_charges_across_policies(
-        self,
-    ) -> None:
-        for name in ("first", "second"):
-            self.cost_policy(name, "2.00", "0.75")
-            context = self.context()
-            self.conn.execute("BEGIN IMMEDIATE")
-            call = review_budget.reserve_call(self.conn, context, 13.0)
-            review_requests.cancel_request(self.conn, context.request_id, 14.0)
-            self.conn.execute("COMMIT")
-            self.assertEqual(call.cost_reservation_decimal, "0.75")
-        self.cost_policy("third", "20.00", "0.75")
-        context = self.context()
-        with self.assertRaisesRegex(ValueError, "budget_cost_limit"):
-            self.transaction(
-                lambda: review_budget.reserve_call(self.conn, context, 15.0)
-            )
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT count(*),min(reserved_at) FROM review_call"
-            ).fetchone()[:],
-            (2, 13.0),
-        )
+        use_policy(self, self.policy)
 
     def test_reservation_precedes_launch(self) -> None:
         context = self.context()
@@ -120,7 +92,7 @@ class ReviewBudgetTests(RequestCase):
         self.addCleanup(self.conn.close)
         self.conn.execute("UPDATE review_control SET generation=2")
         self.transaction(
-            lambda: review_requests.recover_attempts(self.conn, 2, 14.0)
+            lambda: review_requests.recover_attempts(self.conn, 14.0)
         )
         row = self.conn.execute(
             "SELECT state,cost_reservation_decimal,reserved_at "
@@ -131,46 +103,6 @@ class ReviewBudgetTests(RequestCase):
             review_budget.aggregate_usage(
                 self.conn, self.policy.budget.account_id
             ).cost_decimal
-        )
-
-    def test_shared_account_cap_cannot_reset(self) -> None:
-        context = self.context()
-        self.transaction(
-            lambda: review_budget.reserve_call(self.conn, context, 13.0)
-        )
-        self.conn.execute("UPDATE review_call SET state='completed'")
-        self.transaction(
-            lambda: review_budget.reserve_call(
-                self.conn, context.model_copy(update={"round_index": 2}), 14.0
-            )
-        )
-        self.transaction(
-            lambda: review_requests.cancel_request(
-                self.conn, context.request_id, 15.0
-            )
-        )
-        self.policy = self.policy.model_copy(
-            update={
-                "policy_id": "changed",
-                "budget": self.policy.budget.model_copy(
-                    update={"max_model_calls": 100}
-                ),
-            }
-        )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
-        changed = self.context()
-        with self.assertRaisesRegex(ValueError, "budget"):
-            self.transaction(
-                lambda: review_budget.reserve_call(self.conn, changed, 16.0)
-            )
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT count(*),min(reserved_at) FROM review_call"
-            ).fetchone()[:],
-            (2, 13.0),
         )
 
     def test_missing_usage_stays_unknown(self) -> None:
@@ -234,10 +166,7 @@ class ReviewBudgetTests(RequestCase):
                 )
             }
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         context = self.context()
         with self.assertRaisesRegex(ValueError, "budget_charge_unavailable"):
             self.transaction(
@@ -279,21 +208,6 @@ class ReviewBudgetTests(RequestCase):
 
 class ReviewAdmissionEdgeTests(RequestCase):
     """Exercise disabled admission and stale policy control boundaries."""
-
-    def test_disabled_admission_cannot_enqueue(self) -> None:
-        self.conn.execute("UPDATE review_control SET admission=0")
-        with self.assertRaisesRegex(ValueError, "review_policy_required"):
-            self.enqueue()
-
-    def test_control_snapshot_must_match_its_digest(self) -> None:
-        request = self.enqueue()
-        self.conn.execute("UPDATE review_control SET policy_json=NULL")
-        with self.assertRaisesRegex(ValueError, "review_policy_required"):
-            self.transaction(
-                lambda: review_requests.claim_attempt(
-                    self.conn, request.id, 1, 12.0
-                )
-            )
 
     def test_cancelled_gap_does_not_suppress_later_eligible_record(
         self,
@@ -388,23 +302,6 @@ class ReviewAdmissionEdgeTests(RequestCase):
         )
         with self.assertRaisesRegex(ValueError, "evidence_erased"):
             self.enqueue()
-
-    def test_old_generation_failure_cannot_change_current_request(
-        self,
-    ) -> None:
-        request = self.enqueue()
-        attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
-        )
-        self.conn.execute("UPDATE review_control SET generation=2")
-        with self.assertRaisesRegex(ValueError, "rejected_fenced"):
-            self.transaction(
-                lambda: review_requests.fail_attempt(
-                    self.conn, attempt.id, "unavailable", 13.0
-                )
-            )
 
     def test_boundary_prefix_exceeding_policy_bytes_is_admitted(
         self,

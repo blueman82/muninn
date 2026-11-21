@@ -13,6 +13,7 @@ from muninn.redaction import redact
 from muninn.review_json import canonical_json
 from muninn.review_models import Receipt
 from tests.ingest_support import rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
 from tests.test_cli_learning import CliLearningCase
 from tests.test_review_requests import RequestCase
@@ -36,10 +37,7 @@ class KnowledgeStorageProjectionTests(CliLearningCase):
             )
         )
         self.policy = self.policy.model_copy(update={"max_output_bytes": 8192})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.records[1] = user_msg(1, f"Use cache token:\n{CANARY}")
         self.path = self.write(rollout(), self.records)
         self.run_ingest()

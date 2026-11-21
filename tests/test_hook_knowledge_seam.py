@@ -9,9 +9,9 @@ from contextlib import redirect_stdout
 from unittest import mock
 
 from muninn import review_requests
-from muninn.review_json import canonical_json
 from tests.ingest_support import rollout
 from tests.knowledge_context_support import KnowledgeContextCase
+from tests.policy_patch import use_policy
 from tests.test_classify import codex_meta, function_call, user_msg
 
 
@@ -26,10 +26,7 @@ class HookKnowledgeCase(KnowledgeContextCase):
             )
         )
         self.policy = self.policy.model_copy(update={"context_bytes": 10000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
 
     def dispatch(
@@ -229,10 +226,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
     ) -> None:
         ident = self.add()
         self.policy = self.policy.model_copy(update={"context_bytes": 1})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         text = self.body(self.dispatch())
         self.assertLessEqual(len(text.encode()), 4000)
         self.assertIn(ident, text)
@@ -377,10 +371,7 @@ class HookKnowledgeSeamTests(HookKnowledgeCase):
     ) -> None:
         ident = self.add()
         self.policy = self.policy.model_copy(update={"context_bytes": 1})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         answer = self.dispatch()
         text = self.body(answer)
         self.assertIn(ident, text)

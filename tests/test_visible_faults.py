@@ -177,7 +177,7 @@ class ReviewHistoricalGapTests(ReviewReceiptCase):
             if state == "failed":
                 attempt = self.transaction(
                     lambda: review_requests.claim_attempt(
-                        self.conn, request.id, 1, 12.0
+                        self.conn, request.id, 12.0
                     )
                 )
                 self.transaction(
@@ -231,9 +231,7 @@ class ReviewUsageStateTests(ReviewReceiptCase):
         """Claim and reserve a real request using an explicit policy."""
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         context = ReviewContext(
             request_id=request.id,

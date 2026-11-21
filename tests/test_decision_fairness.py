@@ -13,6 +13,7 @@ from muninn import decision_requests, review_requests, review_settings
 from muninn.decision_write import submit_intent
 from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
+from tests.policy_patch import use_policy
 from tests.review_pause_support import initialize
 
 
@@ -36,11 +37,11 @@ class DecisionFairnessTests(DecisionCase):
         a, b = self.waiting_pair()
         self.assertEqual(self.policy.concurrency, 1)
         first = decision_requests.continue_decisions(
-            self.home, 1, 25.0, limit=self.policy.concurrency
+            self.home, 25.0, limit=self.policy.concurrency
         )
         self.assertEqual((first[0].id, first[0].code), (a, "waiting_index"))
         second = decision_requests.continue_decisions(
-            self.home, 1, 26.0, limit=self.policy.concurrency
+            self.home, 26.0, limit=self.policy.concurrency
         )
         self.assertEqual(
             (second[0].id, second[0].state), (b, "approved_pending")
@@ -120,7 +121,7 @@ class DecisionFairnessTests(DecisionCase):
         displays = self.display(a), self.display(b)
         attempts = self.row("SELECT count(*) FROM review_attempt")[0]
         visited = [
-            decision_requests.continue_decisions(self.home, 1, now)[0].id
+            decision_requests.continue_decisions(self.home, now)[0].id
             for now in (25.0, 26.0, 27.0)
         ]
         self.assertEqual(visited, [a, b, a])
@@ -143,7 +144,7 @@ class DecisionFairnessTests(DecisionCase):
         )
         late = self.intent(a)
         self.transaction(lambda: submit_intent(self.conn, late, 30.0))
-        views = decision_requests.continue_decisions(self.home, 1, 31.0)
+        views = decision_requests.continue_decisions(self.home, 31.0)
         self.assertEqual((views[0].id, views[0].state), (a, "saved"))
         self.assertEqual(
             tuple(
@@ -200,13 +201,13 @@ class DecisionFairnessTests(DecisionCase):
                 "SELECT * FROM memory_decision WHERE candidate_id=?", (a.id,)
             )
         )
-        first = decision_requests.continue_decisions(self.home, 1, 25.0)
+        first = decision_requests.continue_decisions(self.home, 25.0)
         self.assertEqual(
             (first[0].id, first[0].code), (a.id, "rejected_revision")
         )
-        second = decision_requests.continue_decisions(self.home, 1, 26.0)
+        second = decision_requests.continue_decisions(self.home, 26.0)
         self.assertEqual((second[0].id, second[0].state), (b.id, "saved"))
-        third = decision_requests.continue_decisions(self.home, 1, 27.0)
+        third = decision_requests.continue_decisions(self.home, 27.0)
         self.assertEqual(
             (third[0].id, third[0].code), (a.id, "rejected_revision")
         )
@@ -236,10 +237,7 @@ class DecisionFairnessTests(DecisionCase):
             )
         )
         self.policy = self.policy.model_copy(update={"concurrency": 2})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
         for candidate in (self.stage(), self.stage()):
             intent = self.intent(candidate.id)
@@ -250,7 +248,7 @@ class DecisionFairnessTests(DecisionCase):
             wraps=decision_requests.verify_decision,
         ) as verify:
             views = decision_requests.continue_decisions(
-                self.home, 1, 25.0, limit=2
+                self.home, 25.0, limit=2
             )
         self.assertEqual(len({view.id for view in views}), 2)
         self.assertTrue(all(view.state == "saved" for view in views))
@@ -277,10 +275,7 @@ class DecisionFairnessTests(DecisionCase):
             )
         )
         self.policy = self.policy.model_copy(update={"concurrency": 2})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
         candidates = self.stage(), self.stage()
         for offset, candidate in enumerate(candidates):
@@ -298,7 +293,7 @@ class DecisionFairnessTests(DecisionCase):
             )
         ]
         with self.assertRaises(sqlite3.IntegrityError):
-            decision_requests.continue_decisions(self.home, 1, 25.0, limit=2)
+            decision_requests.continue_decisions(self.home, 25.0, limit=2)
         self.assertEqual(self.projection(), before)
         self.assertEqual(
             [

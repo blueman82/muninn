@@ -38,7 +38,6 @@ from muninn.review_models import ReviewContext
 from muninn.review_progress import check_window
 from muninn.review_read_budget import ReadBudget
 from muninn.review_request_views import request_row, request_view
-from muninn.review_runtime_bridge import effective_policy
 from muninn.review_selectors import build_record
 
 
@@ -154,19 +153,14 @@ def _current(
     attempt = conn.execute(
         "SELECT * FROM review_attempt WHERE id=?", (context.attempt_id,)
     ).fetchone()
-    control = conn.execute("SELECT * FROM review_control").fetchone()
     if (
         row["state"] != "running"
         or row["current_attempt_id"] != context.attempt_id
         or attempt is None
         or attempt["request_id"] != context.request_id
         or attempt["ended_at"] is not None
-        or attempt["generation"] != context.generation
-        or control["generation"] != context.generation
     ):
         raise ValueError("rejected_fenced")
-    if effective_policy(conn, row) != context.policy:
-        raise ValueError("review_policy_required")
     view = request_view(row)
     if context.scope != view.scope or context.admitted_windows != (
         view.window,

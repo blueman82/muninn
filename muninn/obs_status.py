@@ -34,6 +34,7 @@ DATA_FILES = frozenset(
         "poller.log.1",
         "tombstones.jsonl",
         "tombstone.key",
+        "learning.json",
         "recall.off",
         "recall.advisory",
         "recall-review.sqlite",

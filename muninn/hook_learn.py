@@ -13,8 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from muninn import classify, cursor_import, ingest, store
-from muninn.cli_learn import installed_policy
+from muninn import classify, cursor_import, ingest, review_settings, store
 from muninn.hook_context import as_payload
 from muninn.knowledge_models import Provider, RequestId
 from muninn.obs_log import log_call
@@ -23,6 +22,7 @@ from muninn.review_models import ReviewPolicy
 from muninn.review_originals import originals, reread
 from muninn.review_progress import reconciliation_windows, source_row
 from muninn.review_read_budget import ReadBudget, uncharged
+from muninn.review_settings import POLICY
 from muninn.review_window_fit import admit_window
 
 _EVENTS = {
@@ -287,8 +287,6 @@ def _persist(
     policy: ReviewPolicy,
 ) -> tuple[RequestId, ...]:
     """Recheck active policy and admit complete windows in one transaction."""
-    if installed_policy(conn) != policy:
-        raise ValueError("review_policy_required")
     source = validated_source(
         conn, provider, data, ReadBudget(policy.max_input_bytes)
     )
@@ -386,14 +384,14 @@ def capture_event(
         return
     home = store.data_home(env)
     try:
-        with closing(store.connect_ro(store.db_path(home))) as conn:
-            policy = installed_policy(conn)
+        if not review_settings.load(home).enabled:
+            raise ValueError("review_policy_required")
         result = capture_boundary(
             home,
             cast(Provider, provider),
             event,
             json.dumps(as_payload(payload)).encode(),
-            policy,
+            POLICY,
         )
     except Exception as exc:
         result = failed_capture(exc)

@@ -38,15 +38,9 @@ class SettingsTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     review_settings.load(Path(tmp))
 
-    def test_policy_follows_settings(self) -> None:
-        policy = review_settings.policy_for(
-            review_settings.Settings(model="opus", effort="high")
-        )
-        runner = policy.runner
-        self.assertEqual(
-            (runner.runner, runner.model, runner.reasoning),
-            ("claude_cli", "opus", "high"),
-        )
+    def test_policy_is_constant(self) -> None:
+        policy = review_settings.POLICY
+        self.assertEqual(policy.runner.runner, "claude_cli")
         self.assertEqual(policy.prompt_digest, PROMPT_DIGEST)
         self.assertEqual(policy.hook_wait_seconds, 0)
 

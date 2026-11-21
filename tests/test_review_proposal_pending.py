@@ -26,7 +26,7 @@ class ProposalPendingTests(CommitCase):
     def claim(self, generation: int = 1) -> AttemptView:
         """Use the public local claim inside an already owned transaction."""
         return review_requests.claim_proposal(
-            self.conn, self.context.request_id, generation, 15.0
+            self.conn, self.context.request_id, 15.0
         )
 
     def state(self) -> tuple[str, ...]:
@@ -251,7 +251,7 @@ class ProposalPendingTests(CommitCase):
         with store.writer_lock(self.home, wait_s=0):
             attempt = self.transaction(
                 lambda: review_requests.claim_attempt(
-                    self.conn, self.context.request_id, 1, 15.0
+                    self.conn, self.context.request_id, 15.0
                 )
             )
         self.assertNotEqual(attempt.id, self.context.attempt_id)

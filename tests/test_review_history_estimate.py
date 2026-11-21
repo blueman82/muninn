@@ -8,6 +8,7 @@ import time
 from muninn import review_budget, review_estimate, review_requests
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext
+from tests.policy_patch import use_policy
 from tests.test_review_requests import RequestCase
 
 
@@ -23,15 +24,10 @@ class HistoryEstimateTests(RequestCase):
                 "retry_backoff_seconds": [5.0, 30.0],
             }
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         context = ReviewContext(
             request_id=request.id,

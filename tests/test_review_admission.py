@@ -181,7 +181,7 @@ class AdmissionTests(RequestCase):
     ) -> None:
         past = self.enqueue(self.window(2, 2))
         ended = self.transaction(
-            lambda: review_requests.claim_attempt(self.conn, past.id, 1, 12.0)
+            lambda: review_requests.claim_attempt(self.conn, past.id, 12.0)
         )
         self.conn.execute(
             "UPDATE review_attempt SET ended_at=13.0,outcome='failed',"
@@ -193,9 +193,7 @@ class AdmissionTests(RequestCase):
         )
         running = self.enqueue(self.window(3, 3))
         self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, running.id, 1, 14.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, running.id, 14.0)
         )
         self.enqueue()
         self.transaction(
@@ -278,9 +276,7 @@ class AdmissionTests(RequestCase):
     ) -> None:
         request = self.enqueue()
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         self.conn.execute(
             "UPDATE review_attempt SET ended_at=13.0,outcome='failed',"
