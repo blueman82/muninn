@@ -21,8 +21,7 @@ required check is skipped.
 The runner requires a finite positive module timeout. A timeout names the
 module, retains its partial stdout and stderr, and fails the suite while other
 modules continue. Unix cleanup keeps the leader unreaped through native
-observation of its owned process group. Windows closes its exclusive Job before
-the final output drain. Cleanup has a separate five-second bound; a cleanup
+observation of its owned process group. Cleanup has a separate five-second bound; a cleanup
 failure preserves captured output and fails the module. Ctrl-C cancels queued
 modules, cleans up active modules, and makes the runner exit 130. Ordinary pass,
 failure and no-test exit handling stays the same. The stdlib-only standards
@@ -36,7 +35,7 @@ One-time setup per clone (the first two are checked by the gate and the tests):
 
     git config core.hooksPath .githooks                  # hooks prefer .venv/bin/python3.13 when present
 
-The macOS/Linux `bin/muninn-install` offers this Git-hook setup on first install and
+The `bin/muninn-install` offers this Git-hook setup on first install and
 installs the pinned runtime plus developer requirements in `.venv`. Install ShellCheck
 separately; the hooks run the full gate and fail if a required tool is missing.
 
@@ -58,13 +57,9 @@ supported Python/platform target. Preserve versions unless a tool update is inte
 For each exact version, use PyPI's `/pypi/<package>/<version>/json` wheel records,
 verify downloaded wheel SHA-256 values, and record only approved wheel hashes.
 Retain `--require-hashes` and `--only-binary=:all:`. Verify a fresh install, missing
-and altered artifact rejection, and the native CI matrix, including Windows ARM.
+and altered artifact rejection, and the native CI matrix.
 Hash or wheel failures stop setup; fix the index/network or reviewed lock rather
 than disabling verification or permitting source builds.
-
-On Windows create the same venv with the selected Python 3.13 interpreter and
-use `.\.venv\Scripts\python.exe` in both pip commands and every later test/gate
-command. Explicit interpreter paths require no shell activation.
 
     cp tools/claude-settings.json .claude/settings.json  # Claude Code: gate after every edit, no stopping on a failure
 

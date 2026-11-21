@@ -113,7 +113,7 @@ class ReadBudget:
 def uncharged() -> ReadBudget:
     """Open a separate account for one uncharged identity or boundary read.
 
-    ADR 0025: the line-1 identity read and the eligible boundary read do
+    ADR 0026: the line-1 identity read and the eligible boundary read do
     not charge the window budget. The per-record cap still applies.
 
     Returns:

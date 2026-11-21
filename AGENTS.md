@@ -18,7 +18,7 @@ These are instructions for coding agents that work in this repository. Also use 
 
 - `bin/muninn` is a launcher that finds the interpreter. Do not write a path in the code.
 
-- `bin/muninn-install` is an sh wrapper for `install/installer.py`. It accepts bare, `--check`, `--status`, `--uninstall` and `--leave-unfinished [--check]`. Other arguments pass through.
+- `bin/muninn-install` is an sh wrapper for `install/installer.py`. It accepts bare, `--check`, `--status` and `--uninstall`. Other arguments pass through.
 
 - `bin/muninn-uninstall` calls `bin/muninn-install --uninstall`. It accepts `--dry-run` and `--purge-data`. Agents run only `--dry-run`.
 
@@ -28,11 +28,11 @@ These are instructions for coding agents that work in this repository. Also use 
 
 - `snapshot.py` in `install/` makes a copy of the store before an upgrade.
 
-- `install/` also holds `uninstall.py`, `configedit.py`, `tomledit.py` and `recovery_guidance.py`. The directory has the full module list.
+- `install/` also holds `uninstall.py`, `configedit.py`, and `tomledit.py`. The directory has the full module list.
 
 - `tools/` holds the standards gate (`python3.13 -m tools.check`). It also holds an optional offline replay tool (`tools.replay_retrieval`).
 
-- `integrations/` and `launchd/` hold templates with a literal `@HOME@`. `install/lifecycle.py` makes the Linux and Windows services.
+- `integrations/` and `launchd/` hold templates with a literal `@HOME@`. `install/lifecycle.py` makes the launchd service.
 
 - `.claude/skills/muninn-*` and the copies in `.codex/skills/muninn-*` hold one skill for each user command.
 
@@ -104,8 +104,6 @@ python3.13 -m venv .venv
 .venv/bin/python3.13 -m pip install --require-hashes -r requirements-dev.txt
 source .venv/bin/activate
 ```
-
-On Windows, make the same venv with the selected Python 3.13 interpreter. Use `.\.venv\Scripts\python.exe` in the two pip commands and in all test and gate commands that follow. An explicit interpreter path needs no shell activation.
 
 The owner sets `git config core.hooksPath .githooks`. If Codex cannot write Git metadata, the owner or the Claude session sets the Git hooks.
 

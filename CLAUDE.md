@@ -39,7 +39,7 @@ Line length is 79 (black and ruff, set in `pyproject.toml`). Run the CLI from so
 
 - `cli_rebuild.py` takes `writer_lock` for `rebuild`.
 
-- The lock is `fcntl.flock` on macOS and Linux. It is `msvcrt.locking` on Windows. Readers open the store read-only. Journal mode is `DELETE`.
+- The lock is `fcntl.flock`. Readers open the store read-only. Journal mode is `DELETE`.
 
 - Exit code 3 means busy. Exit code 4 means the store is not available, or a hot journal. It also means a missing or damaged `tombstone.key` (`tombstone_key.py`).
 
@@ -65,11 +65,9 @@ Line length is 79 (black and ruff, set in `pyproject.toml`). Run the CLI from so
 
 - An allowlist controls all logs and reports (ADR 0004). New fields go through the allowlist. They do not contain transcript text.
 
-- **Deployment:** managed services (launchd, a systemd user service or Task Scheduler) and provider hooks run the installed pinned release. macOS and Linux use `~/.local/lib/muninn/current/bin/muninn`.
+- **Deployment:** managed services (launchd) and provider hooks run the installed pinned release. macOS only. It uses `~/.local/lib/muninn/current/bin/muninn`.
 
-- Windows uses the stable launcher pair `muninn.cmd` and `muninn.ps1`, and `lib/selection.json`.
-
-- A source change has no effect on the live system until you run `--upgrade`. An upgrade that completes erases the previous release. You cannot go back to that release (ADR 0001).
+- A source change has no effect on the live system until you run `bin/muninn-install`. An upgrade that completes erases the previous release. You cannot go back to that release (ADR 0001).
 
 - `integrations/` and `launchd/` hold templates with the literal `@HOME@`. `install/steps_release.py` (`_unpack`) replaces it.
 

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-from muninn import cli_serve, ingest, obs, poller_stop, store
+from muninn import cli_serve, ingest, obs, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CliCase
 from tests.home_support import initialize
@@ -93,9 +93,6 @@ class ServeAliveTests(CliCase):
             mock.patch.object(cli_serve.obs, "write_status", spy),
             mock.patch.object(
                 cli_serve.time, "sleep", side_effect=KeyboardInterrupt
-            ),
-            mock.patch.object(
-                poller_stop, "wait", side_effect=KeyboardInterrupt
             ),
             mock.patch.object(
                 cli_serve.time, "monotonic", side_effect=lambda: self.clock[0]

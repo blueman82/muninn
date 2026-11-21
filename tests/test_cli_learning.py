@@ -11,6 +11,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import cli, cli_core, query, review_requests, review_settings
+from muninn.cli_parser import build_parser
 from muninn.knowledge_models import KnowledgeContext, KnowledgeView, Scope
 from muninn.review_models import Receipt, RequestView, ReviewDetail
 from tests.policy_patch import use_policy
@@ -206,43 +207,37 @@ class CliLearningTests(CliLearningCase):
 
     def test_retry_reopens_same_cancelled_request(self) -> None:
         ident = self.context.request_id
-        code, out = self.call("learn", "cancel", ident)
-        self.assertEqual((code, out["state"]), (0, "cancelled"))
+        self.transaction(
+            lambda: review_requests.cancel_request(self.conn, ident, 14.0)
+        )
         code, out = self.call("learn", "retry", ident)
         self.assertEqual(
             (code, out["id"], out["state"]), (0, ident, "pending")
         )
         self.assertEqual(self.row("SELECT count(*) FROM review_request")[0], 1)
 
-    def test_replay_requires_bounds_and_policy(self) -> None:
-        ref = self.window().source
-        session = f"{ref.provider}:{ref.thread_id}"
-        for args in (
-            ("--session", session),
-            ("--session", session, "--from-line", "2", "--through-line", "3"),
-        ):
-            self.assertEqual(self.call("learn", "replay", *args)[0], 2)
-        policy = self.tmp / "policy.json"
-        policy.write_text(self.policy.model_dump_json())
-        code, out = self.call(
-            "learn",
+    def test_removed_learn_commands_are_rejected(self) -> None:
+        for name in (
+            "setup",
+            "resume",
+            "recover-unknown",
             "replay",
-            "--session",
-            session,
-            "--from-line",
-            "2",
-            "--through-line",
-            "3",
-            "--policy",
-            str(policy),
-        )
-        self.assertEqual((code, out["id"]), (0, self.context.request_id))
-        code, out = self.call(
-            "learn", "request", "--session", session, "--from-line", "2"
-        )
-        self.assertEqual((code, out["error"]), (2, "paired_bounds_required"))
+            "dismiss",
+            "cancel",
+        ):
+            with (
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as caught,
+            ):
+                build_parser().parse_args(["learn", name])
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_request_needs_learning_on(self) -> None:
+        ref = self.window().source
         review_settings.save(self.home, review_settings.Settings())
-        code, out = self.call("learn", "request", "--session", session)
+        code, out = self.call(
+            "learn", "request", "--session", f"{ref.provider}:{ref.thread_id}"
+        )
         self.assertEqual((code, out["error"]), (2, "review_policy_required"))
 
     def test_search_joins_current_support_despite_stale_fts(self) -> None:

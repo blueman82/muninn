@@ -1,6 +1,6 @@
 """Cut or skip a live or catch-up window that does not fit the read limit.
 
-ADR 0025: each window gets its own read budget for its admission check. A
+ADR 0026: each window gets its own read budget for its admission check. A
 JSONL window keeps its last line and loses leading lines until it holds at
 most `MAX_LINES` lines and at most the safe limit of original bytes. Muninn
 skips a window when its last line alone passes the safe limit, or when its

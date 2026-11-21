@@ -2,12 +2,12 @@
 # Muninn: cross-provider memory and knowledge
 
 Muninn provides shared session history and a cited knowledge ledger for Claude Code, Codex and
-Cursor. Its Python 3.13+ CLI (`muninn`) keeps the index and knowledge in SQLite, maintained by a background poller (launchd, systemd user service or Task Scheduler).
+Cursor. Its Python 3.13+ CLI (`muninn`) keeps the index and knowledge in SQLite, maintained by a background poller (launchd).
 Automatic recall keeps separate private review metadata. Everything it returns is untrusted historical data, never instructions. MIT licensed (`LICENSE`).
 
 ## Install, upgrade, uninstall, rollback
 
-- Requires: macOS/Linux/Windows x64 or ARM64; Python 3.13+; git. Windows verification: hosted CI only; non-admin desktop and WSL unverified.
+- Requires: macOS; Python 3.13+; git.
 - Optional desktop apps: Claude, Codex, Cursor. Cursor history import: app installation optional.
 - Hook setup: installed app required; absent apps skipped; installed Claude/Codex without config: manual setup guidance.
 
@@ -17,7 +17,7 @@ Automatic recall keeps separate private review metadata. Everything it returns i
 
 - Upgrade: `git pull`, then the same two commands (`--status` compares the installed commit with
   `HEAD`). One pinned release is kept.
-- If the selected Python lacks Muninn's pinned runtime dependencies, the installer asks before creating `.venv` and installing `requirements-runtime.lock`; answer `n` to stop. On macOS/Linux, first install also offers Git-hook setup: it installs runtime and developer requirements into `.venv` and sets `core.hooksPath` to `.githooks`; custom hooks paths are left unchanged. ShellCheck is required separately.
+- If the selected Python lacks Muninn's pinned runtime dependencies, the installer asks before creating `.venv` and installing `requirements-runtime.lock`; answer `n` to stop. First install also offers Git-hook setup: it installs runtime and developer requirements into `.venv` and sets `core.hooksPath` to `.githooks`; custom hooks paths are left unchanged. ShellCheck is required separately.
 - Recovery: after possible live-store mutation, a failed current-format upgrade keeps current data
   and the selected runtime/configuration, leaves the service stopped, and reports `recovery_required`. Retained archives are not automatic restore authority. See the recovery contract in `docs/REFERENCE.md`.
 - Codex: if the installer prints `OWNER STEP`, run `/hooks` and trust the managed hooks.
@@ -63,8 +63,7 @@ Codex; they do not install hooks. `erase` and `rebuild` need an explicit request
 - `muninn sessions` and `muninn session ROOT`: sessions in scope, newest first, and one session's
   events across its threads.
 - `muninn know list|show|search|context`: current supported notes and guide navigation, with UUIDs and revisions. Use `know show K_ID --revision N` for a historical revision. Context omits ineligible guidance.
-- `muninn learn request|list|show|cancel|retry|replay`: explicit bounded learning controls; an installed frozen
-  policy is required. Replay requires explicit line bounds and `--policy`; retry restarts the same request.
+- `muninn learn on|off|list|show|retry|explain|request`: learning controls; retry restarts the same request.
 - `muninn know propose --input FILE`: checked request-bound proposal, with no model call or owner-authority bypass.
   `know retract K_ID --expected-revision N --reason TEXT` withdraws a current item; correction uses replacement.
 - `muninn recall-review [--batch N] [--ack]`: inspect recorded automatic recall deliveries and acknowledge a reviewed complete batch.
@@ -137,14 +136,11 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 ```
 
-On Windows use the selected Python 3.13 to create the venv; use `.\.venv\Scripts\python.exe` in both pip and later test/gate commands, without activation.
-
 - Runtime: Python 3.13+ and `requirements-runtime.lock` (ADR 0014); launchers use `-I -B`.
-  Launchers are `bin/muninn` on macOS/Linux and `bin/muninn.cmd` / `bin/muninn.ps1` on Windows. The installer verifies each final-path venv before activation; unavailable wheels fail closed.
+  The launcher is `bin/muninn`. The installer verifies each final-path venv before activation; unavailable wheels fail closed.
 - Dev checks (`docs/STANDARDS.md`): tests, then the whole gate:
 
       .venv/bin/python3.13 -m unittest discover -s tests -t .
       .venv/bin/python3.13 -m tools.check --full
 
 - Tests use a temporary `MUNINN_HOME` and synthetic fixtures only.
-- Platform CI: [parallel Windows checks, timing diagnostics and timeout ceilings](docs/ARCHITECTURE.md#platform-ci).

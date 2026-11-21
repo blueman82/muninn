@@ -265,7 +265,7 @@ def reconciliation_windows(
         validate = (
             validate_cursor_boundary if limit else validate_window_boundary
         )
-        # ADR 0025: a free boundary read charges no bytes and no records.
+        # ADR 0026: a free boundary read charges no bytes and no records.
         validate(
             conn,
             EvidenceWindow(

@@ -3,7 +3,7 @@
 ## Status
 
 Accepted by the owner, 2026-11-16.
-Changed by [ADR 0025](0025-own-budget-for-each-window.md): the identity read and the boundary read of live capture and catch-up charge no bytes and no records.
+Changed by [ADR 0026](0026-simple-learning.md): the identity read and the boundary read of live capture and catch-up charge no bytes and no records.
 
 ## Context
 

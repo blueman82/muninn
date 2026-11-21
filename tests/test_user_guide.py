@@ -20,21 +20,7 @@ LABELS = (
     "Steps:",
     "Result:",
 )
-VERBS = {
-    "Get",
-    "Find",
-    "Fix",
-    "Read",
-    "Start",
-    "Do",
-    "Tell",
-    "Sign",
-    "Keep",
-    "Turn",
-    "Check",
-    "See",
-    "Upgrade",
-}
+VERBS = {"Get", "Find", "Start", "Do", "See"}
 BANNED = ("ADR", "please", "click", "For more information")
 LINK = "(docs/USER-GUIDE.md)"
 
@@ -109,19 +95,11 @@ class EntryTest(unittest.TestCase):
     def test_required_codes_have_entries(self) -> None:
         text = fix_section()
         for code in (
-            "budget_clock_reversed",
-            "incomplete_window",
-            "review_policy_required",
-            "rejected_fenced",
             "evidence_limit",
-            "prompt_limit",
             "source_unavailable",
             "rejected_authority",
-            "runtime_race_exhausted",
             "auth",
             "config",
-            "paused",
-            "native_tool_event",
         ):
             with self.subTest(code=code):
                 self.assertIn(f"`{code}`", text)

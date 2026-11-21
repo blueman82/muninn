@@ -54,8 +54,8 @@ class CliStoreFailureTests(CliLearningCase):
                 "--reason",
                 "PRIVATE-REASON",
             )
-        if name == "cancel":
-            return self.call("learn", "cancel", self.context.request_id)
+        if name == "retry":
+            return self.call("learn", "retry", self.context.request_id)
         return self.call(name, "list")
 
     def assert_closed(self, connections: list[sqlite3.Connection]) -> None:
@@ -130,7 +130,7 @@ class CliStoreFailureTests(CliLearningCase):
 
     def check_corruption(self, *, after_open: bool) -> None:
         """Give every destructive subcase a separate normalized fixture."""
-        for name in ("know", "propose", "retract", "learn", "cancel"):
+        for name in ("know", "propose", "retract", "learn", "retry"):
             with self.subTest(command=name, after_open=after_open):
                 case = CliStoreFailureTests()
                 case.setUp()
@@ -236,7 +236,7 @@ class CliStoreFailureTests(CliLearningCase):
             (cli_learn, "request_view", "learn"),
             (cli_learn, "_claim_proposal", "propose"),
             (cli_know.knowledge_write, "retract_knowledge", "retract"),
-            (cli_learn, "_write", "cancel"),
+            (cli_learn, "_write", "retry"),
         )
 
     def test_unknown_errors_and_interrupts_keep_their_identity(self) -> None:

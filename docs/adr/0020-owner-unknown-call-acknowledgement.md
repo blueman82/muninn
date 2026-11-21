@@ -1,6 +1,8 @@
 # 0020: Accept one historical unknown call without changing its evidence
 
-Status: accepted for the owner-authorized recovery command.
+Status: Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: accepted for the owner-authorized recovery command.
 
 An interrupted call can have an unknown result and no recorded launch identity.
 An ended failed attempt does not prove that the native process stopped or that

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- macOS (launchd), Linux (systemd user service) or Windows x64/ARM64 (Task Scheduler).
+- macOS (launchd).
 - Python 3.13 or newer. The installer pins the interpreter that executes it.
   Set `MUNINN_PYTHON=/path/to/python3.13` to select a different interpreter at run time.
 - `git`, and a clean clone of this repo at the commit to install.
@@ -34,12 +34,6 @@ A usual install can offer runtime and Git-hook setup.
 Approval of those prompts changes the checkout.
 That setup occurs independently of the read-only preview.
 
-An upgrade preview must have the existing private writer lock and a stable DELETE-mode store without journal, WAL or shared-memory sidecars.
-It refuses missing, busy, dangerous or changing conditions with `review_policy_preview_unavailable`.
-The preview does not make a lock, repair permissions, stop the service or clear recovery conditions.
-Keep refused conditions and use the existing recovery guidance.
-The preview does not make it safe to install.
-
 `bin/muninn-install` installs this checkout's `HEAD`.
 It selects a new installation if there is no data directory and no release.
 It selects an upgrade when the data directory and release exist.
@@ -52,23 +46,18 @@ Unknown or divergent history reports `versions differ`.
 Examine the revisions before installing.
 Status does not fetch from the network or change the installation.
 
-Other arguments go to `install.installer`: `--repo`, `--sha`, `--fresh`, `--upgrade`, `--dry-run`, `--home`, and `--review-policy`.
+Other arguments go to `install.installer`: `--repo`, `--sha`, `--fresh`, `--upgrade`, `--dry-run` and `--home`.
 The installer must have a full 40-hex `--sha` equal to `HEAD`.
 A new installation refuses an existing data directory or launchd plist.
 It pins the release, indexes existing transcripts, configures managed provider hooks, and starts the poller.
 It then runs `muninn doctor` and prunes to one release.
 
-Before live-store mutation, errors can cause rollback of installer changes.
-After possible mutation, an upgrade of the current format keeps current data and the selected runtime/configuration.
+If an install stops with an error, the installer undoes its own changes.
+After a possible change to the live store, an upgrade keeps the current data and the selected runtime and configuration.
 It keeps the service stopped and records `recovery_required`.
-Archives that remain do not give automatic authority to replace current data.
-See [the recovery contract](REFERENCE.md#current-knowledge-and-learning).
+Archives that remain give no automatic authority to replace current data.
 
-| Platform | Installed desktop app proof |
-|---|---|
-| macOS | `Claude.app`, `Codex.app`, `Cursor.app` in `/Applications` or `~/Applications` |
-| Windows | Desktop executables in `LocalAppData`/`Program Files`. Current-user `Claude`/`OpenAI.Codex` MSIX registration with an existing executable declared in its manifest |
-| Linux | `claude-desktop`, `chatgpt`, `cursor` on PATH |
+Desktop app proof is `Claude.app`, `Codex.app` or `Cursor.app` in `/Applications` or `~/Applications`.
 
 - Provider setup, config validation and hook checks must have an installed app.
 - Leftover settings or transcripts do not prove installation.
@@ -114,115 +103,6 @@ The store can then have free pages.
 If `doctor` then reports `db_free_space`, run `muninn compact`.
 An upgrade error can make recovery necessary with no rollback to the previous release, as described above.
 
-Ordinary writers and rebuild refuse unmarked stores.
-During `--upgrade`, the installer stops the managed poller, then copies a recognized schema v3 store into the marked format.
-It keeps a private copy of the full previous database and its previous knowledge ledger.
-It copies only indexed history into the new store and applies the latest erasure before publication.
-It does not change other unmarked schemas and refuses their upgrade.
-
-The specified legacy release `5c1a69b0edff81df80836d72a80971a91a8f9520` has a macOS/Linux continuation after managed launch exclusion and a subsequent OS boot.
-Keep all previous manual commands, source/module invocations, imported clients and custom work stopped through upgrade and recovery.
-After the computer starts again, repeat the same prepared checkout and `--upgrade --repo DIR --sha SHA`.
-The installer keeps the initial archive, copies indexed history, and applies the latest erasure.
-It publishes the marked store before selecting compatible configuration.
-
-If interrupted, keep its private operation directory and launch exclusion.
-Recovery proceeds forward from checked actual conditions.
-Windows legacy closure and live native qualification remain prerequisites that apply independently.
-See [`REFERENCE.md`](REFERENCE.md).
-
-### Default learning policy
-
-A learning policy tells Muninn when it can send captured conversation text to the learning runner.
-It also sets limits for each learning task.
-Each clone includes the default policy template at `tools/default_codex_policy.json`.
-
-Muninn applies the policy template during an install that uses the current default home when the store has no learning policy.
-The host must satisfy the Codex runner requirements: Apple silicon macOS, a signed Codex CLI on `PATH`, and an existing Codex sign-in directory.
-Muninn records the host, data directory and executable in a private runner-check file.
-If a check does not succeed, installation can finish, but learning stays pending.
-Trust Codex hooks when Codex prompts you at `/hooks`.
-
-The recall modes `recall.off`, `recall.advisory` and `recall.on` control prompt recall.
-They do not control learning from completed sessions.
-
-During first setup, the installer gives two selections for the records to examine:
-
-- **`From now`:** examine records made after this install or upgrade.
-- **All available history:** examine checked older project records, then new records.
-
-The installer keeps your selection for subsequent upgrades.
-An ordinary upgrade with no new learning or policy instruction keeps the stored scope and its initial boundary.
-It does not prompt for approval to examine more history or queue that history to complete the upgrade.
-An explicit scope or policy instruction uses the usual inspection and consent checks.
-For history, the installer shows eligible learning tasks, excluded ranges, and a time estimate before confirmation.
-
-A capture omission does not equal a learning task.
-Muninn excludes missing, erased, changed, or unverifiable source ranges.
-For late imports, `From now` also does not include older or undated records.
-
-To select future records without a scope prompt, run:
-
-```sh
-bin/muninn-install --learning-scope now
-```
-
-Each try allows two calls, 1 MiB of input, 32 KiB of output, 12,000 context bytes, and 120 seconds.
-Revision 3 allows four concurrent learning tasks and three total tries for each task.
-Temporary errors wait 5 seconds, then 30 seconds, before their remaining tries.
-Muninn handles manual and live work before queued history.
-In each group, Muninn handles older work first.
-Muninn checks the current knowledge revision before keeping each result.
-
-The policy allows project scope only.
-It has no total call limit or expiry.
-These controls cannot limit subscription allowance or predict subscription cost.
-An API cost estimate must have comparable calls with reported costs.
-A small sample gives a low-confidence estimate.
-
-Time estimates use full worker batches.
-The installer gives first-try estimates and estimates with permitted retries independently.
-Estimates exclude setup waits and database wait times.
-
-The active background software can check unavailable setup again while learning stays enabled.
-It waits a minimum of 60 seconds.
-A warning does not start a timer when you read it.
-One rejected task does not stop unrelated tasks with revision 3.
-If help is necessary, the next Codex session shows the cause and necessary step.
-
-You do not have to run `doctor` to receive this message.
-Muninn keeps owner pauses and blocks calls without proof that they stopped.
-
-To customise the policy template, edit `tools/default_codex_policy.json` in your private clone.
-Commit the change before installation.
-For revision 3, set `concurrency`, `max_attempts`, and `retry_backoff_seconds` in `revisions.3`.
-Use one backoff value for each permitted retry.
-Keep concurrency at or below 4 and tries at or below 3.
-
-The `limits` object controls the other byte, call, context, and deadline limits.
-You can decrease these limits in the enforced limits.
-Keep the runner, model, `reasoning`, host binding, and project-scope settings.
-Record the approver in `approved_by` and the UTC approval time in `approved_at`.
-
-Eligible repository defaults can move from revision 1 or 2 to revision 3 during upgrade.
-The new approval time must follow the previous time.
-Muninn keeps previous task policies and knowledge.
-It marks unstarted previous-policy tasks as replaced.
-The selected learning scope controls new admission.
-Changed custom policies keep their existing limits.
-
-With learning paused, the installer prompts for approval independently before enabling it.
-Declining keeps the pause.
-An accepted start must have all recorded calls and tries finished.
-An unchanged legacy default can get this checked policy update.
-The update keeps its recorded runner version and host settings.
-
-For an unattended, explicitly approved start, use `bin/muninn-install --enable-learning`.
-This flag does not bypass OS task checks or give approval to changed custom policies.
-A `From now` selection that remains keeps its initial start time.
-The installer confirms replacement work before replacing a previous queue.
-Do not edit the store by hand.
-See the [policy contract](REFERENCE.md#default-learning-policy).
 
 ## Uninstall
 
@@ -261,7 +141,7 @@ If the two files exist, off wins.
 To turn recall on: `unlink ~/.local/share/muninn/recall.off`.
 To turn it off again: `install -m 600 /dev/null ~/.local/share/muninn/recall.off`.
 See `docs/REFERENCE.md`.
-An `--upgrade` does not change the two mode files.
+An upgrade does not change the two mode files.
 
 With recall enabled, supplied context tells the model to give a short `Memory R<number>: useful/noise/uncertain` rating.
 At 50 recorded nonempty blocks, the hook gives you a prompt to paste into Claude or Codex for a source-checked batch inspection.
@@ -320,28 +200,20 @@ It does not include withheld, expired, superseded, retracted, erased or unsuppor
 Open guides with `muninn know show K_ID`, then open cited source records before using them.
 
 ```sh
-muninn learn request --session codex:THREAD --from-line 2 --through-line 8 --policy /path/to/policy.json
+muninn learn on
 muninn learn show R_ID
 muninn learn retry R_ID
-muninn learn replay --session codex:THREAD --from-line 2 --through-line 8 --policy /path/to/policy.json
 muninn know propose --input /path/to/proposal.json
 muninn know retract K_ID --expected-revision 1 --reason "Withdrawn by owner"
 ```
 
-Replace placeholders with actual indexed session, task and knowledge IDs and explicit files.
-Learning tasks must use the installed admitted immutable policy.
-`--policy` must equal it.
-There are no implicit runner, model or budget settings.
-Task line limits must be paired.
-Replay must have line limits and policy.
+Replace placeholders with actual indexed task and knowledge IDs and explicit files.
 
 Retry explicitly starts the same task again when permitted.
 Completed receipts remain idempotent.
 Proposals contain `request_id` plus strict `result`, use admitted source proof and pass checked commit.
 They invoke no model and cannot invent owner authority.
 Corrections use proposed replacements with source checks.
-Do not use `know add`, `know check` or their previous flags.
-
 See [the full contracts](REFERENCE.md#current-knowledge-and-learning).
 
 ## Verify the installation
@@ -364,11 +236,8 @@ The installer can merge the native Cursor hook into `~/.cursor/hooks.json`.
 For manual setup, copy managed lifecycle handlers from the installed release's `integrations/cursor/hooks.json`.
 Keep other hooks in `~/.cursor/hooks.json`.
 The installed fragment contains the escaped native launcher command.
-On macOS/Linux, it is at `~/.local/lib/muninn/current/`.
-On Windows, it is at the selected `%LOCALAPPDATA%\Muninn\lib\<sha>\` release.
+It is at `~/.local/lib/muninn/current/`.
 
-On systems other than macOS, set `MUNINN_CURSOR_DB` to Cursor's native absolute database path in Cursor's environment.
-Without it, the hook skips the import.
 Before compaction, the hook selects one `composerData:<conversation_id>` equal to the documented hook identity.
 It reads at most the `message_count` bubbles reported by Cursor.
 It checks one more bubble to find an oversized conversation.
@@ -434,31 +303,3 @@ It does not run ingest or wait.
 A subsequent startup, session continuation, clear, or compact can read the new mapping.
 Prompt recall operates independently.
 Waiting alone does not refresh the current conversation's startup context.
-
-If learning reports `codex_host_changed`, tell the agent to check store-format and recovery prerequisites.
-Then prepare the preview that writes nothing in [`REFERENCE.md`](REFERENCE.md#renew-an-approved-codex-computer-binding).
-An installed format-1 store must have an ordinary upgrade to format 2 first.
-That step grants no new host permission.
-The subsequent renewal must have your affirmative answer for its specified displayed digest.
-
-A full upgrade can run Codex hook checks and start background learning before the command ends.
-Ongoing approval has no total call or spending cap of its own.
-
-### Keep learning on the current managed Codex
-
-A stored executable path can become unavailable after Codex updates.
-On Apple silicon macOS, prepare the explicit stable interface rule with:
-
-```sh
-bin/muninn-install --upgrade --codex-interface preview --check
-```
-
-The preview writes nothing and makes no model call.
-It can check the stored approval when the previous executable is unavailable.
-Apply its specified digest with `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST`.
-The installer seeks a new `yes` or `y` for that rule.
-It keeps account, model, scope, history, limits and existing work.
-Compatible subsequent Codex updates have no new approval prerequisite.
-
-This trusts the fixed local manager, not an arbitrary executable on `PATH`.
-See [the full contract](REFERENCE.md#follow-the-current-trusted-codex-installation).

@@ -13,10 +13,7 @@ from install.record import Record
 from muninn import (
     cli_core,
     file_sync,
-    platform_rebuild,
     review_requests,
-    review_state,
-    review_unknown_state,
     store,
 )
 from muninn.tombstones import reapply_tombstones
@@ -26,7 +23,6 @@ def _fence_current(conn: sqlite3.Connection) -> None:
     """Fence all abandoned attempts."""
     conn.execute("BEGIN IMMEDIATE")
     try:
-        review_unknown_state.ensure(conn)
         review_requests.recover_attempts(conn, time.time())
         conn.execute("COMMIT")
     except BaseException:
@@ -64,15 +60,6 @@ def prepare_current(ctx: Ctx, rec: Record) -> Path:
         with closing(store.connect_rw(path)) as conn:
             revalidate()
             reapply_tombstones(conn, ctx.data)
-            needs_metadata = not review_state.available(
-                conn, "review_unknown_ack"
-            )
-        if needs_metadata:
-            revalidate()
-            archive = platform_rebuild.retain_upgrade_store(ctx.data, path)
-            rec["store"]["archive"] = str(archive)
-            record.save(ctx, rec)
-            revalidate()
         with closing(store.connect_rw(path)) as conn:
             revalidate()
             _fence_current(conn)

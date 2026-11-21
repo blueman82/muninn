@@ -99,7 +99,6 @@ FAMILIES: tuple[tuple[Text, tuple[str, ...]], ...] = (
             "archive_restore_requires_review",
             "current_store_invalid",
             "cutover_source_mismatch",
-            "pause_unverified",
         ),
     ),
     (

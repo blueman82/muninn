@@ -125,36 +125,8 @@ def retain_store(home: Path, source: Path) -> Path:
         OSError: If validation, exclusive creation, copy, close or sync fails.
             Original errors propagate, including FileExistsError collisions.
     """
-    return _retain_store(home, source, store.RECOVERY_PREFIX)
-
-
-def retain_upgrade_store(home: Path, source: Path) -> Path:
-    """Copy a fenced upgrade source into a durable private retained archive.
-
-    The caller holds actual maintenance and writer scopes, validates the
-    source and closes SQLite connections before copying. No live source
-    replacement, restoration, deletion or retry occurs. Complete and partial
-    artifacts remain enumerable erasure residue; only a returned path means
-    the archive completed copy, close and publication sync.
-
-    Args:
-        home: Existing private data directory with no linked ancestry.
-        source: Validated private regular source directly inside home.
-
-    Returns:
-        Unique pathname beginning with the fixed pre-upgrade store prefix.
-
-    Raises:
-        OSError: If validation, exclusive creation, copy, close or sync fails.
-            The original exception survives any subsequent cleanup failure.
-    """
-    return _retain_store(home, source, store.PRE_UPGRADE_PREFIX)
-
-
-def _retain_store(home: Path, source: Path, prefix: str) -> Path:
-    """Retain private bytes using one program-selected archive prefix."""
     found = _paths(home, source)
-    archive = home / f"{prefix}{uuid.uuid4().hex}"
+    archive = home / f"{store.RECOVERY_PREFIX}{uuid.uuid4().hex}"
     with _resources() as resources:
         input_file = _read(source, found[source], resources)
         fd = platform_io.open_private(

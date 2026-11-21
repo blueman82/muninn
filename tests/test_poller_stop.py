@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import sqlite3
 import tempfile
-import threading
-import time
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from muninn import cli_serve, platform_io, poller_stop, store
 from tests.store_support import Child
 
 GENERATION = "a" * 32
+
+
+def stop(home: Path, pid: int, generation: str) -> None:
+    """Publish a stop request the way the poller reads it."""
+    store.write_json_atomic(
+        home / poller_stop.FILE, {"pid": pid, "generation": generation}
+    )
 
 
 class PollerStopTests(unittest.TestCase):
@@ -28,7 +31,7 @@ class PollerStopTests(unittest.TestCase):
         platform_io.ensure_private_dir(self.home)
 
     def test_only_matching_pid_and_generation_stop(self) -> None:
-        poller_stop.request(self.home, 123, GENERATION)
+        stop(self.home, 123, GENERATION)
         self.assertTrue(poller_stop.requested(self.home, 123, GENERATION))
         self.assertFalse(poller_stop.requested(self.home, 124, GENERATION))
         self.assertFalse(poller_stop.requested(self.home, 123, "b" * 32))
@@ -45,39 +48,6 @@ class PollerStopTests(unittest.TestCase):
                 self.assertFalse(
                     poller_stop.requested(self.home, 123, GENERATION)
                 )
-
-    def test_invalid_request_arguments_create_nothing(self) -> None:
-        with self.assertRaises(ValueError):
-            poller_stop.request(self.home, 123, "bad")
-        self.assertFalse((self.home / poller_stop.FILE).exists())
-
-    def test_deadline_expiring_during_staging_never_publishes(self) -> None:
-        with (
-            mock.patch.object(poller_stop.time, "monotonic", return_value=2.0),
-            self.assertRaisesRegex(
-                poller_stop.StopTimeoutError, "coordination_timeout"
-            ),
-        ):
-            poller_stop.request(self.home, 123, GENERATION, deadline=1.0)
-        self.assertFalse((self.home / poller_stop.FILE).exists())
-        self.assertEqual(list(self.home.iterdir()), [])
-
-    def test_idle_wait_responds_before_long_interval(self) -> None:
-        def write_request() -> None:
-            time.sleep(0.1)
-            poller_stop.request(self.home, os.getpid(), GENERATION)
-
-        writer = threading.Thread(target=write_request)
-        writer.start()
-        try:
-            began = time.monotonic()
-            self.assertTrue(
-                poller_stop.wait(self.home, os.getpid(), GENERATION, 5)
-            )
-            self.assertLess(time.monotonic() - began, 3)
-        finally:
-            writer.join(timeout=5)
-        self.assertFalse(writer.is_alive())
 
     def test_stop_request_is_observed_after_commit(
         self,
@@ -132,7 +102,7 @@ with store.writer_lock(home):
             GENERATION,
         )
         child.wait_ready(timeout=20)
-        poller_stop.request(self.home, child.proc.pid, GENERATION)
+        stop(self.home, child.proc.pid, GENERATION)
         out, err = child.proc.communicate(timeout=5)
         self.assertEqual((child.proc.returncode, out, err), (0, "", ""))
         with contextlib.closing(
