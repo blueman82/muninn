@@ -8,7 +8,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import sys
 import tempfile
 import unittest
 from collections.abc import Generator
@@ -19,13 +18,10 @@ from unittest import mock
 from muninn import (
     erase,
     obs,
-    platform_io,
-    platform_windows,
     store,
     tombstone_key,
     tombstones,
 )
-from muninn.file_sync import sync_fd
 from muninn.tombstone_key import KEY_FILE, TombstoneKeyError
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
@@ -73,60 +69,21 @@ class KeyFileTests(unittest.TestCase):
     def winner_race(self, winner: bytes) -> Generator[None]:
         """Create a real private winner before the backend collision."""
         calls: list[str] = []
-        if sys.platform == "win32":
-            real_publish = platform_windows.publish
+        real_link = os.link
 
-            def native(
-                source: Path,
-                target: Path,
-                *,
-                replace: bool,
-                retry_move: bool = False,
-                directory: bool = False,
-            ) -> None:
-                self.assertEqual(target, self.home / KEY_FILE)
-                self.assertFalse(replace)
-                fd = platform_io.open_private(
-                    target, os.O_CREAT | os.O_EXCL | os.O_WRONLY
-                )
-                with os.fdopen(fd, "wb") as handle:
-                    handle.write(winner)
-                    handle.flush()
-                    sync_fd(handle.fileno())
-                assert_private(self, target)
-                calls.append("winner")
-                try:
-                    real_publish(
-                        source,
-                        target,
-                        replace=replace,
-                        retry_move=retry_move,
-                        directory=directory,
-                    )
-                except FileExistsError:
-                    calls.append("collision")
-                    raise
-                self.fail("non-replacing publication overwrote the winner")
+        def raced(src: str | Path, dst: str | Path) -> None:
+            Path(dst).write_bytes(winner)
+            calls.append("winner")
+            try:
+                real_link(src, dst)
+            except FileExistsError:
+                calls.append("collision")
+                raise
+            self.fail("hard link overwrote the winner")
 
-            with mock.patch.object(platform_windows, "publish", native):
-                yield
-            self.assertEqual(calls, ["winner", "collision"])
-        else:
-            real_link = os.link
-
-            def raced(src: str | Path, dst: str | Path) -> None:
-                Path(dst).write_bytes(winner)
-                calls.append("winner")
-                try:
-                    real_link(src, dst)
-                except FileExistsError:
-                    calls.append("collision")
-                    raise
-                self.fail("hard link overwrote the winner")
-
-            with mock.patch.object(os, "link", raced):
-                yield
-            self.assertEqual(calls, ["winner", "collision"])
+        with mock.patch.object(os, "link", raced):
+            yield
+        self.assertEqual(calls, ["winner", "collision"])
         self.assertEqual((self.home / KEY_FILE).read_bytes(), winner)
         self.assertEqual([p.name for p in self.home.iterdir()], [KEY_FILE])
 

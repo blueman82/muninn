@@ -31,7 +31,7 @@ from install.tomledit import (
     toml_check,
 )
 from muninn.file_sync import sync_fd, sync_path
-from muninn.platform_io import assert_private_fd, open_regular
+from muninn.platform_io import open_regular
 
 __all__ = [
     "JsonPath",
@@ -61,7 +61,6 @@ JsonPath = tuple[str, ...]
 def _read(path: Path) -> bytes:
     """Read a verified original; retain a seam for concurrent-writer tests."""
     with open_regular(path, expected=path.lstat()) as source:
-        assert_private_fd(source.fileno())
         status = os.fstat(source.fileno())
         if status.st_uid != os.getuid() or status.st_mode & 0o022:
             raise OSError(
@@ -104,7 +103,6 @@ def _write_temp(path: Path, data: bytes, mode: int) -> Path:
     try:
         with os.fdopen(fd, "wb") as f:
             os.fchmod(f.fileno(), mode)
-            assert_private_fd(f.fileno())
             f.write(data)
             f.flush()
             sync_fd(f.fileno())

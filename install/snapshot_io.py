@@ -62,7 +62,6 @@ def validated(path: Path) -> Generator[Callable[[], None]]:
                     candidate, root=path.parent, expected=expected
                 )
             )
-            platform_io.assert_private_fd(handle.fileno())
             metadata = os.fstat(handle.fileno())
             _private(candidate, metadata)
             identities.append((candidate, metadata))

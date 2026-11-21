@@ -6,11 +6,10 @@ import contextlib
 import hashlib
 import os
 import stat
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from muninn import platform_io, platform_windows, store
+from muninn import platform_io, store
 from muninn.tombstone_key import KEY_FILE, TOMBSTONE_FILE
 
 _CHUNK_BYTES = 1024 * 1024
@@ -62,20 +61,7 @@ def _stamp(metadata: os.stat_result) -> tuple[tuple[int, int], int, int, int]:
 
 def _same_discovery(opened: os.stat_result, expected: os.stat_result) -> bool:
     """Compare path and descriptor views using a shared creation timestamp."""
-    if sys.platform != "win32":
-        return _stamp(opened) == _stamp(expected)
-    # Windows path ctime is creation time; descriptor ctime is change time.
-    return (
-        _identity(opened),
-        opened.st_size,
-        opened.st_mtime_ns,
-        opened.st_birthtime_ns,
-    ) == (
-        _identity(expected),
-        expected.st_size,
-        expected.st_mtime_ns,
-        expected.st_birthtime_ns,
-    )
+    return _stamp(opened) == _stamp(expected)
 
 
 def _private_stat(
@@ -85,9 +71,8 @@ def _private_stat(
     ordinary = stat.S_ISDIR if directory else stat.S_ISREG
     if not ordinary(metadata.st_mode):
         raise SourceChangedError
-    if sys.platform != "win32" and (
-        metadata.st_uid != os.getuid()
-        or stat.S_IMODE(metadata.st_mode) != (0o700 if directory else 0o600)
+    if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != (
+        0o700 if directory else 0o600
     ):
         raise SourceChangedError
 
@@ -96,8 +81,6 @@ def _metadata(path: Path, *, directory: bool = False) -> os.stat_result:
     """Inspect privacy without following a final link or changing its mode."""
     metadata = path.lstat()
     _private_stat(metadata, directory=directory)
-    if sys.platform == "win32":
-        platform_windows.assert_private(path, directory=directory)
     return metadata
 
 
@@ -124,7 +107,6 @@ def _read(path: Path, expected: os.stat_result) -> FileFingerprint:
         path, root=path.parent, expected=expected
     )
     try:
-        platform_io.assert_private_fd(handle.fileno())
         opened = os.fstat(handle.fileno())
         _private_stat(opened)
         if not _same_discovery(opened, expected):

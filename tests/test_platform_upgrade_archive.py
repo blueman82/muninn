@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 import stat
-import sys
-import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from typing import BinaryIO, Literal
@@ -100,13 +98,7 @@ class UpgradeArchiveTests(StoreCase):
             with self.assertRaises(FileExistsError):
                 self.retain()
         self.assertEqual(archive.read_bytes(), b"original old knowledge")
-        expected = [str(archive)]
-        if sys.platform == "win32":
-            partial = archive.with_name(f"{archive.name}.partial")
-            self.assertEqual(partial.read_bytes(), b"original old knowledge")
-            self.assertTrue(platform_io.is_private(partial))
-            expected.append(str(partial))
-        self.assertEqual(erase_residue.aside_files(self.home), expected)
+        self.assertEqual(erase_residue.aside_files(self.home), [str(archive)])
         self.assert_untouched()
 
     def test_write_sync_and_close_failures_keep_private_enumerable_artifacts(
@@ -182,7 +174,6 @@ class UpgradeArchiveTests(StoreCase):
         self.assertEqual(len(erase_residue.aside_files(self.home)), 1)
         self.assert_untouched()
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX parent descriptor")
     def test_parent_sync_error_wins_over_close_and_retains_complete_copy(
         self,
     ) -> None:
@@ -214,64 +205,6 @@ class UpgradeArchiveTests(StoreCase):
         )
         self.assert_untouched()
 
-    @unittest.skipIf(sys.platform == "win32", "fake Windows branch on POSIX")
-    def test_native_archive_failure_before_and_after_move_never_restores(
-        self,
-    ) -> None:
-        for moved in (False, True):
-            with self.subTest(moved=moved):
-                self.native_failure(moved=moved)
-
-    def native_failure(self, *, moved: bool) -> None:
-        """Inject a native publication fault around a real file move."""
-        calls: list[tuple[Path, Path, bool, bool]] = []
-        failure = OSError("native archive publication failed")
-        before = set(erase_residue.aside_files(self.home))
-
-        def move(
-            source: Path, target: Path, *, replace: bool, retry_move: bool
-        ) -> None:
-            calls.append((source, target, replace, retry_move))
-            if moved:
-                source.replace(target)
-            raise failure
-
-        with (
-            mock.patch.object(
-                platform_rebuild, "sys", SimpleNamespace(platform="win32")
-            ),
-            mock.patch.object(
-                platform_rebuild.platform_windows,
-                "assert_private",
-                create=True,
-            ),
-            mock.patch.object(
-                platform_rebuild.platform_windows, "publish", move, create=True
-            ),
-            mock.patch.object(
-                platform_rebuild, "_sync_parent", side_effect=AssertionError
-            ),
-            mock.patch.object(Path, "unlink", side_effect=AssertionError),
-            self.assertRaises(OSError) as caught,
-        ):
-            self.retain()
-        self.assertIs(caught.exception, failure)
-        self.assertEqual(len(calls), 1)
-        source, target, replace, retry = calls[0]
-        self.assertEqual(source, target.with_name(f"{target.name}.partial"))
-        self.assertTrue(target.name.startswith("muninn.sqlite.pre-upgrade-"))
-        self.assertEqual((replace, retry), (False, False))
-        self.assertEqual(
-            set(erase_residue.aside_files(self.home)) - before,
-            {str(target if moved else source)},
-        )
-        self.assertEqual(
-            (target if moved else source).read_bytes(),
-            b"original old knowledge",
-        )
-        self.assert_untouched()
-
-    @unittest.skipIf(sys.platform == "win32", "POSIX unsafe mode and link")
     def test_unsafe_source_is_refused_without_repair_or_archive_creation(
         self,
     ) -> None:

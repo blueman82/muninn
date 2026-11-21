@@ -12,7 +12,6 @@ import contextlib
 import os
 import signal
 import sqlite3
-import sys
 import time
 from argparse import Namespace
 from collections.abc import Callable
@@ -114,10 +113,7 @@ class _Poller:
         # 0644; the log must be owner-only.
         with contextlib.suppress(FileNotFoundError):  # not run by launchd
             (self.home / "poller.log").chmod(0o600)
-        signals = (signal.SIGTERM, signal.SIGINT)
-        if sys.platform != "win32":
-            signals += (signal.SIGHUP,)
-        for sig in signals:
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             signal.signal(sig, self._on_signal)
         obs.write_status(
             self.home,

@@ -362,7 +362,6 @@ def _observed_busy(conn: sqlite3.Connection) -> int | None:
             with platform_io.open_regular(
                 Path(filename).parent / name, root=Path(filename).parent
             ) as handle:
-                platform_io.assert_private_fd(handle.fileno())
                 for line in handle:
                     try:
                         row: object = json.loads(line)

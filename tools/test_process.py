@@ -16,7 +16,6 @@ from typing import BinaryIO
 
 from muninn.review_process_posix import sole_zombie
 from muninn.review_process_quiescence import group_quiescent
-from muninn.review_process_windows import launch
 
 TIMEOUT_EXIT = 124
 CANCELLED_EXIT = 130
@@ -45,8 +44,6 @@ def _contain(process: subprocess.Popen[bytes]) -> None:
         PermissionError: If group signaling is denied without zombie proof.
         subprocess.TimeoutExpired: If cleanup exhausts its execution budget.
     """
-    if os.name == "nt":
-        raise OSError("unix_process_group_unavailable")
     deadline = time.monotonic() + CLEANUP_SECONDS
     try:
         os.killpg(process.pid, signal.SIGKILL)
@@ -79,8 +76,6 @@ def posix_module(
     streams: tuple[BinaryIO, BinaryIO],
 ) -> tuple[int, bool]:
     """Observe completion without reaping or waiting for descendant pipes."""
-    if os.name == "nt":
-        raise OSError("unix_process_group_unavailable")
     with contextlib.ExitStack() as cleanup:
         process = subprocess.Popen(
             argv,
@@ -107,55 +102,6 @@ def posix_module(
             cancel.wait(0.01)
     assert process.returncode is not None
     return process.returncode, False
-
-
-def _drain_pipe(pipe: BinaryIO, stream: BinaryIO) -> bool:
-    """Copy one available chunk and report whether a pipe reached EOF."""
-    try:
-        chunk = os.read(pipe.fileno(), 65536)
-    except BlockingIOError:
-        return False
-    if chunk:
-        stream.write(chunk)
-        return False
-    return True
-
-
-def windows_module(
-    argv: tuple[str, ...],
-    root: Path,
-    env: dict[str, str],
-    deadline: float,
-    cancel: threading.Event,
-    streams: tuple[BinaryIO, BinaryIO],
-) -> tuple[int, bool]:
-    """Drain native pipes while retaining the exclusive Windows Job."""
-    with contextlib.ExitStack() as cleanup:
-        child = launch(argv, root, env)
-        cleanup.callback(child.close)
-        child.stdin.close()
-        pipes = (child.stdout, child.stderr)
-        for pipe in pipes:
-            os.set_blocking(pipe.fileno(), False)
-        ended = [False, False]
-        outcome: tuple[int, bool] | None = None
-        cleanup_deadline = deadline
-        while True:
-            if outcome is None:
-                interrupted = _interrupted(deadline, cancel)
-                code = child.poll() if interrupted is None else interrupted
-                if code is not None:
-                    outcome = code, interrupted is not None
-                    child.close_job()
-                    cleanup_deadline = time.monotonic() + CLEANUP_SECONDS
-            elif time.monotonic() >= cleanup_deadline:
-                raise OSError("test_output_cleanup_timeout")
-            for index, pipe in enumerate(pipes):
-                if not ended[index]:
-                    ended[index] = _drain_pipe(pipe, streams[index])
-            if outcome is not None and all(ended):
-                return outcome
-            cancel.wait(0.01)
 
 
 def execute(
@@ -186,7 +132,7 @@ def execute(
         (Path(temporary) / "stdout").open("w+b") as stdout,
         (Path(temporary) / "stderr").open("w+b") as stderr,
     ):
-        supervise = windows_module if os.name == "nt" else posix_module
+        supervise = posix_module
         failure = ""
         try:
             code, interrupted = supervise(

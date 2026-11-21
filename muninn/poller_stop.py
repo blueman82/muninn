@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import cast
 
-from muninn import file_sync, platform_io, platform_windows, store
+from muninn import file_sync, platform_io, store
 from muninn.review_pause_state import PauseRefusedError
 
 FILE = "stop.json"
@@ -57,18 +57,12 @@ def request(
     fd, temporary = tempfile.mkstemp(dir=home, prefix=".stop.json.")
     try:
         with os.fdopen(fd, "wb") as handle:
-            platform_io.assert_private_fd(handle.fileno())
             handle.write(json.dumps(value).encode())
             handle.flush()
             file_sync.sync_fd(handle.fileno())
         if time.monotonic() >= deadline:
             raise PauseRefusedError("coordination_timeout")
-        if os.name == "nt":
-            platform_windows.publish(
-                Path(temporary), home / FILE, replace=True, retry_move=False
-            )
-        else:
-            Path(temporary).replace(home / FILE)
+        Path(temporary).replace(home / FILE)
     finally:
         with contextlib.suppress(OSError):
             Path(temporary).unlink()
@@ -92,7 +86,6 @@ def requested(home: Path, pid: int, generation: str) -> bool:
         return False
     try:
         with platform_io.open_regular(path, root=home) as handle:
-            platform_io.assert_private_fd(handle.fileno())
             data = handle.read(1025)
         if len(data) > 1024:
             return False

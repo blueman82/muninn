@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest import mock
 
 from muninn import review_launch_spec as launch
-from tests import store_support
 from tests.test_review_rounds import context
 
 
@@ -83,17 +82,3 @@ class WrapperPythonTests(unittest.TestCase):
                 ),
             ):
                 launch.launch_spec(context(), Path.cwd(), {}, b"prompt")
-
-    def test_fixture_child_binds_direct_windows_python(self) -> None:
-        selected, base = "C:/venv/Scripts/python.exe", "C:/Python/python.exe"
-        with (
-            mock.patch.object(sys, "platform", "win32"),
-            mock.patch.object(sys, "executable", selected),
-            mock.patch.object(sys, "_base_executable", base),
-            mock.patch("tests.store_support.subprocess.Popen") as start,
-        ):
-            store_support.Child(self, "pass")
-        self.assertEqual(start.call_args.args[0][0], base)
-        self.assertEqual(
-            start.call_args.kwargs["env"]["__PYVENV_LAUNCHER__"], selected
-        )

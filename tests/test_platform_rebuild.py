@@ -130,7 +130,6 @@ class RetainedPublicationTests(unittest.TestCase):
         self.assertEqual(len(erase_residue.aside_files(self.home)), 1)
         self.assert_source()
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX parent sync")
     def test_archive_parent_sync_failure_keeps_residue(self) -> None:
         failure = OSError("parent sync failed")
         with (
@@ -142,7 +141,6 @@ class RetainedPublicationTests(unittest.TestCase):
         self.assertEqual(len(erase_residue.aside_files(self.home)), 1)
         self.assert_source()
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX replacement seam")
     def test_replace_then_raise_never_restores_retries_or_deletes(
         self,
     ) -> None:
@@ -170,7 +168,6 @@ class RetainedPublicationTests(unittest.TestCase):
         self.assertEqual(self.db.read_bytes(), b"new replayed content")
         self.assertEqual(archive.read_bytes(), b"old governed content")
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX replacement seam")
     def test_post_replace_sync_failure_keeps_new_live_and_archive(
         self,
     ) -> None:
@@ -206,7 +203,6 @@ class RetainedPublicationTests(unittest.TestCase):
                 rebuild.publish_replacement(self.home, self.db, candidate)
         self.assert_source()
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX mode and link fixtures")
     def test_unsafe_modes_and_links_are_not_followed_or_repaired(self) -> None:
         self.db.chmod(0o644)
         with self.assertRaises(PermissionError):
@@ -226,7 +222,6 @@ class RetainedPublicationTests(unittest.TestCase):
         self.assertEqual(erase_residue.aside_files(self.home), [])
         self.assert_source()
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX parent descriptor")
     def test_parent_sync_error_survives_secondary_close_failure(self) -> None:
         failure = OSError("first sync failure")
         real_close = os.close
@@ -259,7 +254,6 @@ class RetainedPublicationTests(unittest.TestCase):
 
         def copy(source: BinaryIO, output: BinaryIO) -> None:
             real_copy(source, output)
-            # Windows replacement requires the completed reader to close.
             source.close()
             replacement.replace(self.db)
 
@@ -271,93 +265,6 @@ class RetainedPublicationTests(unittest.TestCase):
         self.assertEqual(self.db.read_bytes(), b"different content")
         self.assertEqual(len(erase_residue.aside_files(self.home)), 1)
 
-    @unittest.skipIf(sys.platform == "win32", "fake Windows branch on POSIX")
-    def test_windows_native_move_is_once_with_no_retry_or_parent_fsync(
-        self,
-    ) -> None:
-        calls: list[tuple[Path, Path, bool, bool]] = []
-        failure = OSError("native replace then raise")
-
-        def move(
-            source: Path, target: Path, *, replace: bool, retry_move: bool
-        ) -> None:
-            calls.append((source, target, replace, retry_move))
-            if not replace and target.exists():
-                raise FileExistsError("archive collision")
-            source.replace(target)
-            if replace:
-                raise failure
-
-        with (
-            mock.patch.object(
-                rebuild, "sys", SimpleNamespace(platform="win32")
-            ),
-            mock.patch.object(
-                rebuild.platform_windows,
-                "assert_private",
-                create=True,
-            ),
-            mock.patch.object(
-                rebuild.platform_windows, "publish", move, create=True
-            ),
-            mock.patch.object(
-                rebuild,
-                "_sync_parent",
-                side_effect=AssertionError("no Windows directory fsync"),
-            ),
-        ):
-            archive = self.retain()
-            with self.assertRaises(OSError) as caught:
-                self.publish()
-        self.assertIs(caught.exception, failure)
-        self.assertEqual(
-            calls,
-            [
-                (
-                    archive.with_name(f"{archive.name}.partial"),
-                    archive,
-                    False,
-                    False,
-                ),
-                (self.new, self.db, True, False),
-            ],
-        )
-        self.assertEqual(self.db.read_bytes(), b"new replayed content")
-        self.assertEqual(archive.read_bytes(), b"old governed content")
-        self.assertEqual(erase_residue.aside_files(self.home), [str(archive)])
-
-    @unittest.skipIf(sys.platform == "win32", "fake Windows branch on POSIX")
-    def test_windows_archive_native_failure_keeps_enumerable_partial(
-        self,
-    ) -> None:
-        failure = OSError("native archive failure")
-        with (
-            mock.patch.object(
-                rebuild, "sys", SimpleNamespace(platform="win32")
-            ),
-            mock.patch.object(
-                rebuild.platform_windows,
-                "assert_private",
-                create=True,
-            ),
-            mock.patch.object(
-                rebuild.platform_windows,
-                "publish",
-                side_effect=failure,
-                create=True,
-            ) as move,
-            self.assertRaises(OSError) as caught,
-        ):
-            self.retain()
-        self.assertIs(caught.exception, failure)
-        self.assertEqual(move.call_count, 1)
-        paths = erase_residue.aside_files(self.home)
-        self.assertEqual(len(paths), 1)
-        self.assertTrue(paths[0].endswith(".partial"))
-        self.assertEqual(Path(paths[0]).read_bytes(), b"old governed content")
-        self.assert_source()
-
-    @unittest.skipIf(sys.platform == "win32", "POSIX process crash cutpoints")
     def test_process_crash_preserves_copy_residue_and_uncertain_new_live(
         self,
     ) -> None:

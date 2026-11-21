@@ -90,22 +90,11 @@ class SnapshotSafetyTests(unittest.TestCase):
 
     def test_foreign_or_public_source_metadata_is_not_repaired(self) -> None:
         before = self.live.stat()
-        if sys.platform == "win32":
-            with (
-                mock.patch.object(
-                    snapshot.snapshot_io.platform_windows,
-                    "assert_private",
-                    side_effect=PermissionError("unsafe ACL"),
-                ),
-                self.assertRaises(PermissionError),
-            ):
-                snapshot.store_version(self.live)
-        else:
-            self.live.chmod(0o644)
-            with self.assertRaises(PermissionError):
-                snapshot.store_version(self.live)
-            self.assertEqual(self.live.stat().st_mode & 0o777, 0o644)
-            self.live.chmod(0o600)
+        self.live.chmod(0o644)
+        with self.assertRaises(PermissionError):
+            snapshot.store_version(self.live)
+        self.assertEqual(self.live.stat().st_mode & 0o777, 0o644)
+        self.live.chmod(0o600)
         self.assertEqual(self.live.stat().st_ino, before.st_ino)
 
 

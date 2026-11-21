@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from muninn import ingest, obs_service, platform_io, store, tombstone_key
+from muninn import ingest, platform_io, store, tombstone_key
 from muninn.knowledge_read import read_snapshot
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
 from muninn.obs_recovery import (
@@ -132,20 +132,18 @@ def _lock_free(home: Path) -> bool:
 
 
 def _data_dir_mode(home: Path) -> CheckResult:
-    """Check private data-directory permissions or the native Windows ACL."""
+    """Check private data-directory permissions."""
     present = home.is_dir()
-    detail = "ACL"
-    if present and sys.platform != "win32":
-        detail = oct(home.stat().st_mode & 0o777)
+    detail = oct(home.stat().st_mode & 0o777) if present else "absent"
     return _result(
         "data_dir_mode",
         present and platform_io.is_private(home, directory=True),
-        detail if present else "absent",
+        detail,
     )
 
 
 def _file_modes(home: Path) -> CheckResult:
-    """Check owner-only file permissions or private Windows ACLs."""
+    """Check owner-only file permissions."""
     loose = [
         n
         for n in _names(home)
@@ -338,9 +336,18 @@ def _upgrade_snapshots(home: Path) -> CheckResult:
     return _result("upgrade_snapshot", not kept, ",".join(kept), level="warn")
 
 
+def release_leftovers(env: Mapping[str, str]) -> list[str]:
+    """List only superseded release IDs in the private library."""
+    lib = Path(env.get("HOME") or Path.home()) / ".local/lib/muninn"
+    try:
+        return sorted(path.name for path in lib.glob(".pruning-*"))
+    except OSError:
+        return []
+
+
 def _release_leftovers(env: Mapping[str, str]) -> CheckResult:
     """No superseded release is left waiting for deletion."""
-    left = obs_service.release_leftovers(env)
+    left = release_leftovers(env)
     return _result("release_leftovers", not left, ",".join(left), level="warn")
 
 
@@ -352,8 +359,6 @@ def _tombstone_key(home: Path) -> CheckResult:
 
 def _launchd_job() -> CheckResult:
     """Check whether launchd's positive PID is visible as a live process."""
-    if sys.platform == "win32":
-        return _result("launchd_job", False, "native scheduler pending")
     try:
         job = run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"])
     except OSError:
@@ -441,13 +446,7 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
         _upgrade_snapshots(home),
         _tombstone_key(home),
         _release_leftovers(env),
-        (
-            _launchd_job()
-            if sys.platform == "darwin"
-            else _result(
-                "managed_service", *obs_service.service_status(home, env, run)
-            )
-        ),
+        _launchd_job(),
         _roots_readable(env),
         _roots_present(env),
     ]

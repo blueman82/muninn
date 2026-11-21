@@ -82,24 +82,6 @@ CASES: tuple[tuple[str, int | OSError, bytes, bool | None, str], ...] = (
 class LaunchdObservationTests(unittest.TestCase):
     """Preserve unknown status and disclose only codes or verified PIDs."""
 
-    def test_windows_does_not_inspect_launchd(self) -> None:
-        with (
-            mock.patch.object(obs, "run") as run,
-            mock.patch.object(obs, "sys", SimpleNamespace(platform="win32")),
-            mock.patch.object(obs, "os", SimpleNamespace()),
-        ):
-            result = obs._launchd_job()
-        self.assertEqual(
-            result,
-            {
-                "check": "launchd_job",
-                "ok": False,
-                "level": "error",
-                "detail": "native scheduler pending",
-            },
-        )
-        run.assert_not_called()
-
     def test_native_result_matrix(self) -> None:
         def uid() -> int:
             return 501

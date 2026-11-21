@@ -381,22 +381,3 @@ class ReviewObservabilityTests(ReviewReceiptCase):
         self.assertIsNone(
             obs_stats.review_stats(self.conn, 20.0).usage.input_tokens
         )
-
-    def test_windows_diagnostic_is_unqualified_and_preserves_repair(
-        self,
-    ) -> None:
-        from_path = self.home / "review.supervisor.repair.json"
-        from_path.write_text(SECRET)
-        from_path.chmod(0o600)
-        with (
-            mock.patch("muninn.obs_status.sys", mock.Mock(platform="win32")),
-            mock.patch.object(
-                obs, "run", return_value=mock.Mock(returncode=1)
-            ),
-        ):
-            got = obs.doctor(self.home, {"HOME": str(self.home)})
-        checks = {c["check"]: c for c in got["checks"]}
-        self.assertIs(checks["review_windows_repair"]["ok"], False)
-        self.assertIsNone(checks["review_pause"]["ok"])
-        self.assertEqual(from_path.read_text(), SECRET)
-        self.assertNotIn(SECRET, json.dumps(got))

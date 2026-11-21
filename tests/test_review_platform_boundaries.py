@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from muninn import knowledge_erase, review_launch_inputs, review_runner
+from muninn import review_launch_inputs, review_runner
 
 
 class ReviewPlatformBoundaryTests(unittest.TestCase):
@@ -68,22 +68,6 @@ class ReviewPlatformBoundaryTests(unittest.TestCase):
         ):
             review_launch_inputs._load(root, root / "prompt", 100)
         read.assert_not_called()
-
-    def test_windows_posix_erasure_helpers_refuse_before_access(self) -> None:
-        path = Path("missing")
-        operations = (
-            lambda: knowledge_erase._unlink_children(999999),
-            lambda: knowledge_erase._remove_attempt_posix(
-                path, "A_" + "a" * 32
-            ),
-        )
-        for operation in operations:
-            with (
-                self.subTest(operation=operation),
-                mock.patch("sys.platform", "win32"),
-                self.assertRaisesRegex(OSError, "^attempt_erasure_platform$"),
-            ):
-                operation()
 
     def test_reported_settings_and_usage_unknown_remain_null(self) -> None:
         observed, usage = review_runner.reported_metadata({}, None)

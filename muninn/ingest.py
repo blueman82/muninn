@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import sys
 import time
 from collections.abc import Callable, Mapping
 from itertools import chain
@@ -46,13 +45,12 @@ def provider_home(env: Mapping[str, str]) -> Path:
     """Return the native provider home from an explicit environment.
 
     Args:
-        env: HOME and, on Windows, USERPROFILE values.
+        env: HOME value.
 
     Returns:
         The native user home used by default provider discovery.
     """
-    native = env.get("USERPROFILE") if sys.platform == "win32" else None
-    return Path(native or env.get("HOME") or Path.home())
+    return Path(env.get("HOME") or Path.home())
 
 
 def default_roots(env: Mapping[str, str] = os.environ) -> dict[str, Path]:

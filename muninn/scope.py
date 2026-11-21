@@ -6,7 +6,6 @@ import os
 import re
 import sqlite3
 import subprocess
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import NamedTuple, cast
@@ -140,14 +139,7 @@ def resolve_key(
         (key, kind ``git|dir``, method ``git|worktree|cwd``).
     """
     native = Path(cwd)
-    if (
-        not native.is_absolute()
-        or "\0" in cwd
-        or (
-            sys.platform == "win32"
-            and (not native.drive or native.drive.startswith("\\\\"))
-        )
-    ):
+    if not native.is_absolute() or "\0" in cwd:
         return "unknown", "dir", "cwd"  # never resolve against our own cwd
     path = Path(cwd).resolve()
     if path.is_dir():

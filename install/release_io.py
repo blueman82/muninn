@@ -44,7 +44,6 @@ def write_private(path: Path, data: bytes) -> None:
     temporary = Path(name)
     # Keep pre-publication failures available for recovery; publish moves it.
     with os.fdopen(fd, "wb") as handle:
-        platform_io.assert_private_fd(handle.fileno())
         handle.write(data)
         handle.flush()
         file_sync.sync_fd(handle.fileno())

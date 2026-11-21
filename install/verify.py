@@ -337,16 +337,6 @@ def verify(ctx: Ctx, rec: Record) -> None:
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
     check("heartbeat_fresh", fresh(ctx, 0))
-    if ctx.platform != "darwin":
-        health = _health(r.stdout)
-        check(
-            "managed_service_verified",
-            any(
-                entry.get("check") == "managed_service"
-                and entry.get("ok") is True
-                for entry in health.get("checks", [])
-            ),
-        )
     report = json.dumps({"checks": checks}, indent=1).encode()
     ce.atomic_write(ctx.rdir / "verify.json", report, 0o600)
     failed = [c["check"] for c in checks if c["ok"] is False]

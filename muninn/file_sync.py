@@ -1,13 +1,11 @@
-"""Flush runtime file descriptors using each platform's strongest API."""
+"""Flush runtime file descriptors using the strongest available API."""
 
 from __future__ import annotations
 
+import fcntl
 import os
 import sys
 from pathlib import Path
-
-if sys.platform != "win32":
-    import fcntl
 
 
 def _full_fsync(fd: int) -> bool:
@@ -32,10 +30,7 @@ def sync_fd(fd: int) -> None:
 
 
 def sync_path(path: Path) -> None:
-    """Flush a POSIX file or directory without hiding a sync failure.
-
-    Windows directory publication uses the native write-through move,
-    because a descriptor fsync does not establish directory durability.
+    """Flush a file or directory without hiding a sync failure.
 
     Args:
         path: File or directory to flush.
@@ -43,10 +38,7 @@ def sync_path(path: Path) -> None:
     Raises:
         OSError: If the platform cannot flush the path.
     """
-    if sys.platform == "win32" and path.is_dir():
-        raise OSError("Windows directory sync requires native publication")
-    flags = os.O_RDWR if sys.platform == "win32" else os.O_RDONLY
-    fd = os.open(path, flags)
+    fd = os.open(path, os.O_RDONLY)
     try:
         sync_fd(fd)
     finally:

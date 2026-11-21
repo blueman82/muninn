@@ -52,7 +52,6 @@ def run_real(
 
 def _existing(fd: int) -> None:
     """Refuse unsafe opened originals without changing their permissions."""
-    platform_io.assert_private_fd(fd)
     status = os.fstat(fd)
     if (
         not stat.S_ISREG(status.st_mode)

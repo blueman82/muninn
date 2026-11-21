@@ -35,8 +35,7 @@ class CleanupOutputTests(unittest.TestCase):
                 "class T(unittest.TestCase):\n"
                 " def test_ok(self): self.assertTrue(True)\n"
             )
-            name = "windows_module" if os.name == "nt" else "posix_module"
-            supervise = getattr(test_process, name)
+            supervise = test_process.posix_module
             for error in (
                 OSError("injected_cleanup_failure"),
                 subprocess.TimeoutExpired("injected_cleanup_failure", 0.05),
@@ -57,7 +56,7 @@ class CleanupOutputTests(unittest.TestCase):
                 with (
                     self.subTest(error=type(error).__name__),
                     mock.patch.object(
-                        test_process, name, side_effect=fail_cleanup
+                        test_process, "posix_module", side_effect=fail_cleanup
                     ),
                     contextlib.redirect_stdout(io.StringIO()),
                 ):
@@ -71,12 +70,9 @@ class CleanupOutputTests(unittest.TestCase):
 class QuiescenceTests(unittest.TestCase):
     """Keep an exited group leader reserved while descendants remain active."""
 
-    @unittest.skipIf(os.name == "nt", "requires native POSIX process groups")
     def test_cleanup_refuses_success_while_a_descendant_is_active(
         self,
     ) -> None:
-        if os.name == "nt":
-            raise unittest.SkipTest("requires native POSIX process groups")
         with tempfile.TemporaryDirectory() as temporary:
             ready = Path(temporary) / "ready"
             identity = Path(temporary) / "child_pid"
@@ -129,10 +125,7 @@ class QuiescenceTests(unittest.TestCase):
                     kill_group(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
 
-    @unittest.skipIf(os.name == "nt", "requires native POSIX process groups")
     def test_expired_cleanup_budget_keeps_the_leader_unreaped(self) -> None:
-        if os.name == "nt":
-            raise unittest.SkipTest("requires native POSIX process groups")
         for phase in ("sleep", "observation"):
             with self.subTest(phase=phase):
                 process = subprocess.Popen(
@@ -185,10 +178,7 @@ class QuiescenceTests(unittest.TestCase):
                 finally:
                     process.wait(timeout=5)
 
-    @unittest.skipIf(os.name == "nt", "requires native POSIX process groups")
     def test_cleanup_rejects_wait_finishing_after_deadline(self) -> None:
-        if os.name == "nt":
-            raise unittest.SkipTest("requires native POSIX process groups")
         process = subprocess.Popen(
             [sys.executable, "-c", "pass"], start_new_session=True
         )

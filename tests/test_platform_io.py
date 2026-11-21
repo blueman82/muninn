@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import stat
-import sys
 import tempfile
 import unittest
 from contextlib import suppress
@@ -65,7 +64,6 @@ class SafeOpenTests(unittest.TestCase):
             self.assertEqual((home / "file").read_bytes(), b"raw\n")
 
 
-@unittest.skipIf(os.name == "nt", "POSIX modes; Windows uses native ACLs")
 class PrivateOpenTests(unittest.TestCase):
     """Keep private reopens stable and preserve unsafe-open failures."""
 
@@ -199,8 +197,7 @@ class PrivateOpenTests(unittest.TestCase):
             target.chmod(0o600)
             link, fifo = home / "link", home / "fifo"
             link.symlink_to(target)
-            if sys.platform != "win32":
-                os.mkfifo(fifo, 0o600)
+            os.mkfifo(fifo, 0o600)
             for path in (link, home, fifo):
                 with self.subTest(path=path), self.assertRaises(OSError):
                     platform_io.open_private(path, os.O_RDONLY)

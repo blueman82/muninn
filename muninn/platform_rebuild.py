@@ -6,14 +6,13 @@ import contextlib
 import os
 import shutil
 import stat
-import sys
 import uuid
 from collections.abc import Callable, Generator
 from functools import partial
 from pathlib import Path
 from typing import BinaryIO
 
-from muninn import platform_io, platform_windows, store
+from muninn import platform_io, store
 from muninn.file_sync import sync_fd
 
 
@@ -47,20 +46,15 @@ def _resources() -> Generator[list[Callable[[], object]]]:
 def _private_info(path: Path, *, directory: bool = False) -> os.stat_result:
     """Require ordinary private owner state without repairing permissions."""
     info = path.lstat()
-    if sys.platform == "win32":
-        platform_windows.assert_private(path, directory=directory)
-    else:
-        ordinary = (
-            stat.S_ISDIR(info.st_mode)
-            if directory
-            else stat.S_ISREG(info.st_mode)
-        )
-        if (
-            not ordinary
-            or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600)
-        ):
-            raise PermissionError("store state is not private owner state")
+    ordinary = (
+        stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+    )
+    if (
+        not ordinary
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600)
+    ):
+        raise PermissionError("store state is not private owner state")
     return info
 
 
@@ -98,15 +92,12 @@ def _read(
         source, root=source.parent, expected=expected
     )
     resources.append(handle.close)
-    platform_io.assert_private_fd(handle.fileno())
     _unchanged({source: expected}, source.parent)
     return handle
 
 
 def _sync_parent(home: Path) -> None:
-    """Sync a POSIX directory without losing a sync error during close."""
-    if sys.platform == "win32":
-        raise OSError("Windows directory sync requires native publication")
+    """Sync a directory without losing a sync error during close."""
     with _resources() as resources:
         fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         resources.append(partial(os.close, fd))
@@ -164,32 +155,21 @@ def _retain_store(home: Path, source: Path, prefix: str) -> Path:
     """Retain private bytes using one program-selected archive prefix."""
     found = _paths(home, source)
     archive = home / f"{prefix}{uuid.uuid4().hex}"
-    temporary = (
-        archive.with_name(f"{archive.name}.partial")
-        if sys.platform == "win32"
-        else archive
-    )
     with _resources() as resources:
         input_file = _read(source, found[source], resources)
         fd = platform_io.open_private(
-            temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            archive, os.O_CREAT | os.O_EXCL | os.O_WRONLY
         )
         resources.append(partial(os.close, fd))
         output = os.fdopen(fd, "wb", closefd=False)
         resources.append(output.close)
-        platform_io.assert_private_fd(fd)
         shutil.copyfileobj(input_file, output)
         output.flush()
         sync_fd(fd)
-        found[temporary] = os.fstat(fd)
+        found[archive] = os.fstat(fd)
         _unchanged(found, home)
     _unchanged(found, home)
-    if sys.platform == "win32":
-        platform_windows.publish(
-            temporary, archive, replace=False, retry_move=False
-        )
-    else:
-        _sync_parent(home)
+    _sync_parent(home)
     return archive
 
 
@@ -230,8 +210,5 @@ def publish_replacement(home: Path, db: Path, new: Path) -> None:
             raise OSError("candidate changed identity")
         sync_fd(fd)
     _unchanged(found, home)
-    if sys.platform == "win32":
-        platform_windows.publish(new, db, replace=True, retry_move=False)
-    else:
-        new.replace(db)
-        _sync_parent(home)
+    new.replace(db)
+    _sync_parent(home)

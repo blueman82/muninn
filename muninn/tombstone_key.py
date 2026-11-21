@@ -11,11 +11,10 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import sys
 import tempfile
 from pathlib import Path
 
-from muninn import platform_io, platform_windows, store
+from muninn import platform_io, store
 from muninn.file_sync import sync_fd, sync_path
 
 TOMBSTONE_FILE = "tombstones.jsonl"
@@ -60,22 +59,16 @@ def _create_key(path: Path) -> bytes:
     Raises:
         TombstoneKeyError: If the winner's file is not a whole key.
     """
-    if sys.platform == "win32":
-        platform_io.ensure_private_dir(path.parent)
     key = os.urandom(KEY_BYTES)
     fd, temp = tempfile.mkstemp(dir=path.parent, prefix=".tombstone.key-")
     try:
         with os.fdopen(fd, "wb") as handle:
-            platform_io.assert_private_fd(handle.fileno())
             handle.write(key)
             handle.flush()
             sync_fd(handle.fileno())
         try:
-            if sys.platform == "win32":
-                platform_windows.publish(Path(temp), path, replace=False)
-            else:
-                os.link(temp, path)
-                sync_path(path.parent)
+            os.link(temp, path)
+            sync_path(path.parent)
         except FileExistsError:
             return _read_key(path)
     finally:
@@ -85,10 +78,7 @@ def _create_key(path: Path) -> bytes:
 
 def _read_key(path: Path) -> bytes:
     """Read only a whole private, regular key file, never through a link."""
-    if sys.platform == "win32":
-        platform_windows.assert_private(path)
     with platform_io.open_regular(path) as handle:
-        platform_io.assert_private_fd(handle.fileno())
         return _checked(handle.read(KEY_BYTES + 1))
 
 
@@ -147,7 +137,6 @@ def log_has_keyed(home: Path) -> bool:
         with platform_io.open_regular(
             path, root=home, expected=discovered
         ) as handle:
-            platform_io.assert_private_fd(handle.fileno())
             marker, found, tail = KEYED_PREFIX.encode(), False, b""
             # Consume through EOF so a marker cannot hide later read failures.
             while block := handle.read(64 * 1024):

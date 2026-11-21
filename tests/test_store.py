@@ -8,7 +8,6 @@ from __future__ import annotations
 import contextlib
 import json
 import sqlite3
-import sys
 import threading
 import time
 import unittest
@@ -17,7 +16,7 @@ from pathlib import Path
 from typing import NoReturn
 from unittest import mock
 
-from muninn import platform_io, platform_windows, store
+from muninn import platform_io, store
 from tests import store_support
 from tests.store_support import (
     HOLD_LOCK,
@@ -26,7 +25,6 @@ from tests.store_support import (
     StoreCase,
     assert_private,
     insert_scope,
-    public_read,
 )
 
 # Re-exported because other test modules still import these helpers from
@@ -38,11 +36,7 @@ class PathTests(StoreCase):
     """Data dir resolution and atomic private file writes."""
 
     def test_data_home_env_default_and_expansion(self) -> None:
-        default = (
-            Path.home() / "AppData" / "Local" / "Muninn" / "data"
-            if sys.platform == "win32"
-            else Path.home() / ".local" / "share" / "muninn"
-        )
+        default = Path.home() / ".local" / "share" / "muninn"
         self.assertEqual(
             store.data_home({"MUNINN_HOME": "/x/y"}), Path("/x/y")
         )
@@ -86,33 +80,14 @@ class PathTests(StoreCase):
         target = self.tmp / "a" / "b"
         store.ensure_private_dir(target)
         assert_private(self, target, directory=True)
-        if sys.platform == "win32":
-            marker = target / "unchanged.txt"
-            marker.write_bytes(b"unchanged")
-            with public_read(self, target, directory=True):
-                with self.assertRaises(PermissionError):
-                    store.ensure_private_dir(target)
-                self.assertEqual(marker.read_bytes(), b"unchanged")
-        else:
-            target.chmod(0o755)
-            store.ensure_private_dir(target)
+        target.chmod(0o755)
+        store.ensure_private_dir(target)
         assert_private(self, target, directory=True)
 
     def test_write_json_atomic_is_private_and_replaces(self) -> None:
         target = self.tmp / "status.json"
-        if sys.platform == "win32":
-            store.write_json_atomic(target, {})
-            with public_read(self, target):
-                original = target.read_bytes()
-                with self.assertRaises(PermissionError):
-                    store.write_json_atomic(target, {"unsafe": True})
-                self.assertEqual(target.read_bytes(), original)
-                self.assertEqual(
-                    sorted(p.name for p in self.tmp.iterdir()), ["status.json"]
-                )
-        else:
-            target.write_text("{}")
-            target.chmod(0o644)
+        target.write_text("{}")
+        target.chmod(0o644)
         store.write_json_atomic(target, {"b": 2, "a": [1]})
         self.assertEqual(target.read_text(), '{"a": [1], "b": 2}')  # sorted
         assert_private(self, target)
@@ -143,25 +118,7 @@ class PathTests(StoreCase):
             calls.append(dst)
             raise KeyboardInterrupt
 
-        if sys.platform == "win32":
-
-            def native(
-                src: Path,
-                dst: Path,
-                *,
-                replace: bool,
-                retry_move: bool = False,
-                directory: bool = False,
-            ) -> NoReturn:
-                self.assertTrue(replace)
-                self.assertTrue(retry_move)
-                self.assertFalse(directory)
-                assert_private(self, src)
-                interrupt(src, dst)
-
-            patch = mock.patch.object(platform_windows, "publish", native)
-        else:
-            patch = mock.patch.object(Path, "replace", interrupt)
+        patch = mock.patch.object(Path, "replace", interrupt)
         with patch, self.assertRaises(KeyboardInterrupt):
             store.write_json_atomic(target, {"new": True})
         self.assertEqual(calls, [target])
@@ -181,33 +138,7 @@ class PathTests(StoreCase):
             calls.append(dst)
             raise KeyboardInterrupt
 
-        if sys.platform == "win32":
-            real_publish = platform_windows.publish
-
-            def native(
-                src: Path,
-                dst: Path,
-                *,
-                replace: bool,
-                retry_move: bool = False,
-                directory: bool = False,
-            ) -> NoReturn:
-                self.assertTrue(replace)
-                self.assertTrue(retry_move)
-                self.assertFalse(directory)
-                real_publish(
-                    src,
-                    dst,
-                    replace=replace,
-                    retry_move=retry_move,
-                    directory=directory,
-                )
-                calls.append(dst)
-                raise KeyboardInterrupt
-
-            patch = mock.patch.object(platform_windows, "publish", native)
-        else:
-            patch = mock.patch.object(Path, "replace", replace_then_interrupt)
+        patch = mock.patch.object(Path, "replace", replace_then_interrupt)
         with patch, self.assertRaises(KeyboardInterrupt):
             store.write_json_atomic(target, {"ok": True})
         self.assertEqual(calls, [target])

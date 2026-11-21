@@ -6,18 +6,16 @@ import json
 import signal
 import sqlite3
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-from muninn import cli_core, obs, platform_io, poller_stop, store
+from muninn import cli_core, obs, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CANARY, CliCase
 from tests.hook_support import launcher_args
@@ -86,81 +84,79 @@ class WriterTests(CliCase):
 LAUNCHER = Path(__file__).resolve().parent.parent / "bin" / "muninn"
 
 
-if sys.platform != "win32":
+class LauncherTests(unittest.TestCase):
+    """bin/muninn finds its interpreter without a hardcoded path."""
 
-    class LauncherTests(unittest.TestCase):
-        """bin/muninn finds its interpreter without a hardcoded path."""
+    def launch(
+        self, home: Path, **env: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Run ``bin/muninn --version`` with a minimal environment.
 
-        def launch(
-            self, home: Path, **env: str
-        ) -> subprocess.CompletedProcess[str]:
-            """Run ``bin/muninn --version`` with a minimal environment.
+        Args:
+            home: Directory used as ``HOME``.
+            **env: Variables that override the minimal environment.
 
-            Args:
-                home: Directory used as ``HOME``.
-                **env: Variables that override the minimal environment.
+        Returns:
+            The completed process with decoded output.
+        """
+        base = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
+        return subprocess.run(
+            [str(home / "release/bin/muninn"), "--version"],
+            env=base | env,
+            capture_output=True,
+            text=True,
+        )
 
-            Returns:
-                The completed process with decoded output.
-            """
-            base = {"HOME": str(home), "PATH": "/usr/bin:/bin"}
-            return subprocess.run(
-                [str(home / "release/bin/muninn"), "--version"],
-                env=base | env,
-                capture_output=True,
-                text=True,
+    def fake_python(self, path: Path) -> Path:
+        """Write an executable that stands in for a Python interpreter.
+
+        Args:
+            path: Where to create the stand-in.
+
+        Returns:
+            The same path.
+        """
+        path.write_text('#!/bin/sh\necho "ran $0"\n')
+        path.chmod(0o755)
+        return path
+
+    def test_resolution_order_and_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            launcher = home / "release/bin/muninn"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_bytes(LAUNCHER.read_bytes())
+            launcher.chmod(0o755)
+            lib = home / ".local/lib/muninn"
+            lib.mkdir(parents=True)
+            linked = self.fake_python(home / "linked-python")
+            (lib / "python").symlink_to(linked)
+            self.assertIn("muninn/python", self.launch(home).stdout)
+            env_py = self.fake_python(home / "env-python")
+            r = self.launch(home, MUNINN_PYTHON=str(env_py))
+            self.assertIn("env-python", r.stdout)
+            venv = home / "release/.venv/bin/python3"
+            venv.parent.mkdir(parents=True)
+            self.fake_python(venv)
+            self.assertIn(str(venv), self.launch(home).stdout)
+            self.assertIn(
+                "env-python",
+                self.launch(home, MUNINN_PYTHON=str(env_py)).stdout,
             )
-
-        def fake_python(self, path: Path) -> Path:
-            """Write an executable that stands in for a Python interpreter.
-
-            Args:
-                path: Where to create the stand-in.
-
-            Returns:
-                The same path.
-            """
-            path.write_text('#!/bin/sh\necho "ran $0"\n')
-            path.chmod(0o755)
-            return path
-
-        def test_resolution_order_and_missing(self) -> None:
-            with tempfile.TemporaryDirectory() as tmp:
-                home = Path(tmp)
-                launcher = home / "release/bin/muninn"
-                launcher.parent.mkdir(parents=True)
-                launcher.write_bytes(LAUNCHER.read_bytes())
-                launcher.chmod(0o755)
-                lib = home / ".local/lib/muninn"
-                lib.mkdir(parents=True)
-                linked = self.fake_python(home / "linked-python")
-                (lib / "python").symlink_to(linked)
-                self.assertIn("muninn/python", self.launch(home).stdout)
-                env_py = self.fake_python(home / "env-python")
-                r = self.launch(home, MUNINN_PYTHON=str(env_py))
-                self.assertIn("env-python", r.stdout)
-                venv = home / "release/.venv/bin/python3"
-                venv.parent.mkdir(parents=True)
-                self.fake_python(venv)
-                self.assertIn(str(venv), self.launch(home).stdout)
-                self.assertIn(
-                    "env-python",
-                    self.launch(home, MUNINN_PYTHON=str(env_py)).stdout,
-                )
-                venv.unlink()
-                (lib / "python").unlink()
-                stubs = home / "stubs"  # pythons older than 3.13
-                stubs.mkdir()
-                for name in ("python3.13", "python3.14", "python3"):
-                    (stubs / name).write_text("#!/bin/sh\nexit 1\n")
-                    (stubs / name).chmod(0o755)
-                r = self.launch(home, PATH=f"{stubs}:/usr/bin:/bin")
-                self.assertEqual(r.returncode, 127)
-                self.assertIn("MUNINN_PYTHON", r.stderr)
+            venv.unlink()
+            (lib / "python").unlink()
+            stubs = home / "stubs"  # pythons older than 3.13
+            stubs.mkdir()
+            for name in ("python3.13", "python3.14", "python3"):
+                (stubs / name).write_text("#!/bin/sh\nexit 1\n")
+                (stubs / name).chmod(0o755)
+            r = self.launch(home, PATH=f"{stubs}:/usr/bin:/bin")
+            self.assertEqual(r.returncode, 127)
+            self.assertIn("MUNINN_PYTHON", r.stderr)
 
 
 class ServeTests(CliCase):
-    """Run CLI behavior through POSIX shell or isolated Windows Python."""
+    """Run CLI behavior through the POSIX shell."""
 
     def start_serve(self, interval: str = "0.2") -> subprocess.Popen[bytes]:
         """Start ``muninn serve`` with its output in the poller log.
@@ -174,10 +170,9 @@ class ServeTests(CliCase):
         log_path = self.home / "poller.log"
         log = self.enterContext(log_path.open("ab"))
         log_path.chmod(0o644)  # as launchd creates it
-        executable, environment = direct_python()
+        environment = direct_python()[1]
         proc = subprocess.Popen(
             launcher_args("serve", "--interval", interval),
-            executable=executable if sys.platform == "win32" else None,
             env=self.env | environment,
             stdout=log,
             stderr=log,
@@ -189,21 +184,12 @@ class ServeTests(CliCase):
         return proc
 
     def stop(self, status: dict[str, Any]) -> None:
-        """Stop the real poller by signal or its published native generation.
+        """Stop the real poller by signal.
 
         Args:
             status: Heartbeat from this poller process.
         """
-        if sys.platform == "win32":
-            self.assertEqual(status["pid"], self.proc.pid)
-            generation = status["stop_generation"]
-            self.assertIsInstance(generation, str)
-            poller_stop.request(self.home, self.proc.pid, generation)
-            self.assertTrue(
-                poller_stop.requested(self.home, self.proc.pid, generation)
-            )
-        else:
-            self.proc.send_signal(signal.SIGTERM)
+        self.proc.send_signal(signal.SIGTERM)
 
     def test_start_serve_uses_platform_command_vector(self) -> None:
         command = ["synthetic-python", "isolated", "serve"]
@@ -216,36 +202,6 @@ class ServeTests(CliCase):
             self.start_serve(interval="17")
         arguments.assert_called_once_with("serve", "--interval", "17")
         self.assertEqual(start.call_args.args[0], command)
-
-    def test_windows_serve_owns_direct_python_with_venv_packages(self) -> None:
-        environment = {"__PYVENV_LAUNCHER__": "synthetic-venv-python"}
-        with (
-            mock.patch(
-                "tests.test_cli_writer.sys", SimpleNamespace(platform="win32")
-            ),
-            mock.patch(
-                "tests.test_cli_writer.direct_python",
-                return_value=("synthetic-base-python", environment),
-            ),
-            mock.patch("tests.test_cli_writer.subprocess.Popen") as start,
-        ):
-            self.start_serve()
-        self.assertEqual(
-            start.call_args.kwargs["executable"], "synthetic-base-python"
-        )
-        self.assertEqual(start.call_args.kwargs["env"], self.env | environment)
-
-    def test_native_stop_targets_the_published_generation(self) -> None:
-        self.proc = mock.Mock(pid=4242)
-        generation = "a" * 32
-        with mock.patch(
-            "tests.test_cli_writer.sys",
-            SimpleNamespace(platform="win32"),
-        ):
-            self.stop({"pid": 4242, "stop_generation": generation})
-        self.assertTrue(poller_stop.requested(self.home, 4242, generation))
-        self.assertFalse(poller_stop.requested(self.home, 4242, "b" * 32))
-        self.proc.send_signal.assert_not_called()
 
     def fail_if_exited(self, what: str) -> None:
         """Fail at once, with a diagnosis, if the poller process is gone.
@@ -366,10 +322,7 @@ class ServeTests(CliCase):
         self.assertEqual(status["events_added"], 2)
         # launchd opens StandardOutPath before Umask applies: 0644 -> 0600
         log_path = self.home / "poller.log"
-        if sys.platform == "win32":
-            self.assertTrue(platform_io.is_private(log_path))
-        else:
-            self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(log_path.stat().st_mode & 0o777, 0o600)
         events = [
             json.loads(x)
             for x in (self.home / "poller.log").read_text().splitlines()
