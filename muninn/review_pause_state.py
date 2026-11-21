@@ -174,13 +174,11 @@ def inspect(home: Path, name: str) -> tuple[bytes, Fingerprint | None]:
     result = bytearray()
     digest = hashlib.sha256()
     with platform_io.open_regular(path, root=home, expected=before) as handle:
-        platform_io.assert_private_fd(handle.fileno())
         initial = os.fstat(handle.fileno())
         while chunk := handle.read(65536):
             digest.update(chunk)
             if len(result) <= LIMIT:
                 result.extend(chunk[: LIMIT + 1 - len(result)])
-        platform_io.assert_private_fd(handle.fileno())
         after = os.fstat(handle.fileno())
     latest = _private(path)
 

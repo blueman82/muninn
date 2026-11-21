@@ -46,9 +46,6 @@ def health_report_command(ctx: Ctx) -> str:
     Returns:
         A command that runs doctor from the installed executable.
     """
-    if ctx.platform == "win32":
-        executable = str(ctx.muninn).replace("'", "''")
-        return f"& '{executable}' --pretty doctor"
     return f"{shlex.quote(str(ctx.muninn))} --pretty doctor"
 
 
@@ -200,12 +197,7 @@ def _doctor(ctx: Ctx, rec: Record) -> subprocess.CompletedProcess[bytes]:
         _show_health_help(ctx, report)
         return result
     guidance = cast(dict[str, Any], guidance_value)
-    if guidance.get(
-        "status"
-    ) != "recovery_check_required" or ctx.platform not in (
-        "darwin",
-        "linux",
-    ):
+    if guidance.get("status") != "recovery_check_required":
         ctx.say("Install health check failed. Recovery steps:")
         _show_health_help(ctx, report)
         return result
@@ -345,16 +337,6 @@ def verify(ctx: Ctx, rec: Record) -> None:
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")
     check("heartbeat_fresh", fresh(ctx, 0))
-    if ctx.platform != "darwin":
-        health = _health(r.stdout)
-        check(
-            "managed_service_verified",
-            any(
-                entry.get("check") == "managed_service"
-                and entry.get("ok") is True
-                for entry in health.get("checks", [])
-            ),
-        )
     report = json.dumps({"checks": checks}, indent=1).encode()
     ce.atomic_write(ctx.rdir / "verify.json", report, 0o600)
     failed = [c["check"] for c in checks if c["ok"] is False]

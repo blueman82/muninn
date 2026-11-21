@@ -7,10 +7,8 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import venv
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from tests.install_wrapper_support import WrapperFixture, git
@@ -238,9 +236,7 @@ class CheckTest(WrapperFixture):
         root = self.hook_repo()
         runtime = self.home.parent / "runtime"
         venv.EnvBuilder(with_pip=False).create(runtime)
-        interpreter = runtime / (
-            "Scripts/python.exe" if sys.platform == "win32" else "bin/python3"
-        )
+        interpreter = runtime / "bin/python3"
         purelib = subprocess.check_output(
             [
                 interpreter,
@@ -270,17 +266,3 @@ class CheckTest(WrapperFixture):
             (snapshot(root), snapshot(self.home), snapshot(runtime)), before
         )
         self.assertEqual(list(runtime.rglob("pydantic*.pyc")), [])
-        with mock.patch(
-            "tests.install_wrapper_support.sys",
-            SimpleNamespace(platform="win32"),
-        ):
-            facade = self.run_wrapper(
-                "--check",
-                script=root / "bin/muninn-install",
-                extra_env={"MUNINN_PYTHON": interpreter.as_posix()},
-            )
-        self.assertEqual(facade.returncode, 0, facade.stderr)
-        self.assertIn("--fresh --dry-run", facade.stdout)
-        self.assert_snapshots(
-            (snapshot(root), snapshot(self.home), snapshot(runtime)), before
-        )

@@ -15,9 +15,8 @@ from typing import Any, cast
 from install import configedit as ce
 from install.constants import CLAUDE_EVENTS, CURSOR_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
-from install.lifecycle import preflight_service
 from install.provider_apps import installed
-from install.provider_paths import codex_argv, cursor_commands, render_pinned
+from install.provider_paths import cursor_commands, render_pinned
 from install.record import Record
 from install.transforms import (
     cursor_handlers,
@@ -31,7 +30,6 @@ from install.transforms import (
     write_trust,
 )
 from install.trust import codex_hooks
-from muninn.platform_paths import read_selection
 from tools.standards import check_repo as check_standards
 
 CODEX_HOOKS_FILE = "integrations/codex/hooks/hooks.json"
@@ -141,10 +139,6 @@ def _check_upgradable(ctx: Ctx) -> None:
     """
     if not (ctx.data.is_dir() and ctx.plist.exists()):
         raise StepFailedError("nothing to upgrade: no data dir or plist")
-    if ctx.platform == "win32":
-        if read_selection(ctx.lib.parent) is None:
-            raise StepFailedError("nothing to upgrade: no release selection")
-        return
     if not (ctx.lib / "current").is_symlink():
         raise StepFailedError("nothing to upgrade: no current release")
 
@@ -184,11 +178,7 @@ def _check_machine(ctx: Ctx) -> None:
     for path in (ctx.rdir, ctx.failed):
         if _exists(path):
             raise StepFailedError(f"{path} already exists")
-    if (
-        ctx.platform != "win32"
-        and ctx.muninn.exists()
-        and not ctx.muninn.is_symlink()
-    ):
+    if ctx.muninn.exists() and not ctx.muninn.is_symlink():
         raise StepFailedError(f"{ctx.muninn} is not a symlink")
 
 
@@ -217,8 +207,6 @@ def _dry_apply(
         if installed(ctx, "claude") and ctx.settings.exists():
             edit_settings(ce.read_file(ctx.settings), fragment)
         if installed(ctx, "codex") and ctx.config.exists():
-            if ctx.platform == "win32":
-                codex_argv(ctx, "--version")
             text = ce.read_file(ctx.config).decode()
             hooks = codex_hooks(files[CODEX_HOOKS_FILE])
             text = drop_trust(text)
@@ -276,15 +264,11 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
         raise StepFailedError("--sha must be a full 40-hex commit id")
     files, fragment = check_repo(ctx, repo, sha)
     _check_machine(ctx)
-    preflight_service(ctx)
     ctx.cursor_hooks = installed(ctx, "cursor") and (
         ctx.cursor_hooks or (ctx.upgrade and _managed_cursor(ctx))
     )
     _dry_apply(ctx, files, fragment, True)
     schema = release_schema(ctx, repo, sha) if ctx.upgrade else None
-    selection = None
-    if ctx.platform == "win32" and ctx.upgrade:
-        selection = (ctx.lib / "selection.json").read_text()
     rec: Record = {
         "fresh": ctx.fresh,
         "upgrade": ctx.upgrade,
@@ -297,7 +281,6 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
         "repo": str(repo),
         "sha": sha,
         "schema_to": schema,
-        "selection": selection,
         "python": {"path": sys.executable, "version": sys.version.split()[0]},
         "rdir": str(ctx.rdir),
         "steps": [],

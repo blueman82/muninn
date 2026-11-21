@@ -5,9 +5,7 @@ from __future__ import annotations
 import math
 import os
 import re
-import shutil
 import sqlite3
-import sys
 from contextlib import ExitStack, closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +13,6 @@ from pathlib import Path
 from muninn import (
     decision_erase,
     knowledge_erase_links,
-    platform_windows,
     store,
 )
 from muninn.knowledge_erase_state import SupportClosure
@@ -205,22 +202,11 @@ def erase_attempt_material(home: Path, attempt_id: AttemptId) -> int:
             is None
         ):
             raise OSError("unknown_attempt")
-    if os.name != "nt":
-        return _remove_attempt_posix(home, attempt_id)
-    platform_windows.assert_ancestry(path)
-    count = 0
-    for root, dirs, files in path.walk(follow_symlinks=False):
-        junctions = [name for name in dirs if (root / name).is_junction()]
-        dirs[:] = [name for name in dirs if name not in junctions]
-        count += len(files) + len(junctions)
-    shutil.rmtree(path)
-    return count
+    return _remove_attempt_posix(home, attempt_id)
 
 
 def _unlink_children(fd: int) -> int:
     """Unlink entries relative to held directories, never through symlinks."""
-    if sys.platform == "win32":
-        raise OSError("attempt_erasure_platform")
     count = 0
     with os.scandir(fd) as entries:
         for entry in entries:
@@ -243,8 +229,6 @@ def _unlink_children(fd: int) -> int:
 
 def _remove_attempt_posix(home: Path, attempt_id: AttemptId) -> int:
     """Bind every parent descriptor so a swapped pathname cannot escape."""
-    if sys.platform == "win32":
-        raise OSError("attempt_erasure_platform")
     with ExitStack() as stack:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         parent = os.open(home, flags)

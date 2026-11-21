@@ -9,16 +9,13 @@ from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-from muninn import platform_io, platform_windows
+from muninn import platform_io
 
 
 def _private(
     path: Path, metadata: os.stat_result, *, directory: bool = False
 ) -> None:
     """Refuse foreign, linked or public POSIX state without repairing it."""
-    if sys.platform == "win32":
-        platform_windows.assert_private(path, directory=directory)
-        return
     ordinary = (
         stat.S_ISDIR(metadata.st_mode)
         if directory
@@ -65,7 +62,6 @@ def validated(path: Path) -> Generator[Callable[[], None]]:
                     candidate, root=path.parent, expected=expected
                 )
             )
-            platform_io.assert_private_fd(handle.fileno())
             metadata = os.fstat(handle.fileno())
             _private(candidate, metadata)
             identities.append((candidate, metadata))

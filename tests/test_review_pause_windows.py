@@ -58,7 +58,6 @@ class WindowsMetadataTests(unittest.TestCase):
                 mock.patch.object(
                     state.platform_io, "open_regular", return_value=handle
                 ),
-                mock.patch.object(state.platform_io, "assert_private_fd"),
                 mock.patch.object(
                     state.os, "fstat", side_effect=[initial, after]
                 ),

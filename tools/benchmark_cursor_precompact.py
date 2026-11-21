@@ -98,12 +98,6 @@ def _hold_lock_child(path: Path, delay_ms: int, hold_ms: int) -> None:
 def _environment(home: Path, store_home: Path) -> dict[str, str]:
     """Return a process environment isolated from user data."""
     return {
-        **{
-            k: os.environ[k]
-            for k in ("SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "TEMP", "TMP")
-            if k in os.environ
-        },
-        "USERPROFILE": str(home),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home),
         "MUNINN_HOME": str(store_home),
@@ -164,11 +158,7 @@ def _run_sample(
         with suppress(subprocess.TimeoutExpired):
             result = subprocess.run(
                 [
-                    str(
-                        LAUNCHER.with_suffix(".cmd")
-                        if sys.platform == "win32"
-                        else LAUNCHER
-                    ),
+                    str(LAUNCHER),
                     "hook",
                     "pre-compact",
                     "--provider",

@@ -28,7 +28,6 @@ from install.context import Ctx, Job, job, link_text, must, run_real
 from install.operation import operation
 from install.provider_paths import cursor_commands
 from install.record import Record, install_record, load_record, save
-from install.release_io import write_private
 from install.snapshot import start_again, undo_store
 from install.steps_release import PRUNING, relink
 from install.transforms import codex_check, drop_trust, restore_cursor_settings
@@ -103,9 +102,7 @@ def _undo_fresh(ctx: Ctx, j: Job | None, rec: Record) -> None:
         j: The launchd job as found at the start of the rollback.
         rec: Recorded exclusive fresh-home identity.
     """
-    if ctx.platform != "darwin" and ctx.plist.exists():
-        _act(ctx, "remove the owned native job", lambda: lifecycle.remove(ctx))
-    elif j:
+    if j:
         _act(ctx, f"bootout new job pid {j['pid']}", lambda: bootout(ctx))
     # Only a fresh install made these, so only then are they ours to move.
     if ctx.data.exists():
@@ -228,18 +225,6 @@ def _undo_config(ctx: Ctx, rec: Record) -> None:
 
 def _undo_links(ctx: Ctx, rec: Record) -> None:
     """Point the release links back at their recorded targets."""
-    if ctx.platform == "win32":
-        previous = rec.get("selection")
-        manifest = ctx.lib / "selection.json"
-        if previous is not None:
-            _act(
-                ctx,
-                "restore the previous native release selection",
-                lambda: write_private(manifest, previous.encode()),
-            )
-        elif manifest.exists():
-            _act(ctx, "remove the fresh native selection", manifest.unlink)
-        return
     for name, target in rec.get("links", {}).items():
         link = Path(name)
         if target is None and link.is_symlink():
@@ -349,8 +334,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         ap.error("the record belongs to another HOME")
     os.umask(PRIVATE_UMASK)
     ctx = Ctx(Path(rec["home"]), run_real, rec["ts"], dry_run=args.dry_run)
-    if ctx.platform != "darwin":
-        lifecycle.preflight_service(ctx)
     problems = rollback(ctx, rec)
     for problem in problems:
         print(f"PROBLEM: {problem}")

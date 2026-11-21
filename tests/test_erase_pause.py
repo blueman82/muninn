@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -13,7 +12,6 @@ from unittest import mock
 
 from muninn import (
     erase,
-    platform_windows,
     poller_stop,
     review_commit,
     review_requests,
@@ -45,18 +43,7 @@ def owner_fixture(control: Path, replacement: bool) -> None:
     """Run the real owner and monitor around a local Python wrapper fixture."""
     fixture = SupervisorCase()
     try:
-        try:
-            fixture.setUp()
-        except PermissionError as error:
-            if sys.platform == "win32" and hasattr(fixture, "tmp"):
-                for ancestor in reversed((fixture.tmp, *fixture.tmp.parents)):
-                    try:
-                        platform_windows.assert_ancestry(ancestor)
-                    except PermissionError:
-                        raise PermissionError(
-                            f"{error}; rejected ancestor: {ancestor}"
-                        ) from error
-            raise
+        fixture.setUp()
         fixture.script = (
             "import os,time; from pathlib import Path; "
             f"Path({str(control / 'cli-started')!r})"

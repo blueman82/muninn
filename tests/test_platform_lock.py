@@ -57,14 +57,8 @@ class NativeLockTests(unittest.TestCase):
     def test_killed_writer_releases_lock(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path, ready = Path(temp) / "lock", Path(temp) / "ready"
-            # A Windows venv redirector has a different PID from its writer.
-            python = (
-                getattr(sys, "_base_executable", sys.executable)
-                if sys.platform == "win32"
-                else sys.executable
-            )
             with subprocess.Popen(
-                [python, "-c", CHILD, str(path), str(ready)], cwd=ROOT
+                [sys.executable, "-c", CHILD, str(path), str(ready)], cwd=ROOT
             ) as child:
                 try:
                     deadline = time.monotonic() + 10

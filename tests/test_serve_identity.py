@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from argparse import Namespace
-from collections.abc import Sequence
-from pathlib import Path
 from unittest.mock import patch
 
-from muninn import cli_serve, ingest, obs, obs_linux_service
+from muninn import cli_serve, ingest, obs
 from muninn.cli_maint import heartbeat
-from muninn.obs_service_commands import render_unit
 from tests.cli_support import CliCase
 from tests.review_pause_support import initialize
 
@@ -43,47 +38,6 @@ class WriterIdentityTests(CliCase):
         self.assertEqual(after.get("install_sha"), "b" * 40)
         self.assertEqual(after.get("writer_install_sha"), loaded)
         self.assertEqual(after.get("pid"), os.getpid())
-        user = Path(self.env["HOME"])
-        python = Path(sys.executable).resolve()
-        current = user / ".local/lib/muninn/current"
-        unit = user / ".config/systemd/user/muninn.service"
-        variables = {
-            "HOME": str(user),
-            "MUNINN_HOME": str(self.home),
-            "CODEX_HOME": str(user / ".codex"),
-            "CLAUDE_CONFIG_DIR": str(user / ".claude"),
-        }
-
-        def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
-            response = (
-                "LoadState=loaded\n"
-                f"MainPID={os.getpid()}\nActiveState=active\n"
-                f"FragmentPath={unit}\nDropInPaths=\n"
-            ).encode()
-            return subprocess.CompletedProcess(
-                [str(value) for value in argv], 0, response
-            )
-
-        with (
-            patch.object(
-                obs_linux_service,
-                "selection",
-                return_value=(current, python, "b" * 40),
-            ),
-            patch.object(
-                obs_linux_service,
-                "read_unit",
-                return_value=render_unit(
-                    python, current, self.home, variables
-                ),
-            ),
-            patch.object(obs_linux_service, "process_identity") as process,
-        ):
-            self.assertEqual(
-                obs_linux_service.inspect(self.home, variables, run),
-                (False, "writer_release_mismatch"),
-            )
-        process.assert_not_called()
         writer._alive()
         self.assertEqual(
             obs.read_status(self.home).get("writer_install_sha"), loaded

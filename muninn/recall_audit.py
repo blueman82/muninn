@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from muninn import classify, platform_io, store
+from muninn import classify, platform_io
 
 BATCH = 50
 NAME = "recall-review.sqlite"
@@ -42,7 +42,6 @@ def connection(home: Path, *, write: bool) -> Generator[sqlite3.Connection]:
         OSError: If audit file privacy or journal mode is unsafe.
     """
     path = home / NAME
-    store.assert_sqlite_private(path)
     if write:
         fd = platform_io.open_private(path, os.O_CREAT | os.O_RDWR)
         os.close(fd)

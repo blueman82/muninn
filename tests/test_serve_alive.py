@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import sys
 import time
 import unittest
 from argparse import Namespace
@@ -51,8 +50,7 @@ class ServeAliveTests(CliCase):
     def no_sleep(self) -> Any:
         """Make ``serve`` fail if it sleeps, without patching ``time``.
 
-        POSIX replaces only the poller's time reference. Windows checks
-        the real matching request through its bounded native wait instead.
+        Replaces only the poller's time reference.
 
         Returns:
             A context manager for the stand-in.
@@ -64,41 +62,16 @@ class ServeAliveTests(CliCase):
         stand_in = SimpleNamespace(
             sleep=refuse, monotonic=time.monotonic, time=time.time
         )
-        if sys.platform != "win32":
-            return mock.patch.object(cli_serve, "time", stand_in)
-        real_wait = poller_stop.wait
-
-        def requested_wait(
-            home: Path, pid: int, generation: str, seconds: float
-        ) -> bool:
-            began = time.monotonic()
-            stopped = real_wait(home, pid, generation, min(seconds, 1.0))
-            self.assertTrue(stopped, "kept running after the stop")
-            self.assertLess(time.monotonic() - began, 1.0)
-            return stopped
-
-        return mock.patch.object(poller_stop, "wait", requested_wait)
+        return mock.patch.object(cli_serve, "time", stand_in)
 
     def keep_signal_handlers(self) -> None:
         """Restore every handler installed by the real native poller."""
-        signals = (signal.SIGTERM, signal.SIGINT)
-        if sys.platform != "win32":
-            signals += (signal.SIGHUP,)
-        for sig in signals:
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             self.addCleanup(signal.signal, sig, signal.getsignal(sig))
 
     def request_stop(self) -> None:
-        """Use real POSIX signals or a matching private Windows generation."""
-        if sys.platform == "win32":
-            status = self.status()
-            generation = status["stop_generation"]
-            self.assertIsInstance(generation, str)
-            poller_stop.request(self.home, os.getpid(), str(generation))
-            self.assertTrue(
-                poller_stop.requested(self.home, os.getpid(), str(generation))
-            )
-        else:
-            os.kill(os.getpid(), signal.SIGTERM)
+        """Stop the poller with a real signal."""
+        os.kill(os.getpid(), signal.SIGTERM)
 
     def serve_one_pass(
         self,
@@ -131,19 +104,6 @@ class ServeAliveTests(CliCase):
         ):
             cli_serve.serve(Namespace(interval=60.0), self.env, self.home, {})
 
-    def test_every_registered_native_handler_is_preserved(self) -> None:
-        with (
-            mock.patch.object(self, "addCleanup") as cleanup,
-            mock.patch(
-                "tests.test_serve_alive.sys", SimpleNamespace(platform="win32")
-            ),
-        ):
-            self.keep_signal_handlers()
-        self.assertEqual(
-            [call.args[1] for call in cleanup.call_args_list],
-            [signal.SIGTERM, signal.SIGINT],
-        )
-
     def test_a_stop_arriving_just_after_a_status_write_still_stops(
         self,
     ) -> None:
@@ -158,12 +118,6 @@ class ServeAliveTests(CliCase):
                 self.request_stop()
             return moved
 
-        def write_then_stop(home: Path, fields: dict[str, object]) -> None:
-            REAL_WRITE_STATUS(home, fields)
-            if not fired:
-                fired.append(1)
-                self.request_stop()
-
         def fake(
             conn: object,
             roots: object,
@@ -177,11 +131,7 @@ class ServeAliveTests(CliCase):
         self.keep_signal_handlers()
         with (
             mock.patch.object(cli_serve.ingest, "ingest", fake),
-            (
-                mock.patch.object(Path, "replace", replace_then_sigterm)
-                if sys.platform != "win32"
-                else mock.patch.object(obs, "write_status", write_then_stop)
-            ),
+            mock.patch.object(Path, "replace", replace_then_sigterm),
             self.no_sleep(),
         ):
             result = cli_serve.serve(
@@ -194,8 +144,7 @@ class ServeAliveTests(CliCase):
         """Pinned: the pass is counted, its log line may be lost, exit 0.
 
         The heartbeat is the record of a finished pass; the log line is
-        news for a human. POSIX signals interrupt before that line; a
-        Windows request is observed at the next boundary after the line.
+        news for a human. The signal interrupts before that line.
         """
         real_heartbeat = cli_serve.heartbeat
 
@@ -220,12 +169,7 @@ class ServeAliveTests(CliCase):
         self.assertEqual(self.status()["passes"], 1)
         lines = (self.home / "poller.log").read_text().splitlines()
         events = [json.loads(x)["event"] for x in lines]
-        expected = (
-            ["start", "pass", "stop"]
-            if sys.platform == "win32"
-            else ["start", "stop"]
-        )
-        self.assertEqual(events, expected)
+        self.assertEqual(events, ["start", "stop"])
 
     def test_a_stop_noted_mid_transaction_survives_a_silent_rollback(
         self,

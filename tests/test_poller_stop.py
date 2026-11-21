@@ -10,7 +10,6 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from muninn import cli_serve, platform_io, poller_stop, store
@@ -60,22 +59,6 @@ class PollerStopTests(unittest.TestCase):
             poller_stop.request(self.home, 123, GENERATION, deadline=1.0)
         self.assertFalse((self.home / poller_stop.FILE).exists())
         self.assertEqual(list(self.home.iterdir()), [])
-
-    def test_windows_deadline_publication_has_no_retry_loop(self) -> None:
-        windows = SimpleNamespace(**(vars(os) | {"name": "nt"}))
-        with (
-            mock.patch.object(poller_stop, "os", windows),
-            mock.patch.object(
-                poller_stop.platform_windows, "publish", create=True
-            ) as publish,
-        ):
-            poller_stop.request(
-                self.home, 123, GENERATION, deadline=time.monotonic() + 5
-            )
-        self.assertEqual(publish.call_count, 1)
-        self.assertEqual(
-            publish.call_args.kwargs, {"replace": True, "retry_move": False}
-        )
 
     def test_idle_wait_responds_before_long_interval(self) -> None:
         def write_request() -> None:

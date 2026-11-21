@@ -218,20 +218,6 @@ class KeyScanTests(unittest.TestCase):
         with mock.patch.object(Path, "lstat", side_effect=PermissionError):
             self.assertTrue(tombstone_key.log_has_keyed(self.home))
 
-    def test_private_fd_refusal_is_conservative_and_closes(self) -> None:
-        self.write(b"unkeyed")
-        reader = platform_io.open_regular(self.path, root=self.home)
-        with (
-            mock.patch.object(
-                platform_io, "open_regular", return_value=reader
-            ),
-            mock.patch.object(
-                platform_io, "assert_private_fd", side_effect=PermissionError
-            ),
-        ):
-            self.assertTrue(tombstone_key.log_has_keyed(self.home))
-        self.assertTrue(reader.closed)
-
     def test_actual_substitution_after_discovery_is_conservative(
         self,
     ) -> None:

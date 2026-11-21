@@ -154,7 +154,7 @@ class CodexContractTest(unittest.TestCase):
         data = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
         handler = json.loads(data)["hooks"]["SessionEnd"][0]["hooks"][0]
         self.assertEqual(handler["timeout"], 3)
-        hooks = co.codex_hooks(data, platform="darwin")
+        hooks = co.codex_hooks(data)
         end = next(hook for hook in hooks if hook["event"] == "session_end")
         self.assertEqual(
             end["hash"],

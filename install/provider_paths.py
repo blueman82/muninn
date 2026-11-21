@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
 import shlex
 import shutil
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +16,6 @@ from install.context import Ctx
 from install.provider_apps import installed
 from install.transforms import cursor_handlers, cursor_ours, ours
 from install.trust import codex_hooks
-from muninn import platform_windows
 from muninn.platform_io import open_regular
 
 _VERBS = {
@@ -32,32 +29,9 @@ _VERBS = {
 }
 
 
-def powershell() -> str:
-    """Return the native Windows PowerShell executable's absolute path."""
-    return str(
-        Path(os.environ.get("SYSTEMROOT", "C:/Windows"))
-        / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    )
-
-
-def _windows_command(ctx: Ctx, verb: str, provider: str) -> str:
-    """Encode the script path so cmd cannot expand path metacharacters."""
-    script = str(ctx.muninn.with_suffix(".ps1")).replace("'", "''")
-    statement = (
-        f"& '{script}' hook {verb} --provider {provider}; exit $LASTEXITCODE"
-    )
-    encoded = base64.b64encode(statement.encode("utf-16-le")).decode("ascii")
-    return (
-        f'"{powershell()}" -NoProfile -NonInteractive '
-        f"-ExecutionPolicy Bypass -EncodedCommand {encoded}"
-    )
-
-
 def cursor_command(ctx: Ctx, event: str = "preCompact") -> str:
     """Return Cursor's event command using the native installed launcher."""
     verb = _VERBS[event]
-    if ctx.platform == "win32":
-        return _windows_command(ctx, verb, "cursor")
     return f"{shlex.quote(str(ctx.muninn))} hook {verb} --provider cursor"
 
 
@@ -94,29 +68,10 @@ def render_pinned(ctx: Ctx, relative: str, data: bytes) -> bytes:
         for group in groups:
             for handler in group["hooks"]:
                 verb = _VERBS[event]
-                if ctx.platform != "win32":
-                    handler["command"] = (
-                        f"{shlex.quote(str(ctx.muninn))} hook {verb}"
-                        f" --provider {provider}"
-                    )
-                elif provider == "claude":
-                    handler["command"] = powershell()
-                    handler["args"] = [
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        str(ctx.muninn.with_suffix(".ps1")),
-                        "hook",
-                        verb,
-                        "--provider",
-                        provider,
-                    ]
-                else:
-                    handler["command_windows"] = _windows_command(
-                        ctx, verb, provider
-                    )
+                handler["command"] = (
+                    f"{shlex.quote(str(ctx.muninn))} hook {verb}"
+                    f" --provider {provider}"
+                )
     return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode()
 
 
@@ -141,14 +96,7 @@ def hook_invocations(ctx: Ctx) -> list[list[str]]:
         if ours(group)
         for handler in group["hooks"]
     ]
-    calls = [
-        (
-            list(map(str, [handler["command"], *handler["args"]]))
-            if "args" in handler
-            else shlex.split(handler["command"])
-        )
-        for handler in handlers
-    ]
+    calls = [shlex.split(handler["command"]) for handler in handlers]
     paths: list[Path] = (
         list(ctx.cache.glob("*/hooks/hooks.json"))
         if installed(ctx, "codex")
@@ -157,7 +105,7 @@ def hook_invocations(ctx: Ctx) -> list[list[str]]:
     for path in sorted(paths):
         calls.extend(
             shlex.split(hook["command"])
-            for hook in codex_hooks(path.read_bytes(), platform=ctx.platform)
+            for hook in codex_hooks(path.read_bytes())
         )
     if (
         ctx.cursor_hooks
@@ -175,51 +123,23 @@ def hook_invocations(ctx: Ctx) -> list[list[str]]:
 
 
 def codex_argv(ctx: Ctx, *arguments: str) -> list[str]:
-    """Resolve a real Windows executable or the official npm Node entry.
+    """Return the Codex command line.
 
     Args:
-        ctx: Installation platform; POSIX keeps its normal CLI dispatch.
-        *arguments: Arguments passed unchanged without a cmd shell.
+        ctx: Installation context.
+        *arguments: Arguments passed unchanged.
 
     Returns:
-        Real executable and exact CLI arguments.
-
-    Raises:
-        OSError: If an existing candidate is unsafe or dispatch is unsupported.
+        The program name and exact CLI arguments.
     """
-    if ctx.platform != "win32":
-        return ["codex", *arguments]
-    native = shutil.which("codex.exe")
-    if native:
-        _windows_executable(Path(native))
-        return [native, *arguments]
-    shim = shutil.which("codex")
-    if not shim:
-        raise OSError("Codex executable is unavailable")
-    _windows_executable(Path(shim))
-    script = Path(shim).parent / "node_modules/@openai/codex/bin/codex.js"
-    node = shutil.which("node.exe")
-    if not script.is_file() or not node:
-        raise OSError(
-            "put native codex.exe on PATH or install the official npm CLI"
-        )
-    _windows_executable(script)
-    _windows_executable(Path(node))
-    return [node, str(script), *arguments]
-
-
-def _windows_executable(path: Path) -> None:
-    """Validate executable ancestry using actual native Windows semantics."""
-    if sys.platform != "win32":
-        raise OSError("Windows executable validation requires Windows")
-    platform_windows.assert_executable(path)
+    return ["codex", *arguments]
 
 
 def codex_identity(ctx: Ctx) -> tuple[str, ...]:
     """Return opaque descriptor-bound identities of the selected CLI files.
 
     Args:
-        ctx: Native executable or official npm dispatch selection.
+        ctx: Installation context.
 
     Returns:
         Content, filesystem identity and resolved path hashes per CLI file.

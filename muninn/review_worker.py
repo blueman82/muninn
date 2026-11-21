@@ -21,7 +21,6 @@ from muninn.review_process_protocol import (
     decode_control,
     packet,
 )
-from muninn.review_process_windows import NativeChild, launch
 from muninn.review_runtime_models import RuntimeIdentity
 from muninn.review_runtime_records import identity_digest
 
@@ -50,7 +49,7 @@ class _Worker:
         self.expected = 12
         self.prompt = b""
         self.prompt_at = 0
-        self.cli: subprocess.Popen[bytes] | NativeChild | None = None
+        self.cli: subprocess.Popen[bytes] | None = None
         self.closed: set[int] = set()
         self.output_count = 0
         self.completed = False
@@ -62,10 +61,7 @@ class _Worker:
 
     def abort(self) -> None:
         """Kill the still-owned group, including this finite wrapper."""
-        if isinstance(self.cli, NativeChild):
-            self.cli.close()
-        if os.name != "nt":
-            os.killpg(os.getpgrp(), signal.SIGKILL)
+        os.killpg(os.getpgrp(), signal.SIGKILL)
         raise SystemExit(1)
 
     def _parent(self) -> None:
@@ -134,18 +130,14 @@ class _Worker:
         self, argv: tuple[str, ...], cwd: Path, env: dict[str, str]
     ) -> None:
         """Keep native creation separate from proved pre-exec refusal."""
-        self.cli = (
-            launch(argv, cwd, env)
-            if os.name == "nt"
-            else subprocess.Popen(
-                argv,
-                cwd=cwd,
-                env=env,
-                close_fds=True,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
+        self.cli = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            close_fds=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
 
     def _refuse(self, code: Literal["runtime_changed", "exec_enoent"]) -> None:
@@ -226,8 +218,6 @@ class _Worker:
                     sent = os.write(1, self.outgoing[:4096])
                     del self.outgoing[:sent]
             elif self.completed:
-                if isinstance(self.cli, NativeChild):
-                    self.cli.close()
                 return
             time.sleep(0.005)
 

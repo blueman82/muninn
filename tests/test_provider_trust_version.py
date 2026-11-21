@@ -21,7 +21,6 @@ class ProviderVersionTest(unittest.TestCase):
         self,
         version: bytes,
         *,
-        platform: str = "win32",
         code: int = 0,
         identities: tuple[tuple[str, ...], ...] = (("same",), ("same",)),
     ) -> tuple[str, tuple[str, ...]]:
@@ -31,7 +30,6 @@ class ProviderVersionTest(unittest.TestCase):
             Path("/synthetic"),
             mock.Mock(return_value=done),
             "test",
-            platform=platform,
         )
         with (
             mock.patch(
@@ -43,7 +41,7 @@ class ProviderVersionTest(unittest.TestCase):
         ):
             return _codex_observation(ctx)
 
-    def test_verified_windows_version_requires_exit_zero(self) -> None:
+    def test_verified_version_requires_exit_zero(self) -> None:
         self.assertEqual(
             self.observe(b"codex-cli 0.159.2\n"),
             ("codex-cli 0.159.2", ("same",)),
@@ -52,13 +50,9 @@ class ProviderVersionTest(unittest.TestCase):
             self.observe(b"codex-cli 0.159.2\n", code=1), ("", ())
         )
 
-    def test_unproved_windows_version_leaves_owner_step(self) -> None:
-        self.assertEqual(self.observe(b"codex-cli 0.159.3\n"), ("", ()))
-        self.assertEqual(self.observe(b"codex-cli 9.9.9\n"), ("", ()))
-
     def test_verified_posix_allowlist_is_preserved(self) -> None:
         self.assertEqual(
-            self.observe(b"codex-cli 0.159.3\n", platform="darwin"),
+            self.observe(b"codex-cli 0.159.3\n"),
             ("codex-cli 0.159.3", ("same",)),
         )
 

@@ -29,15 +29,6 @@ class ProviderPathsTest(unittest.TestCase):
             roots["claude-projects"], Path("/temporary/claude/projects")
         )
 
-    def test_windows_profile_precedes_inherited_home(self) -> None:
-        with mock.patch("muninn.ingest.sys.platform", "win32"):
-            roots = ingest.default_roots(
-                {"HOME": "/wrong", "USERPROFILE": "/profile"}
-            )
-        self.assertEqual(
-            roots["codex-sessions"], Path("/profile/.codex/sessions")
-        )
-
     def test_foreign_absolute_cwd_never_uses_commit_hint(self) -> None:
         foreign = "/home/foreign" if os.name == "nt" else "C:\\Users\\foreign"
         with mock.patch.object(scope, "_has_commit") as probe:

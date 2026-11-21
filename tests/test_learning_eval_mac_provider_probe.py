@@ -146,7 +146,7 @@ while True: time.sleep(1)
         self,
     ) -> None:
         rendered = (ROOT / "integrations/codex/hooks/hooks.json").read_bytes()
-        wanted = codex_hooks(rendered, platform="darwin")
+        wanted = codex_hooks(rendered)
         cached = Path("/private/disposable/hooks/hooks.json")
         entries = [
             {
@@ -196,7 +196,7 @@ while True: time.sleep(1)
                     "sourcePath": str(cached),
                     "trustStatus": "untrusted",
                 }
-                for h in codex_hooks(rendered, platform="darwin")
+                for h in codex_hooks(rendered)
             ]
             replies = [
                 models.CommandResult(

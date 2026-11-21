@@ -6,7 +6,6 @@ import json
 import os
 import stat
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -53,20 +52,18 @@ def run_real(
 
 def _existing(fd: int) -> None:
     """Refuse unsafe opened originals without changing their permissions."""
-    platform_io.assert_private_fd(fd)
-    if sys.platform != "win32":
-        status = os.fstat(fd)
-        if (
-            not stat.S_ISREG(status.st_mode)
-            or status.st_uid != os.getuid()
-            or status.st_mode & 0o077
-        ):
-            raise OSError("installer log ownership or permissions are unsafe")
+    status = os.fstat(fd)
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or status.st_uid != os.getuid()
+        or status.st_mode & 0o077
+    ):
+        raise OSError("installer log ownership or permissions are unsafe")
 
 
 def _parent(path: Path) -> None:
     """Validate the existing log parent without modifying access control."""
-    if sys.platform != "win32" and path.parent.exists():
+    if path.parent.exists():
         status = path.parent.lstat()
         if (
             not stat.S_ISDIR(status.st_mode)
@@ -74,10 +71,6 @@ def _parent(path: Path) -> None:
             or status.st_mode & 0o077
         ):
             raise OSError("installer log directory is unsafe")
-    elif path.parent.exists() and not platform_io.is_private(
-        path.parent, directory=True
-    ):
-        raise OSError("installer log directory is unsafe")
 
 
 def _open(path: Path) -> int:
@@ -90,10 +83,7 @@ def _open(path: Path) -> int:
         )
     except FileExistsError:
         flags = os.O_WRONLY | os.O_APPEND
-        if sys.platform == "win32":
-            fd = platform_io.open_private(path, flags)
-        else:
-            fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK)
         try:
             _existing(fd)
             return fd

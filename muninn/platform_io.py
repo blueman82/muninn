@@ -4,30 +4,17 @@ from __future__ import annotations
 
 import os
 import stat
-import sys
 import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
-from muninn import file_sync, platform_windows
+from muninn import file_sync
 
 
 def ensure_private_dir(path: Path) -> None:
-    """Create a private leaf directory or validate an existing Windows ACL."""
-    if sys.platform == "win32":
-        platform_windows.assert_ancestry(path)
-        missing: list[Path] = []
-        current = path
-        while not current.exists():
-            missing.append(current)
-            current = current.parent
-        for directory in reversed(missing):
-            directory.mkdir(mode=0o700, exist_ok=True)
-            platform_windows.assert_private(directory, directory=True)
-        platform_windows.assert_private(path, directory=True)
-    else:
-        path.mkdir(mode=0o700, parents=True, exist_ok=True)
-        path.chmod(0o700)
+    """Create a private leaf directory and force mode 0700 on it."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.chmod(0o700)
 
 
 def open_private(path: Path, flags: int) -> int:
@@ -50,8 +37,6 @@ def open_private(path: Path, flags: int) -> int:
     """
     if flags & os.O_TRUNC:
         raise ValueError("validate private state before truncating it")
-    if sys.platform == "win32":
-        return platform_windows.open_private(path, flags)
     flags |= os.O_NOFOLLOW | os.O_NONBLOCK
     fd = os.open(path, flags, 0o600)
     try:
@@ -95,10 +80,7 @@ def open_regular(
         base, actual = root.resolve(), path.resolve()
         if not actual.is_relative_to(base):
             raise OSError("source is outside its root")
-    if sys.platform == "win32":
-        fd = platform_windows.open_regular(path, root)
-    else:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         actual_stat = os.fstat(fd)
         if not stat.S_ISREG(actual_stat.st_mode):
@@ -115,7 +97,7 @@ def open_regular(
 
 
 def is_private(path: Path, *, directory: bool = False) -> bool:
-    """Check Windows ACLs or the equivalent POSIX owner-only mode.
+    """Check the owner-only mode.
 
     Args:
         path: State object to inspect.
@@ -125,19 +107,10 @@ def is_private(path: Path, *, directory: bool = False) -> bool:
         Whether access control can be established as private.
     """
     try:
-        if sys.platform == "win32":
-            platform_windows.assert_private(path, directory=directory)
-            return True
         bits = path.stat().st_mode & 0o777
         return bits == 0o700 if directory else bits & 0o077 == 0
     except OSError:
         return False
-
-
-def assert_private_fd(fd: int) -> None:
-    """Check an opened Windows temp file before private writes."""
-    if sys.platform == "win32":
-        platform_windows.private_fd(fd)
 
 
 def publish_private_file(path: Path, raw: bytes) -> bool:

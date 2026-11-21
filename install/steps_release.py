@@ -25,11 +25,10 @@ from install.context import (
 )
 from install.provider_paths import render_pinned
 from install.record import Record
-from install.release_io import publish, write_private, write_selection
+from install.release_io import publish
 from install.runtime import prepare_runtime, retired_runtimes
 from muninn import platform_io
 from muninn.cursor_import import default_database
-from muninn.obs_service import literal, powershell
 
 PLIST_SOURCE = "current/launchd/com.muninn.plist"
 HISTORY_ROOTS = (
@@ -120,14 +119,6 @@ def pin(ctx: Ctx, rec: Record) -> None:
     if not rec.get("runtime_prepared"):
         prepare_release(ctx, rec)
     python = rec["python"]["path"]
-    if ctx.platform == "win32":
-        platform_io.ensure_private_dir(ctx.muninn.parent)
-        for name in ("muninn.cmd", "muninn.ps1"):
-            write_private(
-                ctx.muninn.parent / name, (dest / "bin" / name).read_bytes()
-            )
-        write_selection(ctx.lib, sha, python)
-        return
     relink(ctx.lib / "current", sha, ctx.ts)
     relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
     relink(ctx.lib / "python", python, ctx.ts)
@@ -260,9 +251,7 @@ def restart(ctx: Ctx, rec: Record, *, registered: bool = False) -> None:
     if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
     started = ctx.now()
-    if ctx.platform != "darwin":
-        lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
-    elif rec.get("paused") and not registered:
+    if rec.get("paused") and not registered:
         must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     else:
         must(ctx, ["launchctl", "kickstart", "-k", ctx.target])
@@ -387,17 +376,6 @@ def start_new(ctx: Ctx, rec: Record) -> None:
         return
     status = ctx.data / "status.json"
     previous = status.stat().st_mtime_ns if status.exists() else None
-    if ctx.platform != "darwin":
-        started = ctx.now()
-        lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
-        wait(ctx, lambda: is_new(ctx, job(ctx)), 30, "new job has no live PID")
-        wait(
-            ctx,
-            lambda: fresh(ctx, started, previous),
-            HEARTBEAT_S,
-            "heartbeat not fresh",
-        )
-        return
     data = src.read_bytes()
     _check_plist(ctx, data)
     ctx.plist.parent.mkdir(parents=True, exist_ok=True)
@@ -414,16 +392,7 @@ def start_new(ctx: Ctx, rec: Record) -> None:
 
 
 def command(ctx: Ctx, *args: str) -> Sequence[str | Path]:
-    """Invoke installed Windows code directly; retain the POSIX launcher."""
-    if ctx.platform == "win32":
-        script = f"$launcher={literal(str(ctx.muninn.with_suffix('.ps1')))};"
-        encoded_args = ",".join(f"({literal(value)})" for value in args)
-        script += (
-            f"$values=@({encoded_args});& $launcher @values;exit $LASTEXITCODE"
-        )
-        argv = powershell(script)
-        argv[3:3] = ["-ExecutionPolicy", "Bypass"]
-        return argv
+    """Build the argv that runs the installed launcher."""
     return [ctx.muninn, *args]
 
 
@@ -437,9 +406,6 @@ def pause(ctx: Ctx, rec: Record) -> None:
 
 def installed_env(ctx: Ctx, **extra: str) -> dict[str, str]:
     """Isolate provider configuration as well as the Muninn data directory."""
-    extra = dict(extra)
-    if ctx.platform == "win32":
-        extra["LOCALAPPDATA"] = str(ctx.lib.parent.parent)
     return muninn_env(
         ctx.data,
         HOME=str(ctx.home),

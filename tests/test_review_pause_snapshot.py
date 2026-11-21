@@ -231,29 +231,6 @@ class SnapshotTests(unittest.TestCase):
             state.inspect(case.home, state.WITNESS)
         self.assertIs(type(caught.exception), state.PauseRefusedError)
 
-    def test_post_read_descriptor_privacy_failure_is_not_reclassified(
-        self,
-    ) -> None:
-        case = self.fixture()
-        checks = [0]
-        error = PermissionError("descriptor privacy changed")
-        original = platform_io.assert_private_fd
-
-        def private(fd: int) -> None:
-            checks[0] += 1
-            if checks[0] == 2:
-                raise error
-            original(fd)
-
-        with (
-            mock.patch.object(
-                platform_io, "assert_private_fd", side_effect=private
-            ),
-            self.assertRaises(PermissionError) as caught,
-        ):
-            state.inspect(case.home, state.WITNESS)
-        self.assertIs(caught.exception, error)
-
     @unittest.skipIf(os.name == "nt", "POSIX mode; Windows uses ACL checks")
     def test_changed_old_descriptor_mode_is_not_reclassified(self) -> None:
         case = self.fixture()

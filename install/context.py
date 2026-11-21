@@ -26,14 +26,6 @@ from install.constants import (
 from install.installer_log import Runner as Runner
 from install.installer_log import install_log as install_log
 from install.installer_log import run_real as run_real
-from muninn.obs_linux_service import query_unit
-from muninn.obs_service import (
-    command_names_path,
-    parse_process,
-    process_command,
-)
-from muninn.obs_status import read_status
-from muninn.platform_paths import read_selection, windows_base
 
 
 class StepFailedError(Exception):
@@ -139,34 +131,11 @@ class Ctx:
         self.config = self.codex_home / "config.toml"
         self.cache = self.codex_home / "plugins/cache" / MKT_NAME / "muninn"
         self.target = f"gui/{self.uid}/{LABEL}"
-        if self.platform == "linux":
-            self.plist = h / ".config/systemd/user/muninn.service"
-            self.target = "muninn.service"
-        elif self.platform == "win32":
-            base = windows_base(
-                os.environ, home=None if self.default_home else h
-            )
-            self.data, self.lib = base / "data", base / "lib"
-            self.rdir = base / f"install-{self.ts}"
-            self.failed = base / f"failed-{self.ts}"
-            self.removed = base / f"{REMOVED_PREFIX}{self.ts}"
-            self.muninn = base / "bin/muninn.cmd"
-            self.plist = base / "task.xml"
-            self.target = "Muninn"
 
     @property
     def release(self) -> Path:
-        """The current confined release without requiring a symlink.
-
-        Raises:
-            StepFailedError: If the native release selection is absent.
-        """
-        if self.platform != "win32":
-            return self.lib / "current"
-        selected = read_selection(self.lib.parent)
-        if selected is None:
-            raise StepFailedError("no installed release selection")
-        return selected[0]
+        """The current release link."""
+        return self.lib / "current"
 
 
 def must(
@@ -230,10 +199,6 @@ def job(ctx: Ctx, target: str | None = None) -> Job | None:
     Returns:
         None when the label is not loaded, otherwise its pid and command.
     """
-    if ctx.platform == "linux":
-        return _linux_job(ctx, target)
-    if ctx.platform == "win32":
-        return _windows_job(ctx)
     r = ctx.run(["launchctl", "print", target or ctx.target])
     if r.returncode:
         return None
@@ -265,8 +230,6 @@ def is_new(ctx: Ctx, j: Job | None) -> bool:
     """Say whether a job is running from the new pinned release."""
     if not (j and j["pid"]):
         return False
-    if ctx.platform == "win32":
-        return command_names_path(j["cmd"], ctx.lib)
     return str(ctx.lib) in j["cmd"]
 
 
@@ -284,49 +247,3 @@ def dry(ctx: Ctx, text: str) -> bool:
     if ctx.dry_run:
         ctx.say(text)
     return ctx.dry_run
-
-
-def _linux_job(ctx: Ctx, target: str | None) -> Job | None:
-    """Distinguish an owned loaded unit from validated native absence."""
-    try:
-        values = query_unit(ctx.run, target or ctx.target)
-        if values["LoadState"] == "not-found":
-            if values != {
-                "LoadState": "not-found",
-                "ActiveState": "inactive",
-                "MainPID": "0",
-                "FragmentPath": "",
-                "DropInPaths": "",
-            }:
-                raise ValueError("service_absence_unknown")
-            return None
-        if (
-            values["LoadState"] != "loaded"
-            or not ctx.plist.is_file()
-            or values["FragmentPath"] != str(ctx.plist)
-            or values["DropInPaths"]
-        ):
-            raise ValueError("service_registration_unowned")
-        pid = int(values["MainPID"])
-    except (OSError, ValueError) as exc:
-        raise StepFailedError(
-            "cannot establish the owned user service"
-        ) from exc
-    if not pid:
-        return {"pid": None, "cmd": ""}
-    ps = ctx.run(["ps", "-ww", "-o", "command=", "-p", str(pid)])
-    return {"pid": pid, "cmd": ps.stdout.decode(errors="replace").strip()}
-
-
-def _windows_job(ctx: Ctx) -> Job | None:
-    """Inspect the actual heartbeat process, never the task engine PID."""
-    status = read_status(ctx.data)
-    pid = status.get("pid")
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return None
-    result = ctx.run(process_command(pid))
-    if result.returncode:
-        return None
-    process = parse_process(result.stdout)
-    command = process["cmd"]
-    return {"pid": pid, "cmd": command if isinstance(command, str) else ""}

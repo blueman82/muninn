@@ -16,13 +16,11 @@ import json
 import os
 import re
 import stat
-import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from install.config_windows import replacement
 from install.errors import RacedError, RefusedError
 from install.tomledit import (
     get_section,
@@ -32,9 +30,8 @@ from install.tomledit import (
     scan_named,
     toml_check,
 )
-from muninn import platform_windows
 from muninn.file_sync import sync_fd, sync_path
-from muninn.platform_io import assert_private_fd, open_regular
+from muninn.platform_io import open_regular
 
 __all__ = [
     "JsonPath",
@@ -64,13 +61,11 @@ JsonPath = tuple[str, ...]
 def _read(path: Path) -> bytes:
     """Read a verified original; retain a seam for concurrent-writer tests."""
     with open_regular(path, expected=path.lstat()) as source:
-        assert_private_fd(source.fileno())
-        if sys.platform != "win32":
-            status = os.fstat(source.fileno())
-            if status.st_uid != os.getuid() or status.st_mode & 0o022:
-                raise OSError(
-                    "provider config ownership or permissions are unsafe"
-                )
+        status = os.fstat(source.fileno())
+        if status.st_uid != os.getuid() or status.st_mode & 0o022:
+            raise OSError(
+                "provider config ownership or permissions are unsafe"
+            )
         return source.read()
 
 
@@ -89,20 +84,6 @@ def read_file(path: Path) -> bytes:
     return _read(path)
 
 
-def _fsync_dir(path: Path) -> None:
-    """Flush a POSIX directory; Windows publication itself is write-through."""
-    if sys.platform != "win32":
-        sync_path(path)
-
-
-def _publish(source: Path, target: Path) -> None:
-    """Publish without delete-first or cross-volume copy fallbacks."""
-    if sys.platform == "win32":
-        platform_windows.publish(source, target, replace=True)
-    else:
-        source.replace(target)
-
-
 def _write_temp(path: Path, data: bytes, mode: int) -> Path:
     """Write ``data`` to a fsynced temp file next to ``path``.
 
@@ -118,19 +99,10 @@ def _write_temp(path: Path, data: bytes, mode: int) -> Path:
     Returns:
         The temp file's path.
     """
-    if sys.platform == "win32":
-        platform_windows.assert_ancestry(path.parent)
-        platform_windows.assert_private(path.parent, directory=True)
-    if sys.platform == "win32" and path.exists():
-        fd, temporary = replacement(path)
-        tmp = str(temporary)
-    else:
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "wb") as f:
-            if sys.platform != "win32":
-                os.fchmod(f.fileno(), mode)
-            assert_private_fd(f.fileno())
+            os.fchmod(f.fileno(), mode)
             f.write(data)
             f.flush()
             sync_fd(f.fileno())
@@ -150,10 +122,10 @@ def atomic_write(path: Path, data: bytes, mode: int) -> None:
     """
     tmp = _write_temp(path, data, mode)
     try:
-        _publish(tmp, path)
+        tmp.replace(path)
     finally:
         tmp.unlink(missing_ok=True)
-    _fsync_dir(path.parent)
+    sync_path(path.parent)
 
 
 def create_file(path: Path, data: bytes, mode: int) -> bool:
@@ -170,13 +142,10 @@ def create_file(path: Path, data: bytes, mode: int) -> bool:
     tmp = _write_temp(path, data, mode)
     try:
         try:
-            if sys.platform == "win32":
-                platform_windows.publish(tmp, path, replace=False)
-            else:
-                os.link(tmp, path)
+            os.link(tmp, path)
         except FileExistsError:
             return False
-        _fsync_dir(path.parent)
+        sync_path(path.parent)
         return True
     finally:
         tmp.unlink(missing_ok=True)
@@ -221,10 +190,10 @@ def edit_file(
             # the providers take no lock we could share.
             if _read(path) != before:
                 continue
-            _publish(tmp, path)
+            tmp.replace(path)
         finally:
             tmp.unlink(missing_ok=True)
-        _fsync_dir(path.parent)
+        sync_path(path.parent)
         on_disk = _read(path)
         if on_disk != after:
             raise RacedError(f"{path.name} changed right after our write")
@@ -385,9 +354,7 @@ def tree_snapshot(root: Path) -> dict[str, tuple[str, int]]:
         status = path.lstat()
         if path.is_symlink() or path.is_junction():
             raise OSError("cache contains an unsafe alias")
-        if sys.platform != "win32" and (
-            status.st_uid != os.getuid() or status.st_mode & 0o022
-        ):
+        if status.st_uid != os.getuid() or status.st_mode & 0o022:
             raise OSError("cache ownership or permissions are unsafe")
         if stat.S_ISDIR(status.st_mode):
             digest = ""

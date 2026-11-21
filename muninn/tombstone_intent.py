@@ -180,8 +180,7 @@ def read_journal(home: Path) -> Generator[IntentRow]:
     with platform_io.open_regular(
         path, root=home, expected=discovered
     ) as handle:
-        platform_io.assert_private_fd(handle.fileno())
-        if os.name != "nt" and os.fstat(handle.fileno()).st_mode & 0o077:
+        if os.fstat(handle.fileno()).st_mode & 0o077:
             raise PermissionError("erasure_journal_permissions")
         try:
             for raw in handle:
