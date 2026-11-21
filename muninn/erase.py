@@ -128,15 +128,7 @@ def _aside_remove(aside: list[str]) -> str | None:
     """Return a shell command that removes only the listed literal paths."""
     if not aside:
         return None
-    if os.name != "nt":
-        return "rm -- " + " ".join(shlex.quote(path) for path in aside)
-    literals: list[str] = []
-    for path in aside:
-        # PowerShell recognises smart single quotes as string delimiters too.
-        for quote in "'\u2018\u2019\u201a\u201b":
-            path = path.replace(quote, quote * 2)
-        literals.append("'" + path + "'")
-    return "Remove-Item -LiteralPath @(" + ",".join(literals) + ")"
+    return "rm -- " + " ".join(shlex.quote(path) for path in aside)
 
 
 def _aside_report(home: Path) -> dict[str, object]:
