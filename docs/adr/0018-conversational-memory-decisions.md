@@ -2,16 +2,10 @@
 
 ## Status
 
-ACCEPTED by the owner on 2026-10-29.
-The source implements the commands, checked application, maintenance, and erasure.
-A source change does not prove the selected release, local installation, or live verification.
-Owner authorization: “all above is approved what questions would you ask”.
-
-This approval authorizes implementation.
-It does not prove an owner's decision about a runtime memory proposal.
-
-Related proposal: [memory lifecycle design](../memory-lifecycle-design.md).
-The different [ADR 0017 change](0017-learning-scope-and-recovery.md#proposed-amendment-bounded-correction-and-action-routing) includes usual correction and error notices.
+Accepted by the owner on 2026-10-29, changed by [ADR 0026](0026-simple-learning.md).
+ADR 0026 replaces the learning policy, budget, pause, Codex binding, host and
+maintenance-pause rules that this record once held. This record keeps only the
+rules for owner decisions about memory proposals.
 
 ## What the owner will see
 
@@ -59,13 +53,6 @@ The owner need not run commands, examine the database, type JSON, or supply a ha
 
 - **Transaction:** A database operation that records all its changes together or records none.
 
-- **Generation check:** Muninn records a current work version number, called a generation.
-  Each `review` `attempt` keeps the generation number it started with.
-  When the current number changes, older `attempts` cannot record.
-  The generation check compares the attempt's number with the current number.
-
-  The software also names this a generation fence.
-
 For example, one project record says Python 3.12.
 A subsequent record says Python 3.13.
 If the `evidence` cannot settle the difference, Muninn keeps a question.
@@ -78,50 +65,20 @@ Ordinary project reads do not inherit global guidance.
 A project scope applies to the specified project.
 An optional task limit can limit it more.
 
-These identifiers name records:
-
-| Identifier | Record |
-| --- | --- |
-| `D_ID` | One complete proposal for an owner decision. |
-| `E_ID` | One `evidence` record. |
-| `R_ID` | One learning `request` or application `job`. |
-| `U_ID` | One unresolved question. |
-
-These are placeholders for actual IDs.
-For example, the agent replaces `D_ID` with the displayed proposal's actual ID.
+These identifiers name records: `D_ID` (one proposal), `E_ID` (one
+`evidence` record), `R_ID` (one learning `request` or application `job`) and
+`U_ID` (one unresolved question).
 
 ## Context
 
 Muninn records unresolved questions.
 A question can have no complete proposed change.
-An earlier rejected proposal can also be unavailable.
 No such record proves which unchanged change received owner approval.
-
 An agent command cannot prove an actual owner decision.
-
-The owner must be able to give approval, specify an edit, or reject related memory in conversation.
+The owner gives approval, an edit or a rejection in conversation.
 The agent runs commands and checks the result.
-A view alone cannot complete that decision.
 
 ## Proposed decision
-
-### Selection and scheduling
-
-Keep ordinary automatic learning free of a new approval requirement.
-The `SessionEnd` hook can make a `job` for subsequent `review` without an active conversation.
-Do not make an owner decision necessary for each learned item or safely contained proposal error.
-
-Show a decision for an actual unresolved question related to the current task.
-Also show a decision when the owner explicitly specifies a `review`.
-A subsequent `review` cannot promise `delivery` in the conversation that ended.
-
-The implementer is the person or agent that builds this feature.
-The implementer chooses if the work runs during the live conversation or subsequently.
-Keep current rules for permitted work and worker ownership.
-Limit the wait during the live conversation.
-
-If verification cannot finish in that interval, record pending work for checked continuation.
-Do not increase `rounds`, `attempts`, workers, deadlines, or other budgets.
 
 ### Save a fixed proposal before display
 
@@ -285,18 +242,8 @@ At application, check again all these conditions:
 
 - `Original` factual `supports` and owner proof.
 
-- Current targets and scope.
+- Current targets, scope and tombstones.
 
-- Tombstones, policy, permitted work, and owner pauses.
-
-- `Security` bindings and the active work generation.
-
-A tombstone prevents erased content from coming back.
-`Security` bindings connect work to its approved host, policy, and launch input.
-The generation check compares the attempt's generation number with the current number.
-If the numbers differ, block the record.
-
-Approval cannot restart paused learning or widen authority or scope.
 A changed target blocks application.
 When needed, prepare a new proposal for display and approval.
 
@@ -388,43 +335,12 @@ Keep provider transcripts unchanged.
 
 Do not claim that live erasure also removed kept maintenance archives.
 
-### Upgrade storage without loss of safeguards
+### Storage
 
-Include each new database structure in the two applicable schema fingerprint paths.
-A schema fingerprint checks the tables against a known accepted structure.
-Copy and rebuild must keep decision data and erasure links or safely refuse the store.
-Include these relations in installer maintenance pauses, snapshots, and rollback validation.
-
-Older tools must not silently omit decision data.
-
-Before upgrade, the installer can read a database in known format 1.
-Check its format marker, same table definitions, record links, data integrity, and recorded policy identity.
-Keep current file, lock, sidecar, and process-containment checks.
-Sidecars are related database files external to the primary database file.
-
-Keep the recorded pause, project scope, and time boundary.
-Do not report “no saved selection” for a format-1 read error.
-
-A completed `process` witness alone cannot prove an earlier erasure finished.
-The witness records that the `process` stopped.
-If related rows or work files need cleanup, refuse before archive or candidate-store creation.
-Give a fixed recovery instruction for the previous software.
-
-A fully cleaned, checked format-1 store may continue.
-
-Before writing format 2, take a raw format-1 snapshot.
-Keep the legacy procedure for unmarked format-3 stores different from the marked format-1 procedure.
-Usual runtime stays format-2-only.
-The actual previous software refuses reads and writes on a populated format-2 store.
-
-Do not promise compatibility with previous code or a downgrade at the current path.
-
-Keep [ADR 0011](0011-one-way-schema-migration-with-snapshot.md) snapshot protection.
-Ship the schema, copier, fingerprints, erasure links, and rollback tests in the same unit.
-
-Keep automatic diagnostics to constant codes, counts, and IDs.
+Include each new database structure in the schema fingerprint, the copy and
+the rebuild, or safely refuse the store.
+Keep automatic diagnostics to constant codes, counts and IDs.
 Show proposal and question content only during explicit related `review`.
-Keep that content out of logs, doctor output, and automatic startup notices.
 
 ## Consequences
 
@@ -440,4 +356,3 @@ Proof, erasure, transaction, and schema checks must ship together.
 Tests must include the two sequences of concurrent decision and application.
 They must also include duplicate `delivery`, crash rollback, source erasure, owner-proof erasure, and maintenance preservation or refusal.
 
-Live host and cross-machine verification stay different from local test results.

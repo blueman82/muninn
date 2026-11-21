@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed, 2026-11-19. This decision changes ADR 0023 for the identity
-read and the boundary read of live capture and catch-up.
+Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: Proposed, 2026-11-19. This decision changes ADR 0023 for the identity read and the boundary read of live capture and catch-up.
 
 ## Context
 

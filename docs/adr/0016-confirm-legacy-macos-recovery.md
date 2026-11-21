@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: Accepted.
 
 ## Context
 

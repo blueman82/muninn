@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted for source implementation, 2026-11-04.
-Initial owner activation stays a different affirmative installer decision.
-Source `review`, last gate, `delivery`, installation and live `acceptance` are different milestones.
+Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: Accepted for source implementation, 2026-11-04. Initial owner activation stays a different affirmative installer decision. Source `review`, last gate, `delivery`, installation and live `acceptance` are different milestones.
 
 ## Context
 

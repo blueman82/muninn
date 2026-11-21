@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted.
-Default limits and refresh rules are updated by [ADR 0017](0017-learning-scope-and-recovery.md).
+Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: Accepted. Default limits and refresh rules are updated by [ADR 0017](0017-learning-scope-and-recovery.md).
 
 Date: 2026-10-25
 

@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted by the owner on 26 October 2026.
-This decision updates the default limits and refresh rules in ADR 0015.
+Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: Accepted by the owner on 26 October 2026. This decision updates the default limits and refresh rules in ADR 0015.
 
 ## What this decision does
 

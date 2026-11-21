@@ -181,7 +181,7 @@ class ReviewCatchupTests(RequestCase):
     def test_oversized_source_does_not_consume_the_next_sources_grant(
         self,
     ) -> None:
-        """Each window of a large source gets its own budget (ADR 0025)."""
+        """Each window of a large source gets its own budget (ADR 0026)."""
         self.append(self.path, [{"type": "noop"}] * 500)
         self.write(
             rollout("other"),

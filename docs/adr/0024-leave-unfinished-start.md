@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed, 2026-11-19. The owner must accept or change the take-over rule
-below.
+Replaced by [ADR 0026](0026-simple-learning.md).
+
+Previous status: Proposed, 2026-11-19. The owner must accept or change the take-over rule below.
 
 ## Context
 
