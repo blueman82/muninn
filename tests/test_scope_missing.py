@@ -10,13 +10,7 @@ import os
 import sqlite3
 from unittest import mock
 
-from muninn import (
-    ingest,
-    review_pause,
-    review_pause_state,
-    scope,
-    store,
-)
+from muninn import ingest, scope, store
 from tests.ingest_support import line
 from tests.scope_support import NO_HASH, ScopeCase
 from tests.test_classify import codex_meta, reply, user_msg
@@ -192,7 +186,7 @@ class MissingCwdTests(ScopeCase):
             oldest,
         )
 
-    def test_connection_owned_retry_retains_owner_and_reopens_under_writer(
+    def test_connection_owned_retry_reopens_under_writer(
         self,
     ) -> None:
         self.home.chmod(0o700)
@@ -214,71 +208,55 @@ class MissingCwdTests(ScopeCase):
         )
         facts: scope.CommitFacts = {}
         total = ingest.PassStats()
-        with review_pause.maintenance_owner(
-            self.home, wait_s=0, status=review_pause.EraseStatus()
-        ) as owner:
-            deadline = owner.deadline
-            self.assertFalse(os.get_inheritable(owner.fd))
-            with review_pause.maintenance_writer(owner):
-                conn = store.connect_rw(
-                    store.db_path(self.home), fullfsync=False
-                )
-                with contextlib.closing(conn):
-                    review_pause_state.seed_new(self.home, owner.fd)
-                    with self.assertRaises(
-                        ingest.IngestPreparationRequiredError
-                    ) as raised:
-                        ingest.ingest(conn, roots, commit_facts=facts)
-                    pending = raised.exception
-                    total.accumulate(pending.stats)
-                    self.assertFalse(conn.in_transaction)
-                    for table in ("source", "event", "scope", "scope_path"):
-                        self.assertEqual(
-                            conn.execute(
-                                f"SELECT count(*) FROM {table}"
-                            ).fetchone()[0],
-                            0,
-                        )
+        with store.writer_lock(self.home, wait_s=0):
+            conn = store.connect_rw(store.db_path(self.home), fullfsync=False)
+            with contextlib.closing(conn):
+                with self.assertRaises(
+                    ingest.IngestPreparationRequiredError
+                ) as raised:
+                    ingest.ingest(conn, roots, commit_facts=facts)
+                pending = raised.exception
+                total.accumulate(pending.stats)
+                self.assertFalse(conn.in_transaction)
+                for table in ("source", "event", "scope", "scope_path"):
                     self.assertEqual(
-                        (
-                            pending.stats.failed,
-                            pending.stats.errors,
-                            pending.stats.missing,
-                        ),
-                        (0, {}, 0),
+                        conn.execute(
+                            f"SELECT count(*) FROM {table}"
+                        ).fetchone()[0],
+                        0,
                     )
-                with self.assertRaises(sqlite3.ProgrammingError):
-                    conn.execute("SELECT 1")
-            with self.assertRaises(BlockingIOError):
-                review_pause_state.acquire(self.home)
-            with store.writer_lock(self.home, wait_s=0):
-                pass
-            scope.prepare_commit(pending.lookup, facts)
-            self.assertEqual(owner.deadline, deadline)
-            with (
-                review_pause.maintenance_writer(owner),
-                contextlib.closing(
-                    store.connect_rw(store.db_path(self.home), fullfsync=False)
-                ) as reopened,
-            ):
-                review_pause.verify_current(owner, reopened)
-                stats = ingest.ingest(reopened, roots, commit_facts=facts)
-                total.accumulate(stats)
                 self.assertEqual(
-                    reopened.execute("SELECT count(*) FROM event").fetchone()[
-                        0
-                    ],
-                    2,
+                    (
+                        pending.stats.failed,
+                        pending.stats.errors,
+                        pending.stats.missing,
+                    ),
+                    (0, {}, 0),
                 )
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
+        scope.prepare_commit(pending.lookup, facts)
+        with (
+            store.writer_lock(self.home, wait_s=0),
+            contextlib.closing(
+                store.connect_rw(store.db_path(self.home), fullfsync=False)
+            ) as reopened,
+        ):
+            stats = ingest.ingest(reopened, roots, commit_facts=facts)
+            total.accumulate(stats)
             self.assertEqual(
-                (
-                    total.files_seen,
-                    total.files_changed,
-                    total.events_added,
-                    total.failed,
-                ),
-                (2, 1, 2, 0),
+                reopened.execute("SELECT count(*) FROM event").fetchone()[0],
+                2,
             )
+        self.assertEqual(
+            (
+                total.files_seen,
+                total.files_changed,
+                total.events_added,
+                total.failed,
+            ),
+            (2, 1, 2, 0),
+        )
 
     def test_retry_rechecks_new_cached_cwd_before_prepared_membership(
         self,

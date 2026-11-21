@@ -14,8 +14,7 @@ import time
 from pathlib import Path
 from typing import BinaryIO
 
-from muninn.review_process_posix import sole_zombie
-from muninn.review_process_quiescence import group_quiescent
+from tools.process_quiescence import group_quiescent, sole_zombie
 
 TIMEOUT_EXIT = 124
 CANCELLED_EXIT = 130

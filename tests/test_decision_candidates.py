@@ -200,12 +200,11 @@ class CandidateTests(DecisionCase):
         self.conn.rollback()
         self.assertEqual(self.projection(), before)
 
-    def test_staging_checks_originals_admission_policy_and_scope(self) -> None:
+    def test_staging_checks_originals_and_scope(self) -> None:
         for fault, code in (
             ("unknown", "rejected_evidence"),
             ("unadmitted", "rejected_evidence"),
             ("scope", "rejected_scope"),
-            ("policy", "rejected_validation"),
             ("changed", "rejected_evidence"),
         ):
             with self.subTest(fault=fault):
@@ -218,8 +217,6 @@ class CandidateTests(DecisionCase):
                     self.conn.execute("DELETE FROM review_input")
                 elif fault == "scope":
                     change["scope"] = {"project_id": "/wrong", "task": None}
-                elif fault == "policy":
-                    self.conn.execute("UPDATE review_control SET admission=0")
                 else:
                     old = self.path.read_bytes()
                     self.path.write_bytes(old.replace(b"Python", b"Golang"))

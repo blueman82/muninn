@@ -11,20 +11,14 @@ import os
 import re
 import sqlite3
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 from muninn import ingest, platform_io, store, tombstone_key
 from muninn.knowledge_read import read_snapshot
 from muninn.obs_log import ROTATE_BYTES, actor, log_call, log_poller
-from muninn.obs_recovery import (
-    CheckResult,
-    RecoveryGuidance,
-    recovery_guidance,
-)
 from muninn.obs_stats import db_space, human_bytes, reread, review_stats, stats
 from muninn.obs_status import (
     DATA_FILES,
@@ -73,12 +67,20 @@ LABEL = "com.muninn"
 PRUNING = ".pruning-"
 
 
+class CheckResult(TypedDict):
+    """One doctor check as it appears in the JSON output."""
+
+    check: str
+    ok: bool | None
+    level: str
+    detail: str
+
+
 class DoctorReport(TypedDict):
     """The doctor output: overall verdict and every check."""
 
     ok: bool
     checks: list[CheckResult]
-    recovery_guidance: NotRequired[RecoveryGuidance]
 
 
 def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
@@ -280,7 +282,7 @@ def _store_checks(home: Path) -> list[CheckResult]:
         # extend() appends as the generator yields, so the checks that ran
         # before an SQLite error are kept.
         results.extend(check(conn) for check in _STORE_CHECKS)
-        results.extend(review_checks(conn, time.time()))
+        results.extend(review_checks(conn, time.time(), home))
     except sqlite3.Error as exc:
         results.append(_result("store_readable", False, type(exc).__name__))
     finally:
@@ -452,23 +454,23 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
     ]
     ok = all(c["ok"] is not False for c in checks if c["level"] == "error")
     report: DoctorReport = {"ok": ok, "checks": checks}
-    guidance = recovery_guidance(checks, sys.platform)
-    if guidance is not None:
-        report["recovery_guidance"] = guidance
     return report
 
 
 def review_checks(
-    conn: sqlite3.Connection, now: float
+    conn: sqlite3.Connection, now: float, home: Path
 ) -> tuple[CheckResult, ...]:
     """Report durable review health without process or repair side effects.
 
     Args:
         conn: Current normalized store connection.
         now: Observation time in UTC seconds.
+        home: Data directory holding the learning settings.
 
     Returns:
         Finite counts and codes using the existing doctor result contract.
     """
     with read_snapshot(conn):
-        return tuple(_result(*value) for value in review_health(conn, now))
+        return tuple(
+            _result(*value) for value in review_health(conn, now, home)
+        )

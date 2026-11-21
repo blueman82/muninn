@@ -25,7 +25,6 @@ from muninn.review_evidence_models import (
 )
 from muninn.review_models import (
     ObservedConfig,
-    PilotBudget,
     ProcessIdentity,
     Receipt,
     ReviewContext,
@@ -51,13 +50,6 @@ def policy_data() -> dict[str, Any]:
         "prompt_digest": DIGEST,
         "projection_version": "test-v1",
         "result_schema_digest": DIGEST,
-        "runner": {
-            "runner": "claude_cli",
-            "executable": "claude",
-            "version": "test",
-            "model": "explicit-model",
-            "reasoning": "explicit-reasoning",
-        },
         "max_rounds": 2,
         "max_input_bytes": 1000,
         "max_output_bytes": 1000,
@@ -68,16 +60,6 @@ def policy_data() -> dict[str, Any]:
         "concurrency": 1,
         "hook_wait_seconds": 0.0,
         "allow_global": False,
-        "budget": {
-            "account_id": "test-account",
-            "max_model_calls": 2,
-            "max_wall_seconds": 60.0,
-            "max_cost_decimal": None,
-            "conservative_call_cost_decimal": None,
-            "currency": None,
-            "approved_by": "test-owner",
-            "approved_at": 0.0,
-        },
     }
 
 
@@ -184,10 +166,6 @@ class ReviewSharedModelTests(unittest.TestCase):
                 cached_tokens=None,
                 cost_decimal=None,
                 currency=None,
-            )
-        with self.assertRaises(ValidationError):
-            PilotBudget.model_validate(
-                {**data["budget"], "max_model_calls": 0}
             )
         context = ReviewContext(
             request_id=REQUEST,
@@ -364,7 +342,7 @@ class ReviewSharedModelTests(unittest.TestCase):
         }
         stats = {
             "schema_version": 1,
-            "admission": {"enabled": False, "policy_status": "policy_absent"},
+            "admission": {"enabled": False},
             "requests_by_state": {"pending": 1},
             "calls_by_state": {"unknown": 1},
             "oldest_pending_age_seconds": None,
@@ -387,18 +365,3 @@ class ReviewSharedModelTests(unittest.TestCase):
         ):
             with self.assertRaises(ValidationError):
                 ReviewStats.model_validate({**stats, field: value})
-        budget = policy_data()["budget"]
-        for field, value in (
-            ("max_wall_seconds", 0.0),
-            ("approved_at", -1.0),
-            ("max_cost_decimal", "-1"),
-            ("max_cost_decimal", "2"),
-        ):
-            with self.assertRaises(ValidationError):
-                PilotBudget.model_validate({**budget, field: value})
-        self.assertEqual(
-            PilotBudget.model_validate(
-                {**budget, "max_cost_decimal": "2.50", "currency": "USD"}
-            ).max_cost_decimal,
-            "2.50",
-        )

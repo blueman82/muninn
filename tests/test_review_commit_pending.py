@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from unittest import mock
 
-from muninn import review_originals, review_pause, store, tombstones
+from muninn import review_originals, store, store_maint, tombstones
 from muninn.review_json import canonical_json
 from muninn.review_requests import UNKNOWN_CONFIG
 from muninn.tombstone_key import TOMBSTONE_FILE
-from tests.review_pause_support import initialize, interrupt_erasure
+from tests.home_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
 
@@ -27,7 +27,7 @@ class PendingCommitTests(CommitCase):
             (
                 self.context.attempt_id,
                 self.digest(self.policy),
-                canonical_json(self.policy.runner),
+                "{}",
                 canonical_json(UNKNOWN_CONFIG),
             ),
         )
@@ -141,9 +141,7 @@ class PendingCommitTests(CommitCase):
 
     def test_paused_replay_keeps_affected_attempt_fenced(self) -> None:
         journal = self.pending()
-        with review_pause.erase_connection(
-            self.home, wait_s=0, status=review_pause.EraseStatus()
-        ) as conn:
+        with store_maint.maintenance_connection(self.home, wait_s=0) as conn:
             self.assertEqual(
                 conn.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1
             )

@@ -12,6 +12,7 @@ from muninn.review_claims import claim as _claim
 from muninn.review_claims import claim_or_refuse as _claim_or_refuse
 from muninn.review_claims import fence as _fence
 from muninn.review_claims import request_policy as _policy
+from muninn.review_codes import CODES
 from muninn.review_evidence_models import EvidenceWindow
 from muninn.review_json import canonical_json
 from muninn.review_models import (
@@ -33,37 +34,11 @@ from muninn.review_progress import (
     unsuppressed_window,
 )
 from muninn.review_read_budget import ReadBudget
-from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_request_views import attempt_view, request_row, request_view
+from muninn.review_settings import POLICY
 from muninn.review_state import selection
 
 _RETRYABLE = frozenset({"deadline", "unavailable", "rejected_revision"})
-_ERRORS = (
-    _RETRYABLE
-    | RUNTIME_CODES
-    | {
-        "auth",
-        "config",
-        "source_unavailable",
-        "incomplete_window",
-        "budget_clock_reversed",
-        "evidence_limit",
-        "prompt_limit",
-        "evidence_byte_limit",
-        "evidence_record_limit",
-        "evidence_work_limit",
-        "evidence_selection_limit",
-        "budget",
-        "review_policy_required",
-        "rejected_validation",
-        "rejected_evidence",
-        "rejected_scope",
-        "rejected_authority",
-        "rejected_revision",
-        "rejected_erased",
-        "rejected_fenced",
-    }
-)
 
 
 def enqueue_review(
@@ -79,8 +54,6 @@ def enqueue_review(
     """Deduplicate immutable windows, scopes and policies atomically."""
     require_transaction(conn, now)
     policy = checked_policy(policy)
-    if not conn.execute("SELECT admission FROM review_control").fetchone()[0]:
-        raise ValueError("review_policy_required")
     if trigger not in {"explicit", "reconcile", "hook", "ingest", "history"}:
         raise ValueError("invalid_trigger")
     saved = selection(conn)
@@ -153,11 +126,11 @@ def reconcile_sources(
     """Admit complete new intervals without reviving cancellation."""
     require_transaction(conn, now)
     policy = checked_policy(policy)
-    control = conn.execute("SELECT * FROM review_control").fetchone()
-    if not control["admission"] or control["activated_at"] is None:
+    if (
+        conn.execute("SELECT activated_at FROM review_control").fetchone()[0]
+        is None
+    ):
         return ()
-    if control["policy_digest"] != digest(policy):
-        raise ValueError("review_policy_required")
     sources = reconciliation_sources(conn)
     if not sources:
         return ()
@@ -194,31 +167,28 @@ def reconcile_sources(
 def claim_attempt(
     conn: sqlite3.Connection,
     request_id: RequestId,
-    generation: int,
     now: float,
 ) -> AttemptView:
     """Create one current attempt after checking readiness and policy."""
-    return _claim(conn, request_id, generation, now, proposal=False)
+    return _claim(conn, request_id, now, proposal=False)
 
 
 def claim_or_refuse_attempt(
     conn: sqlite3.Connection,
     request_id: RequestId,
-    generation: int,
     now: float,
 ) -> AttemptView | RequestView:
     """Claim ready work or durably refuse its unavailable source evidence."""
-    return _claim_or_refuse(conn, request_id, generation, now)
+    return _claim_or_refuse(conn, request_id, now)
 
 
 def claim_proposal(
     conn: sqlite3.Connection,
     request_id: RequestId,
-    generation: int,
     now: float,
 ) -> AttemptView:
     """Fence prior work and claim a checked local proposal atomically."""
-    return _claim(conn, request_id, generation, now, proposal=True)
+    return _claim(conn, request_id, now, proposal=True)
 
 
 def cancel_request(
@@ -254,10 +224,7 @@ def retry_request(
         "SELECT 1 FROM review_receipt WHERE request_id=?", (request_id,)
     ).fetchone():
         return request_view(row)
-    policy = checked_policy(
-        ReviewPolicy.model_validate_json(row["policy_json"])
-    )
-    _policy(conn, row, budget=ReadBudget(policy.max_input_bytes))
+    _policy(conn, row, budget=ReadBudget(POLICY.max_input_bytes))
     if row["state"] not in {"cancelled", "failed", "waiting"}:
         raise ValueError("request_not_retryable")
     _fence(conn, row, "operator_retry", now)
@@ -277,18 +244,11 @@ def fail_attempt(
 ) -> RequestView:
     """Record finite failure codes and allow only bounded transient retries."""
     require_transaction(conn, now)
-    if error_code not in _ERRORS:
+    if error_code not in CODES:
         raise ValueError("invalid_error_code")
     attempt = attempt_view(conn, attempt_id)
     row = request_row(conn, attempt.request_id)
-    generation = conn.execute(
-        "SELECT generation FROM review_control"
-    ).fetchone()[0]
-    if (
-        row["current_attempt_id"] != attempt_id
-        or row["state"] != "running"
-        or attempt.generation != generation
-    ):
+    if row["current_attempt_id"] != attempt_id or row["state"] != "running":
         raise ValueError("rejected_fenced")
     _fence(conn, row, "failed", now)
     conn.execute(
@@ -299,62 +259,16 @@ def fail_attempt(
     return request_view(request_row(conn, attempt.request_id))
 
 
-def resume_admission(
-    conn: sqlite3.Connection,
-    policy: ReviewPolicy,
-    request_id: RequestId,
-    now: float,
-) -> None:
-    """Resume exact ongoing authority after an inspected contained refusal."""
-    require_transaction(conn, now)
-    policy = checked_policy(policy)
-    control = conn.execute("SELECT * FROM review_control").fetchone()
-    if (
-        control is None
-        or control["admission"]
-        or policy.experimental_codex is None
-        or control["policy_digest"] != digest(policy)
-        or control["policy_json"] != canonical_json(policy)
-    ):
-        raise ValueError("recovery_refused")
-    failure = conn.execute(
-        "SELECT a.request_id,a.error_code,a.ended_at,a.outcome,r.state "
-        "FROM review_attempt a JOIN review_request r ON r.id=a.request_id "
-        "ORDER BY a.started_at DESC,a.id DESC LIMIT 1"
-    ).fetchone()
-    unsafe = conn.execute(
-        "SELECT 1 FROM review_request WHERE state IN "
-        "('pending','running','waiting') "
-        "UNION ALL SELECT 1 FROM review_attempt WHERE ended_at IS NULL "
-        "UNION ALL SELECT 1 FROM review_attempt WHERE error_code IS NOT NULL "
-        "AND error_code!='rejected_authority' "
-        "UNION ALL SELECT 1 FROM review_attempt WHERE outcome='abandoned' "
-        "UNION ALL SELECT 1 FROM review_call WHERE state!='completed' LIMIT 1"
-    ).fetchone()
-    if (
-        failure is None
-        or failure["request_id"] != request_id
-        or failure["state"] != "failed"
-        or failure["error_code"] != "rejected_authority"
-        or failure["outcome"] != "failed"
-        or failure["ended_at"] is None
-        or unsafe is not None
-    ):
-        raise ValueError("recovery_refused")
-    conn.execute("UPDATE review_control SET admission=1")
-
-
 def _retry_state(
     conn: sqlite3.Connection, row: sqlite3.Row, permitted: bool, now: float
 ) -> None:
     """Apply the stored finite retry schedule without changing its policy."""
-    policy = ReviewPolicy.model_validate_json(row["policy_json"])
     count: int = conn.execute(
         "SELECT count(*) FROM review_attempt WHERE request_id=?", (row["id"],)
     ).fetchone()[0]
     retry_at: float | None = (
-        now + policy.retry_backoff_seconds[count - 1]
-        if permitted and 0 < count < policy.max_attempts
+        now + POLICY.retry_backoff_seconds[count - 1]
+        if permitted and 0 < count < POLICY.max_attempts
         else None
     )
     conn.execute(
@@ -366,23 +280,15 @@ def _retry_state(
 
 def recover_attempts(
     conn: sqlite3.Connection,
-    generation: int,
     now: float,
 ) -> tuple[RequestId, ...]:
-    """Fence abandoned generations while preserving cancellation."""
+    """Fence attempts a stopped process left running, keeping cancellation."""
     require_transaction(conn, now)
-    control = conn.execute("SELECT generation FROM review_control").fetchone()[
-        0
-    ]
-    if type(generation) is not int or generation < 1 or generation != control:
-        raise ValueError("rejected_fenced")
     rows = conn.execute(
         "SELECT r.* FROM review_request r JOIN review_attempt a "
-        "ON a.id=r.current_attempt_id WHERE a.generation<? AND "
-        "a.ended_at IS NULL "
+        "ON a.id=r.current_attempt_id WHERE a.ended_at IS NULL "
         "AND NOT EXISTS(SELECT 1 FROM review_receipt c WHERE "
-        "c.request_id=r.id)",
-        (generation,),
+        "c.request_id=r.id)"
     ).fetchall()
     recovered: list[RequestId] = []
     for row in rows:

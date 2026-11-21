@@ -17,12 +17,11 @@ from muninn.review_models import (
 )
 from muninn.review_progress import (
     check_window,
-    checked_policy,
     require_transaction,
 )
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_request_views import attempt_view, request_row, request_view
-from muninn.review_runtime_bridge import effective_policy
+from muninn.review_settings import POLICY
 from muninn.tombstones import require_current_tombstones
 
 UNKNOWN_CONFIG = ObservedConfig(
@@ -43,13 +42,6 @@ _SOURCE_REFUSALS = frozenset(
         "rejected_scope",
     }
 )
-
-
-def _admitted_policy(
-    conn: sqlite3.Connection, row: sqlite3.Row
-) -> ReviewPolicy:
-    """Require the immutable snapshot to match active admission policy."""
-    return effective_policy(conn, row)
 
 
 def _sources(
@@ -84,10 +76,9 @@ def _sources(
 def request_policy(
     conn: sqlite3.Connection, row: sqlite3.Row, *, budget: ReadBudget
 ) -> ReviewPolicy:
-    """Check admission and source evidence for an existing request."""
-    policy = _admitted_policy(conn, row)
-    _sources(conn, row, policy, budget=budget)
-    return policy
+    """Check source evidence for an existing request."""
+    _sources(conn, row, POLICY, budget=budget)
+    return POLICY
 
 
 def _ready(
@@ -127,7 +118,6 @@ def _ready(
 def claim(
     conn: sqlite3.Connection,
     request_id: RequestId,
-    generation: int,
     now: float,
     *,
     proposal: bool,
@@ -141,22 +131,16 @@ def claim(
     if proposal:
         path = conn.execute("PRAGMA database_list").fetchone()[2]
         require_current_tombstones(conn, Path(path).parent)
-    policy = checked_policy(
-        ReviewPolicy.model_validate_json(row["policy_json"])
-    )
     policy = request_policy(
-        conn, row, budget=ReadBudget(policy.max_input_bytes)
+        conn, row, budget=ReadBudget(POLICY.max_input_bytes)
     )
-    _generation(conn, generation)
     operator = _ready(conn, row, policy, now, proposal)
-    return _start(conn, row, policy, generation, now, proposal, operator)
+    return _start(conn, row, now, proposal, operator)
 
 
 def _start(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
-    policy: ReviewPolicy,
-    generation: int,
     now: float,
     proposal: bool,
     operator: bool,
@@ -166,14 +150,12 @@ def _start(
         fence(conn, row, "operator_retry", now)
     ident = f"A_{uuid4().hex}"
     conn.execute(
-        "INSERT INTO review_attempt(id,request_id,generation,requested_json,"
+        "INSERT INTO review_attempt(id,request_id,generation,"
         "observed_json,started_at,progress_at,outcome) "
-        "VALUES(?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,1,?,?,?,?)",
         (
             ident,
             row["id"],
-            generation,
-            None if proposal else canonical_json(policy.runner),
             canonical_json(UNKNOWN_CONFIG),
             now,
             now,
@@ -216,19 +198,6 @@ def _receipt_attempt(
     return row[0] if row is not None else None
 
 
-def _generation(conn: sqlite3.Connection, generation: int) -> None:
-    """Reject stale or invalid supervisor generation without changing it."""
-    current_generation = conn.execute(
-        "SELECT generation FROM review_control"
-    ).fetchone()[0]
-    if (
-        type(generation) is not int
-        or generation < 1
-        or generation != current_generation
-    ):
-        raise ValueError("rejected_fenced")
-
-
 def _current_attempt(
     conn: sqlite3.Connection, row: sqlite3.Row
 ) -> sqlite3.Row | None:
@@ -246,7 +215,6 @@ def _current_attempt(
 def claim_or_refuse(
     conn: sqlite3.Connection,
     request_id: RequestId,
-    generation: int,
     now: float,
 ) -> AttemptView | RequestView:
     """Durably refuse only source admission faults before attempt creation."""
@@ -254,8 +222,7 @@ def claim_or_refuse(
     row = request_row(conn, request_id)
     if _receipt_attempt(conn, request_id) is not None:
         return request_view(row)
-    _generation(conn, generation)
-    policy = _admitted_policy(conn, row)
+    policy = POLICY
     operator = _ready(conn, row, policy, now, False)
     current = _current_attempt(conn, row)
     if current is not None and current["ended_at"] is None:
@@ -275,4 +242,4 @@ def claim_or_refuse(
             (request_id,),
         )
         return request_view(request_row(conn, request_id))
-    return _start(conn, row, policy, generation, now, False, operator)
+    return _start(conn, row, now, False, operator)

@@ -6,7 +6,6 @@ import sqlite3
 from unittest import mock
 
 from muninn import (
-    review_budget,
     review_claims,
     review_evidence,
     review_originals,
@@ -18,6 +17,7 @@ from muninn.review_evidence_models import SourceRef
 from muninn.review_json import canonical_json
 from muninn.review_models import AttemptView, RequestView, ReviewContext
 from tests.ingest_support import line, primary, rollout
+from tests.policy_patch import reserve_call, use_policy
 from tests.test_review_requests import RequestCase
 
 
@@ -28,14 +28,14 @@ class ClaimRefusalTests(RequestCase):
         super().setUp()
         self.request = self.enqueue()
 
-    def claim(self, generation: int = 1) -> AttemptView | RequestView:
+    def claim(self) -> AttemptView | RequestView:
         """Run the guarded claim inside its caller transaction."""
-        return self.transaction(lambda: self.claim_current(generation))
+        return self.transaction(self.claim_current)
 
-    def claim_current(self, generation: int = 1) -> AttemptView | RequestView:
+    def claim_current(self) -> AttemptView | RequestView:
         """Call admission without opening or ending a caller transaction."""
         return review_requests.claim_or_refuse_attempt(
-            self.conn, self.request.id, generation, 15.0
+            self.conn, self.request.id, 15.0
         )
 
     def state(self, *, requests: bool = True) -> tuple[str, ...]:
@@ -70,7 +70,7 @@ class ClaimRefusalTests(RequestCase):
         """Claim a normal fixture worker without changing its contract."""
         return self.transaction(
             lambda: review_requests.claim_attempt(
-                self.conn, request_id or self.request.id, 1, now
+                self.conn, request_id or self.request.id, now
             )
         )
 
@@ -82,7 +82,7 @@ class ClaimRefusalTests(RequestCase):
             )
         )
 
-    def guard(self, code: str, generation: int = 1) -> None:
+    def guard(self, code: str) -> None:
         """Assert a guard rejects before source reads or durable mutation."""
         before = self.state()
         with (
@@ -93,7 +93,7 @@ class ClaimRefusalTests(RequestCase):
             ),
             self.assertRaisesRegex(ValueError, code),
         ):
-            self.claim_current(generation)
+            self.claim_current()
         self.assertEqual(self.state(), before)
 
     def test_ordinary_claim_still_propagates_missing_original(self) -> None:
@@ -174,9 +174,7 @@ class ClaimRefusalTests(RequestCase):
             round_index=1,
             deadline=72.0,
         )
-        self.transaction(
-            lambda: review_budget.reserve_call(self.conn, context, 12.5)
-        )
+        self.transaction(lambda: reserve_call(self.conn, context, 12.5))
         self.fail_worker(attempt, "unavailable", 13.0)
         original = self.path.read_bytes()
         self.path.unlink()
@@ -207,30 +205,19 @@ class ClaimRefusalTests(RequestCase):
 
     def test_receipt_first_returns_completed_view_without_reads(self) -> None:
         self.receipt(self.request.id)
-        self.conn.execute("UPDATE review_control SET admission=0,generation=2")
         self.path.unlink()
         before = self.state()
         with mock.patch.object(
             review_claims, "check_window", side_effect=AssertionError("read")
         ):
-            for generation in (1, 2):
-                result = self.claim(generation)
-                assert isinstance(result, RequestView)
-                self.assertEqual(result.state, "completed")
+            result = self.claim()
+            assert isinstance(result, RequestView)
+            self.assertEqual(result.state, "completed")
         self.assertEqual(self.state(), before)
 
     def test_guards_precede_source_classification(self) -> None:
         self.path.unlink()
         faults = (
-            (
-                "UPDATE review_control SET admission=0",
-                "review_policy_required",
-            ),
-            (
-                "UPDATE review_control SET policy_digest='changed'",
-                "review_policy_required",
-            ),
-            ("UPDATE review_control SET policy_json='{}'", "validation"),
             (
                 "UPDATE review_request SET state='cancelled'",
                 "request_not_ready",
@@ -248,10 +235,6 @@ class ClaimRefusalTests(RequestCase):
                     self.guard(code)
                 finally:
                     self.conn.execute("ROLLBACK")
-        for generation in (0, 2, True):
-            self.transaction(
-                lambda g=generation: self.guard("rejected_fenced", g)
-            )
         with self.assertRaisesRegex(ValueError, "caller_transaction_required"):
             self.claim_current()
 
@@ -391,10 +374,7 @@ class ClaimRefusalTests(RequestCase):
             self.policy = self.policy.model_copy(
                 update={"max_input_bytes": cap}
             )
-            self.conn.execute(
-                "UPDATE review_control SET policy_json=?,policy_digest=?",
-                (canonical_json(self.policy), self.digest(self.policy)),
-            )
+            use_policy(self, self.policy)
             self.request = self.enqueue(self.window(1, 3))
             self.conn.executemany(
                 "INSERT INTO review_input VALUES(?,?)",

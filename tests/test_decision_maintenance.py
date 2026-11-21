@@ -10,8 +10,8 @@ from install.context import Ctx, StepFailedError
 from muninn import cli_rebuild, erase, store, store_copy, tombstones
 from muninn.decision_candidates import candidate_view, show_candidate
 from tests.decision_support import DecisionCase
+from tests.home_support import initialize
 from tests.installer_fakes import no_command
-from tests.review_pause_support import initialize
 
 
 class DecisionMaintenanceTests(DecisionCase):

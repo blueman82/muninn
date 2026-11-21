@@ -8,8 +8,9 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
-from muninn import knowledge_erase, review_budget, review_requests, store
+from muninn import knowledge_erase, review_requests, store
 from muninn.review_models import ReviewContext
+from tests.policy_patch import reserve_call
 from tests.test_cli_learning import CliLearningCase
 
 
@@ -90,15 +91,6 @@ class CliLearningProposalTests(CliLearningCase):
             0,
         )
 
-    def test_intervening_generation_wins(self) -> None:
-        def generation() -> None:
-            self.conn.execute("UPDATE review_control SET generation=2")
-
-        self.check_race(generation)
-        self.assertEqual(
-            self.row("SELECT generation FROM review_control")[0], 2
-        )
-
     def test_failed_claim_rolls_back_old_worker_and_origin(self) -> None:
         self.conn.execute(
             "CREATE TRIGGER reject_local BEFORE INSERT ON review_attempt "
@@ -124,9 +116,7 @@ class CliLearningProposalTests(CliLearningCase):
             round_index=1,
             deadline=72.0,
         )
-        self.transaction(
-            lambda: review_budget.reserve_call(self.conn, runtime, 12.0)
-        )
+        self.transaction(lambda: reserve_call(self.conn, runtime, 12.0))
         before = dict(self.row("SELECT * FROM review_call"))
         control = tuple(self.row("SELECT * FROM review_control"))
         code, out = self.propose()

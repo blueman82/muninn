@@ -8,11 +8,8 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
-from muninn import knowledge_erase, store, tombstones
-from muninn import review_pause as q
-from muninn import review_pause_state as state
+from muninn import knowledge_erase, store, store_maint, tombstones
 from tests.test_review_commit import CommitCase
-from tests.test_review_pause import PauseCase
 from tests.tombstone_replay_support import CANARY, TARGET, ReplayCase
 
 
@@ -319,18 +316,16 @@ class TombstoneCleanupTests(CommitCase):
             self.assertFalse(self.work.exists())
 
 
-class ReplayConnectionLifetimeTests(PauseCase):
-    """Keep replay and caller connection inside both actual barriers."""
+class ReplayConnectionLifetimeTests(ReplayCase):
+    """Keep replay and caller connection inside the writer lock."""
 
-    def test_erase_opens_and_closes_connection_inside_both_barriers(
+    def test_erase_opens_and_closes_connection_inside_the_writer_lock(
         self,
     ) -> None:
         connect = store.connect_rw
         events: list[str] = []
 
         def barriers() -> None:
-            with self.assertRaises(BlockingIOError):
-                state.acquire(self.home)
             with (
                 self.assertRaises(store.BusyError),
                 store.writer_lock(self.home, wait_s=0),
@@ -356,7 +351,7 @@ class ReplayConnectionLifetimeTests(PauseCase):
 
         with (
             mock.patch.object(store, "connect_rw", side_effect=checked),
-            q.erase_connection(self.home, wait_s=0, status=self.status),
+            store_maint.maintenance_connection(self.home, wait_s=0),
         ):
             events.append("caller")
         self.assertEqual(events, ["open", "caller", "close"])

@@ -29,7 +29,6 @@ from install.steps_release import (
     command,
     fresh,
     installed_env,
-    restart,
 )
 from install.transforms import ours
 from install.trust import TrustedHook, codex_hooks
@@ -132,24 +131,6 @@ def _health(stdout: bytes) -> dict[str, Any]:
     return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
-def _recovery_steps(ctx: Ctx, report: Mapping[str, Any]) -> None:
-    """Show only the fixed recovery steps returned by doctor.
-
-    Args:
-        ctx: Installer output context.
-        report: Parsed doctor report.
-    """
-    guidance_value = report.get("recovery_guidance")
-    if not isinstance(guidance_value, dict):
-        return
-    guidance = cast(dict[str, Any], guidance_value)
-    steps = guidance.get("steps")
-    if isinstance(steps, list):
-        for step in cast(list[object], steps):
-            if isinstance(step, str):
-                ctx.say(f"  {step}")
-
-
 def _show_health_help(ctx: Ctx, report: Mapping[str, Any]) -> None:
     """Give the user the next command when health checks still fail.
 
@@ -157,83 +138,37 @@ def _show_health_help(ctx: Ctx, report: Mapping[str, Any]) -> None:
         ctx: Installer output context.
         report: Parsed doctor report.
     """
-    guidance = report.get("recovery_guidance")
-    if isinstance(guidance, dict):
-        _recovery_steps(ctx, report)
-    else:
-        checks_value = report.get("checks")
-        failed: list[str] = []
-        if isinstance(checks_value, list):
-            for raw_item in cast(list[object], checks_value):
-                if not isinstance(raw_item, dict):
-                    continue
-                item = cast(dict[str, object], raw_item)
-                name = item.get("check")
-                if item.get("ok") is False and isinstance(name, str):
-                    failed.append(name)
-        if failed:
-            ctx.say("  Failed checks: " + ", ".join(failed))
+    checks_value = report.get("checks")
+    failed: list[str] = []
+    if isinstance(checks_value, list):
+        for raw_item in cast(list[object], checks_value):
+            if not isinstance(raw_item, dict):
+                continue
+            item = cast(dict[str, object], raw_item)
+            name = item.get("check")
+            if item.get("ok") is False and isinstance(name, str):
+                failed.append(name)
+    if failed:
+        ctx.say("  Failed checks: " + ", ".join(failed))
     ctx.say(f"  Health report: {health_report_command(ctx)}")
 
 
-def _doctor(ctx: Ctx, rec: Record) -> subprocess.CompletedProcess[bytes]:
-    """Run doctor and attempt only its qualified automatic repair path.
+def _doctor(ctx: Ctx) -> subprocess.CompletedProcess[bytes]:
+    """Run doctor and show what failed.
 
     Args:
         ctx: Installer paths and command runner.
-        rec: Current install record used to restart the service.
 
     Returns:
-        The final doctor result, before or after recovery.
+        The doctor result.
     """
     env = installed_env(ctx)
     result = ctx.run(command(ctx, "doctor"), env=env)
     if result.returncode == 0:
         return result
     report = _health(result.stdout)
-    guidance_value = report.get("recovery_guidance")
-    if not isinstance(guidance_value, dict):
-        ctx.say("Install health check failed.")
-        _show_health_help(ctx, report)
-        return result
-    guidance = cast(dict[str, Any], guidance_value)
-    if guidance.get("status") != "recovery_check_required":
-        ctx.say("Install health check failed. Recovery steps:")
-        _show_health_help(ctx, report)
-        return result
-    ctx.say("Install health check failed. Checking whether recovery is safe.")
-    repaired = ctx.run(command(ctx, "recover"), env=env)
-    outcome_value = _health(repaired.stdout).get("recovery")
-    outcome = (
-        cast(dict[str, object], outcome_value)
-        if isinstance(outcome_value, dict)
-        else {}
-    )
-    if repaired.returncode == 0 and outcome.get("status") == "recovered":
-        ctx.say("Muninn recovered the interrupted pause automatically.")
-        try:
-            restart(ctx, rec, registered=True)
-        except Exception:
-            ctx.say("Recovery finished, but the service did not restart.")
-            ctx.say(f"  Health report: {health_report_command(ctx)}")
-            raise
-        result = ctx.run(command(ctx, "doctor"), env=env)
-        if result.returncode != 0:
-            ctx.say("The health check still fails after recovery.")
-            _show_health_help(ctx, _health(result.stdout))
-        return result
-    ctx.say("Muninn could not finish recovery automatically.")
-    recovery = _health(repaired.stdout)
-    why, action = recovery.get("why"), recovery.get("next_action")
-    if isinstance(why, str):
-        ctx.say(f"  {why}")
-    if isinstance(action, str):
-        ctx.say(f"  Next: {action}")
-    else:
-        _show_health_help(ctx, report)
-    if isinstance(action, str):
-        ctx.say(f"  Health report: {health_report_command(ctx)}")
-        ctx.say("  After recovery, rerun the same install command.")
+    ctx.say("Install health check failed.")
+    _show_health_help(ctx, report)
     return result
 
 
@@ -332,7 +267,7 @@ def verify(ctx: Ctx, rec: Record) -> None:
         )
     if ctx.probe and rec["has_codex"]:
         codex_checks(ctx, rec, check)
-    r = _doctor(ctx, rec)
+    r = _doctor(ctx)
     check("doctor", r.returncode == 0)
     j = job(ctx)
     check("new_pid_alive", is_new(ctx, j), f"pid {j and j['pid']}")

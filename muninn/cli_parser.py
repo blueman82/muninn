@@ -8,7 +8,6 @@ from typing import Any, NoReturn, Protocol
 
 from muninn import query
 from muninn.cli_core import (
-    attempt_argument,
     decision_argument,
     knowledge_argument,
     request_argument,
@@ -44,13 +43,9 @@ knowledge and learning:
   know list/search/show/context use current supported UUID/revision views.
   know propose --input FILE checks request-bound evidence and owner authority;
   know retract K_ID requires --expected-revision N and --reason TEXT.
-  recover resumes a verified interrupted maintenance pause; it never starts a
-  new erasure request or reboots, but may apply an already-recorded tombstone.
   learn request requires installed frozen policy; line bounds must be paired.
   learn retry explicitly restarts the same request; completed receipts persist.
-  learn dismiss R_ID removes only that request's saved failure notice.
   learn explain R_ID --human also prints a plain explanation to stderr.
-  learn resume requires the exact installed policy and one inspected refusal.
   learn replay requires --from-line, --through-line and --policy.
   No implicit runner/model/budget settings. Old know add/check flags retired.
   Cursor resume/postcompact injection is unproven: pull muninn know context.
@@ -178,15 +173,6 @@ def _add_maintenance(cmd: _Commands) -> None:
     p.add_argument("--usage", action="store_true")
     cmd.add("compact", "VACUUM the store to return free space")
     cmd.add("doctor", "health checks (exit 1 when unhealthy)")
-    p = cmd.add("recover", "resume a verified interrupted maintenance pause")
-    p.add_argument(
-        "--confirm-legacy-volume",
-        action="store_true",
-        help=(
-            "approve recovery of a matching old macOS "
-            "record without a disk ID"
-        ),
-    )
     cmd.add("rebuild", "rebuild the store from the transcripts")
     p = cmd.add("recall-review", "review a batch of 50 recall deliveries")
     p.add_argument("--batch", type=int, help="one-based delivery batch")
@@ -270,6 +256,8 @@ def _add_learning(cmd: _Commands) -> None:
         p.add_argument("--policy", required=name == "replay")
         if name == "request":
             p.add_argument("--task")
+    learn.add("on", "start learning from future chat")
+    learn.add("off", "stop learning")
     p = learn.add("setup", "choose future records or verified history")
     p.add_argument("--mode", choices=("now", "all"), required=True)
     p.add_argument("--project")
@@ -286,20 +274,11 @@ def _add_learning(cmd: _Commands) -> None:
             "cancelled",
         ),
     )
-    for name in ("show", "cancel", "retry", "dismiss"):
+    for name in ("show", "cancel", "retry"):
         learn.add(name).add_argument("request_id", type=request_argument)
     p = learn.add("explain", "explain retained learning history")
     p.add_argument("request_id", type=request_argument)
     p.add_argument("--human", action="store_true")
-    p = learn.add("recover-unknown", "accept uncertainty for one failed call")
-    p.add_argument(
-        "--attempt", dest="attempt_id", type=attempt_argument, required=True
-    )
-    p.add_argument("--round", dest="round_index", type=int, required=True)
-    p.add_argument("--accept-uncertainty", action="store_true", required=True)
-    p = learn.add("resume")
-    p.add_argument("--policy", required=True)
-    p.add_argument("--failed-request", type=request_argument, required=True)
 
 
 def _add_hook(cmd: _Commands) -> None:

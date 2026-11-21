@@ -6,17 +6,17 @@ from pathlib import Path
 from unittest import mock
 
 from muninn import (
-    review_budget,
     review_originals,
-    review_pause,
     review_requests,
     store,
+    store_maint,
     tombstones,
 )
 from muninn.review_models import AttemptView, ReviewContext
 from muninn.tombstone_key import TOMBSTONE_FILE
+from tests.home_support import initialize, interrupt_erasure
 from tests.ingest_support import TID
-from tests.review_pause_support import initialize, interrupt_erasure
+from tests.policy_patch import reserve_call
 from tests.test_review_commit import CommitCase
 
 
@@ -26,7 +26,7 @@ class ProposalPendingTests(CommitCase):
     def claim(self, generation: int = 1) -> AttemptView:
         """Use the public local claim inside an already owned transaction."""
         return review_requests.claim_proposal(
-            self.conn, self.context.request_id, generation, 15.0
+            self.conn, self.context.request_id, 15.0
         )
 
     def state(self) -> tuple[str, ...]:
@@ -55,9 +55,7 @@ class ProposalPendingTests(CommitCase):
                 deadline=72.0,
             )
             self.transaction(
-                lambda value=context: review_budget.reserve_call(
-                    self.conn, value, 13.0
-                )
+                lambda value=context: reserve_call(self.conn, value, 13.0)
             )
             self.conn.execute(
                 "UPDATE review_call SET state='completed' WHERE round_index=?",
@@ -177,9 +175,7 @@ class ProposalPendingTests(CommitCase):
             self.assertRaisesRegex(ValueError, "^erasure_pending$"),
         ):
             self.transaction(self.claim)
-        with review_pause.erase_connection(
-            self.home, wait_s=0, status=review_pause.EraseStatus()
-        ):
+        with store_maint.maintenance_connection(self.home, wait_s=0):
             self.assertEqual(self.row("SELECT count(*) FROM tombstone")[0], 1)
         self.assertEqual(
             tuple(
@@ -220,7 +216,6 @@ class ProposalPendingTests(CommitCase):
                 local = self.claim()
                 self.assertTrue(self.conn.in_transaction)
                 self.assertNotEqual(local.id, self.context.attempt_id)
-                self.assertIsNone(local.requested)
                 self.assertEqual(local.outcome, "operator_retry")
                 self.assertEqual(
                     self.row(
@@ -251,11 +246,10 @@ class ProposalPendingTests(CommitCase):
         with store.writer_lock(self.home, wait_s=0):
             attempt = self.transaction(
                 lambda: review_requests.claim_attempt(
-                    self.conn, self.context.request_id, 1, 15.0
+                    self.conn, self.context.request_id, 15.0
                 )
             )
         self.assertNotEqual(attempt.id, self.context.attempt_id)
-        self.assertIsNotNone(attempt.requested)
         self.assertEqual(
             self.row("SELECT origin FROM review_request")[0], "review"
         )

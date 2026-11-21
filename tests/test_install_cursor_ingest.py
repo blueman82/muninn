@@ -20,15 +20,12 @@ from muninn import (
     store,
     tombstones,
 )
-from muninn import review_pause_state as state
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
     SourceRef,
 )
-from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
-from muninn.review_progress import digest
 from tests import test_install_ingest
 from tests.classify_claude_support import claude_rec, text_block
 from tests.ingest_support import line
@@ -110,8 +107,6 @@ class FreshCursorReplayTests(unittest.TestCase):
 
     def prepare(self, path: Path, cwd: str) -> cursor_import.PreparedImport:
         """Select real fixture originals outside the writer."""
-        with self.assertRaises(BlockingIOError):
-            state.acquire(self.ctx.data)
         with store.writer_lock(self.ctx.data, wait_s=0):
             pass
         prepared = self.real_prepare(path, cwd)
@@ -143,9 +138,7 @@ class FreshCursorReplayTests(unittest.TestCase):
         )
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "UPDATE review_control SET admission=1,generation=1,"
-            "policy_json=?,policy_digest=?,activated_at=10.0",
-            (canonical_json(policy), digest(policy)),
+            "UPDATE review_control SET generation=1,activated_at=10.0"
         )
         request = review_requests.enqueue_review(
             conn, self.window, self.selected[0].scope, policy, "explicit", 11.0
@@ -163,7 +156,7 @@ class FreshCursorReplayTests(unittest.TestCase):
                 "INSERT INTO review_input VALUES(?,?)",
                 (request.id, evidence.id),
             )
-        attempt = review_requests.claim_attempt(conn, request.id, 1, 12.0)
+        attempt = review_requests.claim_attempt(conn, request.id, 12.0)
         conn.execute("UPDATE review_control SET admission=0")
         conn.execute("COMMIT")
         self.work = self.ctx.data / "review-work" / attempt.id
@@ -293,8 +286,6 @@ class FreshCursorReplayTests(unittest.TestCase):
             self.callers.append(conn)
             self.assertEqual(home, self.ctx.data)
             self.seed_attempt(conn)
-            with self.assertRaises(BlockingIOError):
-                state.acquire(home)
             with (
                 self.assertRaises(store.BusyError),
                 store.writer_lock(home, wait_s=0),
@@ -361,8 +352,6 @@ class FreshCursorReplayTests(unittest.TestCase):
         )
         with store.writer_lock(self.ctx.data, wait_s=0):
             pass
-        fd = state.acquire(self.ctx.data)
-        knowledge_erase.os.close(fd)
 
     def test_real_cleanup_finishes_before_activation(self) -> None:
         with self.operation(), cutover.prepared_store(self.ctx, self.rec):

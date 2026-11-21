@@ -30,10 +30,11 @@ from muninn.review_evidence_models import (
     EvidenceSelector,
     SourceRef,
 )
-from muninn.review_json import canonical_json, canonical_json_value
+from muninn.review_json import canonical_json_value
 from muninn.review_models import Receipt
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import TID, line, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import reply, user_msg
 from tests.test_review_commit import CommitCase
 
@@ -49,10 +50,7 @@ class DecisionCase(CommitCase):
         self.policy = self.policy.model_copy(
             update={"max_input_bytes": 1_000_000, "context_bytes": 12000}
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.transaction(
             lambda: review_requests.cancel_request(
                 self.conn, self.context.request_id, 14.0
@@ -208,9 +206,7 @@ class DecisionCase(CommitCase):
             lambda: admit_application(self.conn, self.home, ident, 1, 21.0)
         )
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 22.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 22.0)
         )
         ids = tuple(
             row[0]

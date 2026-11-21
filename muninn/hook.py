@@ -43,7 +43,7 @@ from muninn.hook_status import scope_label as _label
 from muninn.knowledge_proof import proof_view
 from muninn.platform_io import open_regular
 from muninn.query.answers import knowledge_scopes
-from muninn.review_recovery import startup_action
+from muninn.review_settings import is_enabled
 
 __all__ = [
     "BLOCK_LIMIT",
@@ -318,9 +318,8 @@ def _start_block(
     """Build the SessionStart block for the payload's repository."""
     cwd = project_cwd(payload, env)
     with knowledge_read.read_snapshot(conn):
-        issue = startup_action(conn)
-        if issue is not None:
-            trace["learning_notice"] = learning_status(issue)
+        if not is_enabled(home):
+            trace["learning_notice"] = learning_status()
         ids = scope.scope_ids_for_read(conn, cwd)
         label = _label(conn, ids, cwd)
         project = next(iter(knowledge_scopes(conn, ids, False)), None)

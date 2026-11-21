@@ -11,8 +11,8 @@ from pathlib import Path
 
 from muninn import cli_rebuild, erase_residue, store
 from tests.cli_support import CliCase
+from tests.home_support import initialize
 from tests.knowledge_retirement_support import native_note
-from tests.review_pause_support import initialize
 from tests.test_ingest import TID
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -128,19 +128,19 @@ class RebuildCrashTests(CliCase):
                 0,
             )
 
-    def test_prearchive_crash_leaves_admission_off_without_guessing(
+    def test_prearchive_crash_leaves_the_store_unchanged(
         self,
     ) -> None:
         crashed = self.child("fenced")
         self.assertEqual(crashed.returncode, 71, crashed.stderr)
         self.assertEqual(crashed.stdout, "")
         self.assertEqual(self.db.stat().st_ino, self.identity)
-        self.assert_live(0)
+        self.assert_live(1)
         self.assertEqual(self.archives(), {})
         self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
         later = self.child("normal")
         self.assertEqual(later.returncode, 0, later.stderr)
-        self.assert_live(0)
+        self.assert_live(1)
         self.assertEqual(len(self.archives()), 1)
 
     def test_partial_archive_crash_keeps_residue_without_restoring_it(
@@ -148,19 +148,19 @@ class RebuildCrashTests(CliCase):
     ) -> None:
         crashed = self.child("partial")
         self.assertEqual(crashed.returncode, 72, crashed.stderr)
-        self.assert_live(0)
+        self.assert_live(1)
         before = self.archives()
         self.assertEqual([len(raw) for raw in before.values()], [64])
         later = self.child("normal")
         self.assertEqual(later.returncode, 0, later.stderr)
-        self.assert_live(0)
+        self.assert_live(1)
         self.assertEqual(len(self.archives()), 2)
         self.assertEqual({p: p.read_bytes() for p in before}, before)
 
     def test_complete_orphan_is_never_promoted_by_fresh_process(self) -> None:
         crashed = self.child("candidate")
         self.assertEqual(crashed.returncode, 73, crashed.stderr)
-        self.assert_live(0)
+        self.assert_live(1)
         candidate = self.home / cli_rebuild.REBUILD
         before = self.archives() | {
             self.db: self.db.read_bytes(),
@@ -181,7 +181,7 @@ class RebuildCrashTests(CliCase):
         self.assertTrue(out["recovery_required"])
         self.assertNotIn("old_restored", out)
         self.assertEqual({p: p.read_bytes() for p in before}, before)
-        self.assert_live(0)
+        self.assert_live(1)
 
     def assert_published_crash(self, mode: str, expected: int) -> None:
         """Check new live data through a crash and fresh invocation."""
@@ -198,7 +198,7 @@ class RebuildCrashTests(CliCase):
                 conn.execute(
                     "SELECT admission FROM review_control"
                 ).fetchone()[0],
-                0,
+                1,
             )
         later = self.child("normal")
         self.assertEqual(later.returncode, 0, later.stderr)

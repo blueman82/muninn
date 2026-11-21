@@ -113,7 +113,6 @@ class LearningHistoryTests(RequestCase):
             self.conn, self.policy, self.scope.project_id
         )
         self.assertEqual(len(scan.items), 0)
-        self.assertIsNone(scan.estimate["api_cost_decimal"])
 
     def test_old_source_indexed_after_selection_stays_excluded(self) -> None:
         self.transaction(

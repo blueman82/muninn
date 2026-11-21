@@ -18,8 +18,8 @@ from unittest import mock
 from muninn import cli_core, obs, store
 from muninn.query.index_age import ALIVE_AT
 from tests.cli_support import CANARY, CliCase
+from tests.home_support import initialize
 from tests.hook_support import launcher_args
-from tests.review_pause_support import initialize
 from tests.store_support import direct_python
 from tests.test_ingest import TID
 

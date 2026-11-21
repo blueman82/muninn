@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from typing import cast
 
 from muninn.knowledge_models import ReviewResult, StrictModel
 
@@ -74,3 +75,26 @@ def canonical_json(value: StrictModel) -> str:
 def result_schema() -> dict[str, object]:
     """Generate the output schema from the same result definitions."""
     return ReviewResult.model_json_schema()
+
+
+def load_object(raw: bytes | str) -> dict[str, object]:
+    """Parse one strict JSON object, rejecting duplicates and nonfinite.
+
+    Args:
+        raw: UTF-8 JSON text or bytes.
+
+    Returns:
+        The parsed object.
+
+    Raises:
+        ValueError: If the text is not strictly one JSON object.
+    """
+    value: object = json.loads(
+        raw,
+        object_pairs_hook=unique_object,
+        parse_constant=reject_constant,
+        parse_float=finite_float,
+    )
+    if not isinstance(value, dict):
+        raise ValueError("invalid_native_output")
+    return cast(dict[str, object], value)

@@ -43,7 +43,7 @@ from muninn.knowledge_erase import (
     erase_attempt_material,
     erase_support_closure,
 )
-from muninn.review_pause import EraseStatus, erase_connection
+from muninn.store_maint import maintenance_connection
 from muninn.tombstone_key import TOMBSTONE_FILE
 from muninn.tombstones import append_tombstones, reapply_tombstones
 
@@ -177,7 +177,6 @@ def _erase_and_verify(
     home: Path,
     target: Target,
     match: str | None,
-    status: EraseStatus,
 ) -> dict[str, object]:
     """Commit the plan, then measure what survived."""
     needles = [match.encode()] if match else pick_needles(conn, target)
@@ -197,11 +196,8 @@ def _erase_and_verify(
     # in between cannot lose an erasure.
     # The key is made here, after planning, so a dry run never creates it.
     target.tombstones += content_tombstones(conn, target)
-    status.erasure_phase = "intent_may_be_durable"
     append_tombstones(home, target.tombstones)
-    status.erasure_phase = "intent_durable"
     summary = _commit(conn, target)
-    status.erasure_phase = "committed"
     working_files = sum(
         erase_attempt_material(home, row[0])
         for ident in target.review.requests
@@ -220,8 +216,6 @@ def _erase_and_verify(
         needles = [n for n in needles if not still_stored(conn, n)]
     vocab = vocab_left(conn, rare)
     residue = residue_scan(home, needles)
-    if not vocab and not residue and not summary.retained_archives:
-        status.erasure_phase = "verified"
     return {
         "review": asdict(summary),
         "vocab": vocab,
@@ -245,8 +239,8 @@ def erase(
 
     Exactly one of ``session``, ``event_ref`` and ``match`` is given. The
     caller holds ``store.writer_lock`` and, for real erasure, has established
-    producer pause through ``erase_connection``. This low-level function
-    never acquires those barriers. A ``ValueError`` propagates when
+    the writer lock through ``maintenance_connection``. This low-level
+    function never acquires it. A ``ValueError`` propagates when
     not exactly one selector is given, ``match`` is shorter than
     ``MIN_MATCH`` characters or ``event_ref`` is malformed; a
     ``LookupError`` when ``event_ref`` matches no thread, several threads
@@ -270,7 +264,6 @@ def erase(
         home,
         EraseRequest(session, event_ref, match, dry_run),
         env,
-        EraseStatus(),
     )
 
 
@@ -279,7 +272,6 @@ def _erase(
     home: Path,
     request: EraseRequest,
     env: Mapping[str, str],
-    status: EraseStatus,
 ) -> dict[str, object]:
     """Collect and erase once under the caller's established barriers."""
     session, event_ref, match = (
@@ -313,7 +305,7 @@ def _erase(
     } | _aside_report(home)
     if dry_run:
         return out
-    return out | _erase_and_verify(conn, home, target, match, status)
+    return out | _erase_and_verify(conn, home, target, match)
 
 
 def run_erase(
@@ -341,20 +333,18 @@ def run_erase_request(
     *,
     wait_s: float = 15.0,
     env: Mapping[str, str] = os.environ,
-    status: EraseStatus | None = None,
 ) -> dict[str, object]:
-    """Establish producer pause and writer ownership, then erase.
+    """Take the writer lock, then erase.
 
     Real erasure refuses an absent store; dry runs keep their writer-only
     path and may initialize an empty store. Neither creates containment
-    evidence. Original callee exceptions propagate with the caller's status.
+    evidence.
 
     Args:
         home: Data directory.
         request: Selector and dry-run intent.
         wait_s: Coordination-acquisition budget, not a whole-command deadline.
         env: Environment, for provider roots and ``HOME``.
-        status: Optional caller-owned milestones retained through failures.
 
     Returns:
         Counts and paths only; never erased text or the match string.
@@ -362,7 +352,6 @@ def run_erase_request(
     _pick_mode(request.session, request.event_ref, request.match)
     if request.event_ref is not None:
         query.parse_ref(request.event_ref)
-    status = status if status is not None else EraseStatus()
     with ExitStack() as resources:
         try:
             if request.dry_run:
@@ -371,9 +360,9 @@ def run_erase_request(
                 resources.callback(conn.close)
             else:
                 conn = resources.enter_context(
-                    erase_connection(home, wait_s=wait_s, status=status)
+                    maintenance_connection(home, wait_s=wait_s)
                 )
-            return _erase(conn, home, request, env, status)
+            return _erase(conn, home, request, env)
         except BaseException:
             # Secondary cleanup must not hide the original body failure.
             with suppress(BaseException):

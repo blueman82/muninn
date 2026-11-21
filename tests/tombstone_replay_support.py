@@ -12,9 +12,8 @@ from unittest import mock
 
 from muninn import erase, query, store, tombstones
 from muninn.erase_collect import Target
-from muninn.review_pause import EraseStatus
 from tests.cli_support import CliCase
-from tests.review_pause_support import initialize
+from tests.home_support import initialize
 
 TARGET = "replay-target"
 CONTROL = "replay-control"
@@ -23,10 +22,8 @@ CANARY = "replayerasurecanary"
 
 def interrupted(home: Path, selector: str, value: str) -> None:
     """Exit after the public erase has durably appended its actual intent."""
-    status = EraseStatus()
 
     def cut(conn: sqlite3.Connection, target: Target) -> None:
-        assert status.erasure_phase == "intent_durable"
         assert not conn.in_transaction
         assert target.events
         os._exit(71)
@@ -38,7 +35,7 @@ def interrupted(home: Path, selector: str, value: str) -> None:
     else:
         request = erase.EraseRequest(event_ref=value)
     with mock.patch.object(erase, "_commit", cut):
-        erase.run_erase_request(home, request, wait_s=0, status=status)
+        erase.run_erase_request(home, request, wait_s=0)
     raise AssertionError("interruption_not_reached")
 
 

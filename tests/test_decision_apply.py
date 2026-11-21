@@ -31,6 +31,7 @@ from muninn.review_json import canonical_json
 from muninn.review_read_budget import ReadBudget
 from tests.decision_support import DecisionCase
 from tests.ingest_support import line
+from tests.policy_patch import use_policy
 
 
 class ApplicationCase(DecisionCase):
@@ -53,9 +54,7 @@ class ApplicationCase(DecisionCase):
             )
         )
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 22.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 22.0)
         )
         ids = tuple(
             row[0]
@@ -83,10 +82,7 @@ class ApplicationCase(DecisionCase):
         self.policy = self.policy.model_copy(
             update={"context_bytes": 65536, "max_output_bytes": 65536}
         )
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.context = self.start()
 
     def governed(self) -> dict[str, list[tuple[object, ...]]]:
@@ -251,7 +247,7 @@ class DecisionApplicationTests(ApplicationCase):
                 )
                 attempt = self.transaction(
                     lambda context=context: review_requests.claim_attempt(
-                        self.conn, context.request_id, 1, 25.0
+                        self.conn, context.request_id, 25.0
                     )
                 )
                 context = context.model_copy(
@@ -298,11 +294,7 @@ class DecisionApplicationTests(ApplicationCase):
         self.assertIs(
             review_commit.CommitContext, review_commit_state.CommitContext
         )
-        for name in (
-            "EVIDENCE_ERRORS",
-            "stored_receipt",
-            "checked_request_policy",
-        ):
+        for name in ("EVIDENCE_ERRORS", "stored_receipt"):
             self.assertIs(
                 getattr(review_commit, name),
                 getattr(review_commit_state, name),

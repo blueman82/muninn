@@ -183,6 +183,8 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 | `muninn know propose --input FILE` | Strict `ProposalInput`, then a checked current local `attempt` and `Receipt`. No model invocation. |
 | `muninn know retract K_ID --expected-revision N --reason TEXT` | Checked withdrawal of that current revision. Reports `KnowledgeView`. |
 | `muninn learn request --session REF [--from-line N --through-line N] [--policy PATH] [--task TASK]` | `RequestView` for a bounded `request`. Paired `bounds` or activation/uncompleted boundary through the latest complete record. `--task` binds the `request` to one task in the source project. |
+| `muninn learn on` | Turn learning on. Saves `learning.json`, installs the learning policy and learns only chat from now on. Output `{"enabled":true}`. |
+| `muninn learn off` | Turn learning off and stop new reviews. Output `{"enabled":false}`. |
 | `muninn learn setup` | Preview history or save an explicit record scope. |
 | `muninn learn list [--state STATE]` | `requests: [RequestView, ...]`. `state` is `pending`, `running`, `waiting`, `completed`, `failed` or `cancelled`. |
 | `muninn learn show R_ID` | `ReviewDetail`: `request`, `attempts`, durable calls, governed `evidence`, receipt/null, `correction_status`, and safe `diagnostics`. Content is shown only when specified, not logged. |

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from muninn import hook
+from tests.policy_patch import use_policy
 from tests.test_cli_learning import CliLearningCase
 
 OWNER = "Use Python for this project."
@@ -72,10 +73,7 @@ class AgentPathTests(CliLearningCase):
         )
         # Long temporary paths (Windows) do not fit the default test cap.
         self.policy = self.policy.model_copy(update={"context_bytes": 12000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (self.policy.model_dump_json(), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         return ids[0], ids[1]
 
     def agent_outputs(self) -> dict[str, str]:

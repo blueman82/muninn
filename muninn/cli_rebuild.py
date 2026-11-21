@@ -24,11 +24,8 @@ from muninn import (
     tombstone_key,
     tombstones,
 )
-from muninn import review_pause as q
 from muninn import store_fingerprint as fingerprint
 from muninn.cli_core import Env, Out, Record, Result
-from muninn.review_models import ReviewPolicy
-from muninn.review_progress import checked_policy, digest
 
 __all__ = ["REBUILD", "rebuild"]
 REBUILD = "muninn.sqlite.rebuild"
@@ -50,7 +47,6 @@ class _Prepared:
     original: fingerprint.Fingerprint
     archive: fingerprint.FileFingerprint
     candidate: fingerprint.FileFingerprint
-    control: sqlite3.Row
     copied: dict[str, int]
 
 
@@ -83,36 +79,22 @@ def _connection(
         conn.close()
 
 
-def _fence(conn: sqlite3.Connection) -> sqlite3.Row:
-    """Disable admission and fence attempts, retaining unknown charges."""
-    control = conn.execute("SELECT * FROM review_control").fetchone()
+def _fence(conn: sqlite3.Connection) -> None:
+    """Fence running attempts, retaining unknown charges."""
     conn.execute("BEGIN IMMEDIATE")
     try:
-        conn.execute(
-            "UPDATE review_control SET admission=0,generation=generation+1"
-        )
-        review_requests.recover_attempts(
-            conn, control["generation"] + 1, time.time()
-        )
+        review_requests.recover_attempts(conn, time.time())
         conn.execute("COMMIT")
     except BaseException:
         with contextlib.suppress(BaseException):
             conn.execute("ROLLBACK")
         raise
-    if control["admission"]:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        if digest(policy) != control["policy_digest"]:
-            raise ValueError("review_policy_required")
-    return control
 
 
-def _prepare(owner: q.MaintenanceOwner, status: _Status) -> _Prepared:
+def _prepare(home: Path, status: _Status) -> _Prepared:
     """Fence and retain the live source before exclusively building a copy."""
-    home = owner.home
     db, new = store.db_path(home), home / REBUILD
-    with q.maintenance_writer(owner):
+    with store.writer_lock(home, wait_s=cli_core.WRITER_WAIT_S):
         if any(
             os.path.lexists(str(new) + suffix)
             for suffix in ("", "-journal", "-wal", "-shm")
@@ -130,8 +112,8 @@ def _prepare(owner: q.MaintenanceOwner, status: _Status) -> _Prepared:
         fingerprint.verify(home, before)
         with _connection(db, before.database) as conn:
             status.mutation_possible = True
-            q.verify_current(owner, conn)
-            control = _fence(conn)
+            tombstones.reapply_tombstones(conn, home)
+            _fence(conn)
         original = fingerprint.capture(home)
         if (original.home_identity, original.database.identity) != (
             before.home_identity,
@@ -155,18 +137,13 @@ def _prepare(owner: q.MaintenanceOwner, status: _Status) -> _Prepared:
             copied = store_copy.copy_governed_state(source, target)
         fingerprint.verify(home, original)
         return _Prepared(
-            original, retained, fingerprint.capture_file(new), control, copied
+            original, retained, fingerprint.capture_file(new), copied
         )
 
 
-def _validate(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
-    """Validate content and preserve only the verified original policy."""
+def _validate(conn: sqlite3.Connection) -> None:
+    """Validate the rebuilt content."""
     store.assert_store_format(conn)
-    actual = conn.execute("SELECT * FROM review_control").fetchone()
-    if tuple(actual)[3:] != tuple(control)[3:] or actual["admission"] != 0:
-        raise ValueError("review_policy_required")
-    if actual["generation"] != control["generation"] + 1:
-        raise ValueError("review_policy_required")
     store_copy.rebuild_indexes(conn)
     if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise ValueError("rebuild_foreign_keys")
@@ -177,9 +154,6 @@ def _validate(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
     )
     conn.execute(
         "INSERT INTO knowledge_fts(knowledge_fts) VALUES('integrity-check')"
-    )
-    conn.execute(
-        "UPDATE review_control SET admission=?", (control["admission"],)
     )
 
 
@@ -207,17 +181,14 @@ def _verify_after_own_open(
 
 
 def _finish(
-    owner: q.MaintenanceOwner,
+    home: Path,
     prepared: _Prepared,
     candidate: fingerprint.FileFingerprint,
     status: _Status,
 ) -> int:
     """Replay and validate under the final uninterrupted writer barrier."""
-    home = owner.home
     db, new = store.db_path(home), home / REBUILD
     fingerprint.verify(home, prepared.original)
-    with _connection(db, prepared.original.database) as source:
-        q.verify_current(owner, source)
     # Even our own replay can invalidate the copied view. Refuse conservatively
     # rather than publish from a different source than the frozen original.
     _verify_after_own_open(home, prepared.original)
@@ -225,7 +196,7 @@ def _finish(
     with _connection(new, candidate) as target:
         reapplied = tombstones.reapply_tombstones(target, home)
         tombstones.require_current_tombstones(target, home)
-        _validate(target, prepared.control)
+        _validate(target)
     validated = fingerprint.capture_file(new)
     for suffix in ("-journal", "-wal", "-shm"):
         if os.path.lexists(str(new) + suffix):
@@ -244,38 +215,35 @@ def _run(env: Env, home: Path, status: _Status) -> Out:
     """Retain one owner and deadline across complete ingest attempts."""
     started, total = time.monotonic(), ingest.PassStats()
     facts: scope.CommitFacts = {}
-    with q.maintenance_owner(
-        home, wait_s=cli_core.WRITER_WAIT_S, status=q.EraseStatus()
-    ) as owner:
-        prepared = _prepare(owner, status)
-        candidate = prepared.candidate
-        while True:
-            pending: ingest.IngestPreparationRequiredError | None = None
-            with q.maintenance_writer(owner):
-                fingerprint.verify(home, prepared.original)
-                new = home / REBUILD
-                _same_file(new, candidate)
-                with _connection(new, candidate) as target:
-                    try:
-                        stats = ingest.ingest(
-                            target,
-                            ingest.default_roots(env),
-                            full=True,
-                            commit_facts=facts,
-                        )
-                    except ingest.IngestPreparationRequiredError as exc:
-                        pending = exc
-                        total.accumulate(exc.stats)
-                    else:
-                        total.accumulate(stats)
-                candidate = fingerprint.capture_file(new)
-                if pending is None:
-                    if total.failed or total.errors or total.unreadable_files:
-                        raise ValueError("rebuild_ingest_incomplete")
-                    reapplied = _finish(owner, prepared, candidate, status)
-                    break
-            assert pending is not None
-            scope.prepare_commit(pending.lookup, facts)
+    prepared = _prepare(home, status)
+    candidate = prepared.candidate
+    while True:
+        pending: ingest.IngestPreparationRequiredError | None = None
+        with store.writer_lock(home, wait_s=cli_core.WRITER_WAIT_S):
+            fingerprint.verify(home, prepared.original)
+            new = home / REBUILD
+            _same_file(new, candidate)
+            with _connection(new, candidate) as target:
+                try:
+                    stats = ingest.ingest(
+                        target,
+                        ingest.default_roots(env),
+                        full=True,
+                        commit_facts=facts,
+                    )
+                except ingest.IngestPreparationRequiredError as exc:
+                    pending = exc
+                    total.accumulate(exc.stats)
+                else:
+                    total.accumulate(stats)
+            candidate = fingerprint.capture_file(new)
+            if pending is None:
+                if total.failed or total.errors or total.unreadable_files:
+                    raise ValueError("rebuild_ingest_incomplete")
+                reapplied = _finish(home, prepared, candidate, status)
+                break
+        assert pending is not None
+        scope.prepare_commit(pending.lookup, facts)
     total.duration_s = time.monotonic() - started
     return {
         "rebuilt": True,
@@ -330,10 +298,6 @@ def rebuild(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             "rebuild_ingest_incomplete",
             "rebuild_foreign_keys",
             "quick_check_failed",
-            "review_policy_required",
-            "pause_unverified",
-            "coordination_timeout",
-            "owner_changed",
             "cutover_source_mismatch",
             "cutover_foreign_keys",
             "cutover_integrity",

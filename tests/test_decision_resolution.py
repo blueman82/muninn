@@ -287,22 +287,6 @@ class DecisionApplicationGuardTests(ApplicationCase):
         self.assertEqual(self.governed(), before)
         self.assertNotEqual(candidate_view(self.conn, ident).state, "saved")
 
-    def test_active_pause_and_policy_cannot_be_overridden_by_approval(
-        self,
-    ) -> None:
-        ident, context = self.application()
-        candidate = candidate_view(self.conn, ident).candidate
-        assert candidate is not None
-        self.conn.execute("UPDATE review_control SET admission=0")
-        before = self.governed()
-        with self.assertRaisesRegex(ValueError, "rejected_validation"):
-            review_commit.commit_review(
-                self.conn,
-                context,
-                enrich_support(candidate, self.proof.owner_evidence_id),
-            )
-        self.assertEqual(self.governed(), before)
-
     def test_normalizer_drift_refuses_without_rewriting_candidate(
         self,
     ) -> None:

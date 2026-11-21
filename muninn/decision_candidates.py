@@ -32,7 +32,6 @@ from muninn.redaction import redact, redact_parts
 from muninn.review_candidates import validate_batch
 from muninn.review_commit_state import (
     EVIDENCE_ERRORS,
-    checked_request_policy,
     stored_receipt,
 )
 from muninn.review_evidence import validate_evidence
@@ -41,6 +40,7 @@ from muninn.review_json import canonical_json, canonical_json_value
 from muninn.review_progress import check_window, require_transaction
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_requests import request_view
+from muninn.review_settings import POLICY
 from muninn.tombstones import require_current_tombstones
 
 ENRICHMENT_RULE = (
@@ -105,7 +105,7 @@ def _originals(
     ids: tuple[EvidenceId, ...],
 ) -> tuple[EvidenceRecord, ...]:
     """Check admitted originals and the preparation window under one budget."""
-    policy = checked_request_policy(conn, row)
+    policy = POLICY
     admitted = {
         r[0]
         for r in conn.execute(

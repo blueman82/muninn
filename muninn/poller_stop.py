@@ -12,9 +12,14 @@ from pathlib import Path
 from typing import cast
 
 from muninn import file_sync, platform_io, store
-from muninn.review_pause_state import PauseRefusedError
 
 FILE = "stop.json"
+
+
+class StopTimeoutError(Exception):
+    """Staging a stop request outlived its publication deadline."""
+
+
 _GENERATION = re.compile(r"[0-9a-f]{32}")
 _POLL_S = 0.1
 
@@ -44,7 +49,7 @@ def request(
     Raises:
         ValueError: If the target fields are invalid.
         PermissionError: If the data directory is unsafe.
-        PauseRefusedError: If staging exhausts the publication deadline.
+        StopTimeoutError: If staging exhausts the publication deadline.
     """
     if not _valid(pid, generation):
         raise ValueError("invalid stop target")
@@ -61,7 +66,7 @@ def request(
             handle.flush()
             file_sync.sync_fd(handle.fileno())
         if time.monotonic() >= deadline:
-            raise PauseRefusedError("coordination_timeout")
+            raise StopTimeoutError("coordination_timeout")
         Path(temporary).replace(home / FILE)
     finally:
         with contextlib.suppress(OSError):

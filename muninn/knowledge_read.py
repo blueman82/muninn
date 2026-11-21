@@ -27,12 +27,12 @@ from muninn.review_evidence_models import (
     EvidenceRecord,
     SourceRef,
 )
-from muninn.review_models import ReviewPolicy
 from muninn.review_selectors import (
     PROJECTION_VERSION,
     SOURCE_VERSIONS,
     check_tombstones,
 )
+from muninn.review_settings import POLICY
 
 _SELECT = (
     "SELECT k.*,v.revision,v.form,v.kind,v.scope_json,v.content_json,"
@@ -126,12 +126,7 @@ def _scope_allowed(conn: sqlite3.Connection, scope: Scope) -> bool:
             ).fetchone()
             is not None
         )
-    row = conn.execute(
-        "SELECT admission,policy_json FROM review_control WHERE singleton=1"
-    ).fetchone()
-    if row is None or not row["admission"] or row["policy_json"] is None:
-        return False
-    return ReviewPolicy.model_validate_json(row["policy_json"]).allow_global
+    return POLICY.allow_global
 
 
 def _disputed(conn: sqlite3.Connection, ident: str, revision: int) -> bool:

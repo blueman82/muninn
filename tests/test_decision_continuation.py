@@ -1,4 +1,4 @@
-"""Exercise targeted and supervisor continuation without execution stubs."""
+"""Exercise targeted and learner continuation without execution stubs."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ import subprocess
 import sys
 from unittest import mock
 
-from muninn import decision_requests, review_requests, store
+from muninn import decision_requests, review_requests, review_settings, store
 from muninn.decision_write import submit_intent
-from muninn.review_supervisor import Supervisor
+from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
+from tests.policy_patch import use_policy
 
 
 class DecisionContinuationTests(DecisionCase):
@@ -20,21 +21,32 @@ class DecisionContinuationTests(DecisionCase):
         intent = self.intent(ident)
         self.transaction(lambda: submit_intent(self.conn, intent, 20.0))
 
+    def test_application_saves_with_learning_off_and_no_stored_policy(
+        self,
+    ) -> None:
+        candidate = self.stage()
+        self.submit(candidate.id)
+        self.transaction(
+            lambda: review_requests.cancel_request(
+                self.conn, self.context.request_id, 24.0
+            )
+        )
+        review_settings.save(self.home, review_settings.Settings())
+        self.conn.execute(
+            "UPDATE review_control SET admission=0,policy_json=NULL,"
+            "policy_digest=NULL"
+        )
+        view = decision_requests.request_application(
+            self.home, candidate.id, 25.0
+        )
+        self.assertEqual(view.state, "saved")
+
     def test_targeted_apply_never_selects_another_candidate(self) -> None:
         a, b = self.stage(), self.stage()
         self.submit(a.id)
         self.submit(b.id)
         before = self.row("SELECT count(*) FROM review_attempt")[0]
-        with (
-            mock.patch.object(Supervisor, "start", side_effect=AssertionError),
-            mock.patch(
-                "muninn.review_round_launch.create_wrapper",
-                side_effect=AssertionError,
-            ),
-        ):
-            result = decision_requests.request_application(
-                self.home, b.id, 25.0
-            )
+        result = decision_requests.request_application(self.home, b.id, 25.0)
         self.assertEqual(
             (result.id, result.state, result.receipt),
             (b.id, "approved_pending", None),
@@ -55,13 +67,11 @@ class DecisionContinuationTests(DecisionCase):
         with store.writer_lock(self.home, wait_s=0):
             pass
 
-    def test_continuation_is_bounded_and_generation_fenced(self) -> None:
+    def test_continuation_is_bounded(self) -> None:
         a, b = self.stage(), self.stage()
         self.submit(a.id)
         self.submit(b.id)
-        with self.assertRaisesRegex(ValueError, "rejected_fenced"):
-            decision_requests.continue_decisions(self.home, 2, 25.0)
-        views = decision_requests.continue_decisions(self.home, 1, 25.0)
+        views = decision_requests.continue_decisions(self.home, 25.0)
         self.assertEqual(len(views), 1)
         self.assertEqual(views[0].state, "approved_pending")
         self.assertEqual(
@@ -91,9 +101,7 @@ class DecisionContinuationTests(DecisionCase):
                 self.conn, self.context.request_id, 26.0
             )
         )
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        self.assertIsNone(supervisor._claim(27.0))
+        self.assertIsNone(Learner(self.home)._claim(27.0))
         self.assertEqual(
             self.row(
                 "SELECT state FROM review_request WHERE id=?",
@@ -202,6 +210,7 @@ class DecisionContinuationTests(DecisionCase):
         code = """
 import sys
 from pathlib import Path
+from tests.policy_patch import use_policy
 from muninn import decision_requests, store
 home, ident = Path(sys.argv[1]), sys.argv[2]
 with store.writer_lock(home, wait_s=0):
@@ -225,15 +234,11 @@ with store.writer_lock(home, wait_s=0):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_paused_admission_still_checks_complete_display(self) -> None:
+    def test_small_display_limit_still_checks_complete_display(self) -> None:
         candidate = self.stage()
         self.submit(candidate.id)
         small = self.policy.model_copy(update={"context_bytes": 32})
-        self.conn.execute(
-            "UPDATE review_control SET "
-            "admission=0,policy_json=?,policy_digest=?",
-            (small.model_dump_json(), self.digest(small)),
-        )
+        use_policy(self, small)
         before = self.row("SELECT count(*) FROM review_evidence")[0]
         view = decision_requests.request_application(
             self.home, candidate.id, 25.0
@@ -263,7 +268,7 @@ with store.writer_lock(home, wait_s=0):
         )
         self.transaction(lambda: submit_intent(self.conn, late, 24.0))
         receipt = self.saved_fixture(candidate.id)
-        views = decision_requests.continue_decisions(self.home, 1, 30.0)
+        views = decision_requests.continue_decisions(self.home, 30.0)
         self.assertEqual(len(views), 1)
         self.assertEqual(
             (views[0].state, views[0].receipt), ("saved", receipt)
@@ -289,31 +294,8 @@ with store.writer_lock(home, wait_s=0):
             ("waiting_verification", 0, None),
         )
         self.assertEqual(
-            decision_requests.continue_decisions(self.home, 1, 31.0), ()
+            decision_requests.continue_decisions(self.home, 31.0), ()
         )
-
-    def test_stale_owner_policy_or_generation_stops_continuation_setup(
-        self,
-    ) -> None:
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        self.conn.execute("UPDATE review_control SET generation=2")
-        with mock.patch.object(
-            supervisor,
-            "_inputs",
-            side_effect=AssertionError("stale owner setup"),
-        ):
-            self.assertFalse(supervisor._ready_to_spawn(25.0))
-        self.conn.execute(
-            "UPDATE review_control SET generation=1,policy_digest=?",
-            ("f" * 64,),
-        )
-        with mock.patch.object(
-            supervisor,
-            "_inputs",
-            side_effect=AssertionError("stale policy setup"),
-        ):
-            self.assertFalse(supervisor._ready_to_spawn(25.0))
 
     def test_tick_continues_one_decision_before_ordinary_claim(self) -> None:
         candidate = self.stage()
@@ -323,20 +305,10 @@ with store.writer_lock(home, wait_s=0):
                 self.conn, self.context.request_id, 24.0
             )
         )
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        supervisor._owner = 1
-        supervisor.monitor = mock.Mock()
-        supervisor.monitor.drain.return_value = []
-        supervisor._catchup = (0, 100.0)
-        with (
-            mock.patch.object(supervisor, "_inputs", return_value=True),
-            mock.patch(
-                "muninn.review_round_launch.create_wrapper",
-                side_effect=AssertionError,
-            ),
-        ):
-            supervisor.tick(25.0)
+        review_settings.save(self.home, review_settings.Settings(enabled=True))
+        learner = Learner(self.home)
+        learner._catchup = (0, 100.0)
+        learner.tick(25.0)
         view = decision_requests.decision_view(self.conn, candidate.id)
         self.assertEqual(view.state, "saved")
         self.assertIsNotNone(view.receipt)

@@ -102,9 +102,6 @@ class LaunchdObservationTests(unittest.TestCase):
                     mock.patch.object(
                         obs, "run", side_effect=responses
                     ) as run,
-                    mock.patch.object(
-                        obs, "sys", SimpleNamespace(platform="darwin")
-                    ),
                     mock.patch.object(obs, "os", SimpleNamespace(getuid=uid)),
                 ):
                     result = obs._launchd_job()

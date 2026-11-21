@@ -102,9 +102,6 @@ class StagingSafetyTests(DecisionCase):
             mock.patch.object(store, "connect_rw", side_effect=AssertionError),
         ):
             self.assertEqual(self.stage().state, "waiting_verification")
-        self.conn.execute("UPDATE review_control SET admission=0")
-        with self.assertRaisesRegex(ValueError, "^rejected_validation$"):
-            self.stage()
 
     def test_guide_display_and_application_share_cross_claim_normalization(
         self,

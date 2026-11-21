@@ -7,15 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError, field_validator
 
-from muninn import obs_log, review_history, review_recovery, review_requests
+from muninn import review_codes, review_history, review_requests
+from muninn.review_learner_result import failure_code
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES
-from muninn.review_recovery_codes import (
-    CONTAINED,
-    EXPLANATIONS,
-    RUNTIME_CODES,
-    SHARED,
-)
-from muninn.review_supervisor_result import failure_code
 from tests.test_review_requests import RequestCase
 
 SECRET_MARKER = "SECRET-MARKER-7f3a"
@@ -37,7 +31,6 @@ _KEPT = (
     "prompt_limit",
     "deadline",
     *sorted(EVIDENCE_LIMIT_CODES),
-    *sorted(RUNTIME_CODES),
 )
 _DOCS = Path(__file__).resolve().parents[1] / "docs" / "REFERENCE.md"
 
@@ -70,26 +63,16 @@ class CodeCoverageTests(unittest.TestCase):
         for code in _KEPT:
             kept = failure_code(ValueError(code), "config")
             self.assertEqual(kept, code)
-            self.assertIn(kept, EXPLANATIONS, code)
-            detail = review_recovery.explain(kept, "launch")
-            self.assertEqual(detail["code"], code)
-            self.assertNotEqual(detail["cause"], EXPLANATIONS["config"][0])
-
-    def test_new_codes_are_stored_and_counted(self) -> None:
-        stored: frozenset[str] = review_requests._ERRORS
-        logged: frozenset[str] = obs_log._REVIEW_ERRORS
-        for code in NEW_CODES:
-            self.assertIn(code, stored, code)
-            self.assertIn(code, logged, code)
+            self.assertIn(kept, review_codes.EXPLANATIONS, code)
+            self.assertNotEqual(
+                review_codes.explain(kept), review_codes.explain("config")
+            )
 
     def test_new_codes_keep_existing_decisions(self) -> None:
         retry: frozenset[str] = review_requests._RETRYABLE
         for code in NEW_CODES:
+            self.assertIn(code, review_codes.CODES, code)
             self.assertNotIn(code, retry, code)
-            self.assertNotIn(code, CONTAINED, code)
-            self.assertNotIn(code, SHARED, code)
-        self.assertNotIn("config", CONTAINED)
-        self.assertIn("config", SHARED)
 
     def test_docs_have_a_row_for_each_new_code(self) -> None:
         text = _DOCS.read_text(encoding="utf-8")
@@ -110,9 +93,9 @@ class PrivacyTests(unittest.TestCase):
 
     def test_explain_never_echoes_error_text(self) -> None:
         for error in (validation_error(), OSError(SECRET_MARKER)):
-            detail = review_recovery.explain(str(error), "launch")
-            self.assertEqual(detail["code"], "config")
-            self.assertNotIn(SECRET_MARKER, "".join(detail.values()))
+            text = review_codes.explain(str(error))
+            self.assertEqual(text, review_codes.explain("config"))
+            self.assertNotIn(SECRET_MARKER, text)
 
 
 class ReplayTests(RequestCase):

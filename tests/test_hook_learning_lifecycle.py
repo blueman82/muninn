@@ -12,6 +12,7 @@ from unittest import mock
 
 from muninn import cli_hook, cursor_import, hook_learn
 from tests.knowledge_context_support import KnowledgeContextCase
+from tests.policy_patch import use_policy
 
 
 class HookLearningLifecycleTests(KnowledgeContextCase):
@@ -20,13 +21,7 @@ class HookLearningLifecycleTests(KnowledgeContextCase):
     def setUp(self) -> None:
         super().setUp()
         self.policy = self.policy.model_copy(update={"context_bytes": 10000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (
-                json.dumps(self.policy.model_dump(mode="json")),
-                self.digest(self.policy),
-            ),
-        )
+        use_policy(self, self.policy)
         self.env = dict(os.environ) | {
             "HOME": str(self.tmp / "native-home"),
             "MUNINN_HOME": str(self.home),

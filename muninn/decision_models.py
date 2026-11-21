@@ -56,7 +56,6 @@ type DecisionCode = Literal[
     "owner_intent",
     "display_proof",
     "candidate_changed",
-    "learning_paused",
     "decision_reference_required",
     "already_saved",
     "evidence_byte_limit",

@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from muninn import hook, knowledge_read, obs
-from muninn.review_json import canonical_json
 from tests import test_cli as tcli
 from tests.knowledge_context_support import KnowledgeContextCase
+from tests.policy_patch import use_policy
 from tests.query_support import QueryCase
 
 OPEN = '<muninn-memory source="muninn" trust="untrusted-data">'
@@ -139,10 +139,7 @@ class HookCase(KnowledgeContextCase):
         ).fetchone()[0]
         self.env = {"MUNINN_HOME": str(self.home)}
         self.policy = self.policy.model_copy(update={"context_bytes": 10000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         obs.write_status(
             self.home, {"last_pass_at": time.time(), "interval_s": 60}
         )
@@ -321,10 +318,7 @@ class HookCliCase(tcli.CliCase, KnowledgeContextCase):
     def setUp(self) -> None:
         super().setUp()
         self.policy = self.policy.model_copy(update={"context_bytes": 10000})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         self.conn.execute(
             "INSERT OR REPLACE INTO scope_path(cwd,scope_id,method) "
             "SELECT ?,id,'cwd' FROM scope WHERE key=?",

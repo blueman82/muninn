@@ -16,9 +16,9 @@ from muninn import (
     store,
 )
 from muninn.knowledge_models import Scope
-from muninn.review_json import canonical_json
 from muninn.review_models import ReviewContext
 from tests.ingest_support import line, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
 from tests.test_review_scope import ScopeCommitCase
 
@@ -119,11 +119,7 @@ class ReviewReadTests(ScopeCommitCase):
             )
         )
         self.policy = self.policy.model_copy(update=limits)
-        raw, hashed = canonical_json(self.policy), self.digest(self.policy)
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (raw, hashed),
-        )
+        use_policy(self, self.policy)
         self.context = self.start(4, 4)
 
     def test_search_open_and_initial_context_admit_off_window_support(
@@ -187,12 +183,10 @@ class ReviewReadTests(ScopeCommitCase):
     def test_current_attempt_policy_and_window_are_authoritative(self) -> None:
         base = self.runtime()
         for changes in (
-            {"generation": 2},
             {"attempt_id": "A_" + "f" * 32},
             {"scope": Scope(project_id="other", task=None)},
             {"admitted_windows": (self.window(),)},
             {"evidence_ids": (self.evidence[0].id,)},
-            {"policy": self.policy.model_copy(update={"policy_id": "forged"})},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 review_rounds.execute_read(

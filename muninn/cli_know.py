@@ -22,7 +22,7 @@ from muninn.cli_core import (
 )
 from muninn.cli_decision import decision
 from muninn.cli_know_shared import scopes as _scopes
-from muninn.cli_learn import installed_policy, propose
+from muninn.cli_learn import propose
 from muninn.hook import CODEX_BLOCK_LIMIT
 from muninn.hook_frame import BLOCK_LIMIT
 from muninn.hook_start import render_page
@@ -31,6 +31,7 @@ from muninn.knowledge_models import KnowledgeView
 from muninn.knowledge_proof import owner_proofs, proof_view
 from muninn.query.answers import event_ref
 from muninn.review_models import ProposalInput
+from muninn.review_settings import POLICY
 from muninn.scope import scope_ids_for_read
 
 
@@ -113,7 +114,6 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
         raise ValueError("provider_needs_page")
     if a.page is not None:
         return _page(conn, a, env)
-    policy = installed_policy(conn)
     scopes = _scopes(conn, a, env)
     project = next(
         (scope for scope in scopes if scope.project_id is not None), None
@@ -121,7 +121,7 @@ def _read(conn: sqlite3.Connection, a: Namespace, env: Env) -> Out:
     if project is None:
         raise ValueError("scope_unavailable")
     return knowledge_push.knowledge_context(
-        conn, project, policy.context_bytes, time.time()
+        conn, project, POLICY.context_bytes, time.time()
     ).model_dump(mode="json")
 
 

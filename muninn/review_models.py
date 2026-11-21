@@ -21,22 +21,11 @@ from muninn.knowledge_models import (
     UnresolvedId,
     UtcSeconds,
 )
-from muninn.review_codex_policy import CodexExperiment, ManagedCodexExperiment
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
     NonnegativeInt,
     PositiveInt,
-)
-from muninn.review_runtime_models import (
-    ManagedCallRecord,
-    RunnerSelection,
-)
-from muninn.review_runtime_models import (
-    ManagedCodexSelection as ManagedCodexSelection,
-)
-from muninn.review_runtime_models import (
-    RunnerConfig as RunnerConfig,
 )
 
 
@@ -81,59 +70,14 @@ class ObservedConfig(StrictModel):
     reasoning: Text | None
 
 
-class PilotBudget(StrictModel):
-    """Carry explicit approved bounds for a persistent budget account."""
-
-    account_id: Text
-    max_model_calls: PositiveInt
-    max_wall_seconds: PositiveSeconds
-    max_cost_decimal: CostDecimal | None
-    conservative_call_cost_decimal: CostDecimal | None
-    currency: Text | None
-    approved_by: Text
-    approved_at: UtcSeconds
-
-    @model_validator(mode="after")
-    def cost_currency(self) -> Self:
-        """Require currency for either explicit monetary bound."""
-        if (
-            self.max_cost_decimal is not None
-            or self.conservative_call_cost_decimal is not None
-        ) and self.currency is None:
-            raise ValueError("missing_budget_currency")
-        return self
-
-
-class OngoingBudget(StrictModel):
-    """Record ongoing production authority without aggregate trial limits."""
-
-    kind: Literal["ongoing_production"]
-    account_id: Text
-    conservative_call_cost_decimal: None = None
-    currency: None = None
-    approved_by: Text
-    approved_at: UtcSeconds
-
-
-def require_pilot_budget(budget: PilotBudget | OngoingBudget) -> PilotBudget:
-    """Require finite authority for trial-only consumers."""
-    if not isinstance(budget, PilotBudget):
-        raise ValueError("finite_pilot_budget_required")
-    return budget
-
-
 class ReviewPolicy(StrictModel):
     """Require explicit model, boundary, retry and budget controls."""
 
     schema_version: SchemaVersion
     policy_id: Text
-    policy_source: Literal["repository_default"] | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
     prompt_digest: Digest
     projection_version: Text
     result_schema_digest: Digest
-    runner: RunnerSelection
     max_rounds: PositiveInt
     max_input_bytes: PositiveInt
     max_output_bytes: PositiveInt
@@ -144,63 +88,13 @@ class ReviewPolicy(StrictModel):
     concurrency: PositiveInt
     hook_wait_seconds: UtcSeconds
     allow_global: bool
-    budget: PilotBudget | OngoingBudget
-    experimental_codex: CodexExperiment | ManagedCodexExperiment | None = (
-        Field(default=None, exclude_if=lambda value: value is None)
-    )
 
     @model_validator(mode="after")
     def retry_schedule(self) -> Self:
         """Require one explicit backoff for each possible retry."""
         if len(self.retry_backoff_seconds) != self.max_attempts - 1:
             raise ValueError("invalid_backoff_count")
-        self.experimental_bounds()
         return self
-
-    def experimental_bounds(self) -> None:
-        """Refuse widened or incompletely recorded experimental bounds."""
-        if self.policy_source is not None and self.experimental_codex is None:
-            raise ValueError("review_policy_source")
-        if self.experimental_codex is None:
-            if isinstance(self.runner, ManagedCodexSelection):
-                raise ValueError("codex_approval_required")
-            if isinstance(self.budget, OngoingBudget):
-                raise ValueError("ongoing_policy_required")
-            return
-        if isinstance(self.runner, ManagedCodexSelection) != isinstance(
-            self.experimental_codex, ManagedCodexExperiment
-        ):
-            raise ValueError("codex_experimental_policy")
-        input_ceiling = {
-            "muninn-codex-ongoing-production": 65536,
-            "muninn-codex-ongoing-production-v2": 1_048_576,
-            "muninn-codex-ongoing-production-v3": 1_048_576,
-        }.get(self.policy_id)
-        runner, budget = self.runner, self.budget
-        if (
-            input_ceiling is None
-            or self.max_rounds > 2
-            or self.max_input_bytes > input_ceiling
-            or self.max_output_bytes > 32768
-            or self.context_bytes > 12000
-            or self.deadline_seconds > 120.0
-            or not (
-                self.max_attempts <= 3
-                if self.policy_id.endswith("-v3")
-                else self.max_attempts == 1
-            )
-            or not (
-                self.concurrency <= 4
-                if self.policy_id.endswith("-v3")
-                else self.concurrency == 1
-            )
-            or self.hook_wait_seconds
-            or self.allow_global
-            or (runner.runner, runner.model, runner.reasoning)
-            != ("codex_cli", "gpt-6.1-sol", "low")
-            or not isinstance(budget, OngoingBudget)
-        ):
-            raise ValueError("codex_experimental_policy")
 
 
 class RequestView(StrictModel):
@@ -225,7 +119,6 @@ class AttemptView(StrictModel):
     id: AttemptId
     request_id: RequestId
     generation: PositiveInt
-    requested: RunnerSelection | None
     observed: ObservedConfig
     started_at: UtcSeconds
     progress_at: UtcSeconds
@@ -249,17 +142,13 @@ class CallView(StrictModel):
 
     attempt_id: AttemptId
     round_index: PositiveInt
-    budget_account_id: Text
     policy_digest: Digest
     state: CallState
     reserved_at: UtcSeconds
     launched_at: UtcSeconds | None
     ended_at: UtcSeconds | None
-    requested: RunnerConfig | ManagedCallRecord
     observed: ObservedConfig
     usage: Usage | None
-    cost_reservation_decimal: CostDecimal | None
-    currency: Text | None
     process_identity: ProcessIdentity | None
     outcome: Text | None
 
@@ -318,31 +207,12 @@ class ReviewDetail(StrictModel):
     evidence: list[EvidenceRecord]
     receipt: Receipt | None
     correction_status: CorrectionStatus = "unknown"
-    diagnostics: list[dict[str, str]] = Field(
-        default_factory=list[dict[str, str]]
-    )
 
 
 class ReviewAdmission(StrictModel):
-    """Report stored admission separately from checked policy integrity."""
+    """Report whether the saved settings turn learning on."""
 
-    enabled: bool | None
-    policy_status: Literal[
-        "control_absent",
-        "control_invalid",
-        "policy_absent",
-        "policy_invalid",
-        "policy_digest_mismatch",
-        "valid",
-    ]
-
-    @model_validator(mode="after")
-    def consistent_control(self) -> Self:
-        """Reserve an unknown switch for absent or invalid control metadata."""
-        unknown = self.policy_status in {"control_absent", "control_invalid"}
-        if unknown != (self.enabled is None):
-            raise ValueError("inconsistent_admission_control")
-        return self
+    enabled: bool
 
 
 class ReviewStats(StrictModel):

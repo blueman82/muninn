@@ -19,12 +19,12 @@ from muninn import (
     review_progress,
     review_read_budget,
 )
-from muninn.review_json import canonical_json
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, ReadBudget
 from muninn.review_request_views import request_view
 from muninn.review_split import MAX_LINES, safe_limit
 from tests.classify_support import custom_call
 from tests.ingest_support import TID, Record, line
+from tests.policy_patch import use_policy
 from tests.test_classify import codex_meta, reply, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -126,10 +126,7 @@ class LimitCase(RequestCase):
             "MUNINN_HOME": str(self.home),
         }
         self.policy = self.policy.model_copy(update={"max_input_bytes": LIMIT})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
 
     def load(self, records: list[Record]) -> None:
         """Replace the chat file with records and index it again.

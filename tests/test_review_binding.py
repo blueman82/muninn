@@ -8,11 +8,11 @@ from unittest import mock
 from muninn import review_binding, review_evidence
 from muninn.review_candidates import ProposalRejectedError
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
-from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import EvidenceLimitError
 from tests.classify_support import item
 from tests.ingest_support import fc_output, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import function_call, reply, user_msg
 from tests.test_review_commit import CommitCase
 from tests.test_review_requests import RequestCase
@@ -185,10 +185,7 @@ class AgreementTests(BindingCase):
         data = self.policy.model_dump(mode="json")
         data["max_input_bytes"] = 1048576
         self.policy = ReviewPolicy.model_validate(data)
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
         last = 3000
         self.conversation(
             *(event(i) for i in range(1, last - 3)),

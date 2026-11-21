@@ -13,32 +13,24 @@ from pydantic import ValidationError
 
 from muninn import (
     query,
-    review_recovery,
     review_requests,
-    review_unknown_recovery,
+    review_settings,
 )
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
-from muninn.cli_know_shared import saved_policy
 from muninn.cli_learn_explain import explain
+from muninn.cli_learn_switch import switch
 from muninn.cli_learning_setup import failure as setup_failure
 from muninn.cli_learning_setup import setup
 from muninn.knowledge_models import RequestId, Scope
 from muninn.query.answers import BadArgumentError
 from muninn.query.filters import resolve_session
-from muninn.review_budget import call_view
 from muninn.review_commit import CommitContext, commit_review
-from muninn.review_diagnostics import correction_status
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
     SourceRef,
 )
-from muninn.review_json import (
-    canonical_json,
-    finite_float,
-    reject_constant,
-    unique_object,
-)
+from muninn.review_json import canonical_json
 from muninn.review_models import (
     ProposalInput,
     Receipt,
@@ -50,31 +42,33 @@ from muninn.review_progress import (
     checked_policy,
     source_progress,
 )
-from muninn.review_request_views import attempt_view, request_row, request_view
+from muninn.review_request_views import (
+    attempt_view,
+    call_view,
+    correction_status,
+    request_row,
+    request_view,
+)
+from muninn.review_settings import POLICY
 
 
-def installed_policy(conn: sqlite3.Connection) -> ReviewPolicy:
-    """Require the active frozen policy snapshot and its exact digest."""
-    row = conn.execute(
-        "SELECT * FROM review_control WHERE singleton=1"
-    ).fetchone()
-    if row is None or not row["admission"] or row["policy_json"] is None:
+def _require_enabled(home: Path) -> None:
+    """Refuse learning requests while learning is off."""
+    if not review_settings.is_enabled(home):
         raise ValueError("review_policy_required")
-    return saved_policy(conn)
 
 
-def _policy(conn: sqlite3.Connection, path: str | None) -> ReviewPolicy:
-    """Read an explicit strict policy or require the installed snapshot."""
-    installed = installed_policy(conn)
+def _policy(path: str | None) -> ReviewPolicy:
+    """Read an explicit strict policy or use the constant policy."""
     if path is None:
-        return installed
+        return POLICY
     try:
         policy = checked_policy(
             ReviewPolicy.model_validate_json(Path(path).read_bytes())
         )
     except ValueError:
         raise ValueError("review_policy_required") from None
-    if canonical_json(policy) != canonical_json(installed):
+    if canonical_json(policy) != canonical_json(POLICY):
         raise ValueError("review_policy_required")
     return policy
 
@@ -142,7 +136,7 @@ def _window(
 
 def _request(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
     """Admit replay and ordinary windows through the same explicit queue."""
-    policy = _policy(conn, a.policy)
+    policy = _policy(a.policy)
     window, scope = _window(conn, a, now)
     task = getattr(a, "task", None)
     if task is not None:
@@ -156,23 +150,6 @@ def _request(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
     return review_requests.enqueue_review(
         conn, window, scope, policy, "explicit", now
     ).model_dump(mode="json")
-
-
-def _resume(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
-    """Reopen only the inspected contained refusal under exact local terms."""
-    try:
-        raw = Path(a.policy).read_bytes()
-        json.loads(
-            raw.decode("utf-8"),
-            object_pairs_hook=unique_object,
-            parse_constant=reject_constant,
-            parse_float=finite_float,
-        )
-        policy = checked_policy(ReviewPolicy.model_validate_json(raw))
-    except (OSError, UnicodeError, ValueError):
-        raise ValueError("recovery_refused") from None
-    review_requests.resume_admission(conn, policy, a.failed_request, now)
-    return {"admission": True, "policy_id": policy.policy_id}
 
 
 def _receipt(conn: sqlite3.Connection, ident: RequestId) -> Receipt | None:
@@ -237,19 +214,18 @@ def _detail(conn: sqlite3.Connection, ident: RequestId) -> Out:
             )
         ],
         receipt=_receipt(conn, ident),
-        diagnostics=review_recovery.details(conn, ident),
         correction_status=correction_status(conn, ident),
     ).model_dump(mode="json")
 
 
 # Translate within read_store so its one-time hot-journal healing can run.
 @query.guarded
-def _read(conn: sqlite3.Connection, a: Namespace) -> Out:
+def _read(conn: sqlite3.Connection, a: Namespace, home: Path) -> Out:
     """Return the requested durable detail or optionally filtered list."""
     if a.learn_cmd == "show":
         return _detail(conn, a.request_id)
     if a.learn_cmd == "explain":
-        return explain(conn, a.request_id)
+        return explain(conn, a.request_id, home)
     rows = conn.execute(
         "SELECT * FROM review_request WHERE (? IS NULL OR state=?) ORDER BY "
         "created_at,id",
@@ -266,17 +242,9 @@ def _write(conn: sqlite3.Connection, a: Namespace) -> Out:
     conn.execute("BEGIN IMMEDIATE")
     try:
         if a.learn_cmd == "setup":
-            out = setup(conn, a, installed_policy(conn), now)
+            out = setup(conn, a, POLICY, now)
         elif a.learn_cmd in {"request", "replay"}:
             out = _request(conn, a, now)
-        elif a.learn_cmd == "resume":
-            out = _resume(conn, a, now)
-        elif a.learn_cmd == "dismiss":
-            request_row(conn, a.request_id)
-            out = {
-                "request_id": a.request_id,
-                "dismissed": review_recovery.clear(conn, a.request_id),
-            }
         else:
             operation = (
                 review_requests.cancel_request
@@ -298,11 +266,8 @@ def _claim_proposal(
     now = time.time()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        generation = conn.execute(
-            "SELECT generation FROM review_control"
-        ).fetchone()[0]
         attempt = review_requests.claim_proposal(
-            conn, proposal.request_id, generation, now
+            conn, proposal.request_id, now
         )
         evidence = tuple(
             row[0]
@@ -348,23 +313,17 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Dispatch explicit learning controls with content-free refusal codes."""
     record["cmd"] = f"learn {a.learn_cmd}"
     try:
-        if a.learn_cmd == "recover-unknown":
-            out = review_unknown_recovery.recover(
-                home,
-                a.attempt_id,
-                a.round_index,
-                accept_uncertainty=a.accept_uncertainty,
-                now=time.time(),
-            ).model_dump(mode="json")
+        if a.learn_cmd in {"setup", "request", "replay"}:
+            _require_enabled(home)
+        if a.learn_cmd in {"on", "off"}:
+            out = switch(home, a.learn_cmd == "on", time.time())
         elif a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
             out = read_store(
                 home,
-                lambda conn: setup(
-                    conn, a, installed_policy(conn), time.time()
-                ),
+                lambda conn: setup(conn, a, POLICY, time.time()),
             )
         elif a.learn_cmd in {"list", "show", "explain"}:
-            out = read_store(home, lambda conn: _read(conn, a))
+            out = read_store(home, lambda conn: _read(conn, a, home))
         else:
             out = write_store(home, lambda conn: _write(conn, a))
     except ValidationError:

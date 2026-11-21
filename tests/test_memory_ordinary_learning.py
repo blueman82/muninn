@@ -9,59 +9,18 @@ from contextlib import redirect_stdout
 from unittest import mock
 
 from muninn import cli_hook, review_requests
-from muninn.review_models import ReviewContext
-from muninn.review_runner import LaunchSpec, RunnerCapability
 from tests.ingest_support import TID, line
 from tests.test_classify import user_msg
-from tests.test_review_supervisor import SupervisorCase
+from tests.test_review_learner import NOTE, LearnerCase, final
 
 
-class OrdinaryLearningTests(SupervisorCase):
+class OrdinaryLearningTests(LearnerCase):
     """Capture a real hook boundary and commit through a scripted learner."""
-
-    def launch(
-        self,
-        context: ReviewContext,
-        capability: RunnerCapability,
-        prompt: bytes,
-    ) -> LaunchSpec:
-        """Return a synthetic result while retaining the actual worker path."""
-        changes = []
-        if context.evidence_ids:
-            changes.append(
-                {
-                    "action": "add",
-                    "form": "note",
-                    "kind": "fact",
-                    "scope": context.scope.model_dump(),
-                    "content": "Use Python.",
-                    "conditions": [],
-                    "evidence_refs": [context.evidence_ids[0]],
-                    "reason": "The original record supports this note.",
-                }
-            )
-        result = {
-            "schema_version": 1,
-            "changes": changes,
-            "unresolved": [],
-            "no_change_reason": None if changes else "No supported change",
-        }
-        envelope = {
-            "type": "result",
-            "subtype": "success",
-            "is_error": False,
-            "structured_output": {"op": "final", "result": result},
-        }
-        self.script = (
-            "import json,sys;json.load(sys.stdin);print(json.dumps("
-            + repr(envelope)
-            + "))"
-        )
-        return super().launch(context, capability, prompt)
 
     def test_session_end_saves_ordinary_supported_knowledge_without_d(
         self,
     ) -> None:
+        self.fake(final(NOTE))
         self.transaction(
             lambda: review_requests.cancel_request(
                 self.conn, self.request.id, 12.0
@@ -102,7 +61,7 @@ class OrdinaryLearningTests(SupervisorCase):
                 "SELECT 1 FROM review_request WHERE trigger='hook'"
             ).fetchone()
         )
-        self.finish()
+        self.learner.tick(13.0)
         self.assertGreater(
             self.conn.execute("SELECT count(*) FROM knowledge").fetchone()[0],
             0,

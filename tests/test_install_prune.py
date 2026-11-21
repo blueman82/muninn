@@ -210,7 +210,7 @@ class PruneTest(unittest.TestCase):
             )
             self.assertEqual(
                 tuple(conn.execute("SELECT * FROM review_control").fetchone()),
-                (before[0], before[1] + 1, *before[2:]),
+                before,
             )
         self.assertEqual(
             tombstone_key.load_key(self.ctx.data, create=False), key

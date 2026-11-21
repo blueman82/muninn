@@ -11,9 +11,9 @@ from muninn import (
     review_progress,
     review_requests,
 )
-from muninn.review_json import canonical_json
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import TID, rollout
+from tests.policy_patch import use_policy
 from tests.test_classify import codex_meta, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -47,10 +47,7 @@ class ReconciliationReadBudgetTests(RequestCase):
     def cap(self, limit: int) -> None:
         """Bind an explicit synthetic cap before creating any requests."""
         self.policy = self.policy.model_copy(update={"max_input_bytes": limit})
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,policy_digest=?",
-            (canonical_json(self.policy), self.digest(self.policy)),
-        )
+        use_policy(self, self.policy)
 
     def reconcile(self) -> tuple[str, ...]:
         """Run one batch without acquiring or committing an extra writer."""

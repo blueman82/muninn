@@ -12,10 +12,9 @@ from typing import BinaryIO
 from unittest import mock
 
 from muninn import cli_rebuild, erase_residue, platform_rebuild, store
-from muninn import review_pause as q
 from tests.cli_support import CliCase
+from tests.home_support import initialize
 from tests.knowledge_retirement_support import native_note
-from tests.review_pause_support import initialize
 from tests.store_support import assert_private, public_read
 from tests.test_ingest import TID
 
@@ -33,6 +32,7 @@ class RebuildFailureTests(CliCase):
         self.db = store.db_path(self.home)
         self.unowned = self.home / "muninn.sqlite-unknown"
         self.unowned.write_bytes(b"owner")
+        self.admitted = self.admission(self.db)
 
     def asides(self) -> list[Path]:
         """Enumerate recovery residue through the public scan."""
@@ -63,7 +63,7 @@ class RebuildFailureTests(CliCase):
         self.assertEqual(archive.read_bytes(), b"earlier")
         self.assertIsNone(out["old_kept_as"])
         self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
-        self.assertEqual(self.admission(self.db), 0)
+        self.assertEqual(self.admission(self.db), self.admitted)
         self.assertTrue(out["recovery_required"])
 
     def test_public_source_is_refused_without_tightening(self) -> None:
@@ -103,8 +103,8 @@ class RebuildFailureTests(CliCase):
         archive = self.asides()[0]
         self.assertEqual(out["old_kept_as"], archive.name)
         assert_private(self, archive)
-        self.assertEqual(self.admission(archive), 0)
-        self.assertEqual(self.admission(self.db), int(published))
+        self.assertEqual(self.admission(archive), self.admitted)
+        self.assertEqual(self.admission(self.db), self.admitted)
         self.assertEqual(
             (self.home / cli_rebuild.REBUILD).exists(), not published
         )
@@ -158,7 +158,7 @@ class RebuildFailureTests(CliCase):
         self.assertNotIn("Please retain", str(out))
         self.assertNotIn("retained zebra", str(out))
         self.assertEqual(out["old_kept_as"], self.asides()[0].name)
-        self.assertEqual(self.admission(self.db), 1)
+        self.assertEqual(self.admission(self.db), self.admitted)
 
     def test_failed_validation_retains_fenced_live_and_archive(self) -> None:
         with mock.patch.object(
@@ -170,7 +170,7 @@ class RebuildFailureTests(CliCase):
         self.assertEqual((code, out["reason"]), (2, "quick_check_failed"))
         self.assertFalse(out["publication_possible"])
         self.assertTrue(out["recovery_required"])
-        self.assertEqual(self.admission(self.db), 0)
+        self.assertEqual(self.admission(self.db), self.admitted)
         self.assertEqual(self.db.read_bytes(), self.asides()[0].read_bytes())
         self.assertTrue((self.home / cli_rebuild.REBUILD).is_file())
 
@@ -201,7 +201,7 @@ class RebuildFailureTests(CliCase):
         self.assertIsNone(out["old_kept_as"])
         self.assertTrue(out["recovery_required"])
         self.assertEqual([p.read_bytes() for p in self.asides()], [b"partial"])
-        self.assertEqual(self.admission(self.db), 0)
+        self.assertEqual(self.admission(self.db), self.admitted)
         self.assertFalse((self.home / cli_rebuild.REBUILD).exists())
 
     def test_own_open_ctime_drift_preserves_immutable_original(self) -> None:
@@ -263,7 +263,6 @@ class RebuildFailureTests(CliCase):
 
     def test_own_replay_or_other_post_open_changes_never_publish(self) -> None:
         for kind in (
-            "row",
             "identity",
             "size",
             "mtime",
@@ -278,30 +277,19 @@ class RebuildFailureTests(CliCase):
                 with contextlib.closing(store.connect_rw(store.db_path(home))):
                     pass
                 initialize(home)
-                verify, calls = q.verify_current, 0
+                validate, calls = cli_rebuild._validate, 0
 
                 def changed(
-                    owner: q.MaintenanceOwner,
                     conn: sqlite3.Connection,
                     kind: str = kind,
                     home: Path = home,
-                    verify: Callable[
-                        [q.MaintenanceOwner, sqlite3.Connection], None
-                    ] = verify,
+                    validate: Callable[[sqlite3.Connection], None] = validate,
                 ) -> None:
                     nonlocal calls
-                    verify(owner, conn)
+                    validate(conn)
                     calls += 1
-                    if calls != 2:
-                        return
                     path = store.db_path(home)
-                    if kind == "row":
-                        conn.execute(
-                            "INSERT INTO scope VALUES(99,'new','new','dir')"
-                        )
-                    elif kind == "identity":
-                        # Inject after SQLite releases its Windows delete lock.
-                        conn.close()
+                    if kind == "identity":
                         raw = path.read_bytes()
                         path.rename(home / "prior.sqlite")
                         path.write_bytes(raw)
@@ -325,7 +313,7 @@ class RebuildFailureTests(CliCase):
 
                 with (
                     mock.patch.object(
-                        q, "verify_current", side_effect=changed
+                        cli_rebuild, "_validate", side_effect=changed
                     ),
                     mock.patch.object(
                         platform_rebuild, "publish_replacement"
@@ -337,7 +325,7 @@ class RebuildFailureTests(CliCase):
                 self.assertEqual((code, out["reason"]), (2, "source_changed"))
                 self.assertTrue(out["recovery_required"])
                 self.assertFalse(out["publication_possible"])
-                self.assertEqual(calls, 2)
+                self.assertEqual(calls, 1)
                 publish.assert_not_called()
                 self.assertEqual(
                     len(list(home.glob(store.RECOVERY_PREFIX + "*"))), 1
@@ -346,8 +334,8 @@ class RebuildFailureTests(CliCase):
     def test_final_archive_identity_change_refuses_publication(self) -> None:
         validate = cli_rebuild._validate
 
-        def replace(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
-            validate(conn, control)
+        def replace(conn: sqlite3.Connection) -> None:
+            validate(conn)
             archive = self.asides()[0]
             raw = archive.read_bytes()
             archive.rename(archive.with_name("held-archive.sqlite"))
@@ -358,4 +346,4 @@ class RebuildFailureTests(CliCase):
             code, out, _ = self.muninn("rebuild")
         self.assertEqual((code, out["reason"]), (2, "source_changed"))
         self.assertFalse(out["publication_possible"])
-        self.assertEqual(self.admission(self.db), 0)
+        self.assertEqual(self.admission(self.db), self.admitted)

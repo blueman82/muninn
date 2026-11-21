@@ -6,7 +6,12 @@ import dataclasses
 import os
 import time
 from collections.abc import Callable, Generator
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import (
+    AbstractContextManager,
+    ExitStack,
+    closing,
+    contextmanager,
+)
 from pathlib import Path
 
 from install import (
@@ -26,8 +31,11 @@ from muninn import (
     scope,
     store,
 )
-from muninn import review_pause as q
-from muninn import review_pause_state as state
+
+
+def writer(ctx: Ctx) -> AbstractContextManager[None]:
+    """Hold the writer lock for one region of installer store work."""
+    return store.writer_lock(ctx.data, wait_s=cli_core.WRITER_WAIT_S)
 
 
 def _same_home(home: Path, identity: tuple[int, int]) -> None:
@@ -51,25 +59,17 @@ def _create_home(ctx: Ctx) -> tuple[int, int]:
     return identity
 
 
-def _fresh(
-    ctx: Ctx, rec: Record, owner: q.MaintenanceOwner, identity: tuple[int, int]
-) -> Path:
-    """Initialize the exclusively created home beneath its retained owner."""
+def _fresh(ctx: Ctx, rec: Record, identity: tuple[int, int]) -> Path:
+    """Initialize the exclusively created home under the writer lock."""
     path = store.db_path(ctx.data)
-    with q.maintenance_writer(owner):
+    with writer(ctx):
         _same_home(ctx.data, identity)
-        if any(
-            state.inspect(ctx.data, name)[1] is not None
-            for name in (state.WITNESS, state.BASELINE)
-        ):
-            raise state.PauseRefusedError("pause_unverified")
         if os.path.lexists(path):
             raise StepFailedError("fresh_home_changed")
         with closing(store.connect_rw(path)) as conn:
             store.assert_store_format(conn)
         _same_home(ctx.data, identity)
         file_sync.sync_path(path)
-        state.seed_new(ctx.data, owner.fd, bind_volume=False)
         _same_home(ctx.data, identity)
         rec["store"] = {
             "phase": "fresh_initialized",
@@ -84,13 +84,12 @@ def _fresh(
 def _ingest_fresh(
     ctx: Ctx,
     rec: Record,
-    owner: q.MaintenanceOwner,
     path: Path,
     identity: tuple[int, int],
 ) -> None:
     """Finish all provider work and record actual counts before activation."""
     with snapshot_io.validated(path) as revalidate:
-        stats = ingest_transcripts(ctx, owner)
+        stats = ingest_transcripts(ctx)
         revalidate()
         database = cursor_import.default_database(ctx.home, env={})
         prepared = (
@@ -98,12 +97,11 @@ def _ingest_fresh(
             if database is not None and database.is_file()
             else None
         )
-        with q.maintenance_writer(owner):
+        with writer(ctx):
             _same_home(ctx.data, identity)
             revalidate()
             with closing(store.connect_rw(path)) as conn:
                 revalidate()
-                q.verify_current(owner, conn)
                 if prepared is not None:
                     cursor_import.apply(conn, ctx.data, prepared)
                 counts = dict(
@@ -126,14 +124,11 @@ def _ingest_fresh(
             record.save(ctx, rec)
 
 
-def ingest_transcripts(
-    ctx: Ctx, owner: q.MaintenanceOwner
-) -> ingest.PassStats:
-    """Replan full transcript passes beneath one retained installer owner.
+def ingest_transcripts(ctx: Ctx) -> ingest.PassStats:
+    """Replan full transcript passes, each under the writer lock.
 
     Args:
         ctx: Installer paths with explicitly selected provider homes.
-        owner: Live maintenance owner whose acquisition deadline is shared.
 
     Returns:
         Completed invocation work totals, including repeated full passes.
@@ -157,7 +152,7 @@ def ingest_transcripts(
     with ExitStack() as identities:
         while True:
             try:
-                with q.maintenance_writer(owner):
+                with writer(ctx):
                     if revalidate is None:
                         revalidate = identities.enter_context(
                             snapshot_io.validated(path)
@@ -165,7 +160,6 @@ def ingest_transcripts(
                     revalidate()
                     with closing(store.connect_rw(path)) as conn:
                         revalidate()
-                        q.verify_current(owner, conn)
                         stats = ingest.ingest(
                             conn, roots, full=True, commit_facts=facts
                         )
@@ -184,45 +178,28 @@ def ingest_transcripts(
 
 
 @contextmanager
-def _prepared(
-    ctx: Ctx, rec: Record
-) -> Generator[tuple[Path, q.MaintenanceOwner | None]]:
-    """Retain maintenance ownership through the caller's activation work.
-
-    Release this owner before service start or native rollback cleanup.
+def prepared_store(ctx: Ctx, rec: Record) -> Generator[Path]:
+    """Prepare the governed store before consumer activation.
 
     Args:
         ctx: Installer paths and explicit fresh or upgrade mode.
         rec: Durable installer record without transient lock objects.
 
     Yields:
-        The prepared path and retained owner, or None in a dry run.
-
-    Raises:
-        StepFailedError: If the prepared store changed identity.
+        The prepared path; a dry run only says what it would do.
     """
     if ctx.dry_run:
         ctx.say("would prepare the governed store before consumer activation")
-        yield store.db_path(ctx.data), None
+        yield store.db_path(ctx.data)
         return
     identity = _create_home(ctx) if ctx.fresh else None
-    with q.maintenance_owner(
-        ctx.data, wait_s=cli_core.WRITER_WAIT_S, status=q.EraseStatus()
-    ) as owner:
-        if identity is not None:
-            path = _fresh(ctx, rec, owner, identity)
-            _ingest_fresh(ctx, rec, owner, path, identity)
-        else:
-            path = _current(ctx, rec, owner)
-        record.save(ctx, rec)
-        yield path, owner
-
-
-@contextmanager
-def prepared_store(ctx: Ctx, rec: Record) -> Generator[Path]:
-    """Prepare a store while retaining its owner through the caller scope."""
-    with _prepared(ctx, rec) as (path, _owner):
-        yield path
+    if identity is not None:
+        path = _fresh(ctx, rec, identity)
+        _ingest_fresh(ctx, rec, path, identity)
+    else:
+        path = _current(ctx, rec)
+    record.save(ctx, rec)
+    yield path
 
 
 def prepare_store(ctx: Ctx, rec: Record) -> Path:

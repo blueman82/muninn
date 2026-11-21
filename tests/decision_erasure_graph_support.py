@@ -125,9 +125,7 @@ class DecisionGraphCase(ResolutionCase):
             "INSERT INTO review_input VALUES(?,?)", (request.id, records[0].id)
         )
         attempt = self.transaction(
-            lambda: review_requests.claim_attempt(
-                self.conn, request.id, 1, 12.0
-            )
+            lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         self.context = CommitContext(
             home=self.home,
