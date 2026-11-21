@@ -272,9 +272,7 @@ def codex(ctx: Ctx, rec: Record) -> None:
     if rec["trust"] == "auto":
         _edit_config(
             ctx,
-            lambda text: write_trust(
-                text, codex_hooks(pinned, platform=ctx.platform)
-            ),
+            lambda text: write_trust(text, codex_hooks(pinned)),
         )
 
 
@@ -299,12 +297,7 @@ def _codex_observation(ctx: Ctx) -> tuple[str, tuple[str, ...]]:
         if done.returncode != 0:
             return "", ()
         version = done.stdout.decode().strip()
-        verified = (
-            ("codex-cli 0.159.2",)
-            if ctx.platform == "win32"
-            else CODEX_VERIFIED
-        )
-        if version not in verified or before != codex_identity(ctx):
+        if version not in CODEX_VERIFIED or before != codex_identity(ctx):
             return "", ()
     except (OSError, UnicodeError):
         return "", ()

@@ -279,7 +279,7 @@ def provider(
         or cached.read_bytes() != rendered
     ):
         raise ValueError("plugin_cache_mismatch")
-    wanted = codex_hooks(rendered, platform="darwin")
+    wanted = codex_hooks(rendered)
     with provider_environment(env):
         raw = codex_probe(ctx, timeout=10)
     write_private(ctx.home / "hooks-before-trust.json", canonical(raw))

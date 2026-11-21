@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import venv
 from pathlib import Path
 from unittest import mock
@@ -237,9 +236,7 @@ class CheckTest(WrapperFixture):
         root = self.hook_repo()
         runtime = self.home.parent / "runtime"
         venv.EnvBuilder(with_pip=False).create(runtime)
-        interpreter = runtime / (
-            "Scripts/python.exe" if sys.platform == "win32" else "bin/python3"
-        )
+        interpreter = runtime / "bin/python3"
         purelib = subprocess.check_output(
             [
                 interpreter,

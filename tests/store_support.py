@@ -19,7 +19,6 @@ from collections.abc import Generator
 from pathlib import Path
 
 from muninn import platform_io, store
-from tests import test_configedit_windows
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -78,8 +77,7 @@ def assert_private(
     """
     value = Path(path)
     case.assertTrue(platform_io.is_private(value, directory=directory))
-    if sys.platform != "win32":
-        case.assertEqual(mode(value), 0o700 if directory else 0o600)
+    case.assertEqual(mode(value), 0o700 if directory else 0o600)
 
 
 @contextlib.contextmanager
@@ -99,36 +97,12 @@ def public_read(
     assert_private(case, path, directory=directory)
     original_mode = mode(path)
     try:
-        if sys.platform == "win32":
-            subprocess.run(
-                ["icacls.exe", str(path), "/grant", "*S-1-1-0:(R)"],
-                capture_output=True,
-                check=True,
-            )
-        else:
-            path.chmod(0o755 if directory else 0o644)
+        path.chmod(0o755 if directory else 0o644)
         case.assertFalse(platform_io.is_private(path, directory=directory))
-        original_acl = (
-            test_configedit_windows.descriptor(path)
-            if sys.platform == "win32"
-            else None
-        )
         yield
         case.assertFalse(platform_io.is_private(path, directory=directory))
-        if sys.platform == "win32":
-            case.assertTrue(
-                test_configedit_windows.descriptor(path) == original_acl,
-                "unsafe state security descriptor changed",
-            )
     finally:
-        if sys.platform == "win32":
-            subprocess.run(
-                ["icacls.exe", str(path), "/remove:g", "*S-1-1-0"],
-                capture_output=True,
-                check=True,
-            )
-        else:
-            path.chmod(original_mode)
+        path.chmod(original_mode)
     assert_private(case, path, directory=directory)
 
 
@@ -244,15 +218,7 @@ def insert_event(
 
 def direct_python() -> tuple[str, dict[str, str]]:
     """Run fixture Python directly while preserving its selected venv."""
-    executable, environment = sys.executable, {}
-    if sys.platform == "win32":
-        base: object = getattr(sys, "_base_executable", None)
-        if not isinstance(base, str) or not base:
-            raise OSError("fixture_interpreter_unavailable")
-        executable = base
-        if sys.executable != base:
-            environment = {"__PYVENV_LAUNCHER__": sys.executable}
-    return executable, environment
+    return sys.executable, {}
 
 
 class Child:

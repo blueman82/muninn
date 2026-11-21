@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from muninn import file_sync, platform_io, platform_windows
+from muninn import file_sync, platform_io
 
 
 def publish(
@@ -31,15 +31,10 @@ def publish(
     """
     if directory and replace:
         raise ValueError("directory publication cannot replace a target")
-    if os.name == "nt":
-        platform_windows.publish(
-            source, target, replace=replace, directory=directory
-        )
-    else:
-        if not replace and os.path.lexists(target):
-            raise FileExistsError("publication target already exists")
-        source.replace(target)
-        file_sync.sync_path(target.parent)
+    if not replace and os.path.lexists(target):
+        raise FileExistsError("publication target already exists")
+    source.replace(target)
+    file_sync.sync_path(target.parent)
 
 
 def write_private(path: Path, data: bytes) -> None:

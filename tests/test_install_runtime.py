@@ -20,9 +20,7 @@ from tests.installer_support import World, git, snapshot
 from tools.shape_rules import check_imports
 
 ROOT = Path(__file__).resolve().parent.parent
-VENV_PYTHON = (
-    "Scripts/python.exe" if sys.platform == "win32" else "bin/python3"
-)
+VENV_PYTHON = "bin/python3"
 
 
 class InstallRuntimeTests(unittest.TestCase):

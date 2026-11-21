@@ -66,10 +66,9 @@ def verify_runtime(python: Path, release: Path) -> None:
         raise StepFailedError("runtime_bootstrap_failed")
 
 
-def runtime_python(release: Path, platform: str) -> Path:
+def runtime_python(release: Path) -> Path:
     """Return the interpreter inside a final release's virtual environment."""
-    relative = "Scripts/python.exe" if platform == "win32" else "bin/python3"
-    return release / ".venv" / relative
+    return release / ".venv" / "bin/python3"
 
 
 def prepare_runtime(ctx: Ctx, release: Path) -> Path:
@@ -85,7 +84,7 @@ def prepare_runtime(ctx: Ctx, release: Path) -> Path:
     Raises:
         StepFailedError: If a lock is missing or provisioning/validation fails.
     """
-    python = runtime_python(release, ctx.platform)
+    python = runtime_python(release)
     if dry(ctx, f"would provision and verify the pinned runtime at {release}"):
         return python
     lock = release / "requirements-runtime.lock"
