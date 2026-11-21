@@ -22,14 +22,6 @@ CODE = re.compile(r"[a-z][a-z0-9_]*")
 STEP = re.compile(r"(\d+)\. (.+)")
 UNKNOWN = "no_such_installer_code"
 COMMANDS = ("muninn", "bin/muninn-install", "bin/muninn-uninstall")
-LEAVE_CODES = (
-    "leave_record_unsupported",
-    "leave_policy_active",
-    "leave_links_changed",
-    "leave_provider_unreadable",
-    "leave_confirmation_required",
-    "leave_record_changed",
-)
 
 
 def call_name(node: ast.Call) -> str:
@@ -92,7 +84,7 @@ def all_texts() -> dict[str, list[str]]:
     Returns:
         The explanation lines keyed by the code.
     """
-    codes = installer_codes() | set(LEAVE_CODES) | {UNKNOWN}
+    codes = installer_codes() | {UNKNOWN}
     return {code: failure_text.explain(code) for code in sorted(codes)}
 
 
@@ -149,15 +141,9 @@ class TableTest(unittest.TestCase):
     def test_each_installer_code_has_its_own_text(self) -> None:
         codes = installer_codes()
         default = failure_text.explain(UNKNOWN)
-        for code in sorted(codes | set(LEAVE_CODES)):
+        for code in sorted(codes):
             with self.subTest(code=code):
                 self.assertNotEqual(failure_text.explain(code), default)
-
-    def test_leave_codes_are_raised_by_the_installer(self) -> None:
-        codes = installer_codes()
-        for code in LEAVE_CODES:
-            with self.subTest(code=code):
-                self.assertIn(code, codes)
 
     def test_each_text_has_the_plain_form(self) -> None:
         for code, lines in all_texts().items():
@@ -173,19 +159,9 @@ class TableTest(unittest.TestCase):
             failure_text.explain(UNKNOWN),
         )
 
-    def test_unfinished_start_codes_name_the_way_out(self) -> None:
-        for code in (
-            "legacy_candidate_changed",
-            "review_activation_configuration_changed",
-        ):
-            with self.subTest(code=code):
-                text = "\n".join(failure_text.explain(code))
-                self.assertIn("--leave-unfinished --check", text)
-                self.assertIn("--leave-unfinished", text)
-
     def test_detail_after_the_code_is_not_printed(self) -> None:
         secret = "/Users/someone/private-folder/settings.json"
-        for code in ("legacy_candidate_changed", UNKNOWN):
+        for code in ("review_policy_unsupported", UNKNOWN):
             with self.subTest(code=code):
                 lines = failure_text.explain(f"{code}: {secret}")
                 self.assertEqual(lines, failure_text.explain(code))

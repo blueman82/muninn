@@ -10,7 +10,6 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from install import (
-    codex_interface,
     host_renewal,
     policy_records,
     record,
@@ -237,8 +236,6 @@ def _prepared(
         if identity is not None:
             path = _fresh(ctx, rec, owner, identity)
             _ingest_fresh(ctx, rec, owner, path, identity)
-        elif "codex_interface" in rec:
-            path = codex_interface.prepare(ctx, rec, owner, _current)
         elif "host_renewal" in rec:
             path = _host_store(ctx, rec, owner, check)
         else:
@@ -267,9 +264,7 @@ def prepared_install_store(
             raise
         else:
             if owner is not None:
-                if "codex_interface" in rec:
-                    codex_interface.activate(ctx, rec, owner, path)
-                elif "host_renewal" in rec:
+                if "host_renewal" in rec:
                     host_renewal.activate(ctx, rec, owner, path, check)
                     clear_host_notice(ctx, owner, rec)
                 else:

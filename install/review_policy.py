@@ -90,8 +90,6 @@ def capture(
         "sha": sha,
         "enable_learning": ctx.enable_learning,
     }
-    if ctx.codex_interface is not None:
-        return policy_records.policy_input(result)
     selected = learning_policy_recovery.managed_restart(ctx)
     raw: str | None = canonical_json(selected) if selected else None
     if ctx.review_policy is not None:
