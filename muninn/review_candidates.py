@@ -16,7 +16,6 @@ from muninn.knowledge_models import (
 from muninn.knowledge_write import body_of, claims, target
 from muninn.review_binding import Adjacent, owner_supported
 from muninn.review_correction import CorrectionFeedback
-from muninn.review_diagnostics import FailurePhase
 from muninn.review_evidence_models import EvidenceRecord
 from muninn.review_read_budget import EvidenceLimitError
 
@@ -40,12 +39,7 @@ class CandidateChecks(NamedTuple):
 
 
 class CommitRejectedError(ValueError):
-    """Expose a safe rejection code and its observed operation boundary."""
-
-    def __init__(self, code: str, phase: FailurePhase = "commit") -> None:
-        """Keep the recorded phase separate from the stable failure code."""
-        super().__init__(code)
-        self.phase = phase
+    """Expose a safe rejection code."""
 
 
 class ProposalRejectedError(CommitRejectedError):
@@ -82,7 +76,7 @@ class ProposalRejectedError(CommitRejectedError):
             "target_overlap": "rejected_revision",
         }[code]
         self.code = limit or self.code
-        super().__init__(self.code, "candidate validation")
+        super().__init__(self.code)
 
 
 def _candidate_failure(
@@ -103,7 +97,7 @@ def _target(
     except ValueError as exc:
         if str(exc) not in {"rejected_revision", "rejected_scope"}:
             raise
-        raise CommitRejectedError(str(exc), "candidate validation") from None
+        raise CommitRejectedError(str(exc)) from None
 
 
 def _known(
@@ -111,7 +105,7 @@ def _known(
 ) -> None:
     """Reject references outside the revalidated evidence."""
     if not set(refs) <= records.keys():
-        raise CommitRejectedError("rejected_evidence", "candidate validation")
+        raise CommitRejectedError("rejected_evidence")
 
 
 def _change(
@@ -190,9 +184,7 @@ def _unresolved(
     failure = None
     for affected in proposal.affected:
         if affected.knowledge_id in seen:
-            raise CommitRejectedError(
-                "rejected_revision", "candidate validation"
-            )
+            raise CommitRejectedError("rejected_revision")
         seen.add(affected.knowledge_id)
         if affected.knowledge_id in replaced:
             failure = failure or _candidate_failure(

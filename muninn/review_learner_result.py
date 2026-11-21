@@ -23,7 +23,6 @@ from muninn.review_learner_round import Round
 from muninn.review_models import ReviewContext
 from muninn.review_progress import digest
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
-from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
 
 
@@ -65,7 +64,6 @@ def failure_code(error: ValueError | OSError, fallback: str) -> str:
             "budget_clock_reversed",
         }
         or cause in EVIDENCE_LIMIT_CODES
-        or cause in RUNTIME_CODES
         else fallback
     )
 
@@ -139,17 +137,13 @@ def execute(
                 fail(
                     pending.context,
                     (
-                        outcome.error_code
-                        if outcome.error_code in RUNTIME_CODES
+                        "deadline"
+                        if outcome.error_code == "deadline"
                         else (
-                            "deadline"
-                            if outcome.error_code == "deadline"
-                            else (
-                                "rejected_validation"
-                                if outcome.error_code
-                                in {"invalid_native_output", "output_limit"}
-                                else "unavailable"
-                            )
+                            "rejected_validation"
+                            if outcome.error_code
+                            in {"invalid_native_output", "output_limit"}
+                            else "unavailable"
                         )
                     ),
                     now,

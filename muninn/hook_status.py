@@ -5,47 +5,16 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Mapping
 
-from pydantic import TypeAdapter, ValidationError
-
 from muninn.hook_banner import Item, item_lines
-from muninn.hook_frame import escape_delimiter, frame
-from muninn.knowledge_models import KnowledgeContext, RequestId
-from muninn.review_recovery import explain
-from muninn.review_recovery_codes import CONTAINED
+from muninn.hook_frame import frame
+from muninn.knowledge_models import KnowledgeContext
 
 
-def learning_status(issue: Mapping[str, str]) -> str:
-    """Render plain current wording from safe codes, never saved text."""
-    detail = explain(issue.get("code", "config"), "not recorded")
-    if issue.get("code") == "paused":
-        return (
-            "Muninn learning is paused. The agent can inspect its saved"
-            " policy."
-        )
-    closed = issue.get("admission") == "closed"
-    action = (
-        "Learning remains paused or its saved policy cannot be verified. "
-        "The agent can inspect the saved setup with muninn doctor --pretty."
-        if closed and detail["code"] in CONTAINED
-        else detail["action"]
-    )
-    message = escape_delimiter(
-        printable(f"Muninn learning: {detail['cause']} {action}")
-    )
-    if closed and detail["code"] not in CONTAINED:
-        message += (
-            " Learning remains paused or its saved policy cannot be verified."
-        )
-    try:
-        ident = TypeAdapter(RequestId).validate_python(
-            issue.get("id"), strict=True
-        )
-    except ValidationError:
-        return message
+def learning_status() -> str:
+    """Render the fixed notice shown while learning is off."""
     return (
-        f"{message} The agent can inspect: muninn learn show {ident}. "
-        f"Explain: muninn learn explain {ident} --human. "
-        f"Dismiss notice: muninn learn dismiss {ident}."
+        "Muninn learning is off. Run muninn learn on to turn it on, "
+        "or muninn doctor --pretty to check."
     )
 
 

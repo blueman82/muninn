@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import cast
 
 from muninn import platform_io
-from muninn.review_recovery_codes import RUNTIME_CODES
+from muninn.review_codes import CODES
 
 ROTATE_BYTES = 1024 * 1024
 LINE_BYTES = 1024
@@ -90,32 +90,6 @@ _REVIEW_EVENTS = frozenset(
         "review_skipped",
     }
 )
-_REVIEW_ERRORS = RUNTIME_CODES | frozenset(
-    {
-        "rejected_validation",
-        "rejected_evidence",
-        "rejected_scope",
-        "rejected_authority",
-        "rejected_revision",
-        "rejected_erased",
-        "rejected_fenced",
-        "auth",
-        "config",
-        "source_unavailable",
-        "incomplete_window",
-        "budget_clock_reversed",
-        "evidence_limit",
-        "prompt_limit",
-        "evidence_byte_limit",
-        "evidence_record_limit",
-        "evidence_work_limit",
-        "evidence_selection_limit",
-        "deadline",
-        "budget",
-        "unavailable",
-        "review_policy_required",
-    }
-)
 _REVIEW_STATES = frozenset(
     {
         "pending",
@@ -131,7 +105,7 @@ _REVIEW_STATES = frozenset(
 )
 _REVIEW_CHOICES = {
     "event": _REVIEW_EVENTS,
-    "error_code": _REVIEW_ERRORS,
+    "error_code": CODES,
     "state": _REVIEW_STATES,
     "outcome": frozenset({"completed", "completed_unresolved", "no_change"}),
 }

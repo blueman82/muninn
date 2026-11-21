@@ -42,7 +42,6 @@ from muninn.review_progress import (
     require_transaction,
 )
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
-from muninn.review_recovery import clear as clear_issue
 from muninn.review_requests import fail_attempt, request_view
 from muninn.review_settings import POLICY
 from muninn.review_snapshot import snapshot
@@ -84,28 +83,26 @@ def _evidence(
     if set(ids) != set(context.evidence_ids) or len(ids) != len(
         context.evidence_ids
     ):
-        raise CommitRejectedError("rejected_evidence", "original evidence")
+        raise CommitRejectedError("rejected_evidence")
     view = request_view(row)
     try:
         source, _ = check_window(
             conn, view.window, view.scope, policy, budget=budget
         )
         if source["session_root"] != row["session_root"]:
-            raise CommitRejectedError("rejected_evidence", "original evidence")
+            raise CommitRejectedError("rejected_evidence")
         records = validate_evidence(
             conn, context.home, ids, view.scope, policy, budget=budget
         )
     except ValidationError:
-        raise CommitRejectedError(
-            "rejected_evidence", "original evidence"
-        ) from None
+        raise CommitRejectedError("rejected_evidence") from None
     except EvidenceLimitError as exc:
-        raise CommitRejectedError(exc.code, "original evidence") from None
+        raise CommitRejectedError(exc.code) from None
     except ValueError as exc:
         code = EVIDENCE_ERRORS.get(str(exc))
         if code is None:
             raise
-        raise CommitRejectedError(code, "original evidence") from None
+        raise CommitRejectedError(code) from None
     return records
 
 
@@ -187,7 +184,6 @@ def _complete(
         "WHERE id=?",
         (context.now, context.now, receipt.outcome, context.attempt_id),
     )
-    clear_issue(conn, context.request_id)
     advance_completed(conn, request_view(row).window.source, context.now)
     return receipt
 

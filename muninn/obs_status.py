@@ -16,7 +16,6 @@ from typing import cast
 
 from muninn import platform_io, query, review_settings, store
 from muninn.query.index_age import ALIVE_AT, seconds_since
-from muninn.review_recovery import health_checks as learning_checks
 from muninn.review_settings import POLICY
 
 DATA_FILES = frozenset(
@@ -257,7 +256,6 @@ def review_health(
     output.append(
         ("review_admission", enabled, "open" if enabled else "closed", "info")
     )
-    output.extend(learning_checks(conn))
     return tuple(output)
 
 

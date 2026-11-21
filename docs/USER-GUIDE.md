@@ -103,8 +103,6 @@ To find out what a notice means, do these steps:
 3. If the line has no ID, run `muninn doctor --pretty`.
 4. Find the code or the words of the notice in this guide, and do the steps of that entry.
 
-To hide a notice, run `muninn learn dismiss R_ID`, with the ID of the task. This does not repair the problem. If a notice says that learning stays paused, repair the problem first. Then turn learning on again.
-
 ### Fix a clock error
 
 `budget_clock_reversed`
@@ -236,7 +234,7 @@ To hide a notice, run `muninn learn dismiss R_ID`, with the ID of the task. This
 - **What happens if you do nothing:** no problem occurs. Muninn drops that result and continues with other tasks.
 - **How to repair it:** you do not have to do anything. Do not start the task again. A new try gives the same result.
 - **Steps:** none.
-- **Result:** Muninn keeps only results that its checks accept. To hide the notice, run `muninn learn dismiss R_ID`, with the ID of the task.
+- **Result:** Muninn keeps only results that its checks accept.
 
 ### Do nothing when Muninn skips a task
 

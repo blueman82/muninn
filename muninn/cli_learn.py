@@ -13,7 +13,6 @@ from pydantic import ValidationError
 
 from muninn import (
     query,
-    review_recovery,
     review_requests,
     review_settings,
 )
@@ -26,7 +25,6 @@ from muninn.knowledge_models import RequestId, Scope
 from muninn.query.answers import BadArgumentError
 from muninn.query.filters import resolve_session
 from muninn.review_commit import CommitContext, commit_review
-from muninn.review_diagnostics import correction_status
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
@@ -47,6 +45,7 @@ from muninn.review_progress import (
 from muninn.review_request_views import (
     attempt_view,
     call_view,
+    correction_status,
     request_row,
     request_view,
 )
@@ -215,7 +214,6 @@ def _detail(conn: sqlite3.Connection, ident: RequestId) -> Out:
             )
         ],
         receipt=_receipt(conn, ident),
-        diagnostics=review_recovery.details(conn, ident),
         correction_status=correction_status(conn, ident),
     ).model_dump(mode="json")
 
@@ -247,12 +245,6 @@ def _write(conn: sqlite3.Connection, a: Namespace) -> Out:
             out = setup(conn, a, POLICY, now)
         elif a.learn_cmd in {"request", "replay"}:
             out = _request(conn, a, now)
-        elif a.learn_cmd == "dismiss":
-            request_row(conn, a.request_id)
-            out = {
-                "request_id": a.request_id,
-                "dismissed": review_recovery.clear(conn, a.request_id),
-            }
         else:
             operation = (
                 review_requests.cancel_request

@@ -7,7 +7,6 @@ from pathlib import Path
 
 from muninn import (
     review_history,
-    review_recovery,
     review_state,
     store,
     store_copy,
@@ -57,19 +56,3 @@ class LearningStateCopyTests(RequestCase):
         )
         with self.assertRaisesRegex(ValueError, "cutover_source_mismatch"):
             store_copy.validate_source(self.conn)
-
-    def test_copy_preserves_saved_failure_notice(self) -> None:
-        ident = self.enqueue().id
-        self.transaction(
-            lambda: review_recovery.record(
-                self.conn, ident, "evidence_limit", "evidence", 20.0
-            )
-        )
-        target = sqlite3.connect(":memory:", isolation_level=None)
-        target.row_factory = sqlite3.Row
-        self.addCleanup(target.close)
-        store.initialize_store(target)
-        store_copy.copy_governed_state(self.conn, target)
-        self.assertEqual(
-            review_recovery.notice(self.conn), review_recovery.notice(target)
-        )

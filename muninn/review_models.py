@@ -207,9 +207,6 @@ class ReviewDetail(StrictModel):
     evidence: list[EvidenceRecord]
     receipt: Receipt | None
     correction_status: CorrectionStatus = "unknown"
-    diagnostics: list[dict[str, str]] = Field(
-        default_factory=list[dict[str, str]]
-    )
 
 
 class ReviewAdmission(StrictModel):

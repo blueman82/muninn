@@ -12,6 +12,7 @@ from muninn.review_claims import claim as _claim
 from muninn.review_claims import claim_or_refuse as _claim_or_refuse
 from muninn.review_claims import fence as _fence
 from muninn.review_claims import request_policy as _policy
+from muninn.review_codes import CODES
 from muninn.review_evidence_models import EvidenceWindow
 from muninn.review_json import canonical_json
 from muninn.review_models import (
@@ -33,38 +34,11 @@ from muninn.review_progress import (
     unsuppressed_window,
 )
 from muninn.review_read_budget import ReadBudget
-from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_request_views import attempt_view, request_row, request_view
 from muninn.review_settings import POLICY
 from muninn.review_state import selection
 
 _RETRYABLE = frozenset({"deadline", "unavailable", "rejected_revision"})
-_ERRORS = (
-    _RETRYABLE
-    | RUNTIME_CODES
-    | {
-        "auth",
-        "config",
-        "source_unavailable",
-        "incomplete_window",
-        "budget_clock_reversed",
-        "evidence_limit",
-        "prompt_limit",
-        "evidence_byte_limit",
-        "evidence_record_limit",
-        "evidence_work_limit",
-        "evidence_selection_limit",
-        "budget",
-        "review_policy_required",
-        "rejected_validation",
-        "rejected_evidence",
-        "rejected_scope",
-        "rejected_authority",
-        "rejected_revision",
-        "rejected_erased",
-        "rejected_fenced",
-    }
-)
 
 
 def enqueue_review(
@@ -270,7 +244,7 @@ def fail_attempt(
 ) -> RequestView:
     """Record finite failure codes and allow only bounded transient retries."""
     require_transaction(conn, now)
-    if error_code not in _ERRORS:
+    if error_code not in CODES:
         raise ValueError("invalid_error_code")
     attempt = attempt_view(conn, attempt_id)
     row = request_row(conn, attempt.request_id)
