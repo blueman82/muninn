@@ -11,7 +11,6 @@ from pathlib import Path
 
 from install import (
     codex_interface,
-    decision_migration,
     host_renewal,
     legacy_cutover,
     legacy_recovery,
@@ -41,7 +40,6 @@ from muninn import (
 )
 from muninn import review_pause as q
 from muninn import review_pause_state as state
-from muninn.store_copy import copy_governed_state as copy_governed_state
 
 
 def _same_home(home: Path, identity: tuple[int, int]) -> None:
@@ -259,12 +257,7 @@ def _prepared(
         elif "host_renewal" in rec:
             path = _host_store(ctx, rec, owner, check)
         else:
-            try:
-                path = _current(ctx, rec, owner)
-            except StepFailedError as exc:
-                if str(exc) != "cutover_required":
-                    raise
-                path = decision_migration.prepare_historical(ctx, rec, owner)
+            path = _current(ctx, rec, owner)
         rec["policy_store_identity"] = list(
             rec["legacy"]["publication_binding"]["candidate"]["identity"]
             if "legacy" in rec

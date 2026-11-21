@@ -67,7 +67,6 @@ with (
                return_value=Path.home() / ".codex"),
     mock.patch("muninn.review_codex_launch.verify_codex_executable",
                return_value=(Path("/bin/codex"), "a" * 64)),
-    mock.patch("install.decision_migration.migrate_decisions", forbidden),
     mock.patch("muninn.platform_rebuild.publish_replacement", forbidden),
     mock.patch("install.steps_release.prepare_runtime", forbidden),
 

@@ -225,9 +225,7 @@ class UpgradeFlowTests(SnapshotCase):
         self.store.unlink()
         make_store(self.data, 1)
         before = self.store.read_bytes()
-        with self.assertRaisesRegex(
-            co.StepFailedError, "cutover_source_mismatch"
-        ):
+        with self.assertRaisesRegex(co.StepFailedError, "cutover_required"):
             co.install(self.ctx, self.w.repo, self.sha2)
         self.assertEqual(self.store.read_bytes(), before)
         self.assertEqual(self.selection(), Path(self.first))

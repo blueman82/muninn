@@ -7,8 +7,8 @@ import sqlite3
 from contextlib import closing
 from unittest import mock
 
-from install.cutover import copy_governed_state
 from muninn import store, tombstone_key, tombstones
+from muninn.store_copy import copy_governed_state
 from muninn.tombstone_intent import read_intent
 from muninn.tombstone_replay import plan_transcripts
 from tests.knowledge_cutover_support import legacy_schema

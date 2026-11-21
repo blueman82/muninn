@@ -71,7 +71,6 @@ from install.record import (
     load_record,
     save,
 )
-from install.recovery_guidance import recover_pause
 from install.rollback import failed_install
 from install.runtime import prepare_runtime, verify_runtime
 from install.snapshot import snapshot_store
@@ -174,7 +173,6 @@ __all__ = [
     "prepare_store",
     "prune",
     "record",
-    "recover_pause",
     "relink",
     "repoint",
     "restart",
@@ -210,7 +208,6 @@ UPGRADE_STEPS: tuple[Step, ...] = (
     prepare_release,
     history_upgrade,
     pause,
-    recover_pause,
     prepare_store,
     pin,
     claude,
