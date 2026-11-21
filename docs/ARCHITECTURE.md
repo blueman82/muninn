@@ -7,7 +7,7 @@ flowchart LR
     CX["Codex<br/>sessions + archived"]
     CUR["Cursor database<br/>state.vscdb"]
   end
-  P["poller<br/>muninn serve (60 s)<br/>launchd / systemd / Task Scheduler"]
+  P["poller<br/>muninn serve (60 s)<br/>launchd"]
   CI["fresh install /<br/>muninn ingest --full"]
   CH["Cursor preCompact<br/>exact conversation_id,<br/>message_count limit"]
   DB[("muninn.sqlite<br/>events, knowledge,<br/>tombstones, FTS5")]
@@ -34,8 +34,7 @@ flowchart LR
 ```
 
 - **One transcript-store writer at a time.** The poller, `ingest`, `erase`, `compact`, `rebuild` and
-  normalized knowledge writers take an exclusive lock on `writer.lock`: `fcntl.flock` on macOS and Linux,
-  `msvcrt.locking` on Windows. Readers open the database read-only. The journal mode is
+  normalized knowledge writers take an exclusive lock on `writer.lock`: `fcntl.flock`. Readers open the database read-only. The journal mode is
   DELETE, so a crash leaves a journal that the next writer rolls back.
 - **Recall review.** Nonempty generated recall blocks have sequential delivery ids.
   A separate private metadata database serializes counter and checkpoint updates in
@@ -46,15 +45,10 @@ flowchart LR
   persistent review reminder; `recall-review` resolves requests and model assessments
   from the transcript index. Reviews open originals, distinguish model self-ratings
   from validated usefulness, and acknowledge completed batches explicitly.
-- **Native poller.** macOS uses launchd, Linux a systemd user service, and Windows Task
-  Scheduler. Each runs `muninn serve --interval 60`.
-- **Pinned release.** Services and provider hooks run the installed launcher. On macOS
-  and Linux, `~/.local/lib/muninn/current/bin/muninn` selects the interpreter from
-  `$MUNINN_PYTHON`, then the installer's `python` link, then Python 3.13+ on PATH. On
-  Windows, the stable `bin/muninn.cmd` and `bin/muninn.ps1` launchers use
-  `lib/selection.json` to select the pinned release; interpreter selection tries
-  `MUNINN_PYTHON`, the recorded interpreter, then Python 3.13+ on PATH, with native path
-  and ACL checks.
+- **Native poller.** macOS uses launchd. It runs `muninn serve --interval 60`.
+- **Pinned release.** The service and provider hooks run the installed launcher,
+  `~/.local/lib/muninn/current/bin/muninn`. It selects the interpreter from
+  `$MUNINN_PYTHON`, then the installer's `python` link, then Python 3.13+ on PATH.
 - **Provider detection (`install/provider_apps.py`).**
   - Gates: setup, config validation, installed-hook verification.
   - Evidence: installed desktop apps; never leftover configs/transcripts.
@@ -68,30 +62,13 @@ flowchart LR
   orphan promotion or inferred admission reenable. Missing output is not proof of
   nonpublication. The final RW opener's own ctime normalization is the only local
   metadata exception; across-gap fingerprints remain strict.
-- **Installer.** `install/installer.py` retains the `--fresh` and `--upgrade`
-  modes. Fresh preparation completes transcript and available Cursor history
-  before selecting the release. One owner spans preparation and pin/config;
-  provider preparation runs between writer regions with SQLite connections closed.
-  Actual stored provider counts feed the checklist, and service start must advance
-  the heartbeat beyond the completed ingest. Current-format upgrades confirm
-  that writers are paused, fence attempts and validate the policy.
-  They retain the owner through pin/config, releasing it before service
-  start. It keeps the live pathname and all governed archives. After possible live
-  mutation, rollback retains current data/runtime/configuration, records recovery
-  required and leaves the service stopped. Actual store replacement still needs
-  the installer's durable possible-publication phase. The exact legacy route
-  retains its operation lock across later-boot validation and publication, copies
-  base history into a marked target, replays erasure there, retains its archive,
-  and establishes the existing complete witness under the final writer.
-  Successor validation accounts for intentional format/configuration changes;
-  after compatible exposure recovery follows current witness rules.
-  `prepared_store` remains preparation-only. `prepared_install_store` retains
-  one owner through configuration and runs explicit first-policy activation only
-  on normal exit, with durable intent before commit. Exception unwind skips it.
-  Latest erasure is replayed after the configuration gap, and service start follows
-  provider setup and owner release. Cursor config rollback preserves
-  current foreign additions, edits, deletions and order. Uninstall keeps its
-  existing separate data-retention contract.
+- **Installer.** `install/installer.py` has the `--fresh` and `--upgrade` modes.
+  Fresh preparation completes transcript and available Cursor history before it
+  selects the release. Provider setup runs between writer regions with SQLite
+  connections closed. A failed upgrade keeps the current data, runtime and
+  configuration and leaves the service stopped. Cursor config rollback keeps
+  foreign additions, edits, deletions and order. Uninstall keeps its own
+  data-retention contract.
 - **Cursor refresh.** The optional native `preCompact` hook imports only the
   uniquely matching `composerData:<conversation_id>`, scoped to valid native
   `workspace_roots`. A single root overrides stale process context; multiple roots
@@ -106,34 +83,3 @@ flowchart LR
 - **Trust.** Stored content is untrusted historical data. Secrets receive best-effort
   redaction at ingest and on output; automatic injection is framed so pasted copies are
   flagged on ingest. See the README for the full list.
-
-## Platform CI
-
-`.github/workflows/platforms.yml` uses standard GitHub-hosted runners. Windows x64
-(`windows-2022`) and ARM64 (`windows-11-arm`) each run two jobs in parallel:
-
-- **Proof:** real Windows lifecycle, then the pinned Codex binary and rendered provider
-  routes, with native proof diagnostics uploaded as artifacts.
-- **Gate:** Windows native API typing and the mandatory `tools.check --full` gate.
-
-Both Windows architectures run the full set of required checks. macOS and Linux run
-their checks in one job each. Python setup caches pip downloads using
-both `requirements-runtime.lock` and `requirements-dev.txt`; each job still
-installs the separate hash-verified wheel closures, including Pyright's pinned
-Node wheel. Cache reuse does not bypass artifact verification.
-
-Lifecycle diagnostics include bounded integer phase durations in milliseconds, retained
-across phase transitions and failures. These durations are inclusive; nested timings
-must not be added together. Diagnostic artifacts retain codes and numeric measurements,
-not transcript content. Native proof uploads request 30-day retention, matching the
-worker-quiescence proof workflow. Verify each artifact's actual `expires_at` through
-the GitHub API because repository policies can limit the requested period. This
-change applies only to new uploads; existing artifacts keep their assigned expiry.
-For evidence needed longer, preserve the original ZIP and its SHA256/API digest,
-run and job IDs, and source commit before expiry. These archives do not include raw
-job logs; retaining them does not establish native qualification.
-
-The **75-minute limit is a per-job failure ceiling**, not an expected run duration. The
-Windows lifecycle child has a separate **1,800-second ceiling**. CI overlaps the Windows
-proof and gate jobs to reduce elapsed time while retaining both limits and the complete
-check coverage.

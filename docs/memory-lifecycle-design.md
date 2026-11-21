@@ -1,3 +1,5 @@
+History, not current behaviour.
+
 # Improve how Muninn checks and saves memory
 
 Status: APPROVED by the owner on 2026-10-29.
