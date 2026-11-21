@@ -1091,7 +1091,7 @@ This adds test coverage.
 It does not prove a runtime defect or measured benefit.
 Keep the current terse extraction prompt unless controlled `evaluation` finds a repeatable quality problem.
 
-Muninn sources used to compare: [content models](../muninn/knowledge_models.py), [recall `review`](../muninn/cli_recall_review.py), [offline retrieval replay](../tools/replay_retrieval.py), [learning `evaluation`](../tools/learning_eval/pilot.py), and [procedural-paraphrase fixture](../tests/fixtures/learning/procedural-paraphrase.json).
+Muninn sources used to compare: [content models](../muninn/knowledge_models.py), [recall `review`](../muninn/cli_recall_review.py), [learning `evaluation`](../tools/learning_eval/pilot.py), and [procedural-paraphrase fixture](../tests/fixtures/learning/procedural-paraphrase.json).
 
 HyperSkill sources, pinned to the inspected checkout:
 
