@@ -6,7 +6,6 @@ import os
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,15 +27,10 @@ class WrapperFixture(unittest.TestCase):
         self.stub = Path(tmp.name) / "python-stub"
         self.stub.write_text(
             '#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "venv" ]; then '
-            'if [ "${VENV_DIR:-bin}" = "Scripts" ]; then '
-            'mkdir -p "$3/Scripts"; cp "$0" "$3/Scripts/python.exe"; '
-            'else mkdir -p "$3/bin"; cp "$0" "$3/bin/python3"; '
-            'cp "$0" "$3/bin/python3.13"; fi; exit 0; fi\n'
+            'mkdir -p "$3/bin"; cp "$0" "$3/bin/python3"; '
+            'cp "$0" "$3/bin/python3.13"; exit 0; fi\n'
             'while [ "${1:-}" = -E ] || [ "${1:-}" = -s ] || '
             '[ "${1:-}" = -B ]; do shift; done\n'
-            'if [ "$1" = "-c" ] && '
-            '[ "$2" = "import sys; print(sys.platform)" ]; then '
-            'echo "${PY_PLATFORM:-linux}"; exit 0; fi\n'
             'if [ "$1" = "-c" ]; then '
             'if [ "$0" = "$MUNINN_PYTHON" ] && '
             '[ "${IMPORT_RC:-0}" -ne 0 ]; then exit "$IMPORT_RC"; fi\n'
@@ -77,19 +71,6 @@ class WrapperFixture(unittest.TestCase):
         )
         env.update(extra_env or {})
         command: list[str | Path] = [script, *args]
-        if sys.platform == "win32":
-            shell = shutil.which("sh")
-            if shell is None:
-                raise RuntimeError("Windows wrapper fixture needs required sh")
-            command = [shell, script.as_posix(), *args]
-            env.update(
-                HOME=self.home.as_posix(),
-                MUNINN_PYTHON=(
-                    Path(env["MUNINN_PYTHON"]).as_posix()
-                    if env["MUNINN_PYTHON"]
-                    else ""
-                ),
-            )
         return subprocess.run(
             command,
             env=env,

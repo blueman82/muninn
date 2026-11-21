@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from pathlib import Path
@@ -55,11 +54,3 @@ def write_private(path: Path, data: bytes) -> None:
         handle.flush()
         file_sync.sync_fd(handle.fileno())
     publish(temporary, path)
-
-
-def write_selection(lib: Path, sha: str, python: str) -> None:
-    """Commit only the two fields consumed by the validated native launcher."""
-    write_private(
-        lib / "selection.json",
-        json.dumps({"sha": sha, "python": python}).encode(),
-    )

@@ -4,56 +4,13 @@ from __future__ import annotations
 
 import shlex
 import shutil
-import subprocess
 import unittest
-from types import SimpleNamespace
-from unittest import mock
 
 from tests.install_wrapper_support import ROOT, WRAPPER, WrapperFixture, git
 
 
 class WrapperTest(WrapperFixture):
     """Verify automatic mode selection and explicitly accepted local setup."""
-
-    def test_windows_facade_runs_the_same_script_with_required_sh(
-        self,
-    ) -> None:
-        shell = shutil.which("sh")
-        self.assertIsNotNone(shell)
-        with (
-            mock.patch(
-                "tests.install_wrapper_support.sys",
-                SimpleNamespace(platform="win32"),
-                create=True,
-            ),
-            mock.patch.object(subprocess, "run", wraps=subprocess.run) as run,
-        ):
-            result = self.run_wrapper("--repo", "/x", "--sha", "f" * 40)
-        self.assertEqual(
-            run.call_args.args[0][:2], [shell, WRAPPER.as_posix()]
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"--repo /x --sha {'f' * 40}", self.argv())
-        self.assertEqual(
-            run.call_args.kwargs["env"]["HOME"], self.home.as_posix()
-        )
-        self.assertEqual(
-            run.call_args.kwargs["env"]["MUNINN_PYTHON"], self.stub.as_posix()
-        )
-
-    def test_windows_facade_refuses_missing_required_shell(self) -> None:
-        with (
-            mock.patch(
-                "tests.install_wrapper_support.sys",
-                SimpleNamespace(platform="win32"),
-                create=True,
-            ),
-            mock.patch.object(shutil, "which", return_value=None),
-            mock.patch.object(subprocess, "run") as run,
-            self.assertRaisesRegex(RuntimeError, "required sh"),
-        ):
-            self.run_wrapper()
-        run.assert_not_called()
 
     def test_bare_on_an_empty_machine_runs_a_fresh_install(self) -> None:
         r = self.run_wrapper()
@@ -281,26 +238,6 @@ class WrapperTest(WrapperFixture):
             self.argv(),
             r"(?m)^-m pip install --require-hashes -r .+[/\\]"
             r"requirements-dev\.txt$",
-        )
-
-    def test_windows_setup_uses_windows_venv_interpreter(self) -> None:
-        root = self.hook_repo()
-        result = self.run_wrapper(
-            script=root / "bin/muninn-install",
-            input="y\ny\n",
-            extra_env={
-                "IMPORT_RC": "1",
-                "PY_PLATFORM": "win32",
-                "VENV_DIR": "Scripts",
-            },
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((root / ".venv" / "Scripts" / "python.exe").is_file())
-        self.assertFalse((root / ".venv" / "bin").exists())
-        self.assertEqual(
-            git(root, "config", "--get", "core.hooksPath").decode().strip(),
-            ".githooks",
         )
 
     def test_status_compares_the_installed_commit_with_head(self) -> None:

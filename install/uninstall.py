@@ -42,7 +42,6 @@ from install.constants import (
 )
 from install.context import Ctx, StepFailedError, job, link_text, run_real
 from install.errors import RacedError, RefusedError
-from install.lifecycle import preflight_service, remove
 from install.provider_paths import cursor_commands
 from install.rollback import bootout
 from install.transforms import (
@@ -53,7 +52,6 @@ from install.transforms import (
     foreign_groups,
 )
 from muninn import platform_io
-from muninn.platform_paths import read_selection
 
 
 def _act(ctx: Ctx, text: str, fn: Callable[[], object]) -> bool:
@@ -153,8 +151,6 @@ def _preflight(ctx: Ctx, purge: bool) -> None:
         RefusedError: If a provider config cannot be edited safely.
         StepFailedError: If the dir for the moved data already exists.
     """
-    if ctx.platform != "darwin":
-        preflight_service(ctx)
     if ctx.settings.exists():
         before = ce.read_file(ctx.settings)
         _settings_check(before, drop_hooks(before))
@@ -239,9 +235,7 @@ def _stop_job(ctx: Ctx) -> bool:
     """Unload the launchd job and remove its plist."""
     done = False
     j = job(ctx)
-    if ctx.platform != "darwin" and ctx.plist.exists():
-        done = _act(ctx, "remove owned native service", lambda: remove(ctx))
-    elif j:
+    if j:
         pid = f" (pid {j['pid']})" if j["pid"] else " (not running)"
         done = _act(ctx, f"stop the poller{pid}", lambda: bootout(ctx))
     if ctx.plist.exists():
@@ -251,10 +245,6 @@ def _stop_job(ctx: Ctx) -> bool:
 
 def _is_ours(ctx: Ctx) -> bool:
     """Say whether the ``muninn`` command link points into our release dir."""
-    if ctx.platform == "win32":
-        return read_selection(
-            ctx.lib.parent
-        ) is not None and platform_io.is_private(ctx.muninn)
     return ctx.muninn.is_symlink() and Path(
         link_text(ctx.muninn)
     ).is_relative_to(ctx.lib)
@@ -264,23 +254,7 @@ def _remove_release(ctx: Ctx) -> bool:
     """Remove the ``muninn`` link if it is ours, then the release dir."""
     done = False
     if _is_ours(ctx):
-        paths = (
-            list(ctx.muninn.parent.glob("muninn*.cmd"))
-            + list(ctx.muninn.parent.glob("muninn*.ps1"))
-            if ctx.platform == "win32"
-            else [ctx.muninn]
-        )
-        for path in paths:
-            if path.name in {
-                "muninn",
-                "muninn.cmd",
-                "muninn.ps1",
-                "muninn-install.cmd",
-                "muninn-install.ps1",
-                "muninn-uninstall.cmd",
-                "muninn-uninstall.ps1",
-            } and (ctx.platform != "win32" or platform_io.is_private(path)):
-                done = _act(ctx, f"remove {path}", path.unlink)
+        done = _act(ctx, f"remove {ctx.muninn}", ctx.muninn.unlink)
     if ctx.lib.exists():
         done = _act(ctx, f"remove {ctx.lib}", lambda: shutil.rmtree(ctx.lib))
     return done

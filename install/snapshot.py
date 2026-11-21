@@ -9,15 +9,13 @@ from collections.abc import Generator
 from contextlib import closing, contextmanager
 from pathlib import Path
 
-from install import lifecycle, snapshot_io
+from install import snapshot_io
 from install.context import Ctx, StepFailedError, job, must, wait
 from install.cutover import prepare_store
 from install.preflight import SCHEMA_FILE as SCHEMA_FILE
 from install.preflight import VERSION_PATTERN
 from install.preflight import release_schema as release_schema
 from install.record import Record
-from muninn import obs_linux_service
-from muninn.platform_paths import read_selection
 
 _VERSION = VERSION_PATTERN
 
@@ -100,31 +98,8 @@ def undo_store(ctx: Ctx, rec: Record) -> bool:
 
 def start_again(ctx: Ctx) -> None:
     """Load the job again on the relinked release after a restore."""
-    if ctx.platform != "darwin":
-        if ctx.platform == "win32":
-            from_selection = lifecycle_selection(ctx)
-            lifecycle.start(ctx, from_selection[1], from_selection[0])
-        else:
-            current, python, _ = obs_linux_service.selection(ctx.home)
-            lifecycle.start(ctx, python, current)
-    else:
-        must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
+    must(ctx, ["launchctl", "bootstrap", f"gui/{ctx.uid}", ctx.plist])
     wait(ctx, functools.partial(_running, ctx), 30, "job has no live PID")
-
-
-def lifecycle_selection(ctx: Ctx) -> tuple[Path, Path]:
-    """Require the retained native release and recorded interpreter.
-
-    Returns:
-        Confined release and recorded interpreter paths.
-
-    Raises:
-        StepFailedError: If no safe retained selection exists.
-    """
-    selected = read_selection(ctx.lib.parent)
-    if selected is None:
-        raise StepFailedError("retained release selection is unavailable")
-    return selected
 
 
 def snapshot_store(ctx: Ctx, rec: Record) -> None:
