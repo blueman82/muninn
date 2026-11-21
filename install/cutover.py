@@ -11,12 +11,10 @@ from pathlib import Path
 
 from install import (
     record,
-    review_policy,
     snapshot_io,
 )
 from install.context import Ctx, StepFailedError
 from install.current_store import prepare_current as _current
-from install.operation import OperationCheck
 from install.record import Record
 from muninn import (
     cli_core,
@@ -216,7 +214,6 @@ def _prepared(
             _ingest_fresh(ctx, rec, owner, path, identity)
         else:
             path = _current(ctx, rec, owner)
-        rec["policy_store_identity"] = list(rec["store"]["file_identity"])
         record.save(ctx, rec)
         yield path, owner
 
@@ -226,22 +223,6 @@ def prepared_store(ctx: Ctx, rec: Record) -> Generator[Path]:
     """Prepare a store while retaining its owner through the caller scope."""
     with _prepared(ctx, rec) as (path, _owner):
         yield path
-
-
-@contextmanager
-def prepared_install_store(
-    ctx: Ctx, rec: Record, check: OperationCheck
-) -> Generator[Path]:
-    """Activate the first explicit policy only after normal installer exit."""
-    with _prepared(ctx, rec) as (path, owner):
-        try:
-            yield path
-        except BaseException:
-            raise
-        else:
-            if owner is not None:
-                review_policy.ready(ctx, rec)
-                review_policy.activate(ctx, rec, owner, path, check)
 
 
 def prepare_store(ctx: Ctx, rec: Record) -> Path:

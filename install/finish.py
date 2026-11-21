@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 
-from install import policy_records, review_policy
+from install import policy_records
 from install.constants import INSTALL_RECORD
 from install.context import Ctx
 from install.record import Record, install_record, save
@@ -12,29 +12,9 @@ from install.snapshot import discard
 from install.steps_release import sweep
 
 
-def supersede(ctx: Ctx, sha: str) -> None:
-    """Retire a completed activation record after a replacement verifies."""
-    found = review_policy.pending(ctx)
-    if found is None:
-        return
-    active, rec = found
-    if (
-        rec["sha"] == sha
-        or rec.get("policy_status") != "active"
-        or policy_records.activation_phase(rec) != "complete"
-        or rec.get("failed", {}).get("step") != "verify"
-    ):
-        return
-    rec["superseded_by"] = sha
-    rec.pop("recovery_required", None)
-    save(active, rec)
-
-
 def complete(ctx: Ctx, rec: Record) -> Record:
     """Retain recovery authority and publish the verified final outcome."""
     policy_records.validate(rec)
-    if ctx.upgrade and not ctx.dry_run:
-        supersede(ctx, rec["sha"])
     rec["sweep_failed"] = sweep(ctx)
     discard(ctx, rec)
     if (

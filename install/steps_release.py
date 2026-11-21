@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import cast
 
 from install import configedit as ce
-from install import legacy_baseline as baseline
 from install import lifecycle, policy_records
 from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
 from install.context import (
@@ -112,12 +111,6 @@ def prepare_release(ctx: Ctx, rec: Record) -> None:
     python = prepare_runtime(ctx, dest)
     rec["python"]["path"] = str(python)
     rec["runtime_prepared"] = True
-    if (
-        (ctx.platform == "darwin" and ctx.upgrade)
-        or ctx.review_policy
-        or policy_records.input_raw(rec)
-    ):
-        rec["prepared_runtime"] = baseline.tree_state(dest, links=True)
 
 
 def pin(ctx: Ctx, rec: Record) -> None:

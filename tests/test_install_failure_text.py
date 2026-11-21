@@ -228,7 +228,6 @@ class EntryTest(unittest.TestCase):
             mock.patch.object(
                 installer, "choose_cursor_hooks", return_value=False
             ),
-            mock.patch("install.learning_scope.choose", return_value=None),
             contextlib.redirect_stdout(out),
         ):
             code = installer.main(

@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from install import configedit as ce
-from install import installer, learning_scope, uninstall
+from install import installer, uninstall
 from install.constants import GIT_ENV, PRIVATE_UMASK, TS_FORMAT
 from install.context import Ctx, StepFailedError, run_real
 from install.failure_text import explain
@@ -42,10 +42,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args in (["--help"], ["-h"]):
         print("usage: muninn-install [--check | --status | --uninstall]")
         print("Other arguments pass through to install.installer.")
-        print(
-            "Custom first policy: --repo DIR --sha SHA "
-            "--fresh|--upgrade --review-policy PATH"
-        )
     elif args not in ([], ["--check"], ["--status"]):
         return installer.main(args)
     else:
@@ -94,9 +90,6 @@ def parser() -> argparse.ArgumentParser:
         help="a new machine: no data, launchd job or release yet",
     )
     ap.add_argument("--home", type=Path)
-    ap.add_argument("--review-policy", type=Path)
-    ap.add_argument("--learning-scope", choices=("now", "all"))
-    ap.add_argument("--enable-learning", action="store_true")
     return ap
 
 
@@ -139,8 +132,6 @@ def install_main(argv: Sequence[str] | None = None) -> int:
         fresh=args.fresh,
         upgrade=args.upgrade,
         default_home=default_home,
-        review_policy=args.review_policy,
-        enable_learning=args.enable_learning,
     )
     ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
     return _run(ctx, args)
@@ -161,10 +152,7 @@ def _run(ctx: Ctx, args: argparse.Namespace) -> int:
     """
     try:
         ctx.cursor_hooks = installer.choose_cursor_hooks(ctx)
-        learning_scope.choose(ctx, args.learning_scope, input)
-        result = installer.install(ctx, args.repo.resolve(), args.sha)
-        if result.get("legacy_outcome"):
-            return 1
+        installer.install(ctx, args.repo.resolve(), args.sha)
     except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
         return fail(str(exc))
     return 0

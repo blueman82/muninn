@@ -7,7 +7,6 @@ import sys
 import time
 from unittest import mock
 
-from install import review_policy_transition
 from muninn import (
     review_budget,
     review_claims,
@@ -184,74 +183,3 @@ class RuntimeBridgeTests(RequestCase):
             self.transaction(
                 lambda: mark_correction(self.conn, context, "format")
             )
-
-    def test_explicit_managed_restart_keeps_old_queue_and_exact_grant(
-        self,
-    ) -> None:
-        self.conn.execute("UPDATE review_control SET admission=0")
-        before = self.row()["policy_json"]
-        with (
-            mock.patch(
-                "muninn.review_codex_policy.host_identity",
-                return_value="1" * 64,
-            ),
-            mock.patch("platform.system", return_value="Darwin"),
-            mock.patch("platform.machine", return_value="arm64"),
-        ):
-            review_policy_transition.apply(
-                self.conn, self.new, enable_admission=True
-            )
-        self.assertEqual(self.row()["state"], "pending")
-        self.assertEqual(self.row()["policy_json"], before)
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT policy_digest,admission FROM review_control"
-            ).fetchone()[:],
-            (self.digest(self.new), 1),
-        )
-
-    def test_revision_three_restart_does_not_cancel_initial_carried_queue(
-        self,
-    ) -> None:
-        self.conn.execute("DELETE FROM review_request")
-        self.old = self.old.model_copy(
-            update={
-                "policy_id": "muninn-codex-ongoing-production-v3",
-                "max_attempts": 3,
-                "retry_backoff_seconds": [5.0, 30.0],
-                "concurrency": 4,
-            }
-        )
-        self.policy = self.old
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,"
-            "policy_digest=?,admission=1",
-            (canonical_json(self.old), self.digest(self.old)),
-        )
-        self.request = self.enqueue()
-        self.new = managed_policy(self.old, self.tmp / "manager")
-        capsule = bridge.capture(
-            self.conn,
-            self.old,
-            self.new,
-            host_enrollment=host_enrollment(self.old, self.new),
-        )
-        publish_authority(self.home, self.old, self.new, capsule)
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?,"
-            "policy_digest=?,admission=0",
-            (canonical_json(self.new), self.digest(self.new)),
-        )
-        with (
-            mock.patch(
-                "muninn.review_codex_policy.host_identity",
-                return_value="1" * 64,
-            ),
-            mock.patch("platform.system", return_value="Darwin"),
-            mock.patch("platform.machine", return_value="arm64"),
-        ):
-            review_policy_transition.apply(
-                self.conn, self.new, enable_admission=True
-            )
-        self.assertEqual(self.row()["state"], "pending")
-        self.assertIsNone(self.row()["cancel_code"])

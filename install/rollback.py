@@ -291,13 +291,9 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     """
     policy_records.validate(rec)
     problems: list[str] = []
-    if (
-        rec.get("recovery_required")
-        or policy_records.activation_phase(rec) is not None
-        or (
-            rec.get("upgrade")
-            and (rec.get("paused") or rec.get("store") or rec.get("snapshot"))
-        )
+    if rec.get("recovery_required") or (
+        rec.get("upgrade")
+        and (rec.get("paused") or rec.get("store") or rec.get("snapshot"))
     ):
         _act(
             ctx,

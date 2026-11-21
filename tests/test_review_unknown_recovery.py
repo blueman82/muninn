@@ -8,8 +8,6 @@ import unittest
 from contextlib import closing
 from unittest import mock
 
-from install.context import StepFailedError
-from install.learning_policy_recovery import require_finished
 from muninn import (
     cli_parser,
     review_commit,
@@ -20,7 +18,6 @@ from muninn.knowledge_models import ReviewResult
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_runtime_models import ManagedCallRecord
-from muninn.review_supervisor_store import halt_interrupted
 from muninn.review_unknown_state import UnknownAcknowledgement
 from tests.unknown_recovery_support import UnknownRecoveryCase
 
@@ -111,21 +108,6 @@ class UnknownRecoveryTests(UnknownRecoveryCase):
             before,
         )
 
-    def test_acknowledged_call_allows_installer_and_supervisor_guards(
-        self,
-    ) -> None:
-        self.recover()
-        require_finished(self.fixture.conn)
-        self.fixture.transaction(
-            lambda: halt_interrupted(self.fixture.conn, self.fixture.policy)
-        )
-        self.assertEqual(
-            self.fixture.conn.execute(
-                "SELECT admission FROM review_control"
-            ).fetchone()[0],
-            1,
-        )
-
     def test_cli_accepts_only_an_explicit_named_acknowledgement(self) -> None:
         args = cli_parser.build_parser().parse_args(
             [
@@ -140,16 +122,6 @@ class UnknownRecoveryTests(UnknownRecoveryCase):
         )
         self.assertEqual(args.learn_cmd, "recover-unknown")
         self.assertEqual(args.attempt_id, self.context.attempt_id)
-
-    def test_changed_call_is_not_exempt_after_acknowledgement(self) -> None:
-        self.recover()
-        self.fixture.conn.execute("UPDATE review_call SET outcome='changed'")
-        with self.assertRaisesRegex(
-            StepFailedError, "learning_recovery_unverified"
-        ):
-            require_finished(self.fixture.conn)
-        with self.assertRaisesRegex(ValueError, "recovery_refused"):
-            self.recover()
 
     def test_recovery_never_publishes_admission_before_ack_commit(
         self,
@@ -226,29 +198,6 @@ class UnknownRecoveryTests(UnknownRecoveryCase):
                 self.fixture.conn.execute(
                     f"UPDATE {table} SET {column}=?", (before,)
                 )
-
-    def test_new_unknown_call_keeps_restart_closed(self) -> None:
-        self.recover()
-        conn = self.fixture.conn
-        row = dict(conn.execute("SELECT * FROM review_call").fetchone())
-        row["round_index"] = 2
-        conn.execute(
-            "INSERT INTO review_call VALUES("
-            + ",".join("?" for _ in row)
-            + ")",
-            tuple(row.values()),
-        )
-        with self.assertRaisesRegex(
-            StepFailedError, "learning_recovery_unverified"
-        ):
-            require_finished(conn)
-        self.fixture.transaction(
-            lambda: halt_interrupted(conn, self.fixture.policy)
-        )
-        self.assertEqual(
-            conn.execute("SELECT admission FROM review_control").fetchone()[0],
-            0,
-        )
 
     def test_existing_legacy_call_and_request_bridge_to_current_policy(
         self,

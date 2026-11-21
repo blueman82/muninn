@@ -121,7 +121,6 @@ class RuntimeModelTests(TestCase):
             for first in (
                 "muninn.review_claims",
                 "muninn.review_runner",
-                "install.learning_policy_recovery",
             ):
                 result = subprocess.run(
                     [

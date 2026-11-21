@@ -44,7 +44,7 @@ from install.context import (
 )
 from install.cutover import (
     prepare_store,
-    prepared_install_store,
+    prepared_store,
 )
 from install.finish import complete
 from install.operation import OperationCheck, operation
@@ -283,7 +283,7 @@ def _run_step(
         maintenance.close()
         check()
     if step is prepare_store:
-        maintenance.enter_context(prepared_install_store(ctx, rec, check))
+        maintenance.enter_context(prepared_store(ctx, rec))
     else:
         step(ctx, rec)
     if not ctx.dry_run:

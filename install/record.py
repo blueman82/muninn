@@ -35,7 +35,6 @@ _SUMMARY_FIELDS = (
     "store",
     "recovery_required",
     "cursor_hooks",
-    "policy_status",
 )
 
 

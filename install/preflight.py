@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from install import configedit as ce
-from install import review_policy
 from install.constants import CLAUDE_EVENTS, CURSOR_EVENTS, GIT_ENV, PINNED
 from install.context import Ctx, StepFailedError, must
 from install.lifecycle import preflight_service
@@ -38,34 +37,11 @@ from tools.standards import check_repo as check_standards
 CODEX_HOOKS_FILE = "integrations/codex/hooks/hooks.json"
 CURSOR_HOOKS_FILE = "integrations/cursor/hooks.json"
 EMPTY_CURSOR_CONFIG = b'{"version":1,"hooks":{}}\n'
-DEFAULT_POLICY_FILE = "tools/default_codex_policy.json"
 
 
 def _git(ctx: Ctx, repo: Path, *args: str) -> bytes:
     """Run a read-only git command in ``repo`` and return its stdout."""
     return must(ctx, ["git", "-C", repo, *args], env=GIT_ENV).stdout
-
-
-def _default_policy_profile(ctx: Ctx, repo: Path, sha: str) -> bytes | None:
-    """Read the default profile from the exact release selected for install.
-
-    Args:
-        ctx: Install context used to run Git.
-        repo: Validated source repository.
-        sha: Exact commit selected for installation.
-
-    Returns:
-        The committed profile bytes, or None when the release has no profile.
-
-    Raises:
-        StepFailedError: If the profile is not a regular source file.
-    """
-    entry = _git(ctx, repo, "ls-tree", sha, DEFAULT_POLICY_FILE).split()
-    if not entry:
-        return None
-    if len(entry) != 4 or entry[0] != b"100644" or entry[1] != b"blob":
-        raise StepFailedError("default_review_policy_invalid")
-    return _git(ctx, repo, "show", f"{sha}:{DEFAULT_POLICY_FILE}")
 
 
 def _check_cursor_fragment(data: bytes, ctx: Ctx) -> None:
@@ -325,11 +301,7 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
         "python": {"path": sys.executable, "version": sys.version.split()[0]},
         "rdir": str(ctx.rdir),
         "steps": [],
-        "policy_input": review_policy.capture(
-            ctx, sha, _default_policy_profile(ctx, repo, sha)
-        ),
     }
-    review_policy.preflight(ctx, rec)
     return rec
 
 
