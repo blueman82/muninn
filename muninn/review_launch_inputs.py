@@ -6,11 +6,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Literal
 
 from pydantic import ValidationError
 
-from muninn.knowledge_models import SchemaVersion, StrictModel, Text
+from muninn.review_instructions import PromptArtifact
 from muninn.review_json import finite_float, reject_constant, unique_object
 from muninn.review_models import ReviewPolicy
 from muninn.review_progress import digest
@@ -24,14 +23,6 @@ from muninn.review_runtime_models import (
     ManagedCodexSelection,
 )
 from muninn.store import data_home
-
-
-class PromptArtifact(StrictModel):
-    """Bind trusted instructions to one explicit internal assembly format."""
-
-    schema_version: SchemaVersion
-    assembly: Literal["muninn-review-prompt-v1"]
-    instructions: Text
 
 
 def _load(home: Path, path: Path, limit: int) -> bytes:

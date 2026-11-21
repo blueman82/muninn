@@ -16,7 +16,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
-from muninn import review_runner, store
+from muninn import review_instructions, review_runner, store
 from muninn.knowledge_models import Digest, StrictModel
 from muninn.review_codex_output import output_contract_digest
 from muninn.review_codex_policy import host_identity
@@ -30,10 +30,7 @@ from muninn.review_models import ReviewContext, ReviewPolicy, RunnerConfig
 from muninn.review_rounds import round_schema
 from muninn.review_runtime_authority import wire_schema as wire_schema
 
-JSON_ONLY_INSTRUCTION = (
-    "Return only the required JSON object. Do not invoke tools, commands, "
-    "MCP, web search, or file operations."
-)
+JSON_ONLY_INSTRUCTION = review_instructions.JSON_ONLY
 WIRE_INSTRUCTION = (
     "Serialize the JSON object matching payload_schema into the payload_json "
     "string of the required outer object. "
