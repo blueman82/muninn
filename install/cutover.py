@@ -10,15 +10,12 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from install import (
-    host_renewal,
-    policy_records,
     record,
     review_policy,
     snapshot_io,
 )
 from install.context import Ctx, StepFailedError
 from install.current_store import prepare_current as _current
-from install.host_renewal_bindings import clear_host_notice
 from install.operation import OperationCheck
 from install.record import Record
 from muninn import (
@@ -188,27 +185,9 @@ def ingest_transcripts(
                 return total
 
 
-def _host_store(
-    ctx: Ctx,
-    rec: Record,
-    owner: q.MaintenanceOwner,
-    check: OperationCheck | None,
-) -> Path:
-    """Retain the existing host-only preparation and its operation guard."""
-    if check is None:
-        raise StepFailedError("host_renewal_approval_required")
-    value = policy_records.host_renewal(rec["host_renewal"])
-    path = store.db_path(ctx.data)
-    if value.phase == "approved_intent":
-        host_renewal.after_owner(ctx, rec, owner, path, check)
-        path = _current(ctx, rec, owner)
-        host_renewal.contained(ctx, rec, owner, path, check)
-    return path
-
-
 @contextmanager
 def _prepared(
-    ctx: Ctx, rec: Record, check: OperationCheck | None = None
+    ctx: Ctx, rec: Record
 ) -> Generator[tuple[Path, q.MaintenanceOwner | None]]:
     """Retain maintenance ownership through the caller's activation work.
 
@@ -217,7 +196,6 @@ def _prepared(
     Args:
         ctx: Installer paths and explicit fresh or upgrade mode.
         rec: Durable installer record without transient lock objects.
-        check: Held operation validation for installer continuation.
 
     Yields:
         The prepared path and retained owner, or None in a dry run.
@@ -236,8 +214,6 @@ def _prepared(
         if identity is not None:
             path = _fresh(ctx, rec, owner, identity)
             _ingest_fresh(ctx, rec, owner, path, identity)
-        elif "host_renewal" in rec:
-            path = _host_store(ctx, rec, owner, check)
         else:
             path = _current(ctx, rec, owner)
         rec["policy_store_identity"] = list(rec["store"]["file_identity"])
@@ -257,19 +233,15 @@ def prepared_install_store(
     ctx: Ctx, rec: Record, check: OperationCheck
 ) -> Generator[Path]:
     """Activate the first explicit policy only after normal installer exit."""
-    with _prepared(ctx, rec, check) as (path, owner):
+    with _prepared(ctx, rec) as (path, owner):
         try:
             yield path
         except BaseException:
             raise
         else:
             if owner is not None:
-                if "host_renewal" in rec:
-                    host_renewal.activate(ctx, rec, owner, path, check)
-                    clear_host_notice(ctx, owner, rec)
-                else:
-                    review_policy.ready(ctx, rec)
-                    review_policy.activate(ctx, rec, owner, path, check)
+                review_policy.ready(ctx, rec)
+                review_policy.activate(ctx, rec, owner, path, check)
 
 
 def prepare_store(ctx: Ctx, rec: Record) -> Path:

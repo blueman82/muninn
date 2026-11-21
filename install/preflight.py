@@ -301,14 +301,11 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     files, fragment = check_repo(ctx, repo, sha)
     _check_machine(ctx)
     preflight_service(ctx)
-    if not ctx.renew_codex_host:
-        ctx.cursor_hooks = installed(ctx, "cursor") and (
-            ctx.cursor_hooks or (ctx.upgrade and _managed_cursor(ctx))
-        )
+    ctx.cursor_hooks = installed(ctx, "cursor") and (
+        ctx.cursor_hooks or (ctx.upgrade and _managed_cursor(ctx))
+    )
     _dry_apply(ctx, files, fragment, True)
     schema = release_schema(ctx, repo, sha) if ctx.upgrade else None
-    if ctx.renew_codex_host and schema != 2:
-        raise StepFailedError("host_renewal_format_required")
     selection = None
     if ctx.platform == "win32" and ctx.upgrade:
         selection = (ctx.lib / "selection.json").read_text()

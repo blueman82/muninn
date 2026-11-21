@@ -130,15 +130,6 @@ def install_summary(ctx: Ctx, rec: Record, outcome: str) -> Record:
             if entry["path"][0] == "hooks"
         )
     out = {k: rec.get(k) for k in _SUMMARY_FIELDS}
-    if "host_renewal" in rec:
-        receipt = policy_records.host_renewal(rec["host_renewal"])
-        out["host_renewal_phase"] = receipt.phase
-        out["host_renewal_plan_digest"] = receipt.plan.digest
-        out["host_approval_committed"] = receipt.phase in {
-            "grant_committed",
-            "restart_pending",
-            "upgrade_verified",
-        }
     out |= {
         "outcome": outcome,
         "config_keys": keys,

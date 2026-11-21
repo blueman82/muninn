@@ -142,30 +142,12 @@ else
   mode=half
 fi
 
-renewal=0
 check_mode=
-previous=
 for argument in "$@"; do
   case "$argument" in
     --check | --dry-run) check_mode=--check ;;
-    --renew-codex-host) renewal=1 ;;
-    --renew-codex-host=*)
-      renewal=1
-      case "$argument" in
-        --renew-codex-host=preview) check_mode=--check ;;
-      esac
-      ;;
   esac
-  case "$previous:$argument" in
-    --renew-codex-host:preview) check_mode=--check ;;
-  esac
-  previous=$argument
 done
-if [ "$renewal" -eq 1 ]; then
-  ensure_runtime --check
-  cd "$root"
-  exec "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "$@"
-fi
 
 case "${1:-}" in
   -h | --help)

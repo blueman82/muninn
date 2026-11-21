@@ -23,7 +23,6 @@ from typing import Any
 
 from install import configedit as ce
 from install import (
-    host_renewal_recovery,
     lifecycle,
     policy_records,
 )
@@ -293,8 +292,7 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     policy_records.validate(rec)
     problems: list[str] = []
     if (
-        "host_renewal" in rec
-        or rec.get("recovery_required")
+        rec.get("recovery_required")
         or policy_records.activation_phase(rec) is not None
         or (
             rec.get("upgrade")
@@ -337,8 +335,6 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
 
 def rollback(ctx: Ctx, rec: Record) -> list[str]:
     """Serialize direct recovery before native or filesystem effects."""
-    if host_renewal_recovery.pending(ctx) is not None or "host_renewal" in rec:
-        raise ValueError("host_renewal_recovery_required")
     with operation(ctx):
         return rollback_owned(ctx, rec)
 
@@ -387,18 +383,7 @@ def failed_install(ctx: Ctx, rec: Record, step: str, exc: Exception) -> None:
         "error": type(exc).__name__,
     }
     save(ctx, rec)
-    detail = (
-        "host_renewal_recovery_required" if "host_renewal" in rec else str(exc)
-    )
-    ctx.say(f"install failed at {step}: {detail}; rolling back")
-    if "host_renewal" in rec:
-        value = policy_records.host_renewal(rec["host_renewal"])
-        if ctx.host_grant_observed or value.phase in {
-            "grant_committed",
-            "restart_pending",
-            "upgrade_verified",
-        }:
-            ctx.say("host approval committed; upgrade incomplete")
+    ctx.say(f"install failed at {step}: {exc}; rolling back")
     if step != "prepare_release":
         for problem in rollback_owned(ctx, rec):
             ctx.say(f"PROBLEM: {problem}")
