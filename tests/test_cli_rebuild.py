@@ -9,13 +9,13 @@ from typing import Any
 
 from muninn import cli_rebuild, store, store_copy
 from tests.cli_support import CANARY, CliCase
+from tests.home_support import initialize
 from tests.knowledge_cutover_support import (
     cursor_history,
     digest,
     legacy_schema,
 )
 from tests.knowledge_retirement_support import native_note
-from tests.review_pause_support import initialize
 from tests.store_support import assert_private
 from tests.test_ingest import TID
 from tests.test_review_commit import CommitCase
@@ -301,7 +301,7 @@ class GovernedRebuildTests(CommitCase):
             self.assertEqual(digest(conn, immutable), before)
             self.assertEqual(
                 tuple(conn.execute("SELECT * FROM review_control").fetchone()),
-                (1, control[1] + 1, *control[2:]),
+                control,
             )
             self.assertEqual(
                 conn.execute(
@@ -330,5 +330,5 @@ class GovernedRebuildTests(CommitCase):
                 archive.execute(
                     "SELECT admission FROM review_control"
                 ).fetchone()[0],
-                0,
+                control[2],
             )

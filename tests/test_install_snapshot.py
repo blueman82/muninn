@@ -15,8 +15,6 @@ from install import installer as co
 from install import snapshot as sn
 from install.constants import PRE_UPGRADE_PREFIX
 from muninn import erase_residue, obs, platform_io, platform_rebuild, store
-from muninn import review_pause as q
-from muninn import review_pause_state as state
 from tests.cli_support import fake_run
 from tests.installer_support import ROOT, World, git, make_store
 from tests.store_support import assert_private
@@ -62,14 +60,7 @@ class SnapshotCase(unittest.TestCase):
 
     def retained_copy(self) -> Path:
         """Create actual private recovery evidence beneath fixture barriers."""
-        with (
-            q.maintenance_owner(
-                self.data, wait_s=0, status=q.EraseStatus()
-            ) as owner,
-            q.maintenance_writer(owner),
-        ):
-            with closing(store.connect_rw(self.store)) as conn:
-                q.verify_current(owner, conn)
+        with store.writer_lock(self.data, wait_s=0):
             return platform_rebuild.retain_store(self.data, self.store)
 
     def record(self) -> co.Record:
@@ -90,15 +81,6 @@ class UpgradeFlowTests(SnapshotCase):
                 tuple(conn.execute("SELECT * FROM review_control").fetchone()),
                 (1, 0, 0, None, None, None),
             )
-        with (
-            q.maintenance_owner(
-                self.data, wait_s=0, status=q.EraseStatus()
-            ) as owner,
-            q.maintenance_writer(owner),
-            closing(store.connect_rw(self.store)) as conn,
-        ):
-            q.verify_current(owner, conn)
-        self.assertTrue((self.data / state.WITNESS).is_file())
         self.assertLess(
             co.FRESH_STEPS.index(co.prepare_store),
             co.FRESH_STEPS.index(co.pin),
@@ -123,18 +105,17 @@ class UpgradeFlowTests(SnapshotCase):
         self.assertEqual(self.record()["store"]["phase"], "current_prepared")
         self.assertEqual(self.record()["outcome"], "ok")
 
-    def test_native_stop_precedes_owner_and_restart_follows_release(
+    def test_native_stop_precedes_store_work_and_restart_follows(
         self,
     ) -> None:
-        acquire = q.maintenance_owner
+        prepare = co.prepared_store
 
-        def stopped(home: Path, **kwargs: object) -> object:
+        def stopped(ctx: co.Ctx, rec: co.Record) -> object:
             self.assertIsNone(self.w.fake.loaded)
-            return acquire(home, wait_s=0, status=q.EraseStatus())
+            return prepare(ctx, rec)
 
-        with mock.patch.object(q, "maintenance_owner", side_effect=stopped):
+        with mock.patch.object(co, "prepared_store", side_effect=stopped):
             co.install(self.ctx, self.w.repo, self.sha2)
-        os.close(state.acquire(self.data))
         with store.writer_lock(self.data, wait_s=0):
             pass
         self.assertEqual(self.w.fake.loaded, "new")
@@ -149,28 +130,6 @@ class UpgradeFlowTests(SnapshotCase):
         self.assertLess(
             calls.index(stop), len(calls) - 1 - calls[::-1].index(start)
         )
-
-    def test_owner_spans_pin_and_config_without_holding_writer(self) -> None:
-        observed: list[str] = []
-
-        def checked(ctx: co.Ctx, rec: co.Record) -> None:
-            try:
-                fd = state.acquire(ctx.data)
-            except BlockingIOError:
-                pass
-            else:
-                os.close(fd)
-                self.fail("maintenance owner released before pin/config")
-            with store.writer_lock(ctx.data, wait_s=0):
-                observed.append("pin/config")
-
-        steps = list(co.UPGRADE_STEPS)
-        steps.insert(steps.index(co.pin), checked)
-        steps.insert(steps.index(co.restart), checked)
-        with mock.patch.object(co, "UPGRADE_STEPS", tuple(steps)):
-            co.install(self.ctx, self.w.repo, self.sha2)
-        self.assertEqual(observed, ["pin/config", "pin/config"])
-        os.close(state.acquire(self.data))
 
     def test_copy_is_private_consistent_and_does_not_consume_source(
         self,

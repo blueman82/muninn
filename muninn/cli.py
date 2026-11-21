@@ -8,8 +8,7 @@ again just before printing, so a line stored before a redaction rule existed
 still never reaches the screen.
 
 The handlers live in ``cli_read``, ``cli_know``, ``cli_maint``,
-``cli_recovery``, ``cli_rebuild`` and ``cli_serve``; the parser in
-``cli_parser``. The
+``cli_rebuild`` and ``cli_serve``; the parser in ``cli_parser``. The
 launcher and the launchd job call ``main``.
 """
 
@@ -22,7 +21,6 @@ import sys
 import time
 from argparse import Namespace
 from collections.abc import Sequence
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +33,6 @@ from muninn import (
     cli_read,
     cli_rebuild,
     cli_recall_review,
-    cli_recovery,
     cli_serve,
     obs,
     store,
@@ -46,7 +43,6 @@ from muninn.cli_hook_contract import PROVIDERS
 from muninn.cli_output import redacted
 from muninn.cli_parser import build_parser
 from muninn.hook_status import printable
-from muninn.review_pause import EraseStatus
 
 __all__ = [
     "HOOKS",
@@ -70,7 +66,6 @@ _HANDLERS: dict[str, Handler] = {
     "serve": cli_serve.serve,
     "stats": cli_read.stats,
     "doctor": cli_read.doctor,
-    "recover": cli_recovery.recover,
     "compact": cli_maint.compact,
     "rebuild": cli_rebuild.rebuild,
     "know": cli_know.know,
@@ -84,18 +79,10 @@ def _dispatch(
     env: Env,
     home: Path,
     record: Record,
-    *,
-    status: EraseStatus | None = None,
 ) -> Result:
     """Run the handler and map store failures to their exit codes."""
     try:
-        if args.cmd == "erase":
-            result = cli_maint.erase_command(
-                args, env, home, record, status=status
-            )
-        else:
-            result = _HANDLERS[args.cmd](args, env, home, record)
-        return result
+        return _HANDLERS[args.cmd](args, env, home, record)
     except store.BusyError:
         return 3, {"error": "busy"}
     except store.HotJournalError:
@@ -165,18 +152,9 @@ def _run(args: Namespace, env: Env) -> int:
         "cmd": args.cmd,
         "actor": obs.actor(env),
     }
-    status = EraseStatus() if args.cmd == "erase" else None
-    code, out = _dispatch(args, env, home, record, status=status)
+    code, out = _dispatch(args, env, home, record)
     if out is None:  # serve prints nothing
         return code
-    if status is not None:
-        out["erasure_status"] = asdict(status)
-        out["erasure_status"].pop("bind_volume")
-        if status.stop_may_have_been_published:
-            out["erasure_status"] |= {
-                "restart": "not_attempted",
-                "next_action": "check_and_restart_if_needed",
-            }
     return _answer(args, env, home, (code, out), record, started)
 
 

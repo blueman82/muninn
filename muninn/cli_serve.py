@@ -13,6 +13,7 @@ import os
 import signal
 import sqlite3
 import time
+import uuid
 from argparse import Namespace
 from collections.abc import Callable
 from pathlib import Path
@@ -23,14 +24,14 @@ from muninn import (
     ingest,
     obs,
     poller_stop,
-    review_pause_state,
     scope,
     store,
 )
-from muninn.cli_core import Env, Record, Result
+from muninn.cli_core import WRITER_WAIT_S, Env, Record, Result
 from muninn.cli_maint import heartbeat
 from muninn.query.index_age import ALIVE_AT
 from muninn.review_learner import Learner
+from muninn.store_maint import maintenance_connection
 
 __all__ = ["serve"]
 
@@ -97,9 +98,8 @@ class _Poller:
         self.alive_at = _NEVER  # monotonic time of the last write
         self.beat_failed = False  # logged already in this pass
         self.stop_requested = False  # a stop signal has arrived
-        self.stop_generation: str | None = None
+        self.stop_generation = uuid.uuid4().hex
         self.learner = Learner(home)
-        self.owner: int | None = None
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
         """Remember stopping without touching interrupted resources."""
@@ -107,7 +107,7 @@ class _Poller:
 
     def prepare(self) -> None:
         """Tighten the log mode, install signal handlers, log the start."""
-        self._start_review()
+        self._finish_erasure()
         # launchd opens StandardOutPath before Umask applies, leaving it
         # 0644; the log must be owner-only.
         with contextlib.suppress(FileNotFoundError):  # not run by launchd
@@ -133,27 +133,19 @@ class _Poller:
             },
         )
 
-    def _start_review(self) -> None:
-        """Acquire lifetime ownership of the learning store state."""
-        try:
-            self.owner, self.stop_generation = review_pause_state.begin_owner(
-                self.home
-            )
-        except BlockingIOError:
-            raise ValueError("supervisor_busy") from None
+    def _finish_erasure(self) -> None:
+        """Complete an erasure that a crash left half done."""
+        with (
+            contextlib.suppress(store.StoreUnavailableError, store.BusyError),
+            maintenance_connection(self.home, wait_s=WRITER_WAIT_S),
+        ):
+            pass
 
     def close(self) -> None:
-        """Retain ownership through monitor containment and fencing."""
+        """Close the store connection."""
         if self.conn is not None:
             self.conn.close()
             self.conn = None
-        if self.owner is not None:
-            assert self.stop_generation is not None
-            review_pause_state.complete_owner(
-                self.home, self.owner, self.stop_generation
-            )
-            os.close(self.owner)
-            self.owner = None
 
     def _review_tick(self) -> None:
         """Advance SQLite only on main between ingestion transactions."""
@@ -162,9 +154,7 @@ class _Poller:
 
     def _requested(self) -> bool:
         """Remember a native stop request at a transaction boundary."""
-        if self.stop_generation is not None and poller_stop.requested(
-            self.home, os.getpid(), self.stop_generation
-        ):
+        if poller_stop.requested(self.home, os.getpid(), self.stop_generation):
             self.stop_requested = True
         return self.stop_requested
 
@@ -398,10 +388,6 @@ def serve(a: Namespace, env: Env, home: Path, record: Record) -> Result:
             obs.write_status(
                 home, {"last_error": name, "last_error_at": time.time()}
             )
-        return 1, (
-            {"error": "supervisor_busy"}
-            if str(exc) == "supervisor_busy"
-            else None
-        )
+        return 1, None
     finally:
         poller.close()

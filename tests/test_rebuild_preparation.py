@@ -1,23 +1,20 @@
-"""Exercise real preparation gaps beneath retained rebuild ownership."""
+"""Exercise real preparation gaps under the rebuild writer lock."""
 
 from __future__ import annotations
 
 import os
 import sqlite3
-import time
 import unittest
 from collections.abc import Callable
-from contextlib import ExitStack, closing
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
 from muninn import cli_rebuild, ingest, ingest_plan, scope, store
-from muninn import review_pause as q
-from muninn import review_pause_state as state
 from tests.cli_support import CliCase
+from tests.home_support import initialize
 from tests.installer_support import World
-from tests.review_pause_support import initialize
 from tests.test_classify import codex_meta, user_msg
 from tests.test_ingest import rollout
 
@@ -46,20 +43,16 @@ class RebuildPreparationTests(CliCase):
 
     def test_real_git_is_writer_free_with_closed_connections(self) -> None:
         connections: list[sqlite3.Connection] = []
-        owners: list[tuple[int, float]] = []
         probes: list[tuple[object, object]] = []
-        connect, reader, writer, run = (
+        connect, reader, run = (
             store.connect_rw,
             store.connect_ro,
-            q.maintenance_writer,
             scope.subprocess.run,
         )
 
         def opened(
             path: Path, *, readonly: bool = False
         ) -> sqlite3.Connection:
-            with self.assertRaises(BlockingIOError):
-                state.acquire(self.home)
             with (
                 self.assertRaises(store.BusyError),
                 store.writer_lock(self.home, wait_s=0),
@@ -69,13 +62,7 @@ class RebuildPreparationTests(CliCase):
             connections.append(conn)
             return conn
 
-        def region(owner: q.MaintenanceOwner) -> object:
-            owners.append((id(owner), owner.deadline))
-            return writer(owner)
-
         def probe(*args: Any, **kwargs: Any) -> Any:
-            with self.assertRaises(BlockingIOError):
-                state.acquire(self.home)
             with store.writer_lock(self.home, wait_s=0):
                 pass
             for conn in connections:
@@ -91,13 +78,10 @@ class RebuildPreparationTests(CliCase):
                 "connect_ro",
                 side_effect=lambda path: opened(path, readonly=True),
             ),
-            mock.patch.object(q, "maintenance_writer", side_effect=region),
             mock.patch.object(scope.subprocess, "run", side_effect=probe),
         ):
             out = cli_rebuild._run(self.env, self.home, cli_rebuild._Status())
         self.assertEqual(probes, [(True, 10)])
-        self.assertEqual(len(owners), 3)
-        self.assertEqual(len(set(owners)), 1)
         self.assertEqual(
             (
                 out["ingest"]["files_seen"],
@@ -110,7 +94,6 @@ class RebuildPreparationTests(CliCase):
         for conn in connections:
             with self.assertRaises(sqlite3.ProgrammingError):
                 conn.execute("SELECT 1")
-        os.close(state.acquire(self.home))
 
     def test_same_size_mtime_writer_change_refuses_before_next_open(
         self,
@@ -275,42 +258,6 @@ class RebuildPreparationTests(CliCase):
                         handle.write(b"X")
 
                 self.refuse_gap(change)
-
-    def test_original_deadline_bounds_reacquisition_after_git(self) -> None:
-        prepare, writer = scope.prepare_commit, q.maintenance_writer
-        owners: list[q.MaintenanceOwner] = []
-        clock = mock.Mock(wraps=q.time)
-        clock.sleep.side_effect = AssertionError(
-            "expired reacquisition waited"
-        )
-        with ExitStack() as resources:
-
-            def region(owner: q.MaintenanceOwner) -> object:
-                owners.append(owner)
-                return writer(owner)
-
-            def contend(
-                lookup: scope.CommitLookup, facts: scope.CommitFacts
-            ) -> None:
-                prepare(lookup, facts)
-                # External process waits yield independently of coordination.
-                time.sleep(0)
-                resources.enter_context(store.writer_lock(self.home, wait_s=0))
-                clock.monotonic.return_value = owners[0].deadline + 1
-
-            with (
-                mock.patch.object(q, "maintenance_writer", side_effect=region),
-                mock.patch.object(
-                    scope, "prepare_commit", side_effect=contend
-                ),
-                mock.patch.object(q, "time", clock),
-            ):
-                code, out, _ = self.muninn("rebuild")
-            self.assertEqual((code, out["error"]), (3, "busy"))
-            self.assertFalse(out["publication_possible"])
-            self.assertTrue(out["recovery_required"])
-            self.assertEqual(len({id(owner) for owner in owners}), 1)
-            clock.sleep.assert_not_called()
 
     def test_unreadable_source_refuses_despite_valid_candidate_database(
         self,

@@ -43,8 +43,6 @@ knowledge and learning:
   know list/search/show/context use current supported UUID/revision views.
   know propose --input FILE checks request-bound evidence and owner authority;
   know retract K_ID requires --expected-revision N and --reason TEXT.
-  recover resumes a verified interrupted maintenance pause; it never starts a
-  new erasure request or reboots, but may apply an already-recorded tombstone.
   learn request requires installed frozen policy; line bounds must be paired.
   learn retry explicitly restarts the same request; completed receipts persist.
   learn dismiss R_ID removes only that request's saved failure notice.
@@ -176,15 +174,6 @@ def _add_maintenance(cmd: _Commands) -> None:
     p.add_argument("--usage", action="store_true")
     cmd.add("compact", "VACUUM the store to return free space")
     cmd.add("doctor", "health checks (exit 1 when unhealthy)")
-    p = cmd.add("recover", "resume a verified interrupted maintenance pause")
-    p.add_argument(
-        "--confirm-legacy-volume",
-        action="store_true",
-        help=(
-            "approve recovery of a matching old macOS "
-            "record without a disk ID"
-        ),
-    )
     cmd.add("rebuild", "rebuild the store from the transcripts")
     p = cmd.add("recall-review", "review a batch of 50 recall deliveries")
     p.add_argument("--batch", type=int, help="one-based delivery batch")

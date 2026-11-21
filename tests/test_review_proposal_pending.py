@@ -7,16 +7,16 @@ from unittest import mock
 
 from muninn import (
     review_originals,
-    review_pause,
     review_requests,
     store,
+    store_maint,
     tombstones,
 )
 from muninn.review_models import AttemptView, ReviewContext
 from muninn.tombstone_key import TOMBSTONE_FILE
+from tests.home_support import initialize, interrupt_erasure
 from tests.ingest_support import TID
 from tests.policy_patch import reserve_call
-from tests.review_pause_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
 
@@ -175,9 +175,7 @@ class ProposalPendingTests(CommitCase):
             self.assertRaisesRegex(ValueError, "^erasure_pending$"),
         ):
             self.transaction(self.claim)
-        with review_pause.erase_connection(
-            self.home, wait_s=0, status=review_pause.EraseStatus()
-        ):
+        with store_maint.maintenance_connection(self.home, wait_s=0):
             self.assertEqual(self.row("SELECT count(*) FROM tombstone")[0], 1)
         self.assertEqual(
             tuple(

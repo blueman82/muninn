@@ -11,7 +11,6 @@ from typing import Any
 
 from muninn import classify, cli_core, cursor_import, erase, ingest, obs, store
 from muninn.cli_core import Env, Out, Record, Result, counts
-from muninn.review_pause import EraseStatus
 
 __all__ = ["compact", "erase_command", "heartbeat", "ingest_command"]
 
@@ -90,8 +89,6 @@ def erase_command(
     env: Env,
     home: Path,
     record: Record,
-    *,
-    status: EraseStatus | None = None,
 ) -> Result:
     """Run ``muninn erase``; without ``--yes`` it is always a dry run."""
     dry = a.dry_run or not a.yes
@@ -100,7 +97,6 @@ def erase_command(
         erase.EraseRequest(a.session, a.event, a.match, dry),
         env=env,
         wait_s=cli_core.WRITER_WAIT_S,
-        status=status,
     )
     if dry and not a.dry_run:
         out["note"] = "dry run: add --yes to erase"

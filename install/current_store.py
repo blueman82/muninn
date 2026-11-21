@@ -11,6 +11,7 @@ from install import record, snapshot_io
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import (
+    cli_core,
     file_sync,
     platform_rebuild,
     review_requests,
@@ -18,42 +19,34 @@ from muninn import (
     review_unknown_state,
     store,
 )
-from muninn import review_pause as q
+from muninn.tombstones import reapply_tombstones
 
 
-def _fence_current(conn: sqlite3.Connection) -> sqlite3.Row:
-    """Commit the stopped admission and fence all abandoned attempts."""
-    control = conn.execute("SELECT * FROM review_control").fetchone()
+def _fence_current(conn: sqlite3.Connection) -> None:
+    """Fence all abandoned attempts."""
     conn.execute("BEGIN IMMEDIATE")
     try:
         review_unknown_state.ensure(conn)
-        conn.execute(
-            "UPDATE review_control SET admission=0,generation=generation+1"
-        )
         review_requests.recover_attempts(conn, time.time())
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
         raise
-    return control
 
 
-def _restore_admission(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
-    """Validate current data and restore only the prior permitted policy."""
+def _check_current(conn: sqlite3.Connection) -> None:
+    """Validate current data."""
     if conn.execute("PRAGMA foreign_key_check").fetchone() is not None or (
         [row[0] for row in conn.execute("PRAGMA quick_check")] != ["ok"]
     ):
         raise StepFailedError("current_store_invalid")
-    if not control["admission"]:
-        return
-    conn.execute("UPDATE review_control SET admission=1")
 
 
-def prepare_current(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
+def prepare_current(ctx: Ctx, rec: Record) -> Path:
     """Maintain a verified current file without replacing its pathname."""
     path = store.db_path(ctx.data)
     with (
-        q.maintenance_writer(owner),
+        store.writer_lock(ctx.data, wait_s=cli_core.WRITER_WAIT_S),
         snapshot_io.validated(path) as revalidate,
     ):
         try:
@@ -70,7 +63,7 @@ def prepare_current(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
         record.save(ctx, rec)
         with closing(store.connect_rw(path)) as conn:
             revalidate()
-            q.verify_current(owner, conn)
+            reapply_tombstones(conn, ctx.data)
             needs_metadata = not review_state.available(
                 conn, "review_unknown_ack"
             )
@@ -82,9 +75,8 @@ def prepare_current(ctx: Ctx, rec: Record, owner: q.MaintenanceOwner) -> Path:
             revalidate()
         with closing(store.connect_rw(path)) as conn:
             revalidate()
-            q.verify_current(owner, conn)
-            control = _fence_current(conn)
-            _restore_admission(conn, control)
+            _fence_current(conn)
+            _check_current(conn)
             revalidate()
         file_sync.sync_path(path)
         revalidate()

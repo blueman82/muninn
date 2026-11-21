@@ -16,7 +16,7 @@ from unittest import mock
 
 from muninn import cli, obs, store
 from tests.cli_support import ALWAYS, CliCase, fake_run
-from tests.review_pause_support import initialize
+from tests.home_support import initialize
 from tests.store_support import public_read
 from tests.test_classify import codex_meta, function_call
 from tests.test_ingest import TID, fc_output, rollout
@@ -127,9 +127,6 @@ class StatsDoctorTests(CliCase):
         )
         with (
             mock.patch.object(cli.obs, "run", run or fake_run()),
-            mock.patch.object(
-                cli.obs, "sys", SimpleNamespace(platform="darwin")
-            ),
             mock.patch.object(cli.obs, "os", native_access),
         ):
             return self.muninn("doctor", *extra)
@@ -153,7 +150,6 @@ class StatsDoctorTests(CliCase):
         calls: list[Sequence[object]] = []
 
         def run(argv: Sequence[object]) -> CompletedProcess[bytes]:
-            self.assertIsNot(obs.sys, sys)
             self.assertIsNot(obs.os, os)
             self.assertEqual(sys.platform, native_platform)
             self.assertIs(obs.os.access, os.access)
@@ -169,7 +165,6 @@ class StatsDoctorTests(CliCase):
         self.assertEqual(
             list(calls[0]), ["launchctl", "print", "gui/501/com.muninn"]
         )
-        self.assertIs(obs.sys, sys)
         self.assertIs(obs.os, os)
         self.assertEqual(sys.platform, native_platform)
 

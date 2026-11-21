@@ -10,16 +10,14 @@ from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
 
-from install import cutover
-from install.context import StepFailedError
+from install import current_store, cutover
+from install.context import Ctx, StepFailedError
 from install.record import Record
-from muninn import review_pause as q
-from muninn import review_pause_state as state
 from muninn import store
 from muninn.review_models import ReviewContext
+from tests.home_support import initialize, interrupt_erasure
 from tests.installer_support import World
 from tests.policy_patch import reserve_call
-from tests.review_pause_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
 
@@ -46,14 +44,6 @@ class FreshStoreTests(unittest.TestCase):
             self.assertEqual(
                 conn.execute("SELECT count(*) FROM event").fetchone()[0], 0
             )
-        with (
-            q.maintenance_owner(
-                self.ctx.data, wait_s=0, status=q.EraseStatus()
-            ) as owner,
-            q.maintenance_writer(owner),
-            contextlib.closing(store.connect_rw(path)) as conn,
-        ):
-            q.verify_current(owner, conn)
         self.assertEqual(self.world.fake.calls, [])
 
     def test_preexisting_empty_home_is_not_fresh(self) -> None:
@@ -62,63 +52,34 @@ class FreshStoreTests(unittest.TestCase):
             cutover.prepare_store(self.ctx, self.record)
         self.assertEqual(list(self.ctx.data.iterdir()), [])
 
-    def test_replaced_home_refuses_before_store_or_witness(self) -> None:
-        acquire = q.maintenance_owner
+    def test_replaced_home_refuses_before_store(self) -> None:
+        acquire = cutover.writer
 
-        def replace(
-            home: Path, **kwargs: object
-        ) -> contextlib.AbstractContextManager[q.MaintenanceOwner]:
+        def replace(ctx: object) -> contextlib.AbstractContextManager[None]:
+            home = self.ctx.data
             home.rename(home.with_name("original-home"))
             home.mkdir(mode=0o700)
-            return acquire(home, wait_s=0, status=q.EraseStatus())
+            return acquire(self.ctx)
 
         with (
-            mock.patch.object(q, "maintenance_owner", side_effect=replace),
+            mock.patch.object(cutover, "writer", side_effect=replace),
             self.assertRaisesRegex(StepFailedError, "fresh_home_changed"),
         ):
             cutover.prepare_store(self.ctx, self.record)
         self.assertFalse(store.db_path(self.ctx.data).exists())
-        self.assertFalse((self.ctx.data / state.WITNESS).exists())
 
-    def test_new_witness_or_baseline_prevents_initialization(self) -> None:
-        writer = q.maintenance_writer
-        for name in (state.WITNESS, state.BASELINE):
-            with self.subTest(name=name):
-                ctx = self.world.ctx(fresh=True)
-                ctx.data = self.ctx.data.with_name(
-                    name.replace(".", "-") + "-home"
-                )
-
-                def plant(
-                    owner: q.MaintenanceOwner,
-                    name: str = name,
-                ) -> contextlib.AbstractContextManager[None]:
-                    path = owner.home / name
-                    path.write_text("{}")
-                    path.chmod(0o600)
-                    return writer(owner)
-
-                with (
-                    mock.patch.object(
-                        q, "maintenance_writer", side_effect=plant
-                    ),
-                    self.assertRaisesRegex(ValueError, "pause_unverified"),
-                ):
-                    cutover.prepare_store(ctx, self.record)
-                self.assertFalse(store.db_path(ctx.data).exists())
-
-    def test_connection_opens_under_both_barriers_and_closes_before_release(
+    def test_connection_opens_under_the_writer_lock_and_closes_before_release(
         self,
     ) -> None:
         connect = store.connect_rw
-        writer = q.maintenance_writer
+        writer = cutover.writer
         connections: list[sqlite3.Connection] = []
-        regions: list[tuple[int, float]] = []
+        regions: list[int] = []
 
         @contextlib.contextmanager
-        def region(owner: q.MaintenanceOwner) -> Generator[None]:
-            regions.append((id(owner), owner.deadline))
-            with writer(owner):
+        def region(ctx: Ctx) -> Generator[None]:
+            regions.append(id(ctx))
+            with writer(ctx):
                 try:
                     yield
                 finally:
@@ -130,8 +91,6 @@ class FreshStoreTests(unittest.TestCase):
             for previous in connections:
                 with self.assertRaises(sqlite3.ProgrammingError):
                     previous.execute("SELECT 1")
-            with self.assertRaises(BlockingIOError):
-                state.acquire(path.parent)
             with (
                 self.assertRaises(store.BusyError),
                 store.writer_lock(path.parent, wait_s=0),
@@ -143,7 +102,7 @@ class FreshStoreTests(unittest.TestCase):
 
         with (
             mock.patch.object(store, "connect_rw", side_effect=open_checked),
-            mock.patch.object(q, "maintenance_writer", side_effect=region),
+            mock.patch.object(cutover, "writer", side_effect=region),
         ):
             cutover.prepare_store(self.ctx, self.record)
         self.assertEqual(len(connections), 3)
@@ -153,7 +112,6 @@ class FreshStoreTests(unittest.TestCase):
         for conn in connections:
             with self.assertRaises(sqlite3.ProgrammingError):
                 conn.execute("SELECT 1")
-        os.close(state.acquire(self.ctx.data))
         with store.writer_lock(self.ctx.data, wait_s=0):
             pass
 
@@ -197,16 +155,14 @@ class CurrentStoreTests(CommitCase):
         db = store.db_path(self.home)
         identity = db.stat().st_dev, db.stat().st_ino
         self.ready()
-        witness = (self.home / state.WITNESS).read_bytes()
         with mock.patch(
             "subprocess.Popen", side_effect=AssertionError("spawn")
         ):
             self.assertEqual(cutover.prepare_store(self.ctx, self.record), db)
         self.reopen()
         self.assertEqual((db.stat().st_dev, db.stat().st_ino), identity)
-        self.assertEqual((self.home / state.WITNESS).read_bytes(), witness)
         after = tuple(self.row("SELECT * FROM review_control"))
-        self.assertEqual(after, (1, 2, 1, *control[3:]))
+        self.assertEqual(after, control)
         recovered = self.row("SELECT * FROM review_request")
         self.assertEqual(recovered["id"], request["id"])
         self.assertEqual(recovered["state"], "waiting")
@@ -230,24 +186,14 @@ class CurrentStoreTests(CommitCase):
         self.reopen()
         self.assertEqual(
             tuple(self.row("SELECT * FROM review_control")),
-            (1, 2, 0, None, None, None),
-        )
-
-    def test_unverified_home_never_seeds_itself(self) -> None:
-        self.conn.close()
-        with self.assertRaisesRegex(ValueError, "pause_unverified"):
-            cutover.prepare_store(self.ctx, self.record)
-        self.assertFalse((self.home / state.WITNESS).exists())
-        self.reopen()
-        self.assertEqual(
-            self.row("SELECT generation FROM review_control")[0], 1
+            (1, 1, 0, None, None, None),
         )
 
     def test_pending_intent_replays_before_permitted_admission(self) -> None:
         thread = self.row("SELECT thread_id FROM source")[0]
         self.save(self.result([self.note()]))
         self.ready()
-        witness = interrupt_erasure(self.home, thread)
+        interrupt_erasure(self.home, thread)
         cutover.prepare_store(self.ctx, self.record)
         self.reopen()
         self.assertEqual(self.row("SELECT count(*) FROM tombstone")[0], 1)
@@ -258,7 +204,6 @@ class CurrentStoreTests(CommitCase):
         self.assertEqual(
             self.row("SELECT admission FROM review_control")[0], 1
         )
-        self.assertEqual((self.home / state.WITNESS).read_bytes(), witness)
 
     @unittest.skipIf(os.name == "nt", "Windows locks open SQLite stores")
     def test_replaced_source_rejected_before_fencing_stale_connection(
@@ -321,7 +266,7 @@ class CurrentStoreTests(CommitCase):
         db = store.db_path(self.home)
         handles: list[sqlite3.Connection] = []
 
-        def fail(owner: q.MaintenanceOwner, conn: sqlite3.Connection) -> None:
+        def fail(conn: sqlite3.Connection, home: Path) -> int:
             handles.append(conn)
             db.rename(db.with_name("held.sqlite3"))
             with contextlib.closing(store.connect_rw(db)):
@@ -329,13 +274,14 @@ class CurrentStoreTests(CommitCase):
             raise failure
 
         with (
-            mock.patch.object(q, "verify_current", side_effect=fail),
+            mock.patch.object(
+                current_store, "reapply_tombstones", side_effect=fail
+            ),
             self.assertRaises(LookupError) as caught,
         ):
             cutover.prepare_store(self.ctx, self.record)
         self.assertIs(caught.exception, failure)
         with self.assertRaises(sqlite3.ProgrammingError):
             handles[0].execute("SELECT 1")
-        os.close(state.acquire(self.home))
         with store.writer_lock(self.home, wait_s=0):
             pass

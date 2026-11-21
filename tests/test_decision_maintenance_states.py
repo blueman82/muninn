@@ -9,9 +9,9 @@ from muninn import cli_rebuild, erase, review_requests, store, store_copy
 from muninn.decision_candidates import candidate_view, show_candidate
 from muninn.decision_write import submit_intent
 from tests.decision_erasure_graph_support import DecisionGraphCase
+from tests.home_support import initialize
 from tests.ingest_support import TID
 from tests.knowledge_cutover_support import digest
-from tests.review_pause_support import initialize
 
 
 class DecisionStateMaintenanceTests(DecisionGraphCase):

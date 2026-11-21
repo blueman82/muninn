@@ -272,30 +272,8 @@ def review_protocol(
     Returns:
         Finite observations only; no witness, boot or journal content.
     """
-    witness = _protocol_present(home / "review.supervisor.json")
-    repair = _protocol_present(home / "review.supervisor.repair.json")
     intent = _protocol_present(home / "tombstones.jsonl")
     results: tuple[tuple[str, bool | None, str, str], ...] = (
-        (
-            "review_pause",
-            None,
-            (
-                "witness_present_containment_unverified"
-                if witness
-                else "witness_absent_containment_unverified"
-            ),
-            "info",
-        ),
-        (
-            "review_repair",
-            not repair,
-            (
-                "baseline_present_recovery_unverified"
-                if repair
-                else "baseline_absent"
-            ),
-            "warn",
-        ),
         (
             "review_erasure_intent",
             None if intent else True,

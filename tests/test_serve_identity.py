@@ -9,7 +9,7 @@ from unittest.mock import patch
 from muninn import cli_serve, ingest, obs
 from muninn.cli_maint import heartbeat
 from tests.cli_support import CliCase
-from tests.review_pause_support import initialize
+from tests.home_support import initialize
 
 
 class WriterIdentityTests(CliCase):

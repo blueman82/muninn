@@ -20,7 +20,6 @@ from muninn import (
     store,
     tombstones,
 )
-from muninn import review_pause_state as state
 from muninn.review_evidence_models import (
     EvidenceRecord,
     EvidenceWindow,
@@ -108,8 +107,6 @@ class FreshCursorReplayTests(unittest.TestCase):
 
     def prepare(self, path: Path, cwd: str) -> cursor_import.PreparedImport:
         """Select real fixture originals outside the writer."""
-        with self.assertRaises(BlockingIOError):
-            state.acquire(self.ctx.data)
         with store.writer_lock(self.ctx.data, wait_s=0):
             pass
         prepared = self.real_prepare(path, cwd)
@@ -289,8 +286,6 @@ class FreshCursorReplayTests(unittest.TestCase):
             self.callers.append(conn)
             self.assertEqual(home, self.ctx.data)
             self.seed_attempt(conn)
-            with self.assertRaises(BlockingIOError):
-                state.acquire(home)
             with (
                 self.assertRaises(store.BusyError),
                 store.writer_lock(home, wait_s=0),
@@ -357,8 +352,6 @@ class FreshCursorReplayTests(unittest.TestCase):
         )
         with store.writer_lock(self.ctx.data, wait_s=0):
             pass
-        fd = state.acquire(self.ctx.data)
-        knowledge_erase.os.close(fd)
 
     def test_real_cleanup_finishes_before_activation(self) -> None:
         with self.operation(), cutover.prepared_store(self.ctx, self.rec):

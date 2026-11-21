@@ -54,7 +54,9 @@ class PollerStopTests(unittest.TestCase):
     def test_deadline_expiring_during_staging_never_publishes(self) -> None:
         with (
             mock.patch.object(poller_stop.time, "monotonic", return_value=2.0),
-            self.assertRaisesRegex(ValueError, "coordination_timeout"),
+            self.assertRaisesRegex(
+                poller_stop.StopTimeoutError, "coordination_timeout"
+            ),
         ):
             poller_stop.request(self.home, 123, GENERATION, deadline=1.0)
         self.assertFalse((self.home / poller_stop.FILE).exists())

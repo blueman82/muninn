@@ -13,8 +13,8 @@ from muninn import decision_requests, review_requests, review_settings
 from muninn.decision_write import submit_intent
 from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
+from tests.home_support import initialize
 from tests.policy_patch import use_policy
-from tests.review_pause_support import initialize
 
 
 class DecisionFairnessTests(DecisionCase):
