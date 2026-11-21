@@ -29,7 +29,7 @@ None of them holds transcript text.
 | `activation_pending` | No policy was selected, or the host does not satisfy default runner requirements. | Check for Apple silicon macOS, a signed `codex` CLI on `PATH`, and the canonical Codex sign-in directory. If one is unavailable, learning stays pending. Use an accepted policy for a different host. |
 | `activation_incomplete` | A committed first policy exists but actual admission was fenced to 0. | Keep control and boundaries. This modifier cannot reenable configured admission. |
 | `legacy_configuration_incomplete` | Compatible selection or provider mutation could have occurred without a complete durable configuration record | Keep the maintenance launcher and `original` snapshots. Examine/repair configuration before retrying. Do not rerun plugin installation blindly |
-| `review_policy_transition_required` | The selected policy cannot be installed or refreshed with the current rules. | Keep the current policy and admission. Refresh a repository default only with admission on. Check that no learning `requests` or knowledge entries exist. Use a subsequent approval time. Change only fields allowed in [Policy controls](REFERENCE.md#default-learning-policy). |
+| `review_policy_transition_required` | The selected policy cannot be installed or refreshed with the current rules. | Keep the current policy and admission. Refresh a repository default only with admission on. Check that no learning `requests` or knowledge entries exist. Use a subsequent approval time. Change only fields allowed in [Policy controls](REFERENCE.md#learning-settings). |
 | `review_policy_snapshot_changed` | A kept policy snapshot or newly supplied input differs. | Keep the `original` private record. Continue without an external path only when the frozen snapshot is complete and unchanged. |
 
 | Symptom | Likely cause | What to do |
@@ -312,7 +312,7 @@ It must not guess the cause of an older generic `error` record.
 
 `codex_host_changed` means the recorded computer identity differs from the current one.
 The cause of that change is unknown.
-The agent first checks format 2 and current recovery `state`, then prepares the explicit host-only candidate and [non-writing preview](REFERENCE.md#renew-an-approved-codex-computer-binding).
+The agent first checks format 2 and current recovery `state`, then prepares the explicit host-only candidate and [non-writing preview](REFERENCE.md#learning-settings).
 The notice and digest give no permission and start no timer.
 
 Keep a current pause.
@@ -330,7 +330,7 @@ No automatic continuation is accepted for that `gap`.
 ### Current Codex installation changed
 
 A missing previous executable is not permission to broaden its recorded grant.
-Prepare [the managed interface preview](REFERENCE.md#follow-the-current-trusted-codex-installation).
+Prepare [the managed interface preview](REFERENCE.md#learning-settings).
 It checks the `original` approval and the current trusted manager.
 The installer must get owner approval of the complete unchanged initial rule.
 

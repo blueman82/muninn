@@ -222,7 +222,7 @@ This flag does not bypass OS task checks or give approval to changed custom poli
 A `From now` selection that remains keeps its initial start time.
 The installer confirms replacement work before replacing a previous queue.
 Do not edit the store by hand.
-See the [policy contract](REFERENCE.md#default-learning-policy).
+See the [policy contract](REFERENCE.md#learning-settings).
 
 ## Uninstall
 
@@ -436,7 +436,7 @@ Prompt recall operates independently.
 Waiting alone does not refresh the current conversation's startup context.
 
 If learning reports `codex_host_changed`, tell the agent to check store-format and recovery prerequisites.
-Then prepare the preview that writes nothing in [`REFERENCE.md`](REFERENCE.md#renew-an-approved-codex-computer-binding).
+Then prepare the preview that writes nothing in [`REFERENCE.md`](REFERENCE.md#learning-settings).
 An installed format-1 store must have an ordinary upgrade to format 2 first.
 That step grants no new host permission.
 The subsequent renewal must have your affirmative answer for its specified displayed digest.
@@ -461,4 +461,4 @@ It keeps account, model, scope, history, limits and existing work.
 Compatible subsequent Codex updates have no new approval prerequisite.
 
 This trusts the fixed local manager, not an arbitrary executable on `PATH`.
-See [the full contract](REFERENCE.md#follow-the-current-trusted-codex-installation).
+See [the full contract](REFERENCE.md#learning-settings).
