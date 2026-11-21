@@ -80,7 +80,7 @@ List and show print the full proof (`proofs`, `proof`) beside the claim text.
 
 `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and ID coercion have no active interface.
 A missing installed admitted frozen policy refuses with `review_policy_required`.
-Do not invent runner, model, or budget settings.
+Do not invent runner or model settings.
 Writer exit 3 means busy.
 
 ### Conversational memory decisions
@@ -215,7 +215,7 @@ It invokes no model.
 Missing indexing reports `waiting_index` promptly.
 
 Current background work can continue verification.
-No command waits in an indexing loop or restarts paused learning.
+No command waits in an indexing loop.
 A recorded proposal keeps its unchanged receipt.
 Duplicate `delivery` cannot commit it a second time.
 
@@ -226,8 +226,7 @@ The agent can prepare a new proposal when checked `evidence` permits it.
 
 A rejected draft does not put back withheld knowledge or automatically resolve its question.
 
-Explicit views use the actual recorded strict policy and digest.
-This applies with learning active or paused.
+Explicit views use the constant review policy.
 The complete show text must fit that policy's current `context_bytes` in UTF-8 bytes.
 The limit includes all owner instructions.
 Muninn refuses oversize displays. It does not truncate them.

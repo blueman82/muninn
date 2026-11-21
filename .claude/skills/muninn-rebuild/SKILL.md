@@ -10,7 +10,7 @@ disable-model-invocation: true
 
 Replaces a verified marked current store after copying all governed history,
 including normalized knowledge/revisions/support/receipts, scopes, tombstones,
-unknown review charges and DB-only Cursor or missing-source events. It fully
+DB-only Cursor or missing-source events. It fully
 re-ingests transcripts, replays latest erasure intent and validates the candidate.
 Unreadable or historical unmarked stores refuse; rebuild does not migrate them.
 
@@ -32,8 +32,6 @@ failure; an orphan candidate also preserves prior uncertainty. There is no
 `old_restored` claim. Missing output/logs cannot establish nonpublication.
 
 After failure preserve current live data, candidate, every archive, `tombstone.key`
-and latest `tombstones.jsonl`. Never restore, promote an orphan, retry blindly or
-infer a lost prior admission value. A fresh invocation refuses an existing
+and latest `tombstones.jsonl`. Never restore, promote an orphan or retry blindly. A fresh invocation refuses an existing
 `muninn.sqlite.rebuild`. Archive deletion is a separate owner decision; archives
-can retain erased content and prevent verified erasure. Native crash/Windows
-qualification is separate from deterministic local tests.
+can retain erased content and prevent verified erasure.
