@@ -8,8 +8,9 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any
 
+from muninn.cli_hook_contract import PROVIDERS
 from muninn.query.answers import BadArgumentError
-from muninn.query.constants import ALL_KINDS, DEFAULT_KINDS, PROVIDERS
+from muninn.query.constants import ALL_KINDS, DEFAULT_KINDS
 from muninn.query.guard import guarded
 
 # SQL fragments and the parameters that belong to them, in matching order.

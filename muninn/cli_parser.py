@@ -105,7 +105,7 @@ def _add_search(cmd: _Commands) -> None:
     p.add_argument("--include-current", action="store_true")
     p.add_argument("--current-session")
     p.add_argument("--kind", help="comma-separated kinds")
-    p.add_argument("--provider", choices=query.PROVIDERS)
+    p.add_argument("--provider", choices=PROVIDERS)
     p.add_argument("--scope", help="only events whose cwd is exactly this")
     p.add_argument("--since")
     p.add_argument("--until")
@@ -212,7 +212,7 @@ def _add_knowledge(cmd: _Commands) -> None:
     )
     p.add_argument(
         "--provider",
-        choices=("claude", "codex", "cursor"),
+        choices=PROVIDERS,
         help="with --page: the session-start byte limit (default claude)",
     )
     p = know.add("propose")

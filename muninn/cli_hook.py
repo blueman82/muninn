@@ -15,10 +15,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from muninn import hook, hook_cursor, hook_learn, obs, store
+from muninn.cli_hook_contract import PROVIDERS
 
-__all__ = ["HOOKS", "PROVIDERS", "hook_main"]
+__all__ = ["HOOKS", "hook_main"]
 
-PROVIDERS = ("claude", "codex", "cursor")
 type HookRunner = Callable[..., dict[str, Any]]
 
 

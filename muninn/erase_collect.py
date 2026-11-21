@@ -8,6 +8,7 @@ from __future__ import annotations
 import sqlite3
 
 from muninn import decision_erase, query
+from muninn.cli_hook_contract import PROVIDERS
 from muninn.erase_line_selection import (
     add_line as _add_line,
 )
@@ -22,10 +23,6 @@ from muninn.knowledge_erase import support_closure
 from muninn.tombstone_intent import IntentRow, TombstoneRow, event_tag
 from muninn.tombstone_key import key_for
 from muninn.tombstone_rows import tombstone_row
-
-# Providers blocked when a session has not been ingested yet, so a later
-# ingest cannot resurrect it.
-_ALL_PROVIDERS = ["codex", "claude", "cursor"]
 
 
 def _marks(count: int) -> str:
@@ -42,7 +39,7 @@ def _session_providers(conn: sqlite3.Connection, session: str) -> list[str]:
             (session,),
         )
     ]
-    return found or _ALL_PROVIDERS
+    return found or list(PROVIDERS)
 
 
 def _next_frontier(
