@@ -9,9 +9,9 @@ from functools import partial
 from unittest import mock
 from uuid import UUID
 
-from muninn import decision_requests, review_requests
+from muninn import decision_requests, review_requests, review_settings
 from muninn.decision_write import submit_intent
-from muninn.review_supervisor import Supervisor
+from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
 from tests.review_pause_support import initialize
 
@@ -68,21 +68,11 @@ class DecisionFairnessTests(DecisionCase):
                 self.conn, self.context.request_id, 24.0
             )
         )
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        supervisor._owner = 1
-        supervisor.monitor = mock.Mock()
-        supervisor.monitor.drain.return_value = []
-        supervisor._catchup = (0, 100.0)
-        with (
-            mock.patch.object(supervisor, "_inputs", return_value=True),
-            mock.patch(
-                "muninn.review_round_launch.create_wrapper",
-                side_effect=AssertionError,
-            ),
-        ):
-            for now in (25.0, 26.0, 27.0):
-                supervisor.tick(now)
+        review_settings.save(self.home, review_settings.Settings(enabled=True))
+        learner = Learner(self.home)
+        learner._catchup = (0, 100.0)
+        for now in (25.0, 26.0, 27.0):
+            learner.tick(now)
         self.assertEqual(
             self.row(
                 "SELECT state,revision FROM memory_candidate WHERE id=?", (b,)
@@ -328,32 +318,14 @@ class DecisionFairnessTests(DecisionCase):
             )
         )
         initialize(self.home)
+        review_settings.save(self.home, review_settings.Settings(enabled=True))
         code = """
 import sys
-from contextlib import closing
 from pathlib import Path
-import sqlite3
-import subprocess
-import sys
-from functools import partial
-from unittest import mock
-from muninn import store
-from muninn.review_models import ReviewPolicy
-from muninn.review_supervisor import Supervisor
-home, now = Path(sys.argv[1]), float(sys.argv[2])
-with closing(store.connect_ro(store.db_path(home))) as conn:
-    policy = ReviewPolicy.model_validate_json(conn.execute(
-        'SELECT policy_json FROM review_control').fetchone()[0])
-with mock.patch.object(Supervisor, '_inputs', return_value=True), mock.patch(
-        'muninn.review_round_launch.create_wrapper',
-        side_effect=AssertionError):
-    supervisor = Supervisor(home, policy)
-    supervisor.start(now)
-    try:
-        supervisor._catchup = (0, 100.0)
-        supervisor.tick(now)
-    finally:
-        supervisor.stop(now + 0.5)
+from muninn.review_learner import Learner
+learner = Learner(Path(sys.argv[1]))
+learner._catchup = (0, 100.0)
+learner.tick(float(sys.argv[2]))
 """
         for now in (25.0, 26.0):
             result = subprocess.run(

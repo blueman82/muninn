@@ -11,9 +11,9 @@ from muninn.decision_models import DecisionId, DecisionIntent, DecisionView
 from muninn.decision_write import decision_view, submit_intent
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_commit_state import EVIDENCE_ERRORS
+from muninn.review_db import database
 from muninn.review_read_budget import EvidenceLimitError
 from muninn.review_requests import claim_attempt
-from muninn.review_supervisor_store import database
 
 
 def execute_application(

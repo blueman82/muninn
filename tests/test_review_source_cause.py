@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ValidationError, field_validator
 
 from muninn import obs_log, review_history, review_recovery, review_requests
+from muninn.review_learner_result import failure_code
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES
 from muninn.review_recovery_codes import (
     CONTAINED,
@@ -15,7 +16,6 @@ from muninn.review_recovery_codes import (
     RUNTIME_CODES,
     SHARED,
 )
-from muninn.review_supervisor_result import failure_code
 from tests.test_review_requests import RequestCase
 
 SECRET_MARKER = "SECRET-MARKER-7f3a"

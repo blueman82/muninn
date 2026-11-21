@@ -9,7 +9,7 @@ from muninn import decision_requests, review_originals, review_requests
 from muninn.decision_candidates import candidate_view
 from muninn.decision_write import submit_intent
 from muninn.review_json import canonical_json
-from muninn.review_supervisor import Supervisor
+from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
 
 # An unselected field makes the repeated owner reads exceed the policy.
@@ -129,9 +129,7 @@ class DecisionRequestLimitTests(DecisionCase):
                 self.conn, self.context.request_id, 28.0
             )
         )
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 2
-        self.assertIsNone(supervisor._claim(31.0))
+        self.assertIsNone(Learner(self.home)._claim(self.policy, 2, 31.0))
         decision_requests.continue_decisions(self.home, 2, 31.0)
         self.assertEqual(
             self.row(

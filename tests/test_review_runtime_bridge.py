@@ -17,9 +17,9 @@ from muninn import (
 from muninn import review_runtime_bridge as bridge
 from muninn.review_commit_state import checked_request_policy
 from muninn.review_json import canonical_json
+from muninn.review_learner_result import mark_correction
 from muninn.review_models import ReviewContext
 from muninn.review_read_budget import ReadBudget
-from muninn.review_supervisor_store import mark_correction
 from tests.managed_codex_support import (
     host_enrollment,
     identity,

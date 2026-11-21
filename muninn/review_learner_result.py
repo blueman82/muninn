@@ -1,15 +1,16 @@
-"""Reconcile one contained review outcome before releasing its worker."""
+"""Reconcile one finished learning call and plan the next round."""
 
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from muninn import review_prompt
 from muninn.knowledge_models import ReviewResult
-from muninn.review_candidates import CommitRejectedError, ProposalRejectedError
+from muninn.review_candidates import ProposalRejectedError
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_correction import (
     CorrectionFeedback,
@@ -17,13 +18,14 @@ from muninn.review_correction import (
     RoundFormatError,
     require_reduction,
 )
-from muninn.review_diagnostics import FailurePhase
+from muninn.review_db import database
+from muninn.review_learner_round import Round
 from muninn.review_models import ReviewContext
+from muninn.review_progress import digest
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
 from muninn.review_recovery_codes import RUNTIME_CODES
-from muninn.review_round_state import Round
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
-from muninn.review_supervisor_store import database, mark_correction
+from muninn.review_runtime_bridge import effective_policy
 
 
 class Outcome(Protocol):
@@ -70,18 +72,11 @@ def failure_code(error: ValueError | OSError, fallback: str) -> str:
 
 
 def _advance(pending: Round, context: ReviewContext) -> None:
-    """Keep the permit and deadline while clearing finished launch data."""
+    """Keep the permit and deadline and clear the finished prompt."""
     pending.context = context.model_copy(
         update={"round_index": context.round_index + 1}
     )
-    pending.spawned = False
-    pending.handle = None
-    pending.launch = None
     pending.prompt = b""
-    pending.refresh_count = 0
-    pending.first_execution = None
-    pending.prepared_prompt = b""
-    pending.ready = None
 
 
 def _correct(
@@ -135,10 +130,9 @@ def execute(
     pending: Round,
     outcome: Outcome,
     now: float,
-    fail: Callable[[ReviewContext, str, float, str], None],
+    fail: Callable[[ReviewContext, str, float], None],
 ) -> bool:
     """Commit a final result or retain one checked read or correction round."""
-    stage: FailurePhase = "native output"
     original = None
     try:
         try:
@@ -160,15 +154,11 @@ def execute(
                         )
                     ),
                     now,
-                    stage,
                 )
                 return False
-            stage = "original evidence"
             pending.context = review_prompt.refresh(home, pending.context)
-            stage = "model format"
             request = parse_round(outcome.stdout, pending.context)
             if pending.correction is not None:
-                stage = "candidate validation"
                 if not isinstance(request, FinalRequest):
                     raise ValueError("rejected_validation")
                 if pending.correction.original is not None:
@@ -176,13 +166,10 @@ def execute(
                         pending.correction.original, request.result
                     )
             if isinstance(request, FinalRequest):
-                stage = "commit"
                 original = request.result
                 _commit(home, pending, original, now)
                 return False
-            stage = "controlled read"
             result = execute_read(home, request, pending.context)
-            stage = "original evidence"
             context = review_prompt.refresh(home, pending.context)
             pending.history.append(
                 (request.model_dump(mode="json"), json.loads(result))
@@ -196,14 +183,53 @@ def execute(
                 >= pending.context.policy.max_rounds
             ):
                 raise
-            stage = "commit"
             _correct(home, pending, exc, original)
             return True
     except ValueError as exc:
-        fail(
-            pending.context,
-            failure_code(exc, "rejected_validation"),
-            now,
-            exc.phase if isinstance(exc, CommitRejectedError) else stage,
-        )
+        fail(pending.context, failure_code(exc, "rejected_validation"), now)
     return False
+
+
+def mark_correction(
+    conn: sqlite3.Connection,
+    context: ReviewContext,
+    kind: Literal["format", "reduction"],
+) -> None:
+    """Mark one completed call under the caller's fenced transaction."""
+    if not conn.in_transaction:
+        raise ValueError("transaction_required")
+    row = conn.execute(
+        "SELECT * FROM review_request WHERE id=?", (context.request_id,)
+    ).fetchone()
+    try:
+        if row is None or effective_policy(conn, row) != context.policy:
+            raise ValueError("rejected_fenced")
+    except (ValueError, OSError):
+        raise ValueError("rejected_fenced") from None
+    policy = row["policy_json"]
+    changed = conn.execute(
+        "UPDATE review_call SET outcome=? WHERE attempt_id=? "
+        "AND round_index=? AND state='completed' AND ended_at IS NOT NULL "
+        "AND policy_digest=? AND EXISTS ("
+        "SELECT 1 FROM review_request r JOIN review_attempt a "
+        "ON a.id=r.current_attempt_id CROSS JOIN review_control c "
+        "WHERE r.id=? AND a.id=review_call.attempt_id AND a.request_id=r.id "
+        "AND r.state='running' AND a.ended_at IS NULL "
+        "AND a.generation=? AND c.generation=a.generation "
+        "AND c.admission=1 AND r.policy_digest=? "
+        "AND c.policy_digest=? "
+        "AND r.policy_json=?)",
+        (
+            f"correction_{kind}_requested",
+            context.attempt_id,
+            context.round_index,
+            digest(context.policy),
+            context.request_id,
+            context.generation,
+            row["policy_digest"],
+            digest(context.policy),
+            policy,
+        ),
+    ).rowcount
+    if changed != 1:
+        raise ValueError("rejected_fenced")

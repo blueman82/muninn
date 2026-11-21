@@ -25,6 +25,7 @@ from muninn.decision_write import (
 )
 from muninn.knowledge_write import target
 from muninn.review_commit_state import EVIDENCE_ERRORS
+from muninn.review_db import database
 from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewPolicy
 from muninn.review_progress import (
@@ -35,7 +36,6 @@ from muninn.review_progress import (
 )
 from muninn.review_read_budget import EvidenceLimitError, ReadBudget
 from muninn.review_request_views import request_row, request_view
-from muninn.review_supervisor_store import database
 
 
 def _policy(conn: sqlite3.Connection) -> ReviewPolicy:

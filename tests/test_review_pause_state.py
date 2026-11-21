@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import sqlite3
 import tempfile
 import unittest
 from collections.abc import Generator
@@ -14,13 +13,10 @@ from types import SimpleNamespace
 from typing import BinaryIO, cast
 from unittest import mock
 
-from muninn import cli_serve, poller_stop, review_supervisor, store
 from muninn import review_pause_state as state
-from tests.ingest_support import TID
-from tests.review_pause_support import initialize, interrupt_erasure
+from muninn import store
+from tests.review_pause_support import initialize
 from tests.store_support import public_read
-from tests.test_review_supervisor import SupervisorCase
-from tests.test_review_worker import policy
 
 
 class PauseStateTests(unittest.TestCase):
@@ -30,24 +26,6 @@ class PauseStateTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.home = Path(temp.name)
-
-    def test_missing_witness_refuses_before_loading_review_material(
-        self,
-    ) -> None:
-        selected = policy().model_copy(
-            update={"projection_version": "permitted-fields-v2"}
-        )
-        supervisor = review_supervisor.Supervisor(self.home, selected)
-        with (
-            mock.patch.object(
-                review_supervisor,
-                "load_capability",
-                side_effect=AssertionError("material exposed"),
-            ),
-            self.assertRaisesRegex(ValueError, "pause_unverified"),
-        ):
-            supervisor.start(1.0)
-        self.assertFalse((self.home / "review.supervisor.json").exists())
 
     def test_active_complete_reuses_exact_lock_and_token(self) -> None:
         initialize(self.home)
@@ -296,135 +274,3 @@ class PauseStateTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "pause_unverified"),
         ):
             state.inspect(self.home, state.WITNESS)
-
-
-class OwnerCompletionTests(SupervisorCase):
-    """Require real containment and retained-reference cleanup before proof."""
-
-    def test_restart_replays_interrupted_intent_before_material(self) -> None:
-        self.supervisor.stop(13.0)
-        interrupt_erasure(self.home, TID)
-        other = review_supervisor.Supervisor(self.home, self.policy)
-        self.addCleanup(other.stop, 20.0)
-        other.start(14.0)
-        with mock.patch.object(other, "_create") as create:
-            other.tick(15.0)
-        self.assertEqual(create.call_count, 0)
-        self.assertEqual(
-            self.conn.execute("SELECT count(*) FROM tombstone").fetchone()[0],
-            1,
-        )
-        self.assertEqual(
-            self.conn.execute("SELECT count(*) FROM review_call").fetchone()[
-                0
-            ],
-            0,
-        )
-
-    def test_replay_failures_preserve_complete_then_retry_without_boot(
-        self,
-    ) -> None:
-        self.supervisor.stop(13.0)
-        before = interrupt_erasure(self.home, TID)
-        baseline = self.home / state.BASELINE
-        store.write_json_atomic(baseline, {"obsolete": True})
-        retained = baseline.read_bytes()
-        replay = state.reapply_tombstones
-        error = OSError("replay cleanup failed")
-        other = review_supervisor.Supervisor(self.home, self.policy)
-        self.addCleanup(other.stop, 20.0)
-
-        def after_commit(conn: sqlite3.Connection, home: Path) -> int:
-            self.assertFalse(conn.in_transaction)
-            with self.assertRaises(BlockingIOError):
-                state.acquire(home)
-            with (
-                self.assertRaises(store.BusyError),
-                store.writer_lock(home, wait_s=0),
-            ):
-                self.fail("writer released")
-            replay(conn, home)
-            raise error
-
-        for failure in (error, after_commit):
-            with (
-                mock.patch.object(
-                    state, "reapply_tombstones", side_effect=failure
-                ),
-                mock.patch.object(review_supervisor, "load_prompt") as prompt,
-                mock.patch.object(other, "_create") as create,
-                self.assertRaises(OSError) as caught,
-            ):
-                other.start(14.0)
-            self.assertIs(caught.exception, error)
-            self.assertEqual((prompt.call_count, create.call_count), (0, 0))
-            self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
-            self.assertEqual(baseline.read_bytes(), retained)
-        if os.name == "nt":
-            with self.assertRaisesRegex(ValueError, "pause_unverified"):
-                other.start(15.0)
-            self.assertEqual((self.home / state.WITNESS).read_bytes(), before)
-            self.assertEqual(baseline.read_bytes(), retained)
-            return
-        other.start(15.0)
-        self.assertFalse(baseline.exists())
-        self.assertEqual(
-            self.conn.execute("SELECT count(*) FROM review_call").fetchone()[
-                0
-            ],
-            0,
-        )
-
-    def test_busy_reconciliation_keeps_active_until_buffers_are_drained(
-        self,
-    ) -> None:
-        self.supervisor.tick(13.0)
-        original = state.complete_owner
-
-        def check(home: Path, fd: int, token: str) -> None:
-            self.assertFalse(self.supervisor.monitor.slots)
-            self.assertFalse(self.supervisor._rounds)
-            self.assertFalse(self.supervisor._pending)
-            self.assertFalse(self.supervisor._next)
-            self.assertEqual(self.supervisor.artifact, b"")
-            original(home, fd, token)
-
-        with (
-            store.writer_lock(self.home, wait_s=0),
-            self.assertRaises(store.BusyError),
-        ):
-            self.supervisor.stop(14.0)
-        self.assertTrue(self.supervisor._rounds)
-        self.assertEqual(
-            json.loads((self.home / state.WITNESS).read_bytes())["state"],
-            "active",
-        )
-        with mock.patch.object(state, "complete_owner", side_effect=check):
-            self.supervisor.stop(15.0)
-        self.assertEqual(
-            json.loads((self.home / state.WITNESS).read_bytes())["state"],
-            "complete",
-        )
-
-    def test_poller_shares_token_and_consumes_stop_on_all_platforms(
-        self,
-    ) -> None:
-        self.supervisor.stop(14.0)
-        poller = cli_serve._Poller(self.home, {}, 60)
-        self.assertIsNone(poller.stop_generation)
-        with mock.patch.object(
-            poller_stop,
-            "requested",
-            side_effect=AssertionError("pre-start lookup"),
-        ):
-            self.assertFalse(poller._requested())
-        poller._start_review()
-        self.addCleanup(poller.close)
-        assert poller.stop_generation is not None
-        value = state.parse(
-            state.inspect(self.home, state.WITNESS)[0], state.Witness
-        )
-        assert value is not None and value.owner is not None
-        self.assertEqual(value.owner.generation, poller.stop_generation)
-        poller_stop.request(self.home, os.getpid(), poller.stop_generation)
-        self.assertTrue(poller._requested())

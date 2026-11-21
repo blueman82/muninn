@@ -10,17 +10,20 @@ from contextlib import closing
 from pathlib import Path
 
 from muninn import (
+    review_prompt,
     review_provider_claude,
     review_provider_codex,
-    review_recovery,
-    review_round_launch,
+    review_snapshot,
     store,
 )
 from muninn.decision_requests import continue_decisions
 from muninn.review_budget import reserve_call
 from muninn.review_call import CallOutcome, run_call
+from muninn.review_db import catch_up_due, database, is_contention
 from muninn.review_instructions import artifact
 from muninn.review_json import canonical_json_value
+from muninn.review_learner_result import execute, failure_code
+from muninn.review_learner_round import Round
 from muninn.review_models import RequestView, ReviewContext, ReviewPolicy
 from muninn.review_progress import digest
 from muninn.review_request_views import request_view
@@ -29,15 +32,8 @@ from muninn.review_requests import (
     fail_attempt,
     recover_attempts,
 )
-from muninn.review_round_state import Round
 from muninn.review_rounds import round_schema
 from muninn.review_settings import Settings, load
-from muninn.review_supervisor_result import execute, failure_code
-from muninn.review_supervisor_store import (
-    catch_up_due,
-    database,
-    is_contention,
-)
 
 _PROVIDERS = {
     "claude": review_provider_claude,
@@ -45,6 +41,30 @@ _PROVIDERS = {
 }
 # The CLI envelope around a result carries usage data; allow for it.
 _ENVELOPE_FACTOR = 4
+
+
+def _initialize(home: Path, pending: Round, artifact: bytes) -> None:
+    """Prepare original evidence and the prompt for the next call."""
+    if not pending.initialized:
+        version = review_snapshot.read(home, pending.context.scope)
+        pending.context, pending.initial, pending.knowledge = (
+            review_prompt.initialize(home, pending.context)
+        )
+        if version != review_snapshot.read(home, pending.context.scope):
+            raise ValueError("rejected_revision")
+        pending.context = pending.context.model_copy(
+            update={"knowledge_digest": version}
+        )
+        pending.initialized = True
+    pending.context = review_prompt.refresh(home, pending.context)
+    pending.prompt = review_prompt.assemble(
+        artifact,
+        pending.context,
+        pending.initial,
+        pending.knowledge,
+        pending.history,
+        correction=pending.correction,
+    )
 
 
 class Learner:
@@ -156,11 +176,11 @@ class Learner:
         """Run one call and reconcile it; True asks for another round."""
         context = pending.context
         try:
-            review_round_launch.initialize(self.home, pending, artifact())
+            _initialize(self.home, pending, artifact())
             with database(self.home) as conn:
                 reserve_call(conn, pending.context, now)
         except (ValueError, OSError) as exc:
-            self._fail(context, failure_code(exc, "config"), now, "evidence")
+            self._fail(context, failure_code(exc, "config"), now)
             return False
         outcome = self._call(settings, pending)
         with database(self.home) as conn:
@@ -211,7 +231,6 @@ class Learner:
         context: ReviewContext,
         code: str,
         now: float,
-        stage: str = "review",
     ) -> None:
         """Record the failure and let the request retry when it may."""
         with database(self.home) as conn:
@@ -220,4 +239,3 @@ class Learner:
             except ValueError as exc:
                 if str(exc) != "rejected_fenced":
                     raise
-            review_recovery.record(conn, context.request_id, code, stage, now)

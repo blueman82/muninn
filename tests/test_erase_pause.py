@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import time
-from pathlib import Path
-from typing import Any
 from unittest import mock
 
 from muninn import (
@@ -19,88 +14,11 @@ from muninn import (
 )
 from muninn import review_pause_state as state
 from muninn.review_pause import EraseStatus
-from tests.erase_pause_process import process_gone
-from tests.erase_pause_ready import finish_owner, read_ready_text
 from tests.ingest_support import TID, IngestCase
 from tests.review_pause_support import initialize
-from tests.store_support import direct_python
 from tests.test_review_commit import CommitCase
-from tests.test_review_supervisor import SupervisorCase
 
 MARKER = "ERASUREPROCESSPRIVATECANARY"
-
-
-def wait_file(path: Path) -> None:
-    """Bound disposable fixture synchronization without touching services."""
-    deadline = time.monotonic() + 8
-    while not path.exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-    if not path.exists():
-        raise AssertionError(f"fixture did not publish {path.name}")
-
-
-def owner_fixture(control: Path, replacement: bool) -> None:
-    """Run the real owner and monitor around a local Python wrapper fixture."""
-    fixture = SupervisorCase()
-    try:
-        fixture.setUp()
-        fixture.script = (
-            "import os,time; from pathlib import Path; "
-            f"Path({str(control / 'cli-started')!r})"
-            ".write_text(str(os.getpid())); "
-            f"print({MARKER!r},flush=True); time.sleep(30)"
-        )
-        supervisor = fixture.supervisor
-        deadline = time.monotonic() + 8
-        while (
-            not (control / "cli-started").exists()
-            and time.monotonic() < deadline
-        ):
-            supervisor.tick(13.0)
-            time.sleep(0.01)
-        wait_file(control / "cli-started")
-        pending = next(iter(supervisor._rounds.values()))
-        assert pending.handle is not None
-        wrapper = pending.handle.wrapper
-        work = fixture.home / "review-work" / pending.context.attempt_id
-        work.mkdir(parents=True)
-        (work / "prompt").write_text(MARKER)
-        ready = {
-            "home": str(fixture.home),
-            "work": str(work),
-            "provider": str(fixture.path),
-            "token": supervisor.stop_generation,
-            "cli_pid": int((control / "cli-started").read_text()),
-        }
-        del pending
-        store.write_json_atomic(control / "ready.json", ready)
-        assert supervisor.stop_generation is not None
-        assert poller_stop.wait(
-            fixture.home, os.getpid(), supervisor.stop_generation, 8
-        )
-        assert not (fixture.home / erase.TOMBSTONE_FILE).exists()
-        assert (work / "prompt").read_text() == MARKER
-        supervisor.stop(14.0)
-        assert wrapper.poll() is not None
-        assert not supervisor.monitor._thread.is_alive()
-        assert not any(
-            (
-                supervisor.monitor.slots,
-                supervisor._rounds,
-                supervisor._pending,
-                supervisor._next,
-                supervisor.artifact,
-                supervisor.capability,
-            )
-        )
-        if replacement:
-            fd, token = state.begin_owner(fixture.home)
-            state.complete_owner(fixture.home, fd, token)
-            os.close(fd)
-        (control / "cleaned").write_text("contained and buffers discarded")
-        wait_file(control / "release")
-    finally:
-        fixture.doCleanups()
 
 
 class ErasePauseTests(IngestCase):
@@ -204,117 +122,6 @@ class ErasePauseTests(IngestCase):
         erase.run_erase(absent, session="missing", dry_run=True, env=self.env)
         self.assertTrue(store.db_path(absent).exists())
         self.assertFalse((absent / state.WITNESS).exists())
-
-    def start_owner(
-        self, replacement: bool = False
-    ) -> tuple[subprocess.Popen[bytes], dict[str, Any]]:
-        """Start an isolated service fixture with guaranteed cleanup."""
-        control = self.tmp / "control"
-        control.mkdir()
-        code = (
-            "from pathlib import Path; from tests.test_erase_pause "
-            "import owner_fixture; "
-            f"owner_fixture(Path({str(control)!r}), {replacement!r})"
-        )
-        executable, environment = direct_python()
-        proc = subprocess.Popen(
-            [executable, "-c", code],
-            cwd=Path(__file__).resolve().parent.parent,
-            env={
-                "HOME": str(self.tmp),
-                "USERPROFILE": str(self.tmp),
-                "TMPDIR": str(self.tmp),
-                "TEMP": str(self.tmp),
-                "TMP": str(self.tmp),
-                **{
-                    key: os.environ[key]
-                    for key in ("LD_LIBRARY_PATH", "SYSTEMROOT")
-                    if key in os.environ
-                },
-                **environment,
-            },
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        started = False
-
-        def close() -> None:
-            finish_owner(proc, control / "release", started=started)
-
-        self.addCleanup(close)
-        ready = json.loads(read_ready_text(control / "ready.json"))
-        started = True
-        return proc, ready
-
-    def test_selected_owner_discards_buffers_and_children_before_erase(
-        self,
-    ) -> None:
-        proc, ready = self.start_owner()
-        home, work = Path(ready["home"]), Path(ready["work"])
-        original = Path(ready["provider"]).read_bytes()
-        append = erase.append_tombstones
-        status = EraseStatus()
-
-        def after_cleanup(*args: Any) -> None:
-            wait_file(self.tmp / "control" / "cleaned")
-            self.assertTrue(process_gone(ready["cli_pid"]))
-            self.assertEqual((work / "prompt").read_text(), MARKER)
-            self.assertTrue(status.stop_may_have_been_published)
-            append(*args)
-
-        with mock.patch.object(
-            erase, "append_tombstones", side_effect=after_cleanup
-        ):
-            out = erase.run_erase_request(
-                home,
-                erase.EraseRequest(session=TID),
-                wait_s=5,
-                status=status,
-                env=self.env,
-            )
-        self.assertIsNone(proc.poll())
-        self.assertFalse(work.exists())
-        review = out["review"]
-        assert isinstance(review, dict)
-        self.assertEqual(review["working_files"], 1)
-        self.assertEqual(status.erasure_phase, "verified")
-        self.assertEqual(Path(ready["provider"]).read_bytes(), original)
-        target = json.loads((home / poller_stop.FILE).read_text())
-        self.assertEqual(
-            target, {"pid": proc.pid, "generation": ready["token"]}
-        )
-
-    def test_replacement_owner_refuses_without_second_stop_or_intent(
-        self,
-    ) -> None:
-        proc, ready = self.start_owner(replacement=True)
-        home = Path(ready["home"])
-        request = poller_stop.request
-
-        def publish(*args: Any, **kwargs: Any) -> None:
-            request(*args, **kwargs)
-            wait_file(self.tmp / "control" / "cleaned")
-
-        status = EraseStatus()
-        with (
-            mock.patch.object(poller_stop, "request", side_effect=publish),
-            self.assertRaisesRegex(ValueError, "owner_changed"),
-        ):
-            erase.run_erase_request(
-                home,
-                erase.EraseRequest(session=TID),
-                wait_s=5,
-                status=status,
-                env=self.env,
-            )
-        self.assertEqual(status.erasure_phase, "not_started")
-        self.assertTrue(Path(ready["work"]).exists())
-        self.assertFalse((home / erase.TOMBSTONE_FILE).exists())
-        self.assertEqual(
-            json.loads((home / poller_stop.FILE).read_text()),
-            {"pid": proc.pid, "generation": ready["token"]},
-        )
 
 
 class InterruptedEraseTests(CommitCase):

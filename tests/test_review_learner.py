@@ -145,6 +145,12 @@ class LearnerTests(LearnerCase):
             ["correction_format_requested", "completed"],
         )
 
+    def test_second_format_failure_has_no_third_call(self) -> None:
+        self.fake("{'op':'final','raw':'x'}", "{'op':'final','raw':'x'}")
+        self.learner.tick(13.0)
+        self.assertEqual(self.attempt()[0], "rejected_validation")
+        self.assertEqual(self.count("review_call"), 2)
+
     def test_one_read_round_then_final(self) -> None:
         self.fake("{'op':'search','query':'x','scope':d['scope']}", final())
         self.learner.tick(13.0)

@@ -1,4 +1,4 @@
-"""Exercise targeted and supervisor continuation without execution stubs."""
+"""Exercise targeted and learner continuation without execution stubs."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import subprocess
 import sys
 from unittest import mock
 
-from muninn import decision_requests, review_requests, store
+from muninn import decision_requests, review_requests, review_settings, store
 from muninn.decision_write import submit_intent
-from muninn.review_supervisor import Supervisor
+from muninn.review_learner import Learner
 from tests.decision_support import DecisionCase
 
 
@@ -25,16 +25,7 @@ class DecisionContinuationTests(DecisionCase):
         self.submit(a.id)
         self.submit(b.id)
         before = self.row("SELECT count(*) FROM review_attempt")[0]
-        with (
-            mock.patch.object(Supervisor, "start", side_effect=AssertionError),
-            mock.patch(
-                "muninn.review_round_launch.create_wrapper",
-                side_effect=AssertionError,
-            ),
-        ):
-            result = decision_requests.request_application(
-                self.home, b.id, 25.0
-            )
+        result = decision_requests.request_application(self.home, b.id, 25.0)
         self.assertEqual(
             (result.id, result.state, result.receipt),
             (b.id, "approved_pending", None),
@@ -91,9 +82,7 @@ class DecisionContinuationTests(DecisionCase):
                 self.conn, self.context.request_id, 26.0
             )
         )
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        self.assertIsNone(supervisor._claim(27.0))
+        self.assertIsNone(Learner(self.home)._claim(self.policy, 1, 27.0))
         self.assertEqual(
             self.row(
                 "SELECT state FROM review_request WHERE id=?",
@@ -292,29 +281,6 @@ with store.writer_lock(home, wait_s=0):
             decision_requests.continue_decisions(self.home, 1, 31.0), ()
         )
 
-    def test_stale_owner_policy_or_generation_stops_continuation_setup(
-        self,
-    ) -> None:
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        self.conn.execute("UPDATE review_control SET generation=2")
-        with mock.patch.object(
-            supervisor,
-            "_inputs",
-            side_effect=AssertionError("stale owner setup"),
-        ):
-            self.assertFalse(supervisor._ready_to_spawn(25.0))
-        self.conn.execute(
-            "UPDATE review_control SET generation=1,policy_digest=?",
-            ("f" * 64,),
-        )
-        with mock.patch.object(
-            supervisor,
-            "_inputs",
-            side_effect=AssertionError("stale policy setup"),
-        ):
-            self.assertFalse(supervisor._ready_to_spawn(25.0))
-
     def test_tick_continues_one_decision_before_ordinary_claim(self) -> None:
         candidate = self.stage()
         self.submit(candidate.id)
@@ -323,20 +289,10 @@ with store.writer_lock(home, wait_s=0):
                 self.conn, self.context.request_id, 24.0
             )
         )
-        supervisor = Supervisor(self.home, self.policy)
-        supervisor.generation = 1
-        supervisor._owner = 1
-        supervisor.monitor = mock.Mock()
-        supervisor.monitor.drain.return_value = []
-        supervisor._catchup = (0, 100.0)
-        with (
-            mock.patch.object(supervisor, "_inputs", return_value=True),
-            mock.patch(
-                "muninn.review_round_launch.create_wrapper",
-                side_effect=AssertionError,
-            ),
-        ):
-            supervisor.tick(25.0)
+        review_settings.save(self.home, review_settings.Settings(enabled=True))
+        learner = Learner(self.home)
+        learner._catchup = (0, 100.0)
+        learner.tick(25.0)
         view = decision_requests.decision_view(self.conn, candidate.id)
         self.assertEqual(view.state, "saved")
         self.assertIsNotNone(view.receipt)

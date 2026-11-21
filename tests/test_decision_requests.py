@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest import mock
-
 from muninn import decision_requests, review_requests
 from muninn.decision_write import submit_intent
 from muninn.review_history import _covered, replacements
@@ -197,13 +195,9 @@ class DecisionRequestTests(DecisionCase):
         self.approve(self.intent(candidate.id))
         receipt = self.saved_fixture(candidate.id)
         before = self.projection()
-        with mock.patch(
-            "muninn.review_supervisor.Supervisor.start",
-            side_effect=AssertionError,
-        ):
-            view = decision_requests.request_application(
-                self.home, candidate.id, 30.0
-            )
+        view = decision_requests.request_application(
+            self.home, candidate.id, 30.0
+        )
         self.assertEqual((view.state, view.receipt), ("saved", receipt))
         self.assertEqual(self.projection(), before)
 

@@ -15,7 +15,6 @@ from muninn import (
     query,
     review_recovery,
     review_requests,
-    review_unknown_recovery,
 )
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
 from muninn.cli_know_shared import saved_policy
@@ -349,15 +348,7 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Dispatch explicit learning controls with content-free refusal codes."""
     record["cmd"] = f"learn {a.learn_cmd}"
     try:
-        if a.learn_cmd == "recover-unknown":
-            out = review_unknown_recovery.recover(
-                home,
-                a.attempt_id,
-                a.round_index,
-                accept_uncertainty=a.accept_uncertainty,
-                now=time.time(),
-            ).model_dump(mode="json")
-        elif a.learn_cmd in {"on", "off"}:
+        if a.learn_cmd in {"on", "off"}:
             out = switch(home, a.learn_cmd == "on", time.time())
         elif a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
             out = read_store(

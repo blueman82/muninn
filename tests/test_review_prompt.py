@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import time
 from unittest import mock
 
+from muninn import review_learner_result as completion
 from muninn import review_prompt, review_requests
-from muninn import review_supervisor_result as completion
 from muninn.knowledge_models import ReviewResult
 from muninn.review_correction import CorrectionFeedback, CorrectionState
 from muninn.review_models import ReviewContext
 from tests.ingest_support import line
+from tests.test_review_learner import LearnerCase
 from tests.test_review_requests import RequestCase
-from tests.test_review_supervisor import SupervisorCase
 
 
 class ReviewPromptTests(RequestCase):
@@ -201,7 +202,7 @@ class ReviewPromptTests(RequestCase):
         )
 
 
-class ReviewPromptRoundTests(SupervisorCase):
+class ReviewPromptRoundTests(LearnerCase):
     """Carry admitted reads into the next prompt and final commit."""
 
     def test_read_refreshes_complete_union_before_next_round_and_commit(
@@ -232,19 +233,20 @@ class ReviewPromptRoundTests(SupervisorCase):
                 "no_change_reason": "No supported changes",
             },
         }
-        self.script = (
-            "import json,sys; from pathlib import Path; "
-            "p=json.load(sys.stdin); n=p['data']['round_index']; "
-            f"Path({str(self.home)!r},str(n)).write_text(json.dumps(p)); "
-            f"op={read!r} if n==1 else {final!r}; "
+        self.exe.write_text(
+            f"#!{sys.executable}\n"
+            "import json,sys; from pathlib import Path\n"
+            "p=json.load(sys.stdin); n=p['data']['round_index']\n"
+            f"Path({str(self.home)!r},str(n)).write_text(json.dumps(p))\n"
+            f"op={read!r} if n==1 else {final!r}\n"
             "print(json.dumps({'type':'result','subtype':'success',"
-            "'is_error':False,'structured_output':op}))"
+            "'is_error':False,'structured_output':op}))\n"
         )
         real = completion.commit_review
         with mock.patch.object(
             completion, "commit_review", wraps=real
         ) as commit:
-            self.finish()
+            self.learner.tick(13.0)
         first = json.loads((self.home / "1").read_text())["data"]
         second = json.loads((self.home / "2").read_text())["data"]
         ids = tuple(
