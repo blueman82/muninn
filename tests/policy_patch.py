@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import contextlib
+import sqlite3
 import unittest
 from importlib import import_module
 from unittest import mock
 
 from muninn import review_settings
+from muninn.review_claims import UNKNOWN_CONFIG
 from muninn.review_json import canonical_json
-from muninn.review_models import ReviewPolicy
+from muninn.review_models import CallView, ReviewContext, ReviewPolicy
 from muninn.review_progress import digest
+from muninn.review_request_views import call_view
 
 _CONSUMERS = (
     "cli_decision",
@@ -62,3 +65,37 @@ def use_policy(case: unittest.TestCase, policy: ReviewPolicy) -> None:
     home = getattr(case, "home", None)
     if home is not None:
         review_settings.save(home, review_settings.Settings(enabled=True))
+
+
+def reserve_call(
+    conn: sqlite3.Connection, context: ReviewContext, now: float
+) -> CallView:
+    """Insert the reserved call row a learning round would record.
+
+    Args:
+        conn: Connection in the caller's transaction.
+        context: Admitted round to record.
+        now: Reservation time in UTC seconds.
+
+    Returns:
+        The stored call.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO review_call(attempt_id,round_index,"
+        "budget_account_id,"
+        "policy_digest,state,reserved_at,requested_json,observed_json) "
+        "VALUES(?,?,'test',?,'reserved',?,'{}',?)",
+        (
+            context.attempt_id,
+            context.round_index,
+            digest(context.policy),
+            now,
+            canonical_json(UNKNOWN_CONFIG),
+        ),
+    )
+    return call_view(
+        conn.execute(
+            "SELECT * FROM review_call WHERE attempt_id=? AND round_index=?",
+            (context.attempt_id, context.round_index),
+        ).fetchone()
+    )

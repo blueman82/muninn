@@ -3,21 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
-from muninn import review_state
-from muninn.review_models import ReviewPolicy
-from muninn.review_policy_status import policy_status
+from muninn import review_settings, review_state
 from muninn.review_recovery_codes import (
     CONTAINED,
     EXPLANATIONS,
     SHARED,
     STARTUP_STAGES,
 )
-
-
-def enabled(policy: ReviewPolicy) -> bool:
-    """Limit widened ongoing recovery authority to its approved revision."""
-    return policy.policy_id == "muninn-codex-ongoing-production-v3"
 
 
 def explain(code: str, stage: str) -> dict[str, str]:
@@ -119,7 +113,9 @@ def notice(conn: sqlite3.Connection) -> dict[str, str] | None:
     }
 
 
-def startup_action(conn: sqlite3.Connection) -> dict[str, str] | None:
+def startup_action(
+    conn: sqlite3.Connection, home: Path
+) -> dict[str, str] | None:
     """Select an owner action using saved admission and verified policy state.
 
     This read does not establish live host or account health and changes no
@@ -127,12 +123,12 @@ def startup_action(conn: sqlite3.Connection) -> dict[str, str] | None:
 
     Args:
         conn: Existing connection whose read snapshot is caller-owned.
+        home: Muninn data directory holding the learning settings.
 
     Returns:
         One fixed action notice, or None when no owner action is required.
     """
-    status = policy_status(conn)
-    safe = status.enabled is True and status.policy_status == "valid"
+    safe = review_settings.is_enabled(home)
     pause = (
         "Keep learning paused. Run muninn doctor --pretty for current checks."
     )
@@ -168,17 +164,9 @@ def startup_action(conn: sqlite3.Connection) -> dict[str, str] | None:
         return None
     return {
         "id": "setup",
-        "code": (
-            "paused"
-            if status.policy_status == "valid"
-            else status.policy_status
-        ),
+        "code": "paused",
         "stage": "admission",
-        "cause": (
-            "Learning admission is closed."
-            if status.enabled is False
-            else "Muninn cannot verify saved learning admission."
-        ),
+        "cause": "Learning admission is closed.",
         "action": pause,
     }
 

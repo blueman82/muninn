@@ -27,8 +27,6 @@ from muninn import (
 from muninn import review_pause as q
 from muninn import store_fingerprint as fingerprint
 from muninn.cli_core import Env, Out, Record, Result
-from muninn.review_models import ReviewPolicy
-from muninn.review_progress import checked_policy, digest
 
 __all__ = ["REBUILD", "rebuild"]
 REBUILD = "muninn.sqlite.rebuild"
@@ -97,12 +95,6 @@ def _fence(conn: sqlite3.Connection) -> sqlite3.Row:
         with contextlib.suppress(BaseException):
             conn.execute("ROLLBACK")
         raise
-    if control["admission"]:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        if digest(policy) != control["policy_digest"]:
-            raise ValueError("review_policy_required")
     return control
 
 

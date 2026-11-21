@@ -329,14 +329,17 @@ class ReviewProvenanceTests(ReviewReceiptCase):
 
     def counts(self) -> tuple[int, int]:
         """Read current indexed logical eligibility and completion."""
-        got = obs_stats.review_stats(self.conn, 20.0)
+        got = obs_stats.review_stats(self.conn, 20.0, self.home)
         return got.eligible_records, got.completed_records
 
     def gaps(self) -> dict[str, obs.CheckResult]:
         """Read durable health after removing all best-effort logs."""
         for name in ("calls.jsonl", "calls.jsonl.1"):
             (self.home / name).unlink(missing_ok=True)
-        return {c["check"]: c for c in obs.review_checks(self.conn, 20.0)}
+        return {
+            c["check"]: c
+            for c in obs.review_checks(self.conn, 20.0, self.home)
+        }
 
     def test_same_length_rewrite_refusal_keeps_receipt_but_loses_coverage(
         self,

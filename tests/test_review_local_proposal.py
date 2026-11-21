@@ -7,7 +7,6 @@ from contextlib import closing
 from unittest import mock
 
 from muninn import (
-    review_budget,
     review_evidence,
     review_originals,
     review_requests,
@@ -15,7 +14,7 @@ from muninn import (
 )
 from muninn.review_models import AttemptView, ReviewContext
 from tests.ingest_support import TID, line
-from tests.policy_patch import use_policy
+from tests.policy_patch import reserve_call, use_policy
 from tests.test_review_commit import CommitCase
 
 
@@ -78,7 +77,6 @@ class LocalProposalTests(CommitCase):
         ):
             local = self.claim()
         self.assertNotEqual(local.id, old["id"])
-        self.assertIsNone(local.requested)
         self.assertEqual(local.observed, review_requests.UNKNOWN_CONFIG)
         self.assertEqual(
             (local.generation, local.outcome), (1, "operator_retry")
@@ -125,7 +123,6 @@ class LocalProposalTests(CommitCase):
                 self.assertEqual(self.claim(generation).id, receipt.attempt_id)
                 self.assertEqual(self.save(self.result([])), receipt)
         self.assertEqual(self.state(), before)
-        self.assertIsNotNone(self.claim().requested)
         self.assertEqual(
             self.row("SELECT origin FROM review_request")[0], "review"
         )
@@ -137,8 +134,7 @@ class LocalProposalTests(CommitCase):
             )
         )
         request = self.enqueue(self.window(2, 2))
-        first = self.claim(request_id=request.id)
-        self.assertIsNone(first.requested)
+        self.claim(request_id=request.id)
         for state in ("waiting", "cancelled", "failed", "running"):
             with self.subTest(state=state):
                 self.conn.execute(
@@ -147,7 +143,6 @@ class LocalProposalTests(CommitCase):
                     (state, request.id),
                 )
                 local = self.claim(request_id=request.id)
-                self.assertIsNone(local.requested)
                 self.assertEqual(local.outcome, "operator_retry")
                 self.assertEqual(
                     self.row(
@@ -198,15 +193,7 @@ class LocalProposalTests(CommitCase):
 
     def test_unknown_calls_keep_charges_clocks_metadata_and_caps(self) -> None:
         self.policy = self.policy.model_copy(
-            update={
-                "budget": self.policy.budget.model_copy(
-                    update={
-                        "max_cost_decimal": "2.00",
-                        "conservative_call_cost_decimal": "0.75",
-                        "currency": "EUR",
-                    }
-                )
-            }
+            update={"max_input_bytes": self.policy.max_input_bytes + 1}
         )
         self.install_policy()
         worker = self.transaction(
@@ -219,7 +206,7 @@ class LocalProposalTests(CommitCase):
         )
         for index in (1, 2):
             self.transaction(
-                lambda i=index: review_budget.reserve_call(
+                lambda i=index: reserve_call(
                     self.conn,
                     self.runtime(self.context.attempt_id, i),
                     12.0 + i,
@@ -239,7 +226,7 @@ class LocalProposalTests(CommitCase):
                 "SELECT * FROM review_call ORDER BY round_index"
             )
         ]
-        local = self.claim()
+        self.claim()
         self.assertEqual(
             [
                 dict(row)
@@ -257,21 +244,6 @@ class LocalProposalTests(CommitCase):
                 for row in calls
             ],
         )
-        self.assertIsNone(
-            review_budget.aggregate_usage(
-                self.conn, self.policy.budget.account_id
-            ).cost_decimal
-        )
-        for attempt, error in (
-            (self.context.attempt_id, "rejected_fenced"),
-            (local.id, "budget_call_limit"),
-        ):
-            with self.assertRaisesRegex(ValueError, error):
-                self.transaction(
-                    lambda ident=attempt: review_budget.reserve_call(
-                        self.conn, self.runtime(ident), 16.0
-                    )
-                )
         self.assertEqual(
             self.row("SELECT count(*),min(reserved_at) FROM review_call")[:],
             (2, 13.0),
@@ -325,7 +297,6 @@ class LocalProposalTests(CommitCase):
         self.path.write_bytes(original)
         self.conn.execute(
             "CREATE TEMP TRIGGER refuse_local BEFORE INSERT ON review_attempt "
-            "WHEN NEW.requested_json IS NULL "
             "BEGIN SELECT RAISE(ABORT,'refused'); END"
         )
         with self.assertRaisesRegex(sqlite3.IntegrityError, "refused"):

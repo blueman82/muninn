@@ -14,14 +14,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from muninn import platform_io, query, store
+from muninn import platform_io, query, review_settings, store
 from muninn.query.index_age import ALIVE_AT, seconds_since
-from muninn.review_models import ReviewPolicy
-from muninn.review_policy_status import admission_check, policy_status
-from muninn.review_policy_status import (
-    configured_policy_check as _review_policy,
-)
 from muninn.review_recovery import health_checks as learning_checks
+from muninn.review_settings import POLICY
 
 DATA_FILES = frozenset(
     {
@@ -175,19 +171,20 @@ def install_sha(env: Mapping[str, str]) -> str | None:
 
 
 def review_health(
-    conn: sqlite3.Connection, now: float
+    conn: sqlite3.Connection, now: float, home: Path
 ) -> tuple[tuple[str, bool | None, str, str], ...]:
     """Derive finite review diagnostics without probing processes or repairing.
 
     Args:
         conn: Current normalized read snapshot.
         now: Observation time in UTC seconds.
+        home: Data directory holding the learning settings.
 
     Returns:
         Check arguments with safe codes and counts, never stored explanations.
     """
     rows = conn.execute(
-        "SELECT a.started_at,a.ended_at,a.generation,r.policy_json,"
+        "SELECT a.started_at,a.ended_at,a.generation,"
         "r.state,EXISTS(SELECT 1 FROM review_call c WHERE c.attempt_id=a.id "
         "AND c.ended_at IS NULL),a.error_code,a.outcome "
         "FROM review_attempt a JOIN review_request r ON r.id=a.request_id"
@@ -211,18 +208,12 @@ def review_health(
         started,
         ended,
         epoch,
-        raw,
         state,
         process_pending,
         error,
         outcome,
     ) in rows:
-        try:
-            policy = ReviewPolicy.model_validate_json(raw)
-        except ValueError:
-            counts["config"] += 1
-            continue
-        overdue = ended is None and now > started + policy.deadline_seconds
+        overdue = ended is None and now > started + POLICY.deadline_seconds
         counts["process_deadline"] += error == "deadline" or (
             overdue and bool(process_pending)
         )
@@ -262,8 +253,10 @@ def review_health(
         )
     )
     output.extend(_review_gap_checks(conn, control is not None))
-    output.append(_review_policy(conn))
-    output.append(admission_check(policy_status(conn)))
+    enabled = review_settings.is_enabled(home)
+    output.append(
+        ("review_admission", enabled, "open" if enabled else "closed", "info")
+    )
     output.extend(learning_checks(conn))
     return tuple(output)
 

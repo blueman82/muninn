@@ -14,7 +14,7 @@ from muninn import file_sync, platform_io
 from muninn.knowledge_models import StrictModel, Text
 from muninn.review_instructions import PROMPT_DIGEST
 from muninn.review_json import canonical_json_value, result_schema
-from muninn.review_models import PilotBudget, ReviewPolicy, RunnerConfig
+from muninn.review_models import ReviewPolicy
 
 FILE_NAME = "learning.json"
 
@@ -52,6 +52,14 @@ def load(home: Path) -> Settings:
         raise ValueError("learning_settings_invalid") from None
 
 
+def is_enabled(home: Path) -> bool:
+    """Tell whether learning is on; unreadable settings count as off."""
+    try:
+        return load(home).enabled
+    except ValueError:
+        return False
+
+
 def save(home: Path, settings: Settings) -> None:
     """Replace the settings file atomically with owner-only access.
 
@@ -79,13 +87,6 @@ def _policy() -> ReviewPolicy:
         result_schema_digest=hashlib.sha256(
             canonical_json_value(result_schema()).encode()
         ).hexdigest(),
-        runner=RunnerConfig(
-            runner="claude_cli",
-            executable="claude",
-            version="unversioned",
-            model="sonnet",
-            reasoning="low",
-        ),
         max_rounds=2,
         max_input_bytes=1_048_576,
         max_output_bytes=32768,
@@ -96,17 +97,6 @@ def _policy() -> ReviewPolicy:
         concurrency=1,
         hook_wait_seconds=0.0,
         allow_global=False,
-        # Throwaway until the budget field is removed from ReviewPolicy.
-        budget=PilotBudget(
-            account_id="learner",
-            max_model_calls=1_000_000,
-            max_wall_seconds=1e9,
-            max_cost_decimal=None,
-            conservative_call_cost_decimal=None,
-            currency=None,
-            approved_by="muninn",
-            approved_at=0.0,
-        ),
     )
 
 

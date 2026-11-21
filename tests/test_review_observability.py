@@ -9,13 +9,13 @@ from unittest import mock
 from muninn import (
     obs,
     obs_stats,
-    review_budget,
     review_progress,
     review_requests,
     store,
 )
 from muninn.review_models import ReviewContext
 from tests.ingest_support import TID
+from tests.policy_patch import reserve_call
 from tests.test_obs import ReviewReceiptCase
 
 SECRET = "private-result-and-exception-canary"
@@ -26,11 +26,15 @@ class ReviewObservabilityTests(ReviewReceiptCase):
 
     def snapshot(self, now: float = 20.0) -> dict[str, object]:
         """Read only the contracted review report at an explicit time."""
-        return obs_stats.review_stats(self.conn, now).model_dump(mode="json")
+        return obs_stats.review_stats(self.conn, now, self.home).model_dump(
+            mode="json"
+        )
 
     def checks(self, now: float = 20.0) -> dict[str, obs.CheckResult]:
         """Read content-free review diagnostics without changing state."""
-        return {c["check"]: c for c in obs.review_checks(self.conn, now)}
+        return {
+            c["check"]: c for c in obs.review_checks(self.conn, now, self.home)
+        }
 
     def reserve(self) -> str:
         """Claim and reserve a real request using an explicit policy."""
@@ -49,9 +53,7 @@ class ReviewObservabilityTests(ReviewReceiptCase):
             round_index=1,
             deadline=72.0,
         )
-        self.transaction(
-            lambda: review_budget.reserve_call(self.conn, context, 13.0)
-        )
+        self.transaction(lambda: reserve_call(self.conn, context, 13.0))
         return attempt.id
 
     def test_prompt_limit_log_preserves_only_finite_failure(self) -> None:
@@ -80,7 +82,9 @@ class ReviewObservabilityTests(ReviewReceiptCase):
             (self.home / name).unlink(missing_ok=True)
         with store.connect_ro(store.db_path(self.home)) as conn:
             self.addCleanup(conn.close)
-            after = obs_stats.review_stats(conn, 20.0).model_dump(mode="json")
+            after = obs_stats.review_stats(conn, 20.0, self.home).model_dump(
+                mode="json"
+            )
         self.assertEqual(before, after)
 
     def test_busy_ack_and_recovered_capture_are_separate(self) -> None:
@@ -277,7 +281,9 @@ class ReviewObservabilityTests(ReviewReceiptCase):
             (json.dumps({"result": SECRET}),),
         )
         self.assertIsNone(
-            obs_stats.review_stats(self.conn, 20.0).usage.input_tokens
+            obs_stats.review_stats(
+                self.conn, 20.0, self.home
+            ).usage.input_tokens
         )
         self.conn.execute(
             "UPDATE review_call SET state='completed',usage_json=?",
@@ -293,18 +299,8 @@ class ReviewObservabilityTests(ReviewReceiptCase):
                 ),
             ),
         )
-        got = obs_stats.review_stats(self.conn, 20.0).usage
+        got = obs_stats.review_stats(self.conn, 20.0, self.home).usage
         self.assertEqual((got.input_tokens, got.output_tokens), (0, 2))
-
-    def test_unknown_policy_and_error_text_never_reach_doctor(self) -> None:
-        self.reserve()
-        self.conn.execute(
-            "UPDATE review_control SET policy_json=?",
-            (json.dumps({"error": SECRET}),),
-        )
-        got = self.checks()
-        self.assertIs(got["review_policy"]["ok"], False)
-        self.assertNotIn(SECRET, json.dumps(got))
 
     def test_deadline_failure_and_abandoned_recovery_stay_visible(
         self,
@@ -366,7 +362,7 @@ class ReviewObservabilityTests(ReviewReceiptCase):
                 "WHERE round_index=?",
                 (json.dumps(usage), round_index),
             )
-        got = obs_stats.review_stats(self.conn, 20.0).usage
+        got = obs_stats.review_stats(self.conn, 20.0, self.home).usage
         self.assertEqual(got.input_tokens, 4)
         self.assertIsNone(got.output_tokens)
         self.assertIsNone(got.currency)
@@ -375,5 +371,7 @@ class ReviewObservabilityTests(ReviewReceiptCase):
             "UPDATE review_call SET usage_json=NULL WHERE round_index=2"
         )
         self.assertIsNone(
-            obs_stats.review_stats(self.conn, 20.0).usage.input_tokens
+            obs_stats.review_stats(
+                self.conn, 20.0, self.home
+            ).usage.input_tokens
         )

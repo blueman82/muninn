@@ -135,13 +135,12 @@ def claim(
         conn, row, budget=ReadBudget(POLICY.max_input_bytes)
     )
     operator = _ready(conn, row, policy, now, proposal)
-    return _start(conn, row, policy, now, proposal, operator)
+    return _start(conn, row, now, proposal, operator)
 
 
 def _start(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
-    policy: ReviewPolicy,
     now: float,
     proposal: bool,
     operator: bool,
@@ -151,13 +150,12 @@ def _start(
         fence(conn, row, "operator_retry", now)
     ident = f"A_{uuid4().hex}"
     conn.execute(
-        "INSERT INTO review_attempt(id,request_id,generation,requested_json,"
+        "INSERT INTO review_attempt(id,request_id,generation,"
         "observed_json,started_at,progress_at,outcome) "
-        "VALUES(?,?,1,?,?,?,?,?)",
+        "VALUES(?,?,1,?,?,?,?)",
         (
             ident,
             row["id"],
-            None if proposal else canonical_json(policy.runner),
             canonical_json(UNKNOWN_CONFIG),
             now,
             now,
@@ -244,4 +242,4 @@ def claim_or_refuse(
             (request_id,),
         )
         return request_view(request_row(conn, request_id))
-    return _start(conn, row, policy, now, False, operator)
+    return _start(conn, row, now, False, operator)

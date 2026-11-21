@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from pathlib import Path
 
-from muninn import review_recovery, review_state
+from muninn import review_recovery, review_settings, review_state
 from muninn.knowledge_models import RequestId
 from muninn.review_diagnostics import correction_status
 from muninn.review_models import CorrectionStatus
-from muninn.review_policy_status import policy_status
 from muninn.review_request_views import request_row, request_view
 
 _STAGES = {
@@ -177,22 +177,20 @@ def _correction(status: CorrectionStatus) -> str:
     )
 
 
-def _learning(conn: sqlite3.Connection) -> str:
+def _learning(conn: sqlite3.Connection, home: Path) -> str:
     """Describe current admission separately from a historical failure."""
-    status = policy_status(conn)
     setup = _saved(conn, "setup")
-    if not status.enabled or status.policy_status != "valid":
+    if not review_settings.is_enabled(home):
         current = (
-            "Current learning admission is paused or its policy cannot be "
-            "verified. Inspect muninn doctor --pretty before changing setup. "
+            "Current learning admission is paused. Inspect muninn doctor "
+            "--pretty before changing setup. "
             "A historical request failure does not identify the current cause."
         )
     else:
         current = (
-            "Current learning admission is enabled with a valid stored "
-            "policy. Unrelated requests can continue subject to current "
-            "runtime checks. This does not prove a worker is running "
-            "or that current setup passes."
+            "Current learning admission is enabled. Unrelated requests can "
+            "continue subject to current runtime checks. This does not prove "
+            "a worker is running or that current setup passes."
         )
     if setup is not None:
         detail = review_recovery.explain(setup["code"], setup["stage"])
@@ -255,7 +253,9 @@ def _action(code: str, ident: str, state: str) -> str:
     return "No failure recovery action is indicated by the retained history."
 
 
-def explain(conn: sqlite3.Connection, ident: RequestId) -> dict[str, str]:
+def explain(
+    conn: sqlite3.Connection, ident: RequestId, home: Path
+) -> dict[str, str]:
     """Return ordinary-language inspection using only retained metadata."""
     request = request_view(request_row(conn, ident))
     code, failure = _failure(conn, ident)
@@ -267,7 +267,7 @@ def explain(conn: sqlite3.Connection, ident: RequestId) -> dict[str, str]:
         _correction(correction),
         _impact(conn, ident),
         _calls(conn, ident),
-        _learning(conn),
+        _learning(conn, home),
         _action(code, ident, request.state),
         f"To clear only this request's saved reminder, run muninn learn "
         f"dismiss {ident}. Dismissal preserves request history and does not "

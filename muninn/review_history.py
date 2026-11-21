@@ -10,7 +10,6 @@ from typing import Literal, NamedTuple
 
 from muninn import classify, review_state
 from muninn.knowledge_models import Digest, Scope, StrictModel
-from muninn.review_estimate import estimate
 from muninn.review_evidence_models import EvidenceWindow, SourceRef
 from muninn.review_history_plan import plan
 from muninn.review_json import canonical_json
@@ -49,13 +48,12 @@ class HistoryItem(StrictModel):
 
 
 class HistoryScan(StrictModel):
-    """Present verified work, exclusions and explicitly uncertain estimates."""
+    """Present verified work and the excluded source ranges."""
 
     policy_digest: str
     project_id: str | None
     items: list[HistoryItem]
     excluded: list[dict[str, str | int]]
-    estimate: dict[str, str | int | float | None]
 
     @property
     def digest(self) -> str:
@@ -240,7 +238,6 @@ def _inspect(
         project_id=project,
         items=items,
         excluded=excluded,
-        estimate=estimate(conn, policy, len(items)),
     )
 
 

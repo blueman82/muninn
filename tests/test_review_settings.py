@@ -40,7 +40,6 @@ class SettingsTests(unittest.TestCase):
 
     def test_policy_is_constant(self) -> None:
         policy = review_settings.POLICY
-        self.assertEqual(policy.runner.runner, "claude_cli")
         self.assertEqual(policy.prompt_digest, PROMPT_DIGEST)
         self.assertEqual(policy.hook_wait_seconds, 0)
 

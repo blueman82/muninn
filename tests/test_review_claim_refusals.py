@@ -6,7 +6,6 @@ import sqlite3
 from unittest import mock
 
 from muninn import (
-    review_budget,
     review_claims,
     review_evidence,
     review_originals,
@@ -18,7 +17,7 @@ from muninn.review_evidence_models import SourceRef
 from muninn.review_json import canonical_json
 from muninn.review_models import AttemptView, RequestView, ReviewContext
 from tests.ingest_support import line, primary, rollout
-from tests.policy_patch import use_policy
+from tests.policy_patch import reserve_call, use_policy
 from tests.test_review_requests import RequestCase
 
 
@@ -175,9 +174,7 @@ class ClaimRefusalTests(RequestCase):
             round_index=1,
             deadline=72.0,
         )
-        self.transaction(
-            lambda: review_budget.reserve_call(self.conn, context, 12.5)
-        )
+        self.transaction(lambda: reserve_call(self.conn, context, 12.5))
         self.fail_worker(attempt, "unavailable", 13.0)
         original = self.path.read_bytes()
         self.path.unlink()

@@ -14,7 +14,7 @@ from muninn.review_correction import (
 )
 from muninn.review_evidence import initial_evidence
 from muninn.review_evidence_models import EvidenceLocator, SourceRef
-from muninn.review_launch_inputs import PromptArtifact
+from muninn.review_instructions import PromptArtifact
 from muninn.review_models import ReviewContext
 from muninn.review_rounds import (
     EvidenceRequest,

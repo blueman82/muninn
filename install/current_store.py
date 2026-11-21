@@ -19,8 +19,6 @@ from muninn import (
     store,
 )
 from muninn import review_pause as q
-from muninn.review_models import ReviewPolicy
-from muninn.review_progress import checked_policy, digest
 
 
 def _fence_current(conn: sqlite3.Connection) -> sqlite3.Row:
@@ -48,14 +46,6 @@ def _restore_admission(conn: sqlite3.Connection, control: sqlite3.Row) -> None:
         raise StepFailedError("current_store_invalid")
     if not control["admission"]:
         return
-    try:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(control["policy_json"])
-        )
-        if control["policy_digest"] != digest(policy):
-            raise ValueError("policy_digest_mismatch")
-    except ValueError:
-        raise ValueError("review_policy_required") from None
     conn.execute("UPDATE review_control SET admission=1")
 
 

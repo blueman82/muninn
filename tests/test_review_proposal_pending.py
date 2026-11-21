@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest import mock
 
 from muninn import (
-    review_budget,
     review_originals,
     review_pause,
     review_requests,
@@ -16,6 +15,7 @@ from muninn import (
 from muninn.review_models import AttemptView, ReviewContext
 from muninn.tombstone_key import TOMBSTONE_FILE
 from tests.ingest_support import TID
+from tests.policy_patch import reserve_call
 from tests.review_pause_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
@@ -55,9 +55,7 @@ class ProposalPendingTests(CommitCase):
                 deadline=72.0,
             )
             self.transaction(
-                lambda value=context: review_budget.reserve_call(
-                    self.conn, value, 13.0
-                )
+                lambda value=context: reserve_call(self.conn, value, 13.0)
             )
             self.conn.execute(
                 "UPDATE review_call SET state='completed' WHERE round_index=?",
@@ -220,7 +218,6 @@ class ProposalPendingTests(CommitCase):
                 local = self.claim()
                 self.assertTrue(self.conn.in_transaction)
                 self.assertNotEqual(local.id, self.context.attempt_id)
-                self.assertIsNone(local.requested)
                 self.assertEqual(local.outcome, "operator_retry")
                 self.assertEqual(
                     self.row(
@@ -255,7 +252,6 @@ class ProposalPendingTests(CommitCase):
                 )
             )
         self.assertNotEqual(attempt.id, self.context.attempt_id)
-        self.assertIsNotNone(attempt.requested)
         self.assertEqual(
             self.row("SELECT origin FROM review_request")[0], "review"
         )

@@ -180,12 +180,6 @@ class CliLearningTests(CliLearningCase):
                 (out["attempt_id"],),
             )[0]
         )
-        self.assertIsNotNone(
-            self.row(
-                "SELECT requested_json FROM review_attempt WHERE id=?",
-                (previous,),
-            )[0]
-        )
         self.assertEqual(self.row("SELECT count(*) FROM review_call")[0], 0)
         repeat_code, repeat = self.propose()
         self.assertEqual(

@@ -15,7 +15,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
-from muninn import classify, platform_io, store
+from muninn import classify, platform_io, review_settings, store
 from muninn.knowledge_read import read_snapshot
 from muninn.obs_status import (
     ELIGIBLE,
@@ -28,7 +28,6 @@ from muninn.obs_status import (
     read_status,
 )
 from muninn.review_models import ReviewStats, Usage
-from muninn.review_policy_status import policy_status
 
 _LAST_PASS_FIELDS = (
     "last_pass_at",
@@ -271,7 +270,9 @@ def stats(
     db = store.db_path(home)
     with read_snapshot(conn):
         out = _table_counts(conn)
-        out["review"] = review_stats(conn, time.time()).model_dump(mode="json")
+        out["review"] = review_stats(conn, time.time(), home).model_dump(
+            mode="json"
+        )
     out["db_bytes"] = db.stat().st_size if db.exists() else 0
     out["db_space"] = db_space(conn)
     out["last_pass"] = (
@@ -378,12 +379,15 @@ def _observed_busy(conn: sqlite3.Connection) -> int | None:
     return count if observed else None
 
 
-def review_stats(conn: sqlite3.Connection, now: float) -> ReviewStats:
+def review_stats(
+    conn: sqlite3.Connection, now: float, home: Path
+) -> ReviewStats:
     """Read durable review counts and explicitly incomplete busy observations.
 
     Args:
         conn: Current normalized store connection; no writer is acquired.
         now: Observation time in UTC seconds.
+        home: Data directory holding the learning settings.
 
     Returns:
         Content-free counts, nonnegative ages and nullable actual usage.
@@ -400,7 +404,7 @@ def review_stats(conn: sqlite3.Connection, now: float) -> ReviewStats:
         return ReviewStats.model_validate(
             {
                 "schema_version": 1,
-                "admission": policy_status(conn),
+                "admission": {"enabled": review_settings.is_enabled(home)},
                 "requests_by_state": _pairs(
                     conn,
                     "SELECT state,count(*) FROM review_request GROUP BY state",

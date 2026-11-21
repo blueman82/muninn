@@ -17,19 +17,6 @@ from muninn.review_recovery_codes import CONTAINED
 def learning_status(issue: Mapping[str, str]) -> str:
     """Render plain current wording from safe codes, never saved text."""
     detail = explain(issue.get("code", "config"), "not recorded")
-    if issue.get("code") in {
-        "control_absent",
-        "control_invalid",
-        "policy_absent",
-        "policy_invalid",
-        "policy_digest_mismatch",
-    }:
-        return (
-            "Muninn learning is blocked. "
-            "Muninn cannot verify its saved policy. "
-            "The agent can inspect the saved setup with "
-            "muninn doctor --pretty."
-        )
     if issue.get("code") == "paused":
         return (
             "Muninn learning is paused. The agent can inspect its saved"

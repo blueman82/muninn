@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import cli, review_recovery, review_requests
+from muninn import cli, review_recovery, review_requests, review_settings
 from tests.test_cli_learning import CliLearningCase
 
 SECRET = "private-evidence-and-proposal-canary"
@@ -169,7 +169,7 @@ class LearningExplanationTests(CliLearningCase):
         self,
     ) -> None:
         ident = self.save_failure()
-        self.conn.execute("UPDATE review_control SET admission=0")
+        review_settings.save(self.home, review_settings.Settings())
         _, out = self.call("learn", "explain", ident)
         text = out["explanation"]
         self.assertIn("Current learning admission is paused", text)

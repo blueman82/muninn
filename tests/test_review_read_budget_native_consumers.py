@@ -11,7 +11,6 @@ from unittest import mock
 
 from muninn import (
     cursor_import,
-    review_budget,
     review_evidence,
     review_originals,
     review_requests,
@@ -22,7 +21,7 @@ from muninn.review_evidence_models import (
     SourceRef,
 )
 from muninn.review_json import canonical_json
-from muninn.review_models import RequestView, ReviewContext
+from muninn.review_models import RequestView
 from muninn.review_progress import digest
 from muninn.review_read_budget import ReadBudget
 from tests import test_review_window_boundary as boundary_tests
@@ -119,7 +118,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
     ) -> None:
         request = self.enqueue()
         grants = [self.checked_reads(1)]
-        attempt = self.transaction(
+        self.transaction(
             lambda: review_requests.claim_attempt(self.conn, request.id, 12.0)
         )
         grants.append(self.checked_reads(2))
@@ -130,28 +129,11 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
             lambda: review_requests.retry_request(self.conn, request.id, 14.0)
         )
         grants.append(self.checked_reads(2))
-        attempt = self.transaction(
+        self.transaction(
             lambda: review_requests.claim_attempt(self.conn, request.id, 15.0)
         )
         grants.append(self.checked_reads(2))
-        context = ReviewContext(
-            request_id=request.id,
-            attempt_id=attempt.id,
-            generation=1,
-            scope=self.record.scope,
-            policy=self.policy,
-            admitted_windows=(self.window,),
-            evidence_ids=(self.record.id,),
-            round_index=1,
-            deadline=72.0,
-        )
-        for _ in range(2):
-            self.transaction(
-                lambda: review_budget.reserve_call(self.conn, context, 16.0)
-            )
-            grants.append(self.checked_reads(1))
-        self.assertEqual(len({id(grant) for grant in grants}), 6)
-        self.assertEqual(grants[0].bytes_left, grants[-1].bytes_left)
+        self.assertEqual(len({id(grant) for grant in grants}), len(grants))
         self.assertEqual(grants[1].records_left, grants[0].records_left - 1)
         self.assertEqual(
             self.conn.execute(

@@ -8,13 +8,24 @@ import json
 import os
 from unittest import mock
 
-from muninn import cli_hook, hook, obs, review_recovery, review_requests
+from muninn import (
+    cli_hook,
+    hook,
+    obs,
+    review_recovery,
+    review_requests,
+    review_settings,
+)
 from tests.ingest_support import TID
 from tests.test_cli_learning import CliLearningCase
 
 
 class LearningStartupActionTests(CliLearningCase):
     """Read real SQLite state through the SessionStart and inspection paths."""
+
+    def admission(self, on: bool) -> None:
+        """Turn learning on or off in the saved settings."""
+        review_settings.save(self.home, review_settings.Settings(enabled=on))
 
     def save_issue(
         self, code: str, ident: str | None = None, now: float = 20.0
@@ -50,7 +61,7 @@ class LearningStartupActionTests(CliLearningCase):
         older = self.save_issue("auth")
         newer = self.enqueue(self.window(2, 2))
         self.save_issue("rejected_validation", newer.id, 30.0)
-        self.conn.execute("UPDATE review_control SET admission=0")
+        self.admission(False)
         text = str(self.startup().get("systemMessage"))
         self.assertIn(older, text)
         self.assertIn("sign in", text)
@@ -81,9 +92,9 @@ class LearningStartupActionTests(CliLearningCase):
             with self.subTest(code=code):
                 self.save_issue(code)
                 self.assertNotIn("Muninn learning", str(self.startup()))
-                self.conn.execute("UPDATE review_control SET admission=0")
+                self.admission(False)
                 self.assertIn("paused", str(self.startup()))
-                self.conn.execute("UPDATE review_control SET admission=1")
+                self.admission(True)
 
     def test_required_action_codes_remain_visible(self) -> None:
         for code in (
@@ -121,34 +132,19 @@ class LearningStartupActionTests(CliLearningCase):
 
     def test_closed_admission_without_saved_issue_is_visible(self) -> None:
         self.conn.execute("DELETE FROM review_issue")
-        self.conn.execute("UPDATE review_control SET admission=0")
+        self.admission(False)
         before = list(self.conn.iterdump())
         self.assertIn("paused", str(self.startup().get("systemMessage")))
         self.assertEqual(list(self.conn.iterdump()), before)
         self.assertIsNone(review_recovery.notice(self.conn))
 
-    def test_policy_integrity_failure_without_saved_issue_is_visible(
-        self,
-    ) -> None:
-        for field, value in (
-            ("policy_digest", "0" * 64),
-            ("policy_json", "{}"),
-            ("policy_json", None),
-        ):
-            with self.subTest(field=field):
-                self.conn.execute(
-                    f"UPDATE review_control SET {field}=?", (value,)
-                )
-                self.assertIn("Muninn learning", str(self.startup()))
-                self.assertIn("muninn doctor --pretty", str(self.startup()))
-
     def test_current_admission_overrides_stale_saved_action(self) -> None:
-        self.conn.execute("UPDATE review_control SET admission=0")
+        self.admission(False)
         self.save_issue("rejected_authority")
-        self.conn.execute("UPDATE review_control SET admission=1")
+        self.admission(True)
         self.assertNotIn("Muninn learning", str(self.startup()))
         self.save_issue("auth")
-        self.conn.execute("UPDATE review_control SET admission=0")
+        self.admission(False)
         self.assertIn("paused", str(self.startup()))
 
     def test_repeated_startup_preserves_all_history_and_withholds_content(
@@ -220,9 +216,7 @@ class LearningStartupActionTests(CliLearningCase):
         for provider in ("codex", "claude"):
             for admission in (1, 0):
                 with self.subTest(provider=provider, admission=admission):
-                    self.conn.execute(
-                        "UPDATE review_control SET admission=?", (admission,)
-                    )
+                    self.admission(bool(admission))
                     output = io.StringIO()
                     stream = io.TextIOWrapper(io.BytesIO(payload.encode()))
                     with (
@@ -248,7 +242,7 @@ class LearningStartupActionTests(CliLearningCase):
                     else:
                         self.assertIn("paused", str(out.get("systemMessage")))
         safe_outputs = (
-            json.dumps(obs.review_checks(self.conn, 21.0))
+            json.dumps(obs.review_checks(self.conn, 21.0, self.home))
             + (self.home / "calls.jsonl").read_text()
         )
         for canary in canaries:
@@ -274,7 +268,7 @@ class LearningStartupActionTests(CliLearningCase):
                     self.context.attempt_id,
                     index,
                     self.digest(self.policy),
-                    self.policy.runner.model_dump_json(),
+                    "{}",
                     json.dumps(
                         {
                             "runner": None,
@@ -291,7 +285,8 @@ class LearningStartupActionTests(CliLearningCase):
         self.assertEqual(before["correction_status"], "exhausted")
         self.assertNotIn("Muninn learning", str(self.startup()))
         checks = {
-            row["check"]: row for row in obs.review_checks(self.conn, 21.0)
+            row["check"]: row
+            for row in obs.review_checks(self.conn, 21.0, self.home)
         }
         self.assertIs(checks["review_attention"]["ok"], False)
         self.assertEqual(self.call("learn", "show", ident)[1], before)

@@ -16,11 +16,12 @@ from muninn import (
     store,
 )
 from muninn.decision_requests import continue_decisions
-from muninn.review_budget import reserve_call
+from muninn.review_activation import digest
 from muninn.review_call import CallOutcome, run_call
+from muninn.review_claims import UNKNOWN_CONFIG
 from muninn.review_db import catch_up_due, database, is_contention
 from muninn.review_instructions import artifact
-from muninn.review_json import canonical_json_value
+from muninn.review_json import canonical_json, canonical_json_value
 from muninn.review_learner_result import execute, failure_code
 from muninn.review_learner_round import Round
 from muninn.review_models import RequestView, ReviewContext
@@ -152,7 +153,19 @@ class Learner:
         try:
             _initialize(self.home, pending, artifact())
             with database(self.home) as conn:
-                reserve_call(conn, pending.context, now)
+                conn.execute(
+                    "INSERT INTO review_call(attempt_id,round_index,"
+                    "budget_account_id,policy_digest,state,reserved_at,"
+                    "requested_json,observed_json) "
+                    "VALUES(?,?,'learner',?,'reserved',?,'{}',?)",
+                    (
+                        context.attempt_id,
+                        context.round_index,
+                        digest(POLICY),
+                        now,
+                        canonical_json(UNKNOWN_CONFIG),
+                    ),
+                )
         except (ValueError, OSError) as exc:
             self._fail(context, failure_code(exc, "config"), now)
             return False

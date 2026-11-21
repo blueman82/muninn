@@ -318,7 +318,7 @@ def _start_block(
     """Build the SessionStart block for the payload's repository."""
     cwd = project_cwd(payload, env)
     with knowledge_read.read_snapshot(conn):
-        issue = startup_action(conn)
+        issue = startup_action(conn, home)
         if issue is not None:
             trace["learning_notice"] = learning_status(issue)
         ids = scope.scope_ids_for_read(conn, cwd)

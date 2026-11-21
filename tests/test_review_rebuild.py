@@ -13,11 +13,12 @@ from unittest import mock
 from install import cutover
 from install.context import StepFailedError
 from install.record import Record
-from muninn import review_budget, store
 from muninn import review_pause as q
 from muninn import review_pause_state as state
+from muninn import store
 from muninn.review_models import ReviewContext
 from tests.installer_support import World
+from tests.policy_patch import reserve_call
 from tests.review_pause_support import initialize, interrupt_erasure
 from tests.test_review_commit import CommitCase
 
@@ -191,9 +192,7 @@ class CurrentStoreTests(CommitCase):
             round_index=1,
             deadline=72.0,
         )
-        call = self.transaction(
-            lambda: review_budget.reserve_call(self.conn, context, 13.0)
-        )
+        call = self.transaction(lambda: reserve_call(self.conn, context, 13.0))
         control = tuple(self.row("SELECT * FROM review_control"))
         db = store.db_path(self.home)
         identity = db.stat().st_dev, db.stat().st_ino
@@ -217,9 +216,6 @@ class CurrentStoreTests(CommitCase):
             (call.attempt_id, call.round_index),
         )
         self.assertEqual(charged["state"], "unknown")
-        self.assertEqual(
-            charged["cost_reservation_decimal"], call.cost_reservation_decimal
-        )
         self.assertIsNone(charged["usage_json"])
         self.assertEqual(self.record["store"]["phase"], "current_prepared")
         self.assertEqual(self.world.fake.calls, [])
@@ -235,25 +231,6 @@ class CurrentStoreTests(CommitCase):
         self.assertEqual(
             tuple(self.row("SELECT * FROM review_control")),
             (1, 2, 0, None, None, None),
-        )
-
-    def test_invalid_policy_leaves_admission_disabled_and_attempt_fenced(
-        self,
-    ) -> None:
-        self.conn.execute("UPDATE review_control SET policy_digest='mismatch'")
-        self.ready()
-        with self.assertRaisesRegex(ValueError, "review_policy_required"):
-            cutover.prepare_store(self.ctx, self.record)
-        self.reopen()
-        self.assertEqual(
-            tuple(self.row("SELECT generation,admission FROM review_control")),
-            (2, 0),
-        )
-        self.assertIsNotNone(
-            self.row("SELECT ended_at FROM review_attempt")[0]
-        )
-        self.assertEqual(
-            self.record["store"]["phase"], "current_mutation_possible"
         )
 
     def test_unverified_home_never_seeds_itself(self) -> None:

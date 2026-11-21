@@ -6,14 +6,13 @@ from collections.abc import Callable
 from unittest import mock
 
 from muninn import (
-    review_budget,
     review_evidence,
     review_originals,
     review_requests,
 )
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_json import canonical_json
-from muninn.review_models import RequestView, ReviewContext
+from muninn.review_models import RequestView
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import line
 from tests.policy_patch import use_policy
@@ -126,26 +125,7 @@ class ConsumerReadBudgetTests(RequestCase):
                 )
             )
         )
-        attempt = self.transaction(
-            lambda: review_requests.claim_attempt(self.conn, request.id, 15.0)
-        )
-        context = ReviewContext(
-            request_id=request.id,
-            attempt_id=attempt.id,
-            generation=1,
-            scope=self.scope,
-            policy=self.policy,
-            admitted_windows=(request.window,),
-            evidence_ids=(),
-            round_index=1,
-            deadline=72.0,
-        )
-        grants.append(
-            self.observe(
-                lambda: review_budget.reserve_call(self.conn, context, 16.0)
-            )
-        )
-        self.assertEqual(len({id(grant) for grant in grants}), 4)
+        self.assertEqual(len({id(grant) for grant in grants}), len(grants))
         self.assertEqual(
             self.conn.execute(
                 "SELECT policy_json,policy_digest FROM review_request"

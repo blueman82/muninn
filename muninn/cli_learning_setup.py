@@ -25,7 +25,6 @@ def setup(
             "eligible_requests": len(selected.items),
             "excluded_spans": len(selected.excluded),
             "excluded": selected.excluded,
-            "estimate": selected.estimate,
             "confirmation": selected.digest,
             "next_step": "Run muninn learn setup --mode all --confirm "
             + selected.digest

@@ -27,7 +27,7 @@ class PendingCommitTests(CommitCase):
             (
                 self.context.attempt_id,
                 self.digest(self.policy),
-                canonical_json(self.policy.runner),
+                "{}",
                 canonical_json(UNKNOWN_CONFIG),
             ),
         )

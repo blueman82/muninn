@@ -7,7 +7,7 @@ import sqlite3
 
 from muninn.knowledge_models import AttemptId, RequestId, Scope
 from muninn.review_evidence_models import EvidenceWindow, SourceRef
-from muninn.review_models import AttemptView, RequestView
+from muninn.review_models import AttemptView, CallView, RequestView
 
 
 def request_row(
@@ -55,9 +55,23 @@ def attempt_view(
     if row is None:
         raise ValueError("attempt_unavailable")
     data = dict(row)
-    for key in ("requested", "observed", "usage"):
+    del data["requested_json"]
+    for key in ("observed", "usage"):
         value = data.pop(f"{key}_json")
         data[key] = json.loads(value) if value is not None else None
     return AttemptView.model_validate_json(
         json.dumps({"schema_version": 1, **data})
     )
+
+
+def call_view(row: sqlite3.Row) -> CallView:
+    """Decode a durable call without filling unreported observations."""
+    data = {
+        key: row[key]
+        for key in CallView.model_fields
+        if key not in ("observed", "usage", "process_identity")
+    }
+    for key in ("observed", "usage", "process_identity"):
+        value = row[f"{key}_json"]
+        data[key] = json.loads(value) if value is not None else None
+    return CallView.model_validate_json(json.dumps(data))

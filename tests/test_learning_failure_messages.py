@@ -57,7 +57,8 @@ class LearningMessageTests(RequestCase):
             )
         )
         checks = {
-            item["check"]: item for item in obs.review_checks(self.conn, 21.0)
+            item["check"]: item
+            for item in obs.review_checks(self.conn, 21.0, self.home)
         }
         self.assertIn(
             "Codex sign-in is unavailable.",

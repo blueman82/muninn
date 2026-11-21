@@ -280,7 +280,7 @@ def _store_checks(home: Path) -> list[CheckResult]:
         # extend() appends as the generator yields, so the checks that ran
         # before an SQLite error are kept.
         results.extend(check(conn) for check in _STORE_CHECKS)
-        results.extend(review_checks(conn, time.time()))
+        results.extend(review_checks(conn, time.time(), home))
     except sqlite3.Error as exc:
         results.append(_result("store_readable", False, type(exc).__name__))
     finally:
@@ -459,16 +459,19 @@ def doctor(home: Path, env: Mapping[str, str]) -> DoctorReport:
 
 
 def review_checks(
-    conn: sqlite3.Connection, now: float
+    conn: sqlite3.Connection, now: float, home: Path
 ) -> tuple[CheckResult, ...]:
     """Report durable review health without process or repair side effects.
 
     Args:
         conn: Current normalized store connection.
         now: Observation time in UTC seconds.
+        home: Data directory holding the learning settings.
 
     Returns:
         Finite counts and codes using the existing doctor result contract.
     """
     with read_snapshot(conn):
-        return tuple(_result(*value) for value in review_health(conn, now))
+        return tuple(
+            _result(*value) for value in review_health(conn, now, home)
+        )

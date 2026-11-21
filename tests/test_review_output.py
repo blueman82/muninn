@@ -8,7 +8,6 @@ import sys
 import unittest
 
 from muninn import review_output
-from tests import test_review_budget as budget_tests
 
 
 class ReviewOutputTests(unittest.TestCase):
@@ -141,7 +140,7 @@ class ReviewOutputTests(unittest.TestCase):
         code = (
             "import sys; from muninn import review_output; "
             "assert not any(n in sys.modules for n in "
-            "('sqlite3','muninn.review_runner','muninn.review_rounds','muninn.store'))"
+            "('sqlite3','muninn.review_rounds','muninn.store'))"
         )
         done = subprocess.run(
             [sys.executable, "-c", code], capture_output=True
@@ -155,38 +154,3 @@ class ReviewOutputTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "^native_output_limit$"):
             review_output.decode_claude_output(raw, len(raw))
-
-    def test_estimate_does_not_release_conservative_reservation(self) -> None:
-        case = budget_tests.ReviewBudgetTests()
-        case.setUp()
-        self.addCleanup(case.doCleanups)
-        case.cost_policy("decoder", "0.75", "0.50")
-        context = case.context()
-        case.transaction(
-            lambda: budget_tests.review_budget.reserve_call(
-                case.conn, context, 13.0
-            )
-        )
-        _, observed, usage = review_output.decode_claude_output(
-            self.envelope(total_cost_usd=0.01, usage={"input_tokens": 1}), 1000
-        )
-        assert usage is not None
-        case.conn.execute(
-            "UPDATE review_call SET state='completed',"
-            "observed_json=?,usage_json=?",
-            (observed.model_dump_json(), usage.model_dump_json()),
-        )
-        with self.assertRaisesRegex(ValueError, "budget_cost_limit"):
-            case.transaction(
-                lambda: budget_tests.review_budget.reserve_call(
-                    case.conn,
-                    context.model_copy(update={"round_index": 2}),
-                    14.0,
-                )
-            )
-        self.assertEqual(
-            case.conn.execute(
-                "SELECT cost_reservation_decimal FROM review_call"
-            ).fetchone()[0],
-            "0.50",
-        )

@@ -25,7 +25,6 @@ from muninn.cli_learning_setup import setup
 from muninn.knowledge_models import RequestId, Scope
 from muninn.query.answers import BadArgumentError
 from muninn.query.filters import resolve_session
-from muninn.review_budget import call_view
 from muninn.review_commit import CommitContext, commit_review
 from muninn.review_diagnostics import correction_status
 from muninn.review_evidence_models import (
@@ -45,17 +44,18 @@ from muninn.review_progress import (
     checked_policy,
     source_progress,
 )
-from muninn.review_request_views import attempt_view, request_row, request_view
+from muninn.review_request_views import (
+    attempt_view,
+    call_view,
+    request_row,
+    request_view,
+)
 from muninn.review_settings import POLICY
 
 
 def _require_enabled(home: Path) -> None:
     """Refuse learning requests while learning is off."""
-    try:
-        enabled = review_settings.load(home).enabled
-    except ValueError:
-        enabled = False
-    if not enabled:
+    if not review_settings.is_enabled(home):
         raise ValueError("review_policy_required")
 
 
@@ -222,12 +222,12 @@ def _detail(conn: sqlite3.Connection, ident: RequestId) -> Out:
 
 # Translate within read_store so its one-time hot-journal healing can run.
 @query.guarded
-def _read(conn: sqlite3.Connection, a: Namespace) -> Out:
+def _read(conn: sqlite3.Connection, a: Namespace, home: Path) -> Out:
     """Return the requested durable detail or optionally filtered list."""
     if a.learn_cmd == "show":
         return _detail(conn, a.request_id)
     if a.learn_cmd == "explain":
-        return explain(conn, a.request_id)
+        return explain(conn, a.request_id, home)
     rows = conn.execute(
         "SELECT * FROM review_request WHERE (? IS NULL OR state=?) ORDER BY "
         "created_at,id",
@@ -331,7 +331,7 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
                 lambda conn: setup(conn, a, POLICY, time.time()),
             )
         elif a.learn_cmd in {"list", "show", "explain"}:
-            out = read_store(home, lambda conn: _read(conn, a))
+            out = read_store(home, lambda conn: _read(conn, a, home))
         else:
             out = write_store(home, lambda conn: _write(conn, a))
     except ValidationError:

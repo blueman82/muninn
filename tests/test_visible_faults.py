@@ -14,7 +14,6 @@ from muninn import (
     ingest_plan,
     obs,
     obs_stats,
-    review_budget,
     review_progress,
     review_requests,
 )
@@ -22,6 +21,7 @@ from muninn.review_models import ReviewContext
 from tests.cli_support import CliCase, fake_run
 from tests.hook_support import HookCase
 from tests.ingest_support import IngestCase, primary
+from tests.policy_patch import reserve_call
 from tests.test_obs import ReviewReceiptCase
 
 ERR_NOTE = "muninn: the last pass stopped with"
@@ -161,14 +161,14 @@ class ReviewHistoricalGapTests(ReviewReceiptCase):
         self.transaction(
             lambda: review_progress.activate_sources(self.conn, 10.0)
         )
-        before = obs_stats.review_stats(self.conn, 20.0)
+        before = obs_stats.review_stats(self.conn, 20.0, self.home)
         self.assertEqual(
             (before.eligible_records, before.completed_records), (0, 0)
         )
         self.assertTrue(
             next(
                 c
-                for c in obs.review_checks(self.conn, 20.0)
+                for c in obs.review_checks(self.conn, 20.0, self.home)
                 if c["check"] == "review_coverage_gaps"
             )["ok"]
         )
@@ -197,14 +197,14 @@ class ReviewHistoricalGapTests(ReviewReceiptCase):
                 )
             for name in ("calls.jsonl", "calls.jsonl.1"):
                 (self.home / name).unlink(missing_ok=True)
-            got = obs_stats.review_stats(self.conn, 20.0)
+            got = obs_stats.review_stats(self.conn, 20.0, self.home)
             self.assertEqual(
                 (got.eligible_records, got.completed_records), (2, 0)
             )
             self.assertIs(
                 next(
                     c
-                    for c in obs.review_checks(self.conn, 20.0)
+                    for c in obs.review_checks(self.conn, 20.0, self.home)
                     if c["check"] == "review_coverage_gaps"
                 )["ok"],
                 False,
@@ -214,7 +214,10 @@ class ReviewHistoricalGapTests(ReviewReceiptCase):
         )
         self.receipt(request.id)
         self.assertEqual(
-            obs_stats.review_stats(self.conn, 20.0).completed_records, 2
+            obs_stats.review_stats(
+                self.conn, 20.0, self.home
+            ).completed_records,
+            2,
         )
         self.assertEqual(
             self.conn.execute(
@@ -244,9 +247,7 @@ class ReviewUsageStateTests(ReviewReceiptCase):
             round_index=1,
             deadline=72.0,
         )
-        self.transaction(
-            lambda: review_budget.reserve_call(self.conn, context, 13.0)
-        )
+        self.transaction(lambda: reserve_call(self.conn, context, 13.0))
         return attempt.id
 
     def test_unconcluded_calls_with_retained_usage_stay_unknown(self) -> None:
@@ -263,7 +264,7 @@ class ReviewUsageStateTests(ReviewReceiptCase):
                 "UPDATE review_call SET state=?,usage_json=?",
                 (state, json.dumps(usage)),
             )
-            got = obs_stats.review_stats(self.conn, 20.0).usage
+            got = obs_stats.review_stats(self.conn, 20.0, self.home).usage
             self.assertTrue(
                 all(value is None for value in got.model_dump().values())
             )
@@ -281,7 +282,7 @@ class ReviewUsageStateTests(ReviewReceiptCase):
             "UPDATE review_call SET state='completed',usage_json=?",
             (json.dumps(usage),),
         )
-        got = obs_stats.review_stats(self.conn, 20.0).usage
+        got = obs_stats.review_stats(self.conn, 20.0, self.home).usage
         self.assertEqual(got.input_tokens, 3)
         self.assertIsNone(got.currency)
         self.assertIsNone(got.cost_decimal)

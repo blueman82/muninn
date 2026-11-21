@@ -41,13 +41,6 @@ def _policy(limit: int) -> ReviewPolicy:
             "prompt_digest": _DIGEST,
             "projection_version": PROJECTION_VERSION,
             "result_schema_digest": _DIGEST,
-            "runner": {
-                "runner": "claude_cli",
-                "executable": "claude",
-                "version": "measure",
-                "model": "none",
-                "reasoning": "none",
-            },
             "max_rounds": 1,
             "max_input_bytes": limit,
             "max_output_bytes": 1000,
@@ -58,16 +51,6 @@ def _policy(limit: int) -> ReviewPolicy:
             "concurrency": 1,
             "hook_wait_seconds": 0.0,
             "allow_global": False,
-            "budget": {
-                "account_id": "measure",
-                "max_model_calls": 1,
-                "max_wall_seconds": 60.0,
-                "max_cost_decimal": None,
-                "conservative_call_cost_decimal": None,
-                "currency": None,
-                "approved_by": "measure",
-                "approved_at": 0.0,
-            },
         }
     )
 
