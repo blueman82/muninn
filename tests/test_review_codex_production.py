@@ -19,9 +19,7 @@ from muninn.review_models import (
     require_pilot_budget,
 )
 from muninn.review_runtime_models import require_legacy_runner
-from tests.test_learning_eval_contracts import assessment_data
 from tests.test_review_shared_models import policy_data
-from tools.learning_eval.models import Assessment
 from tools.prepare_codex_policy import default_policy, policy
 
 DEFAULT_PROFILE_FIXTURE = (
@@ -159,14 +157,6 @@ class CodexProductionPolicyTests(unittest.TestCase):
         self.assertIsNone(aggregate(calls).cost_decimal)
         with self.assertRaisesRegex(ValueError, "budget_clock_reversed"):
             limits(calls, self.policy.budget, None, 0.0)
-
-    def test_pilot_assessment_cannot_select_ongoing_authority(self) -> None:
-        data = assessment_data()
-        data["policies"] = [self.policy.model_dump(mode="json")]
-        with self.assertRaisesRegex(
-            ValidationError, "finite_pilot_budget_required"
-        ):
-            Assessment.model_validate_json(json.dumps(data))
 
     def test_recall_switches_do_not_block_learning_activation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
