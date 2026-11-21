@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 
 from install import configedit as ce
-from install import lifecycle, policy_records
+from install import lifecycle
 from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
 from install.context import (
     Ctx,
@@ -97,7 +97,6 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
 
 def prepare_release(ctx: Ctx, rec: Record) -> None:
     """Publish source before provisioning an immutable candidate runtime."""
-    policy_records.validate(rec)
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
     if dry(ctx, f"would prepare the release and runtime at {dest}"):
         return

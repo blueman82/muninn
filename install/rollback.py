@@ -22,10 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install import (
-    lifecycle,
-    policy_records,
-)
+from install import lifecycle
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
 from install.operation import operation
@@ -289,7 +286,6 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
         exceptions, so the list is empty; the signature leaves room for
         actions that should be survivable.
     """
-    policy_records.validate(rec)
     problems: list[str] = []
     if rec.get("recovery_required") or (
         rec.get("upgrade")

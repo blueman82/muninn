@@ -161,7 +161,7 @@ class TableTest(unittest.TestCase):
 
     def test_detail_after_the_code_is_not_printed(self) -> None:
         secret = "/Users/someone/private-folder/settings.json"
-        for code in ("review_policy_unsupported", UNKNOWN):
+        for code in ("install_lock_unsafe", UNKNOWN):
             with self.subTest(code=code):
                 lines = failure_text.explain(f"{code}: {secret}")
                 self.assertEqual(lines, failure_text.explain(code))
