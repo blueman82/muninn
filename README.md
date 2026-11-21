@@ -63,8 +63,7 @@ Codex; they do not install hooks. `erase` and `rebuild` need an explicit request
 - `muninn sessions` and `muninn session ROOT`: sessions in scope, newest first, and one session's
   events across its threads.
 - `muninn know list|show|search|context`: current supported notes and guide navigation, with UUIDs and revisions. Use `know show K_ID --revision N` for a historical revision. Context omits ineligible guidance.
-- `muninn learn request|list|show|cancel|retry|replay`: explicit bounded learning controls; an installed frozen
-  policy is required. Replay requires explicit line bounds and `--policy`; retry restarts the same request.
+- `muninn learn on|off|list|show|retry|explain|request`: learning controls; retry restarts the same request.
 - `muninn know propose --input FILE`: checked request-bound proposal, with no model call or owner-authority bypass.
   `know retract K_ID --expected-revision N --reason TEXT` withdraws a current item; correction uses replacement.
 - `muninn recall-review [--batch N] [--ack]`: inspect recorded automatic recall deliveries and acknowledge a reviewed complete batch.

@@ -1,27 +1,18 @@
-"""Private generation-bound stop requests for one native poller owner."""
+"""Check for a private generation-bound stop request for one poller."""
 
 from __future__ import annotations
 
-import contextlib
 import json
-import os
 import re
-import tempfile
-import time
 from pathlib import Path
 from typing import cast
 
-from muninn import file_sync, platform_io, store
+from muninn import platform_io
 
 FILE = "stop.json"
 
 
-class StopTimeoutError(Exception):
-    """Staging a stop request outlived its publication deadline."""
-
-
 _GENERATION = re.compile(r"[0-9a-f]{32}")
-_POLL_S = 0.1
 
 
 def _valid(pid: object, generation: object) -> bool:
@@ -33,44 +24,6 @@ def _valid(pid: object, generation: object) -> bool:
         and isinstance(generation, str)
         and _GENERATION.fullmatch(generation) is not None
     )
-
-
-def request(
-    home: Path, pid: int, generation: str, *, deadline: float | None = None
-) -> None:
-    """Write an atomic private stop request for exactly one poller generation.
-
-    Args:
-        home: Existing private data directory.
-        pid: Process id established by lifecycle verification.
-        generation: Generation read from that process's heartbeat.
-        deadline: Optional monotonic deadline checked before one publication.
-
-    Raises:
-        ValueError: If the target fields are invalid.
-        PermissionError: If the data directory is unsafe.
-        StopTimeoutError: If staging exhausts the publication deadline.
-    """
-    if not _valid(pid, generation):
-        raise ValueError("invalid stop target")
-    if not platform_io.is_private(home, directory=True):
-        raise PermissionError("stop directory is not private")
-    value = {"pid": pid, "generation": generation}
-    if deadline is None:
-        store.write_json_atomic(home / FILE, value)
-        return
-    fd, temporary = tempfile.mkstemp(dir=home, prefix=".stop.json.")
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(json.dumps(value).encode())
-            handle.flush()
-            file_sync.sync_fd(handle.fileno())
-        if time.monotonic() >= deadline:
-            raise StopTimeoutError("coordination_timeout")
-        Path(temporary).replace(home / FILE)
-    finally:
-        with contextlib.suppress(OSError):
-            Path(temporary).unlink()
 
 
 def requested(home: Path, pid: int, generation: str) -> bool:
@@ -108,25 +61,3 @@ def requested(home: Path, pid: int, generation: str) -> bool:
         and target_pid == pid
         and target_generation == generation
     )
-
-
-def wait(home: Path, pid: int, generation: str, seconds: float) -> bool:
-    """Wait up to the idle interval while checking for stop requests promptly.
-
-    Args:
-        home: Private data directory.
-        pid: This poller's process id.
-        generation: This poller's newly generated token.
-        seconds: Maximum idle wait.
-
-    Returns:
-        True if a matching request arrived, False when the interval ended.
-    """
-    deadline = time.monotonic() + max(0.0, seconds)
-    while True:
-        if requested(home, pid, generation):
-            return True
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return False
-        time.sleep(min(_POLL_S, remaining))

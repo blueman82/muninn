@@ -13,15 +13,14 @@ class TaskRequestTests(CliLearningCase):
     def request(self, task: str) -> tuple[int, dict[str, object]]:
         """Request one bounded interval for a named task."""
         source = self.window().source
+        self.conn.execute(
+            "UPDATE review_source SET activation_line=1,completed_line=1"
+        )
         return self.call(
             "learn",
             "request",
             "--session",
             f"{source.provider}:{source.thread_id}",
-            "--from-line",
-            "2",
-            "--through-line",
-            "3",
             "--task",
             task,
         )
@@ -104,10 +103,6 @@ class TaskRequestTests(CliLearningCase):
             "request",
             "--session",
             f"{source.provider}:{source.thread_id}",
-            "--from-line",
-            "2",
-            "--through-line",
-            "3",
         )
         self.assertEqual(code, 0)
         self.assertEqual(out["scope"], self.scope.model_dump())

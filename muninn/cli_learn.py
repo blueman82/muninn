@@ -19,8 +19,6 @@ from muninn import (
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
 from muninn.cli_learn_explain import explain
 from muninn.cli_learn_switch import switch
-from muninn.cli_learning_setup import failure as setup_failure
-from muninn.cli_learning_setup import setup
 from muninn.knowledge_models import RequestId, Scope
 from muninn.query.answers import BadArgumentError
 from muninn.query.filters import resolve_session
@@ -30,18 +28,12 @@ from muninn.review_evidence_models import (
     EvidenceWindow,
     SourceRef,
 )
-from muninn.review_json import canonical_json
 from muninn.review_models import (
     ProposalInput,
     Receipt,
     ReviewDetail,
-    ReviewPolicy,
 )
-from muninn.review_progress import (
-    boundary,
-    checked_policy,
-    source_progress,
-)
+from muninn.review_progress import boundary, source_progress
 from muninn.review_request_views import (
     attempt_view,
     call_view,
@@ -56,21 +48,6 @@ def _require_enabled(home: Path) -> None:
     """Refuse learning requests while learning is off."""
     if not review_settings.is_enabled(home):
         raise ValueError("review_policy_required")
-
-
-def _policy(path: str | None) -> ReviewPolicy:
-    """Read an explicit strict policy or use the constant policy."""
-    if path is None:
-        return POLICY
-    try:
-        policy = checked_policy(
-            ReviewPolicy.model_validate_json(Path(path).read_bytes())
-        )
-    except ValueError:
-        raise ValueError("review_policy_required") from None
-    if canonical_json(policy) != canonical_json(POLICY):
-        raise ValueError("review_policy_required")
-    return policy
 
 
 def _source(conn: sqlite3.Connection, ref: str) -> sqlite3.Row:
@@ -96,18 +73,11 @@ def _source(conn: sqlite3.Connection, ref: str) -> sqlite3.Row:
 def _window(
     conn: sqlite3.Connection, a: Namespace, now: float
 ) -> tuple[EvidenceWindow, Scope]:
-    """Choose explicit paired bounds or the uncompleted activation interval."""
-    if (a.from_line is None) != (a.through_line is None):
-        raise ValueError("paired_bounds_required")
+    """Choose the uncompleted activation interval of one session."""
     source = _source(conn, a.session)
-    last, _ = boundary(conn, source)
-    first, through = a.from_line, a.through_line
-    if first is None:
-        progress = source_progress(conn, source, now)
-        first = (
-            max(progress["activation_line"], progress["completed_line"]) + 1
-        )
-        through = last
+    through, _ = boundary(conn, source)
+    progress = source_progress(conn, source, now)
+    first = max(progress["activation_line"], progress["completed_line"]) + 1
     end = conn.execute(
         "SELECT line_sha256 FROM event WHERE source_id=? AND line=? LIMIT 1",
         (source["id"], through),
@@ -135,8 +105,7 @@ def _window(
 
 
 def _request(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
-    """Admit replay and ordinary windows through the same explicit queue."""
-    policy = _policy(a.policy)
+    """Admit one uncompleted window through the explicit queue."""
     window, scope = _window(conn, a, now)
     task = getattr(a, "task", None)
     if task is not None:
@@ -148,7 +117,7 @@ def _request(conn: sqlite3.Connection, a: Namespace, now: float) -> Out:
             raise ValueError("rejected_scope")
         scope = Scope(project_id=scope.project_id, task=task)
     return review_requests.enqueue_review(
-        conn, window, scope, policy, "explicit", now
+        conn, window, scope, POLICY, "explicit", now
     ).model_dump(mode="json")
 
 
@@ -241,17 +210,12 @@ def _write(conn: sqlite3.Connection, a: Namespace) -> Out:
     now = time.time()
     conn.execute("BEGIN IMMEDIATE")
     try:
-        if a.learn_cmd == "setup":
-            out = setup(conn, a, POLICY, now)
-        elif a.learn_cmd in {"request", "replay"}:
+        if a.learn_cmd == "request":
             out = _request(conn, a, now)
         else:
-            operation = (
-                review_requests.cancel_request
-                if a.learn_cmd == "cancel"
-                else review_requests.retry_request
-            )
-            out = operation(conn, a.request_id, now).model_dump(mode="json")
+            out = review_requests.retry_request(
+                conn, a.request_id, now
+            ).model_dump(mode="json")
         conn.commit()
         return out
     except BaseException:
@@ -313,15 +277,10 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     """Dispatch explicit learning controls with content-free refusal codes."""
     record["cmd"] = f"learn {a.learn_cmd}"
     try:
-        if a.learn_cmd in {"setup", "request", "replay"}:
+        if a.learn_cmd == "request":
             _require_enabled(home)
         if a.learn_cmd in {"on", "off"}:
             out = switch(home, a.learn_cmd == "on", time.time())
-        elif a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
-            out = read_store(
-                home,
-                lambda conn: setup(conn, a, POLICY, time.time()),
-            )
         elif a.learn_cmd in {"list", "show", "explain"}:
             out = read_store(home, lambda conn: _read(conn, a, home))
         else:
@@ -329,7 +288,5 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
     except ValidationError:
         return 2, {"error": "rejected_validation"}
     except (ValueError, BadArgumentError) as exc:
-        if a.learn_cmd == "setup":
-            return 2, setup_failure(str(exc))
         return 2, {"error": str(exc)}
     return 0, out

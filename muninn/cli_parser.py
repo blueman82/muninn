@@ -43,10 +43,9 @@ knowledge and learning:
   know list/search/show/context use current supported UUID/revision views.
   know propose --input FILE checks request-bound evidence and owner authority;
   know retract K_ID requires --expected-revision N and --reason TEXT.
-  learn request requires installed frozen policy; line bounds must be paired.
+  learn request queues one explicit review of a session.
   learn retry explicitly restarts the same request; completed receipts persist.
   learn explain R_ID --human also prints a plain explanation to stderr.
-  learn replay requires --from-line, --through-line and --policy.
   No implicit runner/model/budget settings. Old know add/check flags retired.
   Cursor resume/postcompact injection is unproven: pull muninn know context.
   Already injected context cannot be retracted. Prompt recall starts off.
@@ -248,20 +247,11 @@ def _add_learning(cmd: _Commands) -> None:
         "learn_cmd",
         required=True,
     )
-    for name in ("request", "replay"):
-        p = learn.add(name)
-        p.add_argument("--session", required=True)
-        p.add_argument("--from-line", type=int, required=name == "replay")
-        p.add_argument("--through-line", type=int, required=name == "replay")
-        p.add_argument("--policy", required=name == "replay")
-        if name == "request":
-            p.add_argument("--task")
+    p = learn.add("request")
+    p.add_argument("--session", required=True)
+    p.add_argument("--task")
     learn.add("on", "start learning from future chat")
     learn.add("off", "stop learning")
-    p = learn.add("setup", "choose future records or verified history")
-    p.add_argument("--mode", choices=("now", "all"), required=True)
-    p.add_argument("--project")
-    p.add_argument("--confirm")
     p = learn.add("list")
     p.add_argument(
         "--state",
@@ -274,7 +264,7 @@ def _add_learning(cmd: _Commands) -> None:
             "cancelled",
         ),
     )
-    for name in ("show", "cancel", "retry"):
+    for name in ("show", "retry"):
         learn.add(name).add_argument("request_id", type=request_argument)
     p = learn.add("explain", "explain retained learning history")
     p.add_argument("request_id", type=request_argument)
