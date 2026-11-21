@@ -23,7 +23,6 @@ from muninn.obs_stats import db_space, human_bytes, reread, review_stats, stats
 from muninn.obs_status import (
     DATA_FILES,
     count_field,
-    freshness,
     install_sha,
     poller_error,
     read_status,
@@ -32,6 +31,7 @@ from muninn.obs_status import (
     write_status,
     writer_secure_delete,
 )
+from muninn.query.index_age import freshness
 
 __all__ = [
     "ROTATE_BYTES",
@@ -41,7 +41,6 @@ __all__ = [
     "count_field",
     "db_space",
     "doctor",
-    "freshness",
     "human_bytes",
     "install_sha",
     "log_call",

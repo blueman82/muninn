@@ -22,11 +22,11 @@ from muninn.obs_status import (
     RECEIPTED,
     REVIEW_RECORDS,
     alive_age,
-    freshness,
     install_sha,
     poller_error,
     read_status,
 )
+from muninn.query.index_age import freshness
 from muninn.review_models import ReviewStats, Usage
 
 _LAST_PASS_FIELDS = (

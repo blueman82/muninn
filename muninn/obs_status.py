@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from muninn import platform_io, query, review_settings, store
+from muninn import platform_io, review_settings, store
 from muninn.query.index_age import ALIVE_AT, seconds_since
 from muninn.review_settings import POLICY
 
@@ -118,18 +118,6 @@ def write_status(home: Path, fields: Mapping[str, object]) -> None:
     store.write_json_atomic(
         home / "status.json", {**read_status(home), **fields}
     )
-
-
-def freshness(status: Mapping[str, object]) -> dict[str, object]:
-    """Report how old the index is and whether the poller is alive.
-
-    Args:
-        status: Parsed ``status.json``; an empty one counts as stale.
-
-    Returns:
-        ``index_age_s`` and ``poller`` (``ok`` or ``stale``).
-    """
-    return query.freshness(status or {})
 
 
 def alive_age(status: Mapping[str, object]) -> int | None:
