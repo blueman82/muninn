@@ -19,6 +19,7 @@ SETTINGS = Settings(model="sonnet", effort="low")
 
 
 def _envelope(**over: object) -> bytes:
+    """Return a Claude result envelope with fields overridden."""
     body: dict[str, object] = {
         "type": "result",
         "subtype": "success",

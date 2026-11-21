@@ -12,6 +12,7 @@ from muninn.review_call import CallOutcome, run_call
 
 
 def _script(tmp: Path, body: str) -> str:
+    """Write an executable shell script and return its path."""
     path = tmp / "fake"
     path.write_text("#!/bin/sh\n" + body)
     path.chmod(0o755)
@@ -24,6 +25,7 @@ class RunCallTests(unittest.TestCase):
     def run_body(
         self, body: str, timeout: float = 5, limit: int = 100
     ) -> CallOutcome:
+        """Run a fake script through run_call and return the outcome."""
         with tempfile.TemporaryDirectory() as tmp:
             exe = _script(Path(tmp), body)
             return run_call(
