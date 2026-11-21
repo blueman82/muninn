@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import os
 import subprocess
 import sys
 import tempfile
@@ -61,11 +60,7 @@ class CodexStopGateTest(unittest.TestCase):
     def test_gate_python_prefers_checkout_venv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            relative = (
-                "Scripts/python.exe"
-                if sys.platform == "win32"
-                else "bin/python3.13"
-            )
+            relative = "bin/python3.13"
             python = root / ".venv" / relative
             python.parent.mkdir(parents=True)
             python.touch()
@@ -83,11 +78,7 @@ class CodexStopGateTest(unittest.TestCase):
             root = Path(tmp) / "worktree"
             main = Path(tmp) / "main"
             root.mkdir()
-            relative = (
-                "Scripts/python.exe"
-                if sys.platform == "win32"
-                else "bin/python3.13"
-            )
+            relative = "bin/python3.13"
             python = main / ".venv" / relative
             python.parent.mkdir(parents=True)
             python.touch()
@@ -118,11 +109,7 @@ class CodexStopGateTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "worktree"
             main = Path(tmp) / "main"
-            relative = (
-                "Scripts/python.exe"
-                if sys.platform == "win32"
-                else "bin/python3.13"
-            )
+            relative = "bin/python3.13"
             local_python = root / ".venv" / relative
             main_python = main / ".venv" / relative
             local_python.parent.mkdir(parents=True)
@@ -140,9 +127,6 @@ class CodexStopGateTest(unittest.TestCase):
                     codex_stop_gate.gate_python(), str(main_python)
                 )
 
-    @unittest.skipIf(
-        os.name == "nt", "Windows symlink creation may need privilege"
-    )
     def test_gate_python_rejects_linked_venv_bin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -163,22 +147,6 @@ class CodexStopGateTest(unittest.TestCase):
                 ),
             ):
                 codex_stop_gate.gate_python()
-
-    def test_gate_python_selects_windows_venv(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            python = root / ".venv" / "Scripts" / "python.exe"
-            python.parent.mkdir(parents=True)
-            python.touch()
-            (root / ".venv" / "pyvenv.cfg").write_text("home = Python313")
-            with (
-                mock.patch.object(codex_stop_gate, "ROOT", root),
-                mock.patch.object(
-                    codex_stop_gate, "main_checkout", return_value=root
-                ),
-                mock.patch.object(sys, "platform", "win32"),
-            ):
-                self.assertEqual(codex_stop_gate.gate_python(), str(python))
 
     def test_missing_venv_does_not_launch_global_gate(self) -> None:
         stdout, stderr = io.StringIO(), io.StringIO()

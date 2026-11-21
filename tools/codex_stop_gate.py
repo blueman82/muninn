@@ -45,9 +45,7 @@ def gate_python() -> str:
     Raises:
         FileNotFoundError: If neither checkout has a complete project venv.
     """
-    relative = (
-        "Scripts/python.exe" if sys.platform == "win32" else "bin/python3.13"
-    )
+    relative = "bin/python3.13"
     python = _venv_python(ROOT, relative)
     if python is None:
         python = _venv_python(main_checkout(), relative)
