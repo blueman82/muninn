@@ -30,8 +30,8 @@ def _start(
 ) -> int:
     """Find the indexed byte offset at which a line is charged to begin.
 
-    A line with no indexed event is charged from the next indexed line, as
-    `review_history_plan` does. Line 1 always begins at offset 0.
+    A line with no indexed event is charged from the next indexed line.
+    Line 1 always begins at offset 0.
 
     Args:
         conn: The store connection.
