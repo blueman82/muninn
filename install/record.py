@@ -130,11 +130,6 @@ def install_summary(ctx: Ctx, rec: Record, outcome: str) -> Record:
             if entry["path"][0] == "hooks"
         )
     out = {k: rec.get(k) for k in _SUMMARY_FIELDS}
-    if "legacy" in rec:
-        out["legacy"] = {
-            key: rec["legacy"].get(key)
-            for key in ("version", "baseline", "phase", "publication")
-        }
     if "codex_interface" in rec:
         interface = policy_records.codex_interface(rec["codex_interface"])
         out["codex_interface_phase"] = interface.phase

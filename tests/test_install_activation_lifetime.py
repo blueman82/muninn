@@ -11,7 +11,13 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 from unittest import mock
 
-from install import cutover, installer, legacy_state, record, review_policy
+from install import (
+    cutover,
+    installer,
+    operation,
+    record,
+    review_policy,
+)
 from install.context import Ctx, StepFailedError
 from install.record import Record
 from muninn import platform_lock, store
@@ -51,7 +57,7 @@ class ActivationLifetimeTests(unittest.TestCase):
         """Retain the real installer lock around its activation context."""
         self.ctx.lib.mkdir(mode=0o700, parents=True, exist_ok=True)
         with (
-            legacy_state.operation(self.ctx) as check,
+            operation.operation(self.ctx) as check,
             cutover.prepared_install_store(self.ctx, self.rec, check) as path,
         ):
             yield path
@@ -107,26 +113,6 @@ class ActivationLifetimeTests(unittest.TestCase):
         order = [step.__name__ for step in installer.FRESH_STEPS]
         self.assertLess(order.index("cursor"), order.index("start_new"))
 
-    def test_windows_operation_uses_descriptor_sync_without_directory_sync(
-        self,
-    ) -> None:
-        self.ctx.lib.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with (
-            mock.patch.object(legacy_state.os, "name", "nt"),
-            mock.patch.object(
-                legacy_state.platform_io, "is_private", return_value=True
-            ),
-            mock.patch.object(legacy_state.file_sync, "sync_fd") as sync,
-            mock.patch.object(
-                legacy_state.file_sync,
-                "sync_path",
-                side_effect=OSError("unsupported directory sync"),
-            ),
-            legacy_state.operation(self.ctx) as check,
-        ):
-            self.assertEqual(len(check()), 2)
-            sync.assert_called_once()
-
     def test_fresh_installer_retains_operation_lock_through_activation(
         self,
     ) -> None:
@@ -136,7 +122,7 @@ class ActivationLifetimeTests(unittest.TestCase):
         def ready(ctx: installer.Ctx, rec: installer.Record) -> None:
             with (
                 self.assertRaises(BlockingIOError),
-                legacy_state.operation(ctx),
+                operation.operation(ctx),
             ):
                 self.fail("fresh operation lock was released")
             original(ctx, rec)
@@ -207,7 +193,7 @@ class ActivationLifetimeTests(unittest.TestCase):
             rec: installer.Record,
             owner: q.MaintenanceOwner,
             path: Path,
-            check: legacy_state.OperationCheck,
+            check: operation.OperationCheck,
         ) -> None:
             original(ctx, rec, owner, path, check)
             self.replace_operation_lock()
@@ -329,68 +315,3 @@ class OrdinaryActivationAuthorityTests(unittest.TestCase):
 
     def test_current_config_after_intent_refuses(self) -> None:
         self.check_install_cut(True, "config", "intent")
-
-    def check_resume_cut(self, kind: str, cut: str) -> None:
-        """Refuse a rolled-back bootstrap after stop or pre-COMMIT changes."""
-        self.ctx.review_policy = self.policy
-        original_save = record.save
-
-        def fail_intent(ctx: Ctx, rec: Record) -> None:
-            original_save(ctx, rec)
-            if rec.get("policy_activation", {}).get("phase") == "intent":
-                raise OSError("saved intent fault")
-
-        with (
-            mock.patch("install.record.save", side_effect=fail_intent),
-            self.assertRaisesRegex(OSError, "saved intent fault"),
-        ):
-            installer.install(self.ctx, self.world.repo, self.world.sha)
-        self.assert_not_activated()
-        original_stop = cutover.lifecycle.stop
-        changed = False
-
-        def stop(ctx: Ctx) -> None:
-            nonlocal changed
-            original_stop(ctx)
-            if cut == "stop":
-                self.mutate(ctx, {"sha": self.world.sha}, kind)
-                changed = True
-
-        def save(ctx: Ctx, rec: Record) -> None:
-            nonlocal changed
-            original_save(ctx, rec)
-            if (
-                cut == "intent"
-                and not changed
-                and rec.get("policy_activation", {}).get("phase") == "intent"
-            ):
-                self.mutate(ctx, rec, kind)
-                changed = True
-
-        error = "runtime" if kind == "runtime" else "configuration"
-        with (
-            mock.patch("install.cutover.lifecycle.stop", side_effect=stop),
-            mock.patch("install.record.save", side_effect=save),
-            self.assertRaisesRegex(
-                StepFailedError, f"review_activation_{error}_changed"
-            ),
-        ):
-            installer.install(
-                dataclasses.replace(self.ctx, ts="resume"),
-                self.world.repo,
-                self.world.sha,
-            )
-        self.assertTrue(changed)
-        self.assert_not_activated()
-
-    def test_resume_runtime_after_stop_refuses(self) -> None:
-        self.check_resume_cut("runtime", "stop")
-
-    def test_resume_config_after_stop_refuses(self) -> None:
-        self.check_resume_cut("config", "stop")
-
-    def test_resume_runtime_after_intent_refuses(self) -> None:
-        self.check_resume_cut("runtime", "intent")
-
-    def test_resume_config_after_intent_refuses(self) -> None:
-        self.check_resume_cut("config", "intent")

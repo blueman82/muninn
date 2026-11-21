@@ -20,8 +20,6 @@ from install import (
     host_renewal,
     host_renewal_recovery,
     legacy_baseline,
-    legacy_state,
-    legacy_transition,
     policy_records,
 )
 from install.constants import (
@@ -61,6 +59,7 @@ from install.cutover import (
 from install.finish import finalize
 from install.host_renewal_operation import held_operation
 from install.host_renewal_preview import preview, summary
+from install.operation import OperationCheck, operation
 from install.preflight import preflight
 from install.probe import codex_probe
 from install.record import (
@@ -245,32 +244,14 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
         return special
     if host_renewal_recovery.pending(ctx) is not None:
         raise StepFailedError("host_renewal_recovery_required")
-    if (
-        ctx.upgrade
-        and ctx.platform == "win32"
-        and legacy_transition.selected(ctx)
-    ):
-        raise StepFailedError("legacy_boot_unsupported")
     if ctx.upgrade or ctx.lib.exists():
-        with legacy_state.operation(ctx) as check:
-            resumed = legacy_transition.resume_install(
-                ctx, Path(repo), sha, check
-            )
-            if resumed is not None:
-                return resumed
-            rec = preflight(ctx, Path(repo), sha)
-            if ctx.upgrade and legacy_transition.selected(ctx):
-                if ctx.dry_run:
-                    ctx.say("DRY-RUN: legacy exclusion and restart required")
-                else:
-                    legacy_transition.stage_owned(ctx, rec, check)
-                return rec
-            return _install(ctx, rec, check)
+        with operation(ctx) as check:
+            return _install(ctx, preflight(ctx, Path(repo), sha), check)
     rec = preflight(ctx, Path(repo), sha)
     if ctx.dry_run:
         return _install(ctx, rec, lambda: (0, 0))
     platform_io.ensure_private_dir(ctx.lib)
-    with legacy_state.operation(ctx) as check:
+    with operation(ctx) as check:
         return _install(ctx, preflight(ctx, Path(repo), sha), check)
 
 
@@ -280,7 +261,7 @@ def _interface(ctx: Ctx, repo: Path, sha: str) -> Record:
     def engine(
         active: Ctx,
         rec: Record,
-        check: legacy_state.OperationCheck,
+        check: OperationCheck,
         resume: bool,
     ) -> Record:
         return _install(active, rec, check, resume=resume)
@@ -345,7 +326,7 @@ def _renewal(ctx: Ctx, repo: Path, sha: str) -> Record:
 def _install(
     ctx: Ctx,
     rec: Record,
-    check: legacy_state.OperationCheck,
+    check: OperationCheck,
     *,
     resume: bool = False,
 ) -> Record:
@@ -400,7 +381,7 @@ def _run_step(
     rec: Record,
     step: Step,
     maintenance: ExitStack,
-    check: legacy_state.OperationCheck,
+    check: OperationCheck,
 ) -> None:
     """Apply one existing step while retaining or releasing its owner scope."""
     check()

@@ -131,8 +131,7 @@ def pin(ctx: Ctx, rec: Record) -> None:
         write_selection(ctx.lib, sha, python)
         return
     relink(ctx.lib / "current", sha, ctx.ts)
-    if "legacy" not in rec:
-        relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
+    relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
     relink(ctx.lib / "python", python, ctx.ts)
 
 

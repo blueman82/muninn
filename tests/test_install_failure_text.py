@@ -148,8 +148,6 @@ class TableTest(unittest.TestCase):
 
     def test_each_installer_code_has_its_own_text(self) -> None:
         codes = installer_codes()
-        self.assertIn("legacy_candidate_changed", codes)
-        self.assertIn("review_activation_configuration_changed", codes)
         default = failure_text.explain(UNKNOWN)
         for code in sorted(codes | set(LEAVE_CODES)):
             with self.subTest(code=code):

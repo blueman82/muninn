@@ -24,14 +24,13 @@ from typing import Any
 from install import (
     codex_interface_recovery,
     host_renewal_recovery,
-    legacy_state,
-    legacy_transition,
     lifecycle,
     policy_records,
 )
 from install import configedit as ce
 from install.constants import PRIVATE_DIR_MODE, PRIVATE_UMASK
 from install.context import Ctx, Job, job, link_text, must, run_real
+from install.operation import operation
 from install.provider_paths import cursor_commands
 from install.record import Record, install_record, load_record, save
 from install.release_io import write_private
@@ -347,12 +346,7 @@ def rollback(ctx: Ctx, rec: Record) -> list[str]:
         raise ValueError("codex_interface_recovery_required")
     if host_renewal_recovery.pending(ctx) is not None or "host_renewal" in rec:
         raise ValueError("host_renewal_recovery_required")
-    with legacy_state.operation(ctx) as check:
-        pending = legacy_state.pending(ctx)
-        if pending is not None or "legacy" in rec:
-            if pending is None or pending[1] != rec:
-                raise ValueError("legacy_record_changed")
-            return legacy_transition.recover(ctx, rec, check)
+    with operation(ctx):
         return rollback_owned(ctx, rec)
 
 
@@ -374,7 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ap.error("the record belongs to another HOME")
     os.umask(PRIVATE_UMASK)
     ctx = Ctx(Path(rec["home"]), run_real, rec["ts"], dry_run=args.dry_run)
-    if ctx.platform != "darwin" and "legacy" not in rec:
+    if ctx.platform != "darwin":
         lifecycle.preflight_service(ctx)
     problems = rollback(ctx, rec)
     for problem in problems:

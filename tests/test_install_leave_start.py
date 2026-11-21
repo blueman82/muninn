@@ -166,16 +166,8 @@ class LeaveStartTests(unittest.TestCase):
         settings = json.loads(self.base.settings.read_text())
         settings["theme"] = "light"
         self.base.settings.write_text(json.dumps(settings, indent=2))
-        with self.assertRaisesRegex(
-            StepFailedError, "review_activation_configuration_changed"
-        ):
-            installer.install(self.later(), self.world.repo, self.world.sha)
         git(self.world.repo, "commit", "--allow-empty", "-qm", "next")
         second = git(self.world.repo, "rev-parse", "HEAD").decode().strip()
-        with self.assertRaisesRegex(
-            StepFailedError, "legacy_candidate_changed"
-        ):
-            installer.install(self.later(), self.world.repo, second)
         before = tree(self.base.home)
         saved = record.load_record(self.path)
         questions: list[str] = []
