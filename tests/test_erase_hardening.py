@@ -5,19 +5,14 @@ Synthetic provider trees and a temp MUNINN_HOME only.
 
 from __future__ import annotations
 
-import base64
 import os
 import shlex
 import subprocess
-import sys
-from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
-from install.provider_paths import powershell
 from muninn import (
     cli,
-    erase,
     knowledge_push,
     tombstone_key,
     tombstones,
@@ -25,7 +20,6 @@ from muninn import (
 from tests.cli_support import CliCase, fake_run
 from tests.erase_support import EraseCase
 from tests.knowledge_context_support import KnowledgeContextCase
-from tests.provider_native_stderr import classify
 from tests.store_support import assert_private
 from tests.test_classify import PARENT, codex_meta, reply, user_msg
 from tests.test_ingest import rollout
@@ -132,24 +126,8 @@ class AsideFileTests(EraseCase):
             out = self.erase(session=PARENT, dry_run=dry)
             self.assertEqual(out["aside_files"], [str(self.home / ASIDE)])
             path = str(self.home / ASIDE)
-            expected = (
-                "Remove-Item -LiteralPath @('" + path.replace("'", "''") + "')"
-                if sys.platform == "win32"
-                else "rm -- " + shlex.quote(path)
-            )
+            expected = "rm -- " + shlex.quote(path)
             self.assertEqual(out["aside_remove"], expected)
-
-    def test_windows_command_quotes_every_single_delimiter(self) -> None:
-        path = "C:/synthetic/a'\u2018\u2019\u201a\u201b[] café $(); end"
-        with mock.patch.object(erase, "os", SimpleNamespace(name="nt")):
-            got = erase._aside_remove([path])
-            self.assertIsNone(erase._aside_remove([]))
-        self.assertEqual(
-            got,
-            "Remove-Item -LiteralPath @('C:/synthetic/a''"
-            "\u2018\u2018\u2019\u2019\u201a\u201a\u201b\u201b"
-            "[] café $(); end')",
-        )
 
     def test_reported_command_removes_only_literal_synthetic_asides(
         self,
@@ -173,22 +151,8 @@ class AsideFileTests(EraseCase):
         decoy.write_bytes(b"wildcard decoy")
         marker = self.home / "INJECTED"
         marker.write_bytes(b"injection marker unchanged")
-        if sys.platform == "win32":
-            encoded = base64.b64encode(command.encode("utf-16-le")).decode(
-                "ascii"
-            )
-            argv = [
-                powershell(),
-                "-NoProfile",
-                "-NonInteractive",
-                "-EncodedCommand",
-                encoded,
-            ]
-        else:
-            self.assertEqual(
-                shlex.split(command), ["rm", "--", *expected_files]
-            )
-            argv = ["/bin/sh", "-c", command]
+        self.assertEqual(shlex.split(command), ["rm", "--", *expected_files])
+        argv = ["/bin/sh", "-c", command]
         env = os.environ | {
             "HOME": str(self.tmp),
             "USERPROFILE": str(self.tmp),
@@ -198,65 +162,15 @@ class AsideFileTests(EraseCase):
         got = subprocess.run(
             argv, cwd=self.home, env=env, capture_output=True, timeout=30
         )
-        self.assert_manual_removal_result(got, windows=sys.platform == "win32")
+        self.assertEqual(
+            (got.returncode, got.stdout, got.stderr), (0, b"", b"")
+        )
         self.assertTrue(all(not target.exists() for target in targets))
         self.assertEqual(decoy.read_bytes(), b"wildcard decoy")
         self.assertEqual(marker.read_bytes(), b"injection marker unchanged")
         self.assertEqual(
             transcript.read_bytes(), b"CANARY-TRANSCRIPT-UNCHANGED"
         )
-
-    def assert_manual_removal_result(
-        self, got: subprocess.CompletedProcess[bytes], *, windows: bool
-    ) -> None:
-        """Require success and reject all stderr except native progress."""
-        self.assertEqual((got.returncode, got.stdout), (0, b""))
-        if windows and got.stderr:
-            codes = classify(got.stderr)
-            self.assertEqual(
-                (
-                    codes["stderr_clixml"],
-                    codes["stderr_progress_only"],
-                    codes["stderr_error_count"],
-                    codes["stderr_other_count"],
-                ),
-                (1, 1, 0, 0),
-            )
-        else:
-            self.assertEqual(got.stderr, b"")
-
-    def test_manual_command_accepts_only_bounded_native_progress(self) -> None:
-        progress = (
-            b'#< CLIXML\r\n<Objs Version="1.1.0.1" '
-            b'xmlns="http://schemas.microsoft.com/powershell/2004/04">'
-            b'<Obj S="progress"><MS><PR N="Record">'
-            b"<AV>Preparing modules for first use.</AV>"
-            b"</PR></MS></Obj></Objs>"
-        )
-        result = subprocess.CompletedProcess(["synthetic"], 0, b"", progress)
-        self.assert_manual_removal_result(result, windows=True)
-        with self.assertRaises(AssertionError):
-            self.assert_manual_removal_result(result, windows=False)
-        for stderr in (
-            b"unrecognized output",
-            b"#< CLIXML\nmalformed",
-            progress.replace(b'S="progress"', b'S="Error"'),
-            progress.replace(b'S="progress"', b'S="unknown"'),
-            b"#< CLIXML\n" + b"x" * 65536,
-        ):
-            with self.assertRaises(AssertionError):
-                self.assert_manual_removal_result(
-                    subprocess.CompletedProcess(["synthetic"], 0, b"", stderr),
-                    windows=True,
-                )
-        for result in (
-            subprocess.CompletedProcess(["synthetic"], 1, b"", progress),
-            subprocess.CompletedProcess(
-                ["synthetic"], 0, b"INJECTED", progress
-            ),
-        ):
-            with self.assertRaises(AssertionError):
-                self.assert_manual_removal_result(result, windows=True)
 
     def test_no_aside_file_means_no_command(self) -> None:
         out = self.erase(session=PARENT, dry_run=True)
