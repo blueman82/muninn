@@ -6,8 +6,8 @@ import json
 import sqlite3
 from unittest import mock
 
-from install.cutover import copy_governed_state
 from muninn import store
+from muninn.store_copy import copy_governed_state
 from tests.knowledge_cutover_support import (
     cursor_history,
     digest,

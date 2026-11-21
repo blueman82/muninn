@@ -4,7 +4,6 @@
 #   bin/muninn-install --check   read-only preview; no runtime or Git-hook setup
 #   bin/muninn-install --status  installed commit against this checkout's HEAD
 #   bin/muninn-install --uninstall [--dry-run] [--purge-data]  remove muninn
-#   bin/muninn-install --leave-unfinished [--check]  leave an unfinished start
 #   bin/muninn-install --help    describe the above
 # Any other arguments go straight to install.installer (--repo, --sha, ...).
 # Interpreter order is bin/muninn's (ADR 0003).
@@ -143,44 +142,17 @@ else
   mode=half
 fi
 
-renewal=0
-leave=0
 check_mode=
-previous=
 for argument in "$@"; do
   case "$argument" in
     --check | --dry-run) check_mode=--check ;;
-    --leave-unfinished) leave=1 ;;
-    --renew-codex-host | --codex-interface) renewal=1 ;;
-    --renew-codex-host=* | --codex-interface=*)
-      renewal=1
-      case "$argument" in
-        --renew-codex-host=preview | --codex-interface=preview) check_mode=--check ;;
-      esac
-      ;;
   esac
-  case "$previous:$argument" in
-    --renew-codex-host:preview | --codex-interface:preview) check_mode=--check ;;
-  esac
-  previous=$argument
 done
-# Leaving a start writes one record mark; it needs no Git-hook setup.
-if [ "$leave" -eq 1 ]; then
-  ensure_runtime "$check_mode"
-  cd "$root"
-  exec "$py" -E -s -B -m install.installer "$@"
-fi
-if [ "$renewal" -eq 1 ]; then
-  ensure_runtime --check
-  cd "$root"
-  exec "$py" -E -s -B -m install.installer --repo "$root" --sha "$head" "$@"
-fi
 
 case "${1:-}" in
   -h | --help)
     cat <<'HELP'
 usage: bin/muninn-install [--check | --status | --uninstall]
-       bin/muninn-install --leave-unfinished [--check]
 
 Install or upgrade muninn from this checkout at its HEAD. It picks a fresh
 install or an upgrade by looking at what is on this machine.
@@ -190,9 +162,6 @@ install or an upgrade by looking at what is on this machine.
   --status       show the installed commit against this checkout's HEAD
   --uninstall    remove muninn (bin/muninn-uninstall); takes --dry-run and
                  --purge-data
-  --leave-unfinished [--check]
-                 leave an unfinished upgrade start after a safety check
-                 and a y answer; --check shows the plan and writes nothing
 
 Advanced: any other arguments go straight to install.installer
 (--repo, --sha, --fresh, --upgrade, --dry-run, --home). Details are in

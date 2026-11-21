@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import contextlib
-import io
 import json
-import os
 import sqlite3
 import threading
 from typing import Any
 from unittest import mock
 
 from muninn import (
-    cli,
     cli_decision,
     decision_candidates,
     decision_requests,
@@ -22,7 +19,6 @@ from muninn.decision_models import CandidateInput
 from muninn.decision_requests import admit_application, request_application
 from muninn.knowledge_erase import erase_review_support
 from muninn.review_models import Receipt
-from tests import policy_preview_v1_support as v1
 from tests.decision_support import DecisionCase
 from tests.test_cli_learning import CliLearningCase
 
@@ -361,28 +357,3 @@ class DecisionReadSnapshotTests(DecisionCliCase):
             (status["state"], status["receipt"]), ("approved_pending", None)
         )
         self.assertEqual(snapshots, [True])
-
-
-class RuntimeDecisionFormatTests(v1.V1PreviewFixture):
-    """Refuse old stores through the actual ordinary CLI runtime guard."""
-
-    def test_old_marked_store_is_not_opened_by_decision_views(self) -> None:
-        self.old("state")
-        before = self.path.read_bytes()
-        for args in (("unresolved",), ("decision", "status", "D_" + "f" * 32)):
-            output = io.StringIO()
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {
-                        "HOME": str(self.home),
-                        "MUNINN_HOME": str(self.ctx.data),
-                    },
-                ),
-                contextlib.redirect_stdout(output),
-            ):
-                code = cli.main(("know", *args))
-            self.assertEqual(code, 4)
-            result = json.loads(output.getvalue())
-            self.assertEqual(result["error"], "store_unavailable")
-            self.assertEqual(self.path.read_bytes(), before)

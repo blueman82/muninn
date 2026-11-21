@@ -81,40 +81,6 @@ If the installer tells you to start the computer again, do that. Then run the sa
 
 Muninn shows a code or a message when you must do something. Find the code or the message in this section. Do the steps of that entry.
 
-### Get help when an upgrade cannot finish
-
-`legacy_candidate_changed` and `review_activation_configuration_changed`
-
-- **What you see:** `bin/muninn-install` stops with `FAILED: legacy_candidate_changed` or `FAILED: review_activation_configuration_changed`.
-- **What caused it:** an earlier install started to turn on learning, and it did not finish. Each new install tries to finish it first. It must use the same Muninn version and the same settings files as before. Your version or your settings files changed, so the install stops.
-- **What happens if you do nothing:** you cannot install a new version of Muninn. Your installed Muninn continues to work, and learning stays as it was.
-- **How to repair it:** you can leave the unfinished install when it changed nothing that must be undone. Muninn examines this first. It keeps the install records, and it removes no file. Do not edit or remove the install records.
-- **Steps:**
-  1. Run `bin/muninn-install --leave-unfinished --check`, and read the plan.
-  2. Run `bin/muninn-install --leave-unfinished`, and type `y`.
-  3. Run `bin/muninn-install`.
-  4. If a command stops with `FAILED:`, run `bin/muninn-install --check` and `muninn doctor --pretty`.
-  5. Send the two outputs to the person who looks after your Muninn install.
-- **Result:** the new install continues. If Muninn cannot leave the unfinished install, that person can repair the install safely.
-
-### Fix an unfinished Codex interface change
-
-`codex_interface_recovery_required`
-
-- **What you see:** `bin/muninn-install` stops with `FAILED: codex_interface_recovery_required`.
-- **What caused it:** an earlier Codex interface change started, and it did not finish. Only the approved plan digest from the same commit can continue it.
-- **What happens if you do nothing:** you cannot install a new version of Muninn. The Muninn service can stay stopped, and learning does not run.
-- **How to repair it:** continue the change with the same digest. If the commit changed, leave the change and make a new plan. Do not edit or remove the install records.
-- **Steps:**
-  1. From the same commit, run `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST` with the approved digest.
-  2. If the commit changed or it stops again, run `bin/muninn-install --leave-unfinished --check`, and read the plan.
-  3. Run `bin/muninn-install --leave-unfinished`, and type `y`.
-  4. Run `bin/muninn-install --upgrade --codex-interface preview --check` to make a new plan.
-  5. Run `bin/muninn-install --upgrade --codex-interface PLAN_DIGEST` with the new digest, and type `y`.
-  6. If a command stops with `FAILED:`, run `bin/muninn-install --check` and `muninn doctor --pretty`.
-  7. Send the two outputs to the person who looks after your Muninn install.
-- **Result:** the Codex interface change finishes, and the Muninn service starts again.
-
 ### Find out why a learning task stopped
 
 Muninn learns from your chats in small tasks. When a task stops, Muninn shows a short code.

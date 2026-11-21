@@ -169,7 +169,6 @@ class UnknownLifecycleTests(UnknownRecoveryCase):
             world.ctx(upgrade=True), ts="20261114T020000Z"
         )
         ctx.data = self.fixture.home
-        ctx.learning_prompt = mock.Mock(return_value="no")
         before = {
             name: [
                 tuple(row)
@@ -193,7 +192,6 @@ class UnknownLifecycleTests(UnknownRecoveryCase):
         ):
             result = installer.install(ctx, world.repo, sha)
         self.assertEqual(result["sha"], sha)
-        self.assertFalse(ctx.enable_learning)
         self.assertEqual(
             self.fixture.conn.execute(
                 "SELECT admission FROM review_control"

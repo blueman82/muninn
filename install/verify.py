@@ -7,6 +7,7 @@ run records ``ok: null`` and never fails the install.
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -24,7 +25,6 @@ from install.context import Ctx, StepFailedError, dry, is_new, job
 from install.provider_apps import installed
 from install.provider_paths import hook_invocations
 from install.record import Record
-from install.recovery_guidance import health_report_command
 from install.steps_release import (
     command,
     fresh,
@@ -35,6 +35,21 @@ from install.transforms import ours
 from install.trust import TrustedHook, codex_hooks
 
 Check = Callable[[str, bool | None, str], None]
+
+
+def health_report_command(ctx: Ctx) -> str:
+    """Format a copyable health-report command for the active shell.
+
+    Args:
+        ctx: Installer paths and target platform.
+
+    Returns:
+        A command that runs doctor from the installed executable.
+    """
+    if ctx.platform == "win32":
+        executable = str(ctx.muninn).replace("'", "''")
+        return f"& '{executable}' --pretty doctor"
+    return f"{shlex.quote(str(ctx.muninn))} --pretty doctor"
 
 
 def hook_commands(ctx: Ctx) -> list[str]:

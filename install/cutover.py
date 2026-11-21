@@ -10,25 +10,12 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from install import (
-    codex_interface,
-    decision_migration,
-    host_renewal,
-    legacy_cutover,
-    legacy_recovery,
-    legacy_state,
-    lifecycle,
-    policy_records,
     record,
-    review_policy,
     snapshot_io,
 )
 from install.context import Ctx, StepFailedError
 from install.current_store import prepare_current as _current
-from install.host_renewal_bindings import clear_host_notice
-from install.record import Record, install_record, save
-from install.steps_config import record as record_config
-from install.steps_release import start_new
-from install.verify import verify
+from install.record import Record
 from muninn import (
     cli_core,
     cli_maint,
@@ -41,7 +28,6 @@ from muninn import (
 )
 from muninn import review_pause as q
 from muninn import review_pause_state as state
-from muninn.store_copy import copy_governed_state as copy_governed_state
 
 
 def _same_home(home: Path, identity: tuple[int, int]) -> None:
@@ -197,27 +183,9 @@ def ingest_transcripts(
                 return total
 
 
-def _host_store(
-    ctx: Ctx,
-    rec: Record,
-    owner: q.MaintenanceOwner,
-    check: legacy_state.OperationCheck | None,
-) -> Path:
-    """Retain the existing host-only preparation and its operation guard."""
-    if check is None:
-        raise StepFailedError("host_renewal_approval_required")
-    value = policy_records.host_renewal(rec["host_renewal"])
-    path = store.db_path(ctx.data)
-    if value.phase == "approved_intent":
-        host_renewal.after_owner(ctx, rec, owner, path, check)
-        path = _current(ctx, rec, owner)
-        host_renewal.contained(ctx, rec, owner, path, check)
-    return path
-
-
 @contextmanager
 def _prepared(
-    ctx: Ctx, rec: Record, check: legacy_state.OperationCheck | None = None
+    ctx: Ctx, rec: Record
 ) -> Generator[tuple[Path, q.MaintenanceOwner | None]]:
     """Retain maintenance ownership through the caller's activation work.
 
@@ -226,7 +194,6 @@ def _prepared(
     Args:
         ctx: Installer paths and explicit fresh or upgrade mode.
         rec: Durable installer record without transient lock objects.
-        check: Held operation validation for installer continuation.
 
     Yields:
         The prepared path and retained owner, or None in a dry run.
@@ -245,31 +212,8 @@ def _prepared(
         if identity is not None:
             path = _fresh(ctx, rec, owner, identity)
             _ingest_fresh(ctx, rec, owner, path, identity)
-        elif "legacy" in rec:
-            if check is None:
-                raise StepFailedError("install_operation_required")
-            prepare = (
-                legacy_cutover.prepare
-                if rec["legacy"]["publication"] == "not_started"
-                else legacy_recovery.prepare
-            )
-            path = prepare(ctx, rec, owner, check)
-        elif "codex_interface" in rec:
-            path = codex_interface.prepare(ctx, rec, owner, _current)
-        elif "host_renewal" in rec:
-            path = _host_store(ctx, rec, owner, check)
         else:
-            try:
-                path = _current(ctx, rec, owner)
-            except StepFailedError as exc:
-                if str(exc) != "cutover_required":
-                    raise
-                path = decision_migration.prepare_historical(ctx, rec, owner)
-        rec["policy_store_identity"] = list(
-            rec["legacy"]["publication_binding"]["candidate"]["identity"]
-            if "legacy" in rec
-            else rec["store"]["file_identity"]
-        )
+            path = _current(ctx, rec, owner)
         record.save(ctx, rec)
         yield path, owner
 
@@ -279,40 +223,6 @@ def prepared_store(ctx: Ctx, rec: Record) -> Generator[Path]:
     """Prepare a store while retaining its owner through the caller scope."""
     with _prepared(ctx, rec) as (path, _owner):
         yield path
-
-
-@contextmanager
-def prepared_install_store(
-    ctx: Ctx, rec: Record, check: legacy_state.OperationCheck
-) -> Generator[Path]:
-    """Activate the first explicit policy only after normal installer exit."""
-
-    def activation_check() -> tuple[int, int]:
-        identity = check()
-        if "legacy" in rec:
-            legacy_recovery.verify_configuration(ctx, rec)
-        check()
-        return identity
-
-    with _prepared(ctx, rec, check) as (path, owner):
-        try:
-            yield path
-        except BaseException:
-            raise
-        else:
-            if owner is not None:
-                if "codex_interface" in rec:
-                    codex_interface.activate(ctx, rec, owner, path)
-                elif "host_renewal" in rec:
-                    host_renewal.activate(ctx, rec, owner, path, check)
-                    clear_host_notice(ctx, owner, rec)
-                else:
-                    review_policy.ready(ctx, rec)
-                    review_policy.activate(
-                        ctx, rec, owner, path, activation_check
-                    )
-                if "legacy" in rec:
-                    legacy_recovery.expose(ctx, rec, check)
 
 
 def prepare_store(ctx: Ctx, rec: Record) -> Path:
@@ -331,57 +241,3 @@ def prepare_store(ctx: Ctx, rec: Record) -> Path:
     """
     with prepared_store(ctx, rec) as path:
         return path
-
-
-def install_legacy(
-    ctx: Ctx, rec: Record, check: legacy_state.OperationCheck
-) -> Record:
-    """Continue the retained operation without rollback across exposure."""
-    record_config(ctx, rec)
-    try:
-        with prepared_install_store(ctx, rec, check):
-            check()
-            legacy_recovery.configure(ctx, rec)
-            check()
-        check()
-        rec["legacy"]["phase"] = "starting"
-        save(ctx, rec)
-        check()
-        start_new(ctx, rec)
-        verify(ctx, rec)
-        rec["legacy"]["phase"] = "complete"
-        rec.pop("legacy_outcome", None)
-        rec.pop("recovery_required", None)
-        save(ctx, rec)
-        install_record(ctx, rec, "ok")
-        return rec
-    except Exception:
-        rec["recovery_required"] = True
-        rec["legacy_outcome"] = "recovery_required"
-        try:
-            save(ctx, rec)
-            install_record(ctx, rec, "recovery_required")
-        except Exception:
-            ctx.say("recovery_required: durable outcome could not be updated")
-        raise
-
-
-def resume_policy(
-    ctx: Ctx, rec: Record, check: legacy_state.OperationCheck
-) -> Record:
-    """Finish retained first activation without resetting its control state."""
-    review_policy.verify_ready(ctx, rec)
-    check()
-    lifecycle.stop(ctx)
-    with q.maintenance_owner(
-        ctx.data, wait_s=cli_core.WRITER_WAIT_S, status=q.EraseStatus()
-    ) as owner:
-        review_policy.activate(ctx, rec, owner, store.db_path(ctx.data), check)
-    check()
-    start_new(ctx, rec)
-    verify(ctx, rec)
-    rec["install_complete"] = True
-    rec.pop("recovery_required", None)
-    save(ctx, rec)
-    install_record(ctx, rec, "ok")
-    return rec

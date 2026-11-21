@@ -4,32 +4,20 @@ from __future__ import annotations
 
 import argparse
 import os
-import sqlite3
 import subprocess
 import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from install import (
-    codex_interface,
-    codex_interface_recovery,
-    host_renewal,
-    host_renewal_recovery,
-    installer,
-    learning_scope,
-    leave_start,
-    uninstall,
-)
 from install import configedit as ce
+from install import installer, uninstall
 from install.constants import GIT_ENV, PRIVATE_UMASK, TS_FORMAT
 from install.context import Ctx, StepFailedError, run_real
 from install.failure_text import explain
-from install.host_renewal_preview import preview
 from muninn.platform_paths import read_selection
 
 ROOT = Path(__file__).resolve().parent.parent
-LEAVE = "--leave-unfinished"
 
 
 def _head() -> str:
@@ -47,24 +35,13 @@ def _head() -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """Choose fresh or upgrade while preserving the advanced installer API."""
     args = list(sys.argv[1:] if argv is None else argv)
-    if any(
-        arg in {"--renew-codex-host", "--codex-interface"}
-        or arg.startswith(("--renew-codex-host=", "--codex-interface="))
-        for arg in args
-    ):
-        return installer.main(["--repo", str(ROOT), "--sha", _head(), *args])
     if args and args[0] == "--uninstall":
         return uninstall.main(args[1:])
     if args and args[0] not in {"--check", "--status", "--help", "-h"}:
         return installer.main(args)
     if args in (["--help"], ["-h"]):
         print("usage: muninn-install [--check | --status | --uninstall]")
-        print("Leave an unfinished start: --leave-unfinished [--check]")
         print("Other arguments pass through to install.installer.")
-        print(
-            "Custom first policy: --repo DIR --sha SHA "
-            "--fresh|--upgrade --review-policy PATH"
-        )
     elif args not in ([], ["--check"], ["--status"]):
         return installer.main(args)
     else:
@@ -100,8 +77,6 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--repo", type=Path, required=True)
     ap.add_argument("--sha", required=True)
     ap.add_argument("--dry-run", "--check", action="store_true")
-    ap.add_argument("--renew-codex-host")
-    ap.add_argument("--codex-interface")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument(
         "--upgrade",
@@ -115,9 +90,6 @@ def parser() -> argparse.ArgumentParser:
         help="a new machine: no data, launchd job or release yet",
     )
     ap.add_argument("--home", type=Path)
-    ap.add_argument("--review-policy", type=Path)
-    ap.add_argument("--learning-scope", choices=("now", "all"))
-    ap.add_argument("--enable-learning", action="store_true")
     return ap
 
 
@@ -135,12 +107,8 @@ def install_main(argv: Sequence[str] | None = None) -> int:
     """
     if argv is None:
         argv = sys.argv[1:]
-    if LEAVE in argv:
-        return leave_main(argv)
     ap = parser()
     args = ap.parse_args(argv)
-    if args.renew_codex_host == "preview" or args.codex_interface == "preview":
-        args.dry_run = True
     default_home = args.home is None
     args.home = args.home or Path.home()
     if (
@@ -164,10 +132,6 @@ def install_main(argv: Sequence[str] | None = None) -> int:
         fresh=args.fresh,
         upgrade=args.upgrade,
         default_home=default_home,
-        review_policy=args.review_policy,
-        enable_learning=args.enable_learning,
-        renew_codex_host=args.renew_codex_host,
-        codex_interface=args.codex_interface,
     )
     ctx.log_path = None if args.dry_run else ctx.lib / "install.log"
     return _run(ctx, args)
@@ -187,33 +151,10 @@ def _run(ctx: Ctx, args: argparse.Namespace) -> int:
         sqlite3.Error: If an ordinary install raises a database error.
     """
     try:
-        if args.codex_interface is not None:
-            _interface_input(ctx, args)
-        elif args.renew_codex_host is not None:
-            _renewal_input(ctx, args)
-        else:
-            ctx.cursor_hooks = installer.choose_cursor_hooks(ctx)
-            learning_scope.choose(ctx, args.learning_scope, input)
-        result = installer.install(ctx, args.repo.resolve(), args.sha)
-        if result.get("legacy_outcome"):
-            return 1
-    except sqlite3.Error:
-        if ctx.codex_interface is not None:
-            return fail("codex_interface_recovery_required")
-        if ctx.renew_codex_host is None:
-            raise
-        return fail("host_renewal_recovery_required")
+        ctx.cursor_hooks = installer.choose_cursor_hooks(ctx)
+        installer.install(ctx, args.repo.resolve(), args.sha)
     except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
-        detail = (
-            _interface_detail(exc)
-            if ctx.codex_interface
-            else (
-                "host_renewal_recovery_required"
-                if ctx.renew_codex_host
-                else str(exc)
-            )
-        )
-        return fail(detail)
+        return fail(str(exc))
     return 0
 
 
@@ -230,122 +171,6 @@ def fail(detail: str) -> int:
     for line in explain(detail):
         print(line)
     return 1
-
-
-def leave_main(argv: Sequence[str]) -> int:
-    """Leave one unfinished upgrade start from the command line.
-
-    Args:
-        argv: The arguments; they hold ``--leave-unfinished``.
-
-    Returns:
-        0 for each result of the leave, 1 for a refusal.
-    """
-    ap = argparse.ArgumentParser(prog="install.installer", allow_abbrev=False)
-    ap.add_argument(LEAVE, action="store_true")
-    ap.add_argument(
-        "--check", "--dry-run", dest="dry_run", action="store_true"
-    )
-    args = ap.parse_args(argv)
-    os.umask(PRIVATE_UMASK)
-    ts = time.strftime(TS_FORMAT, time.gmtime())
-    ctx = Ctx(
-        Path.home(),
-        run_real,
-        ts,
-        dry_run=args.dry_run,
-        say=print,
-        default_home=True,
-    )
-    prompt = input if sys.stdin.isatty() else None
-    try:
-        leave_start.leave(ctx, prompt)
-    except (StepFailedError, ce.RefusedError, ce.RacedError, OSError) as exc:
-        return fail(str(exc))
-    return 0
-
-
-def _interface_detail(error: Exception) -> str:
-    """Expose finite refusal codes without private I/O or proof text."""
-    code = str(error)
-    allowed = {
-        "runtime_selection_unavailable",
-        "runtime_selection_unsafe",
-        "runtime_interface_unsupported",
-        "runtime_probe_unavailable",
-        "runtime_structure_limit",
-        "codex_interface_delta",
-        "codex_interface_plan_changed",
-        "codex_interface_approval_required",
-        "codex_interface_state_changed",
-        "codex_interface_record_changed",
-        "codex_interface_runtime_required",
-        "codex_interface_recovery_required",
-        "codex_interface_record_invalid",
-        "codex_interface_limit",
-        "codex_interface_legacy_approval_invalid",
-        "codex_host_identity_unavailable",
-        "codex_host_changed",
-        "codex_platform_changed",
-        "codex_data_home_changed",
-        "codex_interface_decision_unsupported",
-    }
-    return code if code in allowed else "codex_interface_recovery_required"
-
-
-def _interface_input(ctx: Ctx, args: argparse.Namespace) -> None:
-    """Admit only the new upgrade route without unrelated policy changes."""
-    if (
-        args.fresh
-        or not args.upgrade
-        or args.enable_learning
-        or args.learning_scope is not None
-        or args.review_policy is not None
-        or args.renew_codex_host is not None
-    ):
-        raise StepFailedError("codex_interface_delta")
-    if ctx.dry_run:
-        if args.codex_interface != "preview":
-            raise StepFailedError("codex_interface_plan_changed")
-        return
-    found = codex_interface_recovery.pending(ctx)
-    if found is not None:
-        value = codex_interface.policy_records.codex_interface(
-            found[1]["codex_interface"]
-        )
-        if args.codex_interface != value.plan.digest:
-            raise StepFailedError("codex_interface_plan_changed")
-        ctx.interface_plan = value.plan
-        return
-    plan = codex_interface.preview(ctx)
-    if args.codex_interface != plan.digest:
-        raise StepFailedError("codex_interface_plan_changed")
-    ctx.interface_plan = plan
-
-
-def _renewal_input(ctx: Ctx, args: argparse.Namespace) -> None:
-    """Validate the explicit renewal route and collect fresh owner approval.
-
-    Raises:
-        StepFailedError: If the route, exact plan or approval is invalid.
-    """
-    ctx.renew_codex_host = args.renew_codex_host
-    if (
-        args.learning_scope is not None
-        or args.enable_learning
-        or args.fresh
-        or not args.upgrade
-        or args.review_policy is None
-    ):
-        raise StepFailedError("host_renewal_delta")
-    if not ctx.dry_run and host_renewal_recovery.pending(ctx) is None:
-        plan = preview(ctx, args.repo.resolve(), args.sha)
-        if args.renew_codex_host != plan.digest:
-            raise StepFailedError("host_renewal_plan_changed")
-        if not sys.stdin.isatty():
-            raise StepFailedError("host_renewal_approval_required")
-        ctx.host_approval = host_renewal.confirm(plan, input, float(ctx.now()))
-        ctx.host_plan = plan
 
 
 if __name__ == "__main__":

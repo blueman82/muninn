@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
 import sys
 import unittest
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -183,3 +185,12 @@ def provision_runtime(home: Path, argv: list[str]) -> bool:
         assert "--require-hashes" in argv, argv
         return True
     return False
+
+
+def no_command(
+    argv: Sequence[str | Path],
+    env: Mapping[str, str] | None = None,
+    input: bytes | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Refuse any unintended external effect from the fixture context."""
+    raise AssertionError("no external command is expected")

@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
-from install import codex_interface_checks, lifecycle, policy_records
 from install import configedit as ce
+from install import lifecycle
 from install.constants import GIT_ENV, HEARTBEAT_S, LABEL, RECALL_OFF
 from install.context import (
     Ctx,
@@ -97,7 +97,6 @@ def _unpack(ctx: Ctx, tar: bytes, tmp: Path) -> None:
 
 def prepare_release(ctx: Ctx, rec: Record) -> None:
     """Publish source before provisioning an immutable candidate runtime."""
-    policy_records.validate(rec)
     sha, dest = rec["sha"], ctx.lib / rec["sha"]
     if dry(ctx, f"would prepare the release and runtime at {dest}"):
         return
@@ -111,7 +110,6 @@ def prepare_release(ctx: Ctx, rec: Record) -> None:
     python = prepare_runtime(ctx, dest)
     rec["python"]["path"] = str(python)
     rec["runtime_prepared"] = True
-    codex_interface_checks.capture_runtime(ctx, rec, dest)
 
 
 def pin(ctx: Ctx, rec: Record) -> None:
@@ -131,8 +129,7 @@ def pin(ctx: Ctx, rec: Record) -> None:
         write_selection(ctx.lib, sha, python)
         return
     relink(ctx.lib / "current", sha, ctx.ts)
-    if "legacy" not in rec:
-        relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
+    relink(ctx.muninn, ctx.lib / "current/bin/muninn", ctx.ts)
     relink(ctx.lib / "python", python, ctx.ts)
 
 
@@ -262,7 +259,6 @@ def restart(ctx: Ctx, rec: Record, *, registered: bool = False) -> None:
     """Kickstart the running job so it runs the re-pinned release."""
     if dry(ctx, f"would restart the poller ({ctx.target})"):
         return
-    codex_interface_checks.before_start(ctx, rec)
     started = ctx.now()
     if ctx.platform != "darwin":
         lifecycle.start(ctx, Path(rec["python"]["path"]), ctx.release)
@@ -389,7 +385,6 @@ def start_new(ctx: Ctx, rec: Record) -> None:
     src = ctx.lib / PLIST_SOURCE
     if dry(ctx, f"would install the launchd job {ctx.plist} and start it"):
         return
-    codex_interface_checks.before_start(ctx, rec)
     status = ctx.data / "status.json"
     previous = status.stat().st_mtime_ns if status.exists() else None
     if ctx.platform != "darwin":

@@ -30,7 +30,7 @@ from tests.decision_erasure_graph_support import (
     DecisionGraphCase,
 )
 from tests.ingest_support import TID
-from tests.policy_preview_support import no_command
+from tests.installer_fakes import no_command
 from tests.review_pause_support import initialize
 
 

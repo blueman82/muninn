@@ -15,7 +15,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from install import configedit as ce
-from install import legacy_state
 from install.constants import (
     CODEX_VERIFIED,
     CURSOR_DOC_URL,
@@ -79,10 +78,6 @@ def choose_cursor_hooks(ctx: Ctx) -> bool:
 
 def record(ctx: Ctx, rec: Record) -> None:
     """Snapshot the before-values of our config keys and the links."""
-    if "legacy" in rec:
-        legacy_state.validate(ctx, rec)
-        if rec.get("config_snapshot_complete"):
-            return
     settings = (
         ce.load_json(ce.read_file(ctx.settings)) if rec["has_claude"] else {}
     )
@@ -132,11 +127,9 @@ def record(ctx: Ctx, rec: Record) -> None:
     rec["codex_version"] = version
     rec["codex_identity"] = list(identity)
     rec["trust"] = "auto" if version else "owner"
-    if "legacy" not in rec:
-        ctx.rdir.mkdir(mode=PRIVATE_DIR_MODE, parents=True)
+    ctx.rdir.mkdir(mode=PRIVATE_DIR_MODE, parents=True)
     if rec["has_codex"]:
         _snapshot_cache(ctx, rec)
-    rec["config_snapshot_complete"] = True
     save(ctx, rec)
 
 

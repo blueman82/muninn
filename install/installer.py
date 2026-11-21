@@ -7,23 +7,11 @@ preserves actual data and its private recovery authority on failure.
 from __future__ import annotations
 
 import copy
-import dataclasses
-import json
 from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from pathlib import Path
 
-from install import (
-    codex_interface,
-    codex_interface_recovery,
-    entry,
-    host_renewal,
-    host_renewal_recovery,
-    legacy_baseline,
-    legacy_state,
-    legacy_transition,
-    policy_records,
-)
+from install import entry
 from install.constants import (
     CLAUDE_EVENTS,
     CODEX_KEYS,
@@ -56,11 +44,10 @@ from install.context import (
 )
 from install.cutover import (
     prepare_store,
-    prepared_install_store,
+    prepared_store,
 )
-from install.finish import finalize
-from install.host_renewal_operation import held_operation
-from install.host_renewal_preview import preview, summary
+from install.finish import complete
+from install.operation import OperationCheck, operation
 from install.preflight import preflight
 from install.probe import codex_probe
 from install.record import (
@@ -71,7 +58,6 @@ from install.record import (
     load_record,
     save,
 )
-from install.recovery_guidance import recover_pause
 from install.rollback import failed_install
 from install.runtime import prepare_runtime, verify_runtime
 from install.snapshot import snapshot_store
@@ -174,7 +160,6 @@ __all__ = [
     "prepare_store",
     "prune",
     "record",
-    "recover_pause",
     "relink",
     "repoint",
     "restart",
@@ -210,7 +195,6 @@ UPGRADE_STEPS: tuple[Step, ...] = (
     prepare_release,
     history_upgrade,
     pause,
-    recover_pause,
     prepare_store,
     pin,
     claude,
@@ -241,132 +225,32 @@ def install(ctx: Ctx, repo: Path | str, sha: str) -> Record:
     Raises:
         StepFailedError: If current ownership or recovery state refuses.
     """
-    special = codex_interface_recovery.dispatch(
-        ctx, Path(repo), sha, _interface, _renewal
-    )
-    if special is not None:
-        return special
-    if host_renewal_recovery.pending(ctx) is not None:
-        raise StepFailedError("host_renewal_recovery_required")
-    if (
-        ctx.upgrade
-        and ctx.platform == "win32"
-        and legacy_transition.selected(ctx)
-    ):
-        raise StepFailedError("legacy_boot_unsupported")
     if ctx.upgrade or ctx.lib.exists():
-        with legacy_state.operation(ctx) as check:
-            resumed = legacy_transition.resume_install(
-                ctx, Path(repo), sha, check
-            )
-            if resumed is not None:
-                return resumed
-            rec = preflight(ctx, Path(repo), sha)
-            if ctx.upgrade and legacy_transition.selected(ctx):
-                if ctx.dry_run:
-                    ctx.say("DRY-RUN: legacy exclusion and restart required")
-                else:
-                    legacy_transition.stage_owned(ctx, rec, check)
-                return rec
-            return _install(ctx, rec, check)
+        with operation(ctx) as check:
+            return _install(ctx, preflight(ctx, Path(repo), sha), check)
     rec = preflight(ctx, Path(repo), sha)
     if ctx.dry_run:
         return _install(ctx, rec, lambda: (0, 0))
     platform_io.ensure_private_dir(ctx.lib)
-    with legacy_state.operation(ctx) as check:
+    with operation(ctx) as check:
         return _install(ctx, preflight(ctx, Path(repo), sha), check)
-
-
-def _interface(ctx: Ctx, repo: Path, sha: str) -> Record:
-    """Run the interface route through the same checked installer engine."""
-
-    def engine(
-        active: Ctx,
-        rec: Record,
-        check: legacy_state.OperationCheck,
-        resume: bool,
-    ) -> Record:
-        return _install(active, rec, check, resume=resume)
-
-    return codex_interface_recovery.install_owned(
-        ctx, repo, sha, engine, preflight
-    )
-
-
-def _renewal(ctx: Ctx, repo: Path, sha: str) -> Record:
-    """Route a checked renewal through the existing single step engine."""
-    if ctx.dry_run:
-        plan = preview(ctx, Path(repo), sha)
-        ctx.say(json.dumps(summary(plan)))
-        return {"host_preview": summary(plan)}
-    ctx.host_final_steps = tuple(step.__name__ for step in steps(ctx))
-    found = host_renewal_recovery.pending(ctx)
-    saved_file = None
-    if found is not None:
-        active, saved = found
-        receipt = policy_records.host_renewal(saved["host_renewal"])
-        saved_file = legacy_baseline.file_state(
-            active.rdir / "rollback-record.json", private=True
-        )
-        expected = receipt.held_operation_lock
-        plan = receipt.plan
-    else:
-        plan = ctx.host_plan
-        if plan is None:
-            raise StepFailedError("host_renewal_approval_required")
-        expected = plan.operation_lock
-    with held_operation(
-        ctx, approved=plan.operation_lock, expected_before=expected
-    ) as operation:
-        ctx.host_operation = operation
-        if found is not None:
-            active, saved = found
-            repeated = host_renewal_recovery.pending(ctx)
-            if (
-                repeated is None
-                or repeated[1] != saved
-                or legacy_baseline.file_state(
-                    active.rdir / "rollback-record.json", private=True
-                )
-                != saved_file
-            ):
-                raise StepFailedError("host_renewal_record_changed")
-            resumed = host_renewal_recovery.resume_install(
-                ctx, Path(repo), sha, operation.check
-            )
-            if resumed is None:
-                raise StepFailedError("host_renewal_record_changed")
-            active = dataclasses.replace(ctx, ts=resumed["ts"])
-            if resumed["host_renewal"]["phase"] == "upgrade_verified":
-                return host_renewal_recovery.finish_verified(
-                    active, resumed, operation.check
-                )
-            return _install(active, resumed, operation.check, resume=True)
-        return _install(ctx, preflight(ctx, Path(repo), sha), operation.check)
 
 
 def _install(
     ctx: Ctx,
     rec: Record,
-    check: legacy_state.OperationCheck,
-    *,
-    resume: bool = False,
+    check: OperationCheck,
 ) -> Record:
     """Run the ordinary route inside the caller's installer ownership."""
     log_path = ctx.log_path
     if log_path is not None and not ctx.dry_run:
         ctx = copy.copy(ctx)
         ctx.say, ctx.run = install_log(log_path, ctx.run)
-    if not resume:
-        record(ctx, rec)
-        if ctx.interface_plan is not None:
-            codex_interface.run(ctx, rec, ctx.interface_plan)
-        if ctx.host_plan is not None:
-            host_renewal.stage(ctx, rec, ctx.host_plan, check)
+    record(ctx, rec)
     step: Step = record
     try:
         with ExitStack() as maintenance:
-            for step in _pending_steps(ctx, rec, resume):
+            for step in steps(ctx):
                 _run_step(ctx, rec, step, maintenance, check)
     except Exception as exc:
         if ctx.dry_run:
@@ -378,7 +262,7 @@ def _install(
             ctx.say("recovery_required: cleanup failed")
         raise
     check()
-    return finalize(ctx, rec)
+    return complete(ctx, rec)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -386,34 +270,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     return entry.install_main(argv)
 
 
-def _pending_steps(ctx: Ctx, rec: Record, resume: bool) -> tuple[Step, ...]:
-    """Select unfinished steps while always rechecking owner and restart."""
-    if not resume:
-        return steps(ctx)
-    return tuple(
-        step
-        for step in steps(ctx)
-        if step.__name__ not in rec["steps"]
-        or step in (prepare_store, restart, verify)
-    )
-
-
 def _run_step(
     ctx: Ctx,
     rec: Record,
     step: Step,
     maintenance: ExitStack,
-    check: legacy_state.OperationCheck,
+    check: OperationCheck,
 ) -> None:
     """Apply one existing step while retaining or releasing its owner scope."""
     check()
     if step in (start_new, restart):
         maintenance.close()
-        if "host_renewal" in rec:
-            host_renewal.phase(ctx, rec, "restart_pending")
         check()
     if step is prepare_store:
-        maintenance.enter_context(prepared_install_store(ctx, rec, check))
+        maintenance.enter_context(prepared_store(ctx, rec))
     else:
         step(ctx, rec)
     if not ctx.dry_run:

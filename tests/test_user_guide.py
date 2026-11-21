@@ -109,8 +109,6 @@ class EntryTest(unittest.TestCase):
     def test_required_codes_have_entries(self) -> None:
         text = fix_section()
         for code in (
-            "legacy_candidate_changed",
-            "review_activation_configuration_changed",
             "budget_clock_reversed",
             "incomplete_window",
             "review_policy_required",

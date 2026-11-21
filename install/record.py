@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from install import configedit as ce
-from install import policy_records
 from install.constants import CODEX_KEYS, INSTALL_RECORD
 from install.context import Ctx
 from install.transforms import codex_scan
@@ -35,7 +34,6 @@ _SUMMARY_FIELDS = (
     "store",
     "recovery_required",
     "cursor_hooks",
-    "policy_status",
 )
 
 
@@ -84,14 +82,13 @@ def codex_record(text: str) -> list[dict[str, Any]]:
 
 def save(ctx: Ctx, rec: Record) -> None:
     """Write the rollback record (0600: it holds config before-values)."""
-    policy_records.validate(rec)
     data = json.dumps(rec, indent=1).encode()
     ce.atomic_write(ctx.rdir / "rollback-record.json", data, 0o600)
 
 
 def load_record(path: Path | str) -> Record:
     """Read a rollback record written by ``save``."""
-    return policy_records.parse(Path(path).read_bytes())
+    return json.loads(Path(path).read_bytes())
 
 
 def install_record(ctx: Ctx, rec: Record, outcome: str) -> None:
@@ -130,25 +127,6 @@ def install_summary(ctx: Ctx, rec: Record, outcome: str) -> Record:
             if entry["path"][0] == "hooks"
         )
     out = {k: rec.get(k) for k in _SUMMARY_FIELDS}
-    if "legacy" in rec:
-        out["legacy"] = {
-            key: rec["legacy"].get(key)
-            for key in ("version", "baseline", "phase", "publication")
-        }
-    if "codex_interface" in rec:
-        interface = policy_records.codex_interface(rec["codex_interface"])
-        out["codex_interface_phase"] = interface.phase
-        out["codex_interface_plan_digest"] = interface.plan.digest
-        out["codex_interface_minimum_runtime"] = interface.minimum_runtime
-    if "host_renewal" in rec:
-        receipt = policy_records.host_renewal(rec["host_renewal"])
-        out["host_renewal_phase"] = receipt.phase
-        out["host_renewal_plan_digest"] = receipt.plan.digest
-        out["host_approval_committed"] = receipt.phase in {
-            "grant_committed",
-            "restart_pending",
-            "upgrade_verified",
-        }
     out |= {
         "outcome": outcome,
         "config_keys": keys,
