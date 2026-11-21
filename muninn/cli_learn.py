@@ -20,6 +20,7 @@ from muninn import (
 from muninn.cli_core import Env, Out, Record, Result, read_store, write_store
 from muninn.cli_know_shared import saved_policy
 from muninn.cli_learn_explain import explain
+from muninn.cli_learn_switch import switch
 from muninn.cli_learning_setup import failure as setup_failure
 from muninn.cli_learning_setup import setup
 from muninn.knowledge_models import RequestId, Scope
@@ -356,6 +357,8 @@ def learn(a: Namespace, env: Env, home: Path, record: Record) -> Result:
                 accept_uncertainty=a.accept_uncertainty,
                 now=time.time(),
             ).model_dump(mode="json")
+        elif a.learn_cmd in {"on", "off"}:
+            out = switch(home, a.learn_cmd == "on", time.time())
         elif a.learn_cmd == "setup" and a.mode == "all" and a.confirm is None:
             out = read_store(
                 home,

@@ -30,8 +30,7 @@ from muninn import (
 from muninn.cli_core import Env, Record, Result
 from muninn.cli_maint import heartbeat
 from muninn.query.index_age import ALIVE_AT
-from muninn.review_models import ReviewPolicy
-from muninn.review_supervisor import Supervisor
+from muninn.review_learner import Learner
 
 __all__ = ["serve"]
 
@@ -99,7 +98,7 @@ class _Poller:
         self.beat_failed = False  # logged already in this pass
         self.stop_requested = False  # a stop signal has arrived
         self.stop_generation: str | None = None
-        self.supervisor: Supervisor | None = None
+        self.learner = Learner(home)
         self.owner: int | None = None
 
     def _on_signal(self, signum: int, frame: FrameType | None) -> None:
@@ -135,37 +134,19 @@ class _Poller:
         )
 
     def _start_review(self) -> None:
-        """Acquire lifetime ownership with the installed explicit policy."""
+        """Acquire lifetime ownership of the learning store state."""
         try:
-            with contextlib.closing(
-                store.connect_ro(store.db_path(self.home))
-            ) as conn:
-                row = conn.execute(
-                    "SELECT admission,policy_json FROM review_control"
-                ).fetchone()
-        except store.StoreUnavailableError:
-            row = None
-        if row is not None and row[0] and row[1] is not None:
-            self.supervisor = Supervisor(
-                self.home, ReviewPolicy.model_validate_json(row[1])
+            self.owner, self.stop_generation = review_pause_state.begin_owner(
+                self.home
             )
-            self.supervisor.start(time.time())
-            self.stop_generation = self.supervisor.stop_generation
-        else:
-            try:
-                self.owner, self.stop_generation = (
-                    review_pause_state.begin_owner(self.home)
-                )
-            except BlockingIOError:
-                raise ValueError("supervisor_busy") from None
+        except BlockingIOError:
+            raise ValueError("supervisor_busy") from None
 
     def close(self) -> None:
         """Retain ownership through monitor containment and fencing."""
         if self.conn is not None:
             self.conn.close()
             self.conn = None
-        if self.supervisor is not None:
-            self.supervisor.stop(time.time())
         if self.owner is not None:
             assert self.stop_generation is not None
             review_pause_state.complete_owner(
@@ -176,8 +157,8 @@ class _Poller:
 
     def _review_tick(self) -> None:
         """Advance SQLite only on main between ingestion transactions."""
-        if self.supervisor is not None and not self.stop_requested:
-            self.supervisor.tick(time.time())
+        if not self.stop_requested:
+            self.learner.tick(time.time())
 
     def _requested(self) -> bool:
         """Remember a native stop request at a transaction boundary."""

@@ -11,17 +11,13 @@ import unittest
 from collections.abc import Callable
 from unittest import mock
 
-from muninn import cli_serve, store
 from muninn import review_process as process
 from muninn import review_process_identity as native
 from muninn import review_supervisor as supervision
+from muninn import store
 from muninn.review_budget import reserve_call
-from muninn.review_evidence_models import SourceRef
 from muninn.review_models import ProcessIdentity, ReviewContext
-from muninn.review_requests import enqueue_review
 from muninn.review_runner import LaunchSpec, RunnerCapability
-from tests.ingest_support import primary, rollout
-from tests.test_classify import user_msg
 from tests.test_review_supervisor import SupervisorCase
 
 
@@ -238,36 +234,6 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
             other.start(15.0)
         signal.assert_not_called()
 
-    def test_ingestion_only_owner_never_hot_adopts_later_policy(self) -> None:
-        self.supervisor.stop(14.0)
-        self.conn.execute("UPDATE review_control SET admission=0")
-        poller = cli_serve._Poller(self.home, {}, 60)
-        self.addCleanup(poller.close)
-        poller._start_review()
-        self.assertIsNone(poller.supervisor)
-        self.conn.execute("UPDATE review_control SET admission=1")
-        with mock.patch.object(
-            cli_serve, "Supervisor", side_effect=AssertionError("hot adoption")
-        ):
-            poller._review_tick()
-        second = cli_serve._Poller(self.home, {}, 60)
-        self.addCleanup(second.close)
-        with self.assertRaisesRegex(ValueError, "supervisor_busy"):
-            second._start_review()
-        self.assertIsNone(poller.supervisor)
-
-    def test_poller_selects_exact_installed_startup_policy(self) -> None:
-        self.supervisor.stop(14.0)
-        poller = cli_serve._Poller(self.home, {}, 60)
-        self.addCleanup(poller.close)
-        with mock.patch.object(
-            cli_serve, "Supervisor", wraps=supervision.Supervisor
-        ) as factory:
-            poller._start_review()
-        factory.assert_called_once_with(self.home, self.policy)
-        assert poller.supervisor is not None
-        self.assertEqual(poller.supervisor.policy, self.policy)
-
     @unittest.skipIf(sys.platform == "win32", "requires POSIX process groups")
     def test_ready_and_terminal_resume_retains_outcome_through_busy(
         self,
@@ -322,93 +288,6 @@ class ReviewSupervisorRecoveryTests(SupervisorCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["state"], "unknown")
         self.assertIsNone(rows[0]["launched_at"])
-
-    def test_refusal_then_ingest_and_healthy_work_after_restart(self) -> None:
-        tid = "0199aaaa-bbbb-4ccc-8ddd-ffffffffffff"
-        healthy_path = self.write(
-            rollout(tid), primary(tid, cwd=self.scope.project_id)
-        )
-        self.run_ingest()
-        window = self.window().model_copy(
-            update={"source": SourceRef(provider="codex", thread_id=tid)}
-        )
-        healthy = self.transaction(
-            lambda: enqueue_review(
-                self.conn, window, self.scope, self.policy, "explicit", 12.0
-            )
-        )
-        self.append(healthy_path, [user_msg(3, "new ingest evidence")])
-        self.path.unlink()
-        poller = cli_serve._Poller(self.home, {}, 60)
-        poller.roots, poller.supervisor = self.roots, self.supervisor
-        step = poller.step
-
-        def ingest_once() -> None:
-            self.assertEqual(
-                self.conn.execute(
-                    "SELECT state FROM review_request WHERE id=?",
-                    (self.request.id,),
-                ).fetchone()[0],
-                "failed",
-            )
-            self.assertEqual(
-                self.conn.execute(
-                    "SELECT count(*) FROM review_attempt"
-                ).fetchone()[0],
-                0,
-            )
-            step()
-            poller.stop_requested = True
-
-        with (
-            mock.patch.object(
-                poller, "step", side_effect=ingest_once
-            ) as ingest,
-            mock.patch.object(
-                supervision.subprocess,
-                "Popen",
-                side_effect=AssertionError("spawn before ingest"),
-            ),
-        ):
-            self.assertEqual(poller.run(), (0, None))
-        ingest.assert_called_once()
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT cursor_line FROM source WHERE thread_id=?", (tid,)
-            ).fetchone()[0],
-            4,
-        )
-        self.assertEqual(
-            self.conn.execute("SELECT count(*) FROM review_call").fetchone()[
-                0
-            ],
-            0,
-        )
-        self.supervisor.stop(14.0)
-        self.supervisor = supervision.Supervisor(self.home, self.policy)
-        self.supervisor.start(15.0)
-        self.addCleanup(self.supervisor.stop, 20.0)
-        self.finish()
-        self.assertIsNotNone(
-            self.conn.execute(
-                "SELECT 1 FROM review_receipt WHERE request_id=?",
-                (healthy.id,),
-            ).fetchone()
-        )
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT state FROM review_request WHERE id=?",
-                (self.request.id,),
-            ).fetchone()[0],
-            "failed",
-        )
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT count(*) FROM review_attempt WHERE request_id=?",
-                (self.request.id,),
-            ).fetchone()[0],
-            0,
-        )
 
     def test_unexpected_claim_errors_propagate_without_mutation(self) -> None:
         for error in (

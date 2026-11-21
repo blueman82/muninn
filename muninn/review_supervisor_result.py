@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from muninn import review_prompt
 from muninn.knowledge_models import ReviewResult
@@ -18,12 +19,25 @@ from muninn.review_correction import (
 )
 from muninn.review_diagnostics import FailurePhase
 from muninn.review_models import ReviewContext
-from muninn.review_process import ProcessOutcome
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES, EvidenceLimitError
 from muninn.review_recovery_codes import RUNTIME_CODES
 from muninn.review_round_state import Round
 from muninn.review_rounds import FinalRequest, execute_read, parse_round
 from muninn.review_supervisor_store import database, mark_correction
+
+
+class Outcome(Protocol):
+    """The part of a finished call that the result check reads."""
+
+    @property
+    def stdout(self) -> bytes:
+        """Decoded result bytes."""
+        ...
+
+    @property
+    def error_code(self) -> str | None:
+        """Failure code, or None on success."""
+        ...
 
 
 def failure_code(error: ValueError | OSError, fallback: str) -> str:
@@ -119,7 +133,7 @@ def _commit(
 def execute(
     home: Path,
     pending: Round,
-    outcome: ProcessOutcome,
+    outcome: Outcome,
     now: float,
     fail: Callable[[ReviewContext, str, float, str], None],
 ) -> bool:

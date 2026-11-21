@@ -420,13 +420,7 @@ class OwnerCompletionTests(SupervisorCase):
             self.assertFalse(poller._requested())
         poller._start_review()
         self.addCleanup(poller.close)
-        assert (
-            poller.supervisor is not None
-            and poller.stop_generation is not None
-        )
-        self.assertEqual(
-            poller.stop_generation, poller.supervisor.stop_generation
-        )
+        assert poller.stop_generation is not None
         value = state.parse(
             state.inspect(self.home, state.WITNESS)[0], state.Witness
         )
