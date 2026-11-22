@@ -1,3 +1,2 @@
 bin/* text eol=lf
 .githooks/* text eol=lf
-tests/fixtures/installer/marked-v1-runtime/**/*.py.txt -text

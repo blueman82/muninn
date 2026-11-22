@@ -288,13 +288,6 @@ def preflight(ctx: Ctx, repo: Path, sha: str) -> Record:
     return rec
 
 
-def validate_resume_repo(ctx: Ctx, repo: Path, sha: str) -> None:
-    """Revalidate the candidate while managed launch paths are blocked."""
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise StepFailedError("--sha must be a full 40-hex commit id")
-    check_repo(ctx, repo, sha)
-
-
 SCHEMA_FILE = "muninn/store_schema.py"
 VERSION_PATTERN = re.compile(rb"^SCHEMA_VERSION\s*=\s*(\d+)\s*$", re.MULTILINE)
 

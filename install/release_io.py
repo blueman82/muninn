@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from pathlib import Path
 
-from muninn import file_sync, platform_io
+from muninn import file_sync
 
 
 def publish(
@@ -35,16 +34,3 @@ def publish(
         raise FileExistsError("publication target already exists")
     source.replace(target)
     file_sync.sync_path(target.parent)
-
-
-def write_private(path: Path, data: bytes) -> None:
-    """Flush a validated private temporary file before atomic publication."""
-    platform_io.ensure_private_dir(path.parent)
-    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    temporary = Path(name)
-    # Keep pre-publication failures available for recovery; publish moves it.
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        file_sync.sync_fd(handle.fileno())
-    publish(temporary, path)
