@@ -43,6 +43,7 @@ from muninn.cli_hook_contract import PROVIDERS
 from muninn.cli_output import redacted
 from muninn.cli_parser import build_parser
 from muninn.hook_status import printable
+from muninn.query.index_age import freshness
 
 __all__ = [
     "HOOKS",
@@ -116,7 +117,7 @@ def _answer(
     out = redacted(out)
     out.setdefault("notice", NOTICE)
     if "poller" not in out:
-        out |= obs.freshness(obs.read_status(home))
+        out |= freshness(obs.read_status(home))
     # bytes_out is measured before "logged" is added: the log line cannot
     # describe itself.
     body = json.dumps(out, sort_keys=True)

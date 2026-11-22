@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import cast
 
 from muninn import classify, cursor_import, ingest, review_settings, store
+from muninn.cli_hook_contract import PROVIDERS
 from muninn.hook_context import as_payload
 from muninn.knowledge_models import Provider, RequestId
 from muninn.obs_log import log_call
@@ -60,7 +61,7 @@ def _number(value: object) -> bool:
 def valid_event(provider: str, event: str, data: Mapping[str, object]) -> bool:
     """Validate supported native lifecycle fields without guessing aliases."""
     native = _EVENTS.get(event)
-    if native is None or provider not in {"claude", "codex", "cursor"}:
+    if native is None or provider not in PROVIDERS:
         return False
     if provider == "cursor":
         return _cursor_event(event, data)

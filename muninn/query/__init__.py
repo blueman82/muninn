@@ -16,7 +16,6 @@ from muninn.query.constants import (
     ALL_KINDS,
     NOTICE,
     PREVIEW_NOTICE,
-    PROVIDERS,
 )
 from muninn.query.filters import caller_root
 from muninn.query.guard import guarded
@@ -37,7 +36,6 @@ __all__ = [
     "ALL_KINDS",
     "NOTICE",
     "PREVIEW_NOTICE",
-    "PROVIDERS",
     "STOPWORDS",
     "build_fts_query",
     "caller_root",

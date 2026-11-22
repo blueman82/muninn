@@ -278,7 +278,7 @@ Show startup `action` only when needed.
 
 Keep ordinary safely contained errors available for checks.
 
-Muninn source anchors: [knowledge models](../muninn/knowledge_models.py), [bounded startup context](../muninn/knowledge_push.py), [scoped recall](../muninn/hook_recall.py), [capture](../muninn/hook_learn.py), [history admission](../muninn/review_history.py), [`original` `evidence`](../muninn/review_evidence.py), [atomic commit](../muninn/review_commit.py), and [erasure](../muninn/knowledge_erase.py).
+Muninn source anchors: [knowledge models](../muninn/knowledge_models.py), [bounded startup context](../muninn/knowledge_push.py), [scoped recall](../muninn/hook_recall.py), [capture](../muninn/hook_learn.py), [`original` `evidence`](../muninn/review_evidence.py), [atomic commit](../muninn/review_commit.py), and [erasure](../muninn/knowledge_erase.py).
 
 These are comparable functions.
 Their policies, coverage, and live verification can be different.
@@ -1091,7 +1091,7 @@ This adds test coverage.
 It does not prove a runtime defect or measured benefit.
 Keep the current terse extraction prompt unless controlled `evaluation` finds a repeatable quality problem.
 
-Muninn sources used to compare: [content models](../muninn/knowledge_models.py), [recall `review`](../muninn/cli_recall_review.py), [offline retrieval replay](../tools/replay_retrieval.py), [learning `evaluation`](../tools/learning_eval/pilot.py), and [procedural-paraphrase fixture](../tests/fixtures/learning/procedural-paraphrase.json).
+Muninn sources used to compare: [content models](../muninn/knowledge_models.py), [recall `review`](../muninn/cli_recall_review.py), [learning `evaluation`](../tools/learning_eval/pilot.py), and [procedural-paraphrase fixture](../tests/fixtures/learning/procedural-paraphrase.json).
 
 HyperSkill sources, pinned to the inspected checkout:
 

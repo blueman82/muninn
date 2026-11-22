@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from muninn import obs
+from muninn.query.index_age import freshness
 
 
 def index_notes(home: Path) -> tuple[str, ...]:
@@ -16,7 +17,7 @@ def index_notes(home: Path) -> tuple[str, ...]:
         Attempts may include subsequently recovered sources.
     """
     status = obs.read_status(home)
-    fresh = obs.freshness(status)
+    fresh = freshness(status)
     notes: list[str] = []
     if fresh["poller"] != "ok":
         age = fresh["index_age_s"]

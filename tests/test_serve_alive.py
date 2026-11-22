@@ -15,7 +15,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import cli_serve, ingest, obs, store
-from muninn.query.index_age import ALIVE_AT
+from muninn.query.index_age import ALIVE_AT, freshness
 from tests.cli_support import CliCase
 from tests.home_support import initialize
 
@@ -202,7 +202,7 @@ class ServeAliveTests(CliCase):
             **_: Any,
         ) -> ingest.PassStats:
             on_source()
-            during.append(obs.freshness(self.status()))
+            during.append(freshness(self.status()))
             return ingest.PassStats()
 
         self.serve_one_pass(fake)
@@ -269,7 +269,7 @@ class ServeAliveTests(CliCase):
         self.serve_one_pass(fake)
         self.assertEqual(self.status()["last_error"], "RuntimeError")
         self.assertIsNone(self.status()[ALIVE_AT])
-        self.assertEqual(obs.freshness(self.status())["poller"], "stale")
+        self.assertEqual(freshness(self.status())["poller"], "stale")
 
     def test_a_good_pass_clears_an_earlier_error(self) -> None:
         obs.write_status(
@@ -298,7 +298,7 @@ class ServeAliveTests(CliCase):
         ):
             poller.step()
         self.assertEqual(self.alive_writes, [])
-        self.assertEqual(obs.freshness(self.status())["poller"], "stale")
+        self.assertEqual(freshness(self.status())["poller"], "stale")
 
     def test_stop_after_real_commit_keeps_work_without_heartbeat(self) -> None:
         self.session("stop-commit", "question", "answer")

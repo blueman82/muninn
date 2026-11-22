@@ -11,8 +11,10 @@ import io
 import json
 import os
 import shlex
+import sqlite3
 import subprocess
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -25,7 +27,30 @@ from tests.hook_support import (
     HookCliCase,
     launcher_args,
 )
-from tools import benchmark_cursor_precompact as benchmark
+
+
+def _create_cursor_database(
+    path: Path, messages: int, message_chars: int
+) -> None:
+    """Build a synthetic Cursor database holding one active composer."""
+    headers = [{"bubbleId": f"b{i}"} for i in range(messages)]
+    rows = [
+        (
+            "composerData:active",
+            json.dumps({"fullConversationHeadersOnly": headers}),
+        )
+    ] + [
+        (
+            f"bubbleId:active:b{i}",
+            json.dumps({"type": 1 + i % 2, "text": "x" * message_chars}),
+        )
+        for i in range(messages)
+    ]
+    with contextlib.closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute(
+            "CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.executemany("INSERT INTO cursorDiskKV VALUES (?, ?)", rows)
 
 
 class HookCommandTests(HookCliCase):
@@ -149,7 +174,7 @@ class HookCommandTests(HookCliCase):
 
     def test_precompact_imports_explicit_native_database(self) -> None:
         database = self.tmp / "state.vscdb"
-        benchmark._create_database(database, 2, 3, 16)
+        _create_cursor_database(database, 3, 16)
         trace: dict[str, object] = {}
         env = self.env | {"MUNINN_CURSOR_DB": str(database)}
         with mock.patch.object(

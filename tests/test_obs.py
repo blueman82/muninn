@@ -16,7 +16,7 @@ from typing import Any
 from unittest import mock
 
 from muninn import obs, obs_stats, review_evidence, review_requests, store
-from muninn.query.index_age import ALIVE_AT
+from muninn.query.index_age import ALIVE_AT, freshness
 from tests.ingest_support import rollout
 from tests.store_support import assert_private, public_read
 from tests.test_classify import reply, user_msg
@@ -253,11 +253,9 @@ class StatusTests(ObsCase):
     def test_poller_freshness(self) -> None:
         now = time.time()
         with mock.patch("time.time", return_value=now):
-            fresh = obs.freshness({"last_pass_at": now - 30, "interval_s": 60})
-            stale = obs.freshness(
-                {"last_pass_at": now - 500, "interval_s": 60}
-            )
-            none = obs.freshness({})
+            fresh = freshness({"last_pass_at": now - 30, "interval_s": 60})
+            stale = freshness({"last_pass_at": now - 500, "interval_s": 60})
+            none = freshness({})
         self.assertEqual(fresh, {"index_age_s": 30, "poller": "ok"})
         self.assertEqual(stale["poller"], "stale")
         self.assertEqual(none, {"index_age_s": None, "poller": "stale"})
@@ -266,12 +264,12 @@ class StatusTests(ObsCase):
         now = time.time()
         old_pass = {"last_pass_at": now - 500, "interval_s": 60}
         with mock.patch("time.time", return_value=now):
-            busy = obs.freshness({**old_pass, ALIVE_AT: now - 5})
-            gone = obs.freshness({**old_pass, ALIVE_AT: now - 400})
-            junk = obs.freshness({**old_pass, ALIVE_AT: float("inf")})
-            future = obs.freshness({**old_pass, ALIVE_AT: now + 1e6})
-            skewed = obs.freshness({**old_pass, ALIVE_AT: now + 1})
-            unseen = obs.freshness({ALIVE_AT: now})
+            busy = freshness({**old_pass, ALIVE_AT: now - 5})
+            gone = freshness({**old_pass, ALIVE_AT: now - 400})
+            junk = freshness({**old_pass, ALIVE_AT: float("inf")})
+            future = freshness({**old_pass, ALIVE_AT: now + 1e6})
+            skewed = freshness({**old_pass, ALIVE_AT: now + 1})
+            unseen = freshness({ALIVE_AT: now})
         # The index is still as old as its last finished pass.
         self.assertEqual(busy, {"index_age_s": 500, "poller": "ok"})
         self.assertEqual(gone["poller"], "stale")

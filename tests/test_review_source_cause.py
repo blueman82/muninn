@@ -7,10 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError, field_validator
 
-from muninn import review_codes, review_history, review_requests
+from muninn import review_codes, review_requests
 from muninn.review_learner_result import failure_code
 from muninn.review_read_budget import EVIDENCE_LIMIT_CODES
-from tests.test_review_requests import RequestCase
 
 SECRET_MARKER = "SECRET-MARKER-7f3a"
 NEW_CODES = (
@@ -96,40 +95,6 @@ class PrivacyTests(unittest.TestCase):
             text = review_codes.explain(str(error))
             self.assertEqual(text, review_codes.explain("config"))
             self.assertNotIn(SECRET_MARKER, text)
-
-
-class ReplayTests(RequestCase):
-    """A failed request with a new cause replays like one with config."""
-
-    def _covered(self, code: str) -> list[tuple[int, int]]:
-        """Return the covered ranges after a failed attempt with code."""
-        self.conn.execute(
-            "DROP TRIGGER IF EXISTS review_request_policy_immutable"
-        )
-        self.conn.execute(
-            "UPDATE review_request SET state='failed',policy_digest='old'"
-        )
-        self.conn.execute(
-            "INSERT INTO review_attempt(id,request_id,generation,"
-            "observed_json,started_at,progress_at,ended_at,outcome,"
-            "error_code) VALUES('a1',?,1,'{}',1,1,2,'failed',?)",
-            (self.request.id, code),
-        )
-        source = self.conn.execute("SELECT * FROM source").fetchone()
-        covered = review_history._covered
-        return list(covered(self.conn, source, self.policy))
-
-    def test_old_and_new_causes_are_replayable(self) -> None:
-        self.request = self.enqueue()
-        for code in ("config", *NEW_CODES):
-            with self.subTest(code=code):
-                self.conn.execute("DELETE FROM review_attempt")
-                self.assertEqual(self._covered(code), [], code)
-                self.conn.execute("DELETE FROM review_attempt")
-
-    def test_other_causes_stay_covered(self) -> None:
-        self.request = self.enqueue()
-        self.assertNotEqual(self._covered("rejected_scope"), [])
 
 
 if __name__ == "__main__":

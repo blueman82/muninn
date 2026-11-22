@@ -30,7 +30,7 @@ These are instructions for coding agents that work in this repository. Also use 
 
 - `install/` also holds `uninstall.py`, `configedit.py`, and `tomledit.py`. The directory has the full module list.
 
-- `tools/` holds the standards gate (`python3.13 -m tools.check`). It also holds an optional offline replay tool (`tools.replay_retrieval`).
+- `tools/` holds the standards gate (`python3.13 -m tools.check`).
 
 - `integrations/` and `launchd/` hold templates with a literal `@HOME@`. `install/lifecycle.py` makes the launchd service.
 

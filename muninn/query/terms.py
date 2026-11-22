@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from muninn.query.constants import PROVIDERS
+from muninn.cli_hook_contract import PROVIDERS
 
 MAX_TERMS = 16
 MAX_PHRASES = 8
