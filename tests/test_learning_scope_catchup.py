@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest import mock
 
-from muninn import hook_learn, review_catchup, review_state
+from muninn import hook_learn, review_catchup
 from tests.test_review_requests import RequestCase
 
 
@@ -18,7 +18,6 @@ class ScopeCatchupTests(RequestCase):
         )
         self.conn.execute("UPDATE source SET first_seen=1800000001.0")
         self.conn.execute("BEGIN IMMEDIATE")
-        review_state.ensure(self.conn)
         self.conn.execute(
             "INSERT INTO learning_setup VALUES(1,?,NULL,1800000000.0,NULL)",
             (mode,),

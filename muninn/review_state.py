@@ -24,15 +24,6 @@ class LearningSelection(StrictModel):
     scan_digest: Digest | None
 
 
-def ensure(conn: sqlite3.Connection) -> None:
-    """Create only additive state tables in the caller's transaction."""
-    if not conn.in_transaction:
-        raise ValueError("caller_transaction_required")
-    for statement in STATE_SQL.split(";"):
-        if statement.strip():
-            conn.execute(statement)
-
-
 def available(conn: sqlite3.Connection, table: str) -> bool:
     """Check optional state without modifying an older store."""
     return (
