@@ -66,7 +66,7 @@ class LearnerCase(RequestCase):
             f"op=({first}) if n==1 else ({second})\n"
             "sys.stdout.write(op if isinstance(op,str) else json.dumps("
             "{'type':'result','subtype':'success','is_error':False,"
-            "'structured_output':op}))\n"
+            "'structured_output':{'round':op}}))\n"
         )
         self.exe.chmod(0o755)
 

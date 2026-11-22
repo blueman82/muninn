@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import cast
 from unittest import mock
 
 from muninn import review_requests, review_rounds
@@ -182,13 +183,16 @@ class ReviewRoundTests(unittest.TestCase):
                 }
             )
         schema = review_rounds.round_schema()
-        discriminator = schema["discriminator"]
-        assert isinstance(discriminator, dict)
-        self.assertEqual(discriminator["propertyName"], "op")
-        self.assertEqual(
-            set(discriminator["mapping"]),
-            {"search", "open", "evidence", "final"},
-        )
+        self.assertNotIn("discriminator", json.dumps(schema))
+        self.assertEqual(schema["type"], "object")
+        self.assertNotIn("oneOf", schema)
+        properties = cast(dict[str, dict[str, object]], schema["properties"])
+        choices = cast(list[object], properties["round"]["oneOf"])
+        self.assertEqual(len(choices), 4)
+        body = review_rounds.unwrap_round(b'{"round":{"op":"final"}}')
+        self.assertEqual(body, b'{"op":"final"}')
+        with self.assertRaisesRegex(ValueError, "^invalid_native_output$"):
+            review_rounds.unwrap_round(b'{"op":"final"}')
 
     def test_invalid_round_does_not_expose_response_text(self) -> None:
         with self.assertRaisesRegex(
