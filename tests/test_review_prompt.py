@@ -238,7 +238,7 @@ class ReviewPromptRoundTests(LearnerCase):
             f"Path({str(self.home)!r},str(n)).write_text(json.dumps(p))\n"
             f"op={read!r} if n==1 else {final!r}\n"
             "print(json.dumps({'type':'result','subtype':'success',"
-            "'is_error':False,'structured_output':op}))\n"
+            "'is_error':False,'structured_output':{'round':op}}))\n"
         )
         real = completion.commit_review
         with mock.patch.object(

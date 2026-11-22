@@ -7,7 +7,7 @@ import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from pydantic import Field, TypeAdapter, ValidationError
 
@@ -30,7 +30,9 @@ from muninn.review_evidence_models import (
 )
 from muninn.review_json import (
     canonical_json,
+    canonical_json_value,
     finite_float,
+    load_object,
     reject_constant,
     unique_object,
 )
@@ -77,11 +79,55 @@ type RoundRequest = Annotated[
     Field(discriminator="op"),
 ]
 _ADAPTER = TypeAdapter[RoundRequest](RoundRequest)
+ROUND_FIELD = "round"
 
 
 def round_schema() -> dict[str, object]:
-    """Generate the CLI schema from the locally validated union."""
-    return _ADAPTER.json_schema()
+    """Generate the CLI schema from the locally validated union.
+
+    The model API needs one object at the root, with no `oneOf` there, so
+    the union goes under the `round` field. The Claude CLI checks the
+    schema in strict mode and refuses the OpenAPI `discriminator` keyword
+    that pydantic adds. The `const` tags keep the same choice, and local
+    validation still uses the discriminated union.
+
+    Returns:
+        The JSON schema of the object that holds one round request.
+    """
+    union = cast(dict[str, object], _strip(_ADAPTER.json_schema()))
+    defs = union.pop("$defs")
+    return {
+        "type": "object",
+        "properties": {ROUND_FIELD: union},
+        "required": [ROUND_FIELD],
+        "additionalProperties": False,
+        "$defs": defs,
+    }
+
+
+def unwrap_round(body: bytes) -> bytes:
+    """Return the canonical round request from the provider's object.
+
+    Raises:
+        ValueError: With invalid_native_output if no round object is there.
+    """
+    try:
+        value = load_object(body).get(ROUND_FIELD)
+    except (ValueError, RecursionError, UnicodeError):
+        raise ValueError("invalid_native_output") from None
+    if not isinstance(value, dict):
+        raise ValueError("invalid_native_output")
+    return canonical_json_value(cast(dict[str, object], value)).encode()
+
+
+def _strip(node: object) -> object:
+    """Return a copy of a schema node with no `discriminator` keyword."""
+    if isinstance(node, dict):
+        items = cast(dict[str, object], node).items()
+        return {k: _strip(v) for k, v in items if k != "discriminator"}
+    if isinstance(node, list):
+        return [_strip(v) for v in cast(list[object], node)]
+    return node
 
 
 def check_round(context: ReviewContext) -> None:

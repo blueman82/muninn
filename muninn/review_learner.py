@@ -31,7 +31,7 @@ from muninn.review_requests import (
     fail_attempt,
     recover_attempts,
 )
-from muninn.review_rounds import round_schema
+from muninn.review_rounds import round_schema, unwrap_round
 from muninn.review_settings import POLICY, Settings, load
 
 _PROVIDERS = {
@@ -209,7 +209,8 @@ class Learner:
                 "deadline" if out.error_code == "timeout" else out.error_code,
             )
         try:
-            return CallOutcome(provider.decode(out.stdout, limit), None)
+            body = provider.decode(out.stdout, limit)
+            return CallOutcome(unwrap_round(body), None)
         except ValueError as exc:
             return CallOutcome(b"", str(exc))
 
