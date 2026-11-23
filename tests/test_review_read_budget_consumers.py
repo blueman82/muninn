@@ -14,6 +14,7 @@ from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_json import canonical_json
 from muninn.review_models import RequestView
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests.ingest_support import line
 from tests.policy_patch import use_policy
 from tests.test_review_requests import RequestCase
@@ -25,7 +26,7 @@ class ConsumerReadBudgetTests(RequestCase):
     def selected(self, request: RequestView) -> int:
         """Persist one selected original and attach it to the request."""
         window = self.window(2, 2)
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             EvidenceLocator(
                 source=window.source,
@@ -224,32 +225,6 @@ class ConsumerReadBudgetTests(RequestCase):
         with self.assertRaisesRegex(ValueError, "evidence_limit"):
             enqueue(self.window().boundary_hash)
         self.assertEqual((budget.bytes_left, budget.records_left), (0, 4090))
-
-    def test_reconciliation_all_windows_share_one_source_budget(self) -> None:
-        self.cap(3 * len(self.path.read_bytes()))
-        with mock.patch.object(
-            review_originals, "_jsonl", wraps=review_originals._jsonl
-        ) as prefix:
-            ids = self.transaction(
-                lambda: review_requests.reconcile_sources(
-                    self.conn, self.policy, 12.0
-                )
-            )
-        self.assertEqual(len(ids), 2)
-        grants = [call.kwargs["budget"] for call in prefix.call_args_list]
-        self.assertEqual(len(grants), 2)
-        self.assertIs(grants[0], grants[1])
-        # The second window starts at line 3, so only line 3 is charged.
-        self.assertEqual(
-            grants[0].bytes_left,
-            2 * len(self.path.read_bytes()) - len(line(self.records[-1])),
-        )
-        self.assertEqual(
-            self.conn.execute(
-                "SELECT activation_line,completed_line FROM review_source"
-            ).fetchone()[:],
-            (0, 0),
-        )
 
     def test_claim_aggregates_record_units_and_accepts_exact_fit(self) -> None:
         originals = list(self.records)

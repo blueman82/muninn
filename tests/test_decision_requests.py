@@ -5,6 +5,7 @@ from __future__ import annotations
 from muninn import decision_requests
 from muninn.decision_write import submit_intent
 from muninn.review_progress import advance_completed
+from tests import review_support
 from tests.decision_support import DecisionCase
 from tests.test_classify import user_msg
 
@@ -30,7 +31,7 @@ class DecisionRequestTests(DecisionCase):
     def application(self, ident: str, revision: int = 1) -> str:
         """Admit under the real caller-owned transaction."""
         return self.transaction(
-            lambda: decision_requests.admit_application(
+            lambda: review_support.admit_application(
                 self.conn, self.home, ident, revision, 25.0
             )
         ).id

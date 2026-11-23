@@ -22,7 +22,6 @@ SNIPPET_TOKENS = 32
 PER_SESSION = 2  # hits per session in the whole composed list
 TOOLS_PER_PAGE = 4
 KNOWLEDGE_HITS = 3
-KNOWLEDGE_TEXT = 300  # chars of a knowledge entry shown before size trimming
 
 # One composed hit: the event row plus how many identical repeats it absorbed.
 type Entry = dict[str, Any]

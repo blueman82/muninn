@@ -21,6 +21,7 @@ from muninn.review_evidence_models import (
     SourceRef,
 )
 from muninn.review_models import ReviewPolicy
+from tests import review_support
 from tests.classify_claude_support import (
     claude_rec,
     text_block,
@@ -73,7 +74,7 @@ class ReviewEvidenceTests(IngestCase):
 
     def select(self, number: int, pointer: str) -> EvidenceRecord:
         """Select an exact permitted field from the fixture."""
-        return review_evidence.select_evidence(
+        return review_support.select_evidence(
             self.home,
             self.locator(number),
             EvidenceSelector(json_pointer=pointer, start=None, end=None),
@@ -192,7 +193,7 @@ class ReviewEvidenceTests(IngestCase):
         self.path = self.write(rollout(), self.records)
         self.run_ingest(full=True)
         start = text.index("Use Rust")
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             self.locator(2),
             EvidenceSelector(
@@ -316,13 +317,11 @@ class ReviewEvidenceTests(IngestCase):
         selector = EvidenceSelector(
             json_pointer="/message/content/3/content", start=None, end=None
         )
-        selected = review_evidence.select_evidence(
-            self.home, locator, selector
-        )
+        selected = review_support.select_evidence(self.home, locator, selector)
         self.assertEqual(selected.excerpt, "failed")
         self.assertNotIn("hidden", initial.model_dump_json())
         with self.assertRaises(ValueError):
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 self.home, locator.model_copy(update={"part": 1}), selector
             )
         self.persist(selected)
@@ -358,7 +357,7 @@ class ReviewEvidenceTests(IngestCase):
             line_sha256=hashlib.sha256(raw).hexdigest(),
         )
         selector = EvidenceSelector(json_pointer="/text", start=None, end=None)
-        record = review_evidence.select_evidence(self.home, locator, selector)
+        record = review_support.select_evidence(self.home, locator, selector)
         self.assertEqual(record.excerpt, "Please keep Python.")
         self.assertIsInstance(record.original_locator, CursorOriginal)
         self.persist(record)
@@ -394,7 +393,7 @@ class ReviewEvidenceTests(IngestCase):
             json_pointer="/payload/content/0/text", start=20, end=25
         )
         with self.assertRaises(ValueError):
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 self.home, self.locator(2), selector
             )
 

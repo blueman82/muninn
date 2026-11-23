@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from muninn import scope
-from tests.scope_support import ScopeCase
+from tests.scope_support import ScopeCase, global_scope
 
 
 def rewrite_pointer(path: Path, text: str) -> None:
@@ -170,16 +170,6 @@ class MatrixTests(ScopeCase):
 class LookupTests(ScopeCase):
     """Scope id lookup for writers, readers and unusable cwds."""
 
-    def test_global_scope_singleton(self) -> None:
-        conn = self.rw()
-        first = scope.global_scope_id(conn)
-        self.assertEqual(scope.global_scope_id(conn), first)
-        found = conn.execute("SELECT key, label, kind FROM scope")
-        self.assertEqual(
-            [tuple(r) for r in found], [("global", "global", "global")]
-        )
-        self.assertEqual(scope.global_scope_id(self.ro()), first)  # readers
-
     def test_scope_ids_for_read_never_inserts(self) -> None:
         rw = self.rw()
         repo = self.tmp / "repo"
@@ -189,7 +179,7 @@ class LookupTests(ScopeCase):
         plain.mkdir()
         known = scope.scope_id(rw, str(repo))
         self.assertEqual(scope.scope_ids_for_read(rw, str(repo)), [known])
-        wide = scope.global_scope_id(rw)  # now readers also see global
+        wide = global_scope(rw)  # now readers also see global
         late = self.tmp / "late"
         late.mkdir()
         pinned = scope.scope_id(rw, str(late))  # plain when first seen
@@ -225,9 +215,7 @@ class LookupTests(ScopeCase):
         ids = {scope.scope_id(conn, cwd) for cwd in cases}
         self.assertEqual(len(ids), 1)
         # a cwd spelled "global" must not land in the global scope
-        self.assertNotEqual(
-            scope.scope_id(conn, "global"), scope.global_scope_id(conn)
-        )
+        self.assertNotEqual(scope.scope_id(conn, "global"), global_scope(conn))
 
 
 class PointerDiagnosticTests(unittest.TestCase):

@@ -10,7 +10,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest import mock
 
-from install import cutover
+from install import cutover, preflight
 from install import installer as co
 from install import snapshot as sn
 from install.constants import PRE_UPGRADE_PREFIX
@@ -319,10 +319,12 @@ class PlanAndNamesTests(SnapshotCase):
 
     def test_release_schema_matches_the_runtime_constant(self) -> None:
         self.assertEqual(
-            sn.release_schema(self.ctx, self.w.repo, self.sha2),
+            preflight.release_schema(self.ctx, self.w.repo, self.sha2),
             store.SCHEMA_VERSION,
         )
-        found = sn._VERSION.findall((ROOT / sn.SCHEMA_FILE).read_bytes())
+        found = preflight.VERSION_PATTERN.findall(
+            (ROOT / preflight.SCHEMA_FILE).read_bytes()
+        )
         self.assertEqual([int(v) for v in found], [store.SCHEMA_VERSION])
 
     def test_the_prefix_is_the_same_in_installer_and_runtime(self) -> None:

@@ -9,6 +9,7 @@ from muninn import decision_requests, review_originals, review_requests
 from muninn.decision_candidates import candidate_view
 from muninn.decision_write import submit_intent
 from muninn.review_learner import Learner
+from tests import review_support
 from tests.decision_support import DecisionCase
 from tests.policy_patch import use_policy
 
@@ -89,7 +90,7 @@ class DecisionRequestLimitTests(DecisionCase):
         candidate = self.stage()
         self.approve(self.intent(candidate.id))
         self.transaction(
-            lambda: decision_requests.admit_application(
+            lambda: review_support.admit_application(
                 self.conn, self.home, candidate.id, 1, 25.0
             )
         )
@@ -142,7 +143,7 @@ class DecisionRequestLimitTests(DecisionCase):
         candidate = self.stage()
         self.approve(self.intent(candidate.id))
         self.transaction(
-            lambda: decision_requests.admit_application(
+            lambda: review_support.admit_application(
                 self.conn, self.home, candidate.id, 1, 25.0
             )
         )

@@ -8,9 +8,9 @@ from muninn import erase, review_requests, store, tombstones
 from muninn.decision_candidates import candidate_view, show_candidate
 from muninn.decision_proof import verify_decision
 from muninn.decision_write import accept_decision, decision_view, submit_intent
-from muninn.knowledge_erase import erase_review_support
 from muninn.review_read_budget import ReadBudget
 from tests.decision_support import DecisionCase
+from tests.review_support import erase_review_support
 
 MARKER = 'Candidate "private" canary ERASEDECISIONBODY'
 

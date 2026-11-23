@@ -22,6 +22,7 @@ from muninn.review_evidence_models import (
     SourceRef,
 )
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests.ingest_support import line
 from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
@@ -84,7 +85,7 @@ class ReviewCommitBudgetTests(CommitCase):
         self.run_ingest(full=True)
         window = self.window(2, 2)
         self.evidence = tuple(
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 self.home,
                 EvidenceLocator(
                     source=window.source,
@@ -284,7 +285,7 @@ class ReviewCommitBudgetTests(CommitCase):
             through_line=1,
             boundary_hash=hashlib.sha256(raw).hexdigest(),
         )
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             EvidenceLocator(
                 source=window.source,

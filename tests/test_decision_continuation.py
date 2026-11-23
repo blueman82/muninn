@@ -9,6 +9,7 @@ from unittest import mock
 from muninn import decision_requests, review_requests, review_settings, store
 from muninn.decision_write import submit_intent
 from muninn.review_learner import Learner
+from tests import review_support
 from tests.decision_support import DecisionCase
 from tests.policy_patch import use_policy
 
@@ -92,7 +93,7 @@ class DecisionContinuationTests(DecisionCase):
         candidate = self.stage()
         self.approve(self.intent(candidate.id))
         application = self.transaction(
-            lambda: decision_requests.admit_application(
+            lambda: review_support.admit_application(
                 self.conn, self.home, candidate.id, 1, 25.0
             )
         )

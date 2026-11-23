@@ -48,27 +48,25 @@ class ReadBudget:
             MAX_SQL_STEPS,
         )
         self._used = [0, 0, 0]
-        self._active = True
-        self._partitionable = True
 
     @property
     def bytes_left(self) -> int:
         """The unspent byte grant still owned by this account."""
-        return self._grants[0] - self._used[0] if self._active else 0
+        return self._grants[0] - self._used[0]
 
     @property
     def records_left(self) -> int:
         """The unspent record grant still owned by this account."""
-        return self._grants[1] - self._used[1] if self._active else 0
+        return self._grants[1] - self._used[1]
 
     @property
     def sql_steps_left(self) -> int:
         """The unspent native callback grant owned by this account."""
-        return self._grants[2] - self._used[2] if self._active else 0
+        return self._grants[2] - self._used[2]
 
     def consume_bytes(self, count: int) -> None:
         """Charge a nonnegative byte count without permitting overdraw."""
-        if type(count) is not int or count < 0 or not self._active:
+        if type(count) is not int or count < 0:
             raise ValueError("evidence_limit")
         if count > self.bytes_left:
             raise EvidenceLimitError("evidence_byte_limit")
@@ -85,29 +83,6 @@ class ReadBudget:
         if self.sql_steps_left:
             self._used[2] += 1
         return int(self.sql_steps_left == 0)
-
-    def partition(self, count: int) -> tuple[ReadBudget, ...]:
-        """Transfer remaining grants once into positive isolated shares."""
-        remaining = (self.bytes_left, self.records_left, self.sql_steps_left)
-        if (
-            type(count) is not int
-            or count <= 0
-            or not self._partitionable
-            or min(remaining) < count
-        ):
-            raise ValueError("evidence_limit")
-        divisions = [divmod(total, count) for total in remaining]
-        children: list[ReadBudget] = []
-        for index in range(count):
-            grants = tuple(q + int(index < r) for q, r in divisions)
-            child = ReadBudget(grants[0])
-            child._grants = (grants[0], grants[1], grants[2])
-            child._partitionable = False
-            children.append(child)
-        # Transfer removes funding authority without fabricating consumption.
-        self._active = False
-        self._partitionable = False
-        return tuple(children)
 
 
 def uncharged() -> ReadBudget:

@@ -11,7 +11,6 @@ from muninn.decision_apply import enrich_support
 from muninn.decision_candidates import candidate_view
 from muninn.decision_models import DecisionIntent
 from muninn.decision_write import submit_intent
-from muninn.review_evidence import select_evidence
 from muninn.review_evidence_models import (
     EvidenceLocator,
     EvidenceSelector,
@@ -20,6 +19,7 @@ from muninn.review_evidence_models import (
 from tests.classify_claude_support import claude_rec
 from tests.decision_support import DecisionCase
 from tests.ingest_support import line, primary, rollout
+from tests.review_support import select_evidence
 from tests.test_decision_apply import ApplicationCase
 
 

@@ -21,6 +21,20 @@ from muninn import store
 NO_HASH = "0" * 40
 
 
+def global_scope(conn: sqlite3.Connection) -> int:
+    """Return the id of the 'global' scope row, inserting it if absent.
+
+    Muninn reads this row but no longer writes it, so tests make it.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO scope(key, label, kind) "
+        "VALUES ('global', 'global', 'global')"
+    )
+    return conn.execute("SELECT id FROM scope WHERE key='global'").fetchone()[
+        0
+    ]
+
+
 class ScopeCase(unittest.TestCase):
     """Base case with a temp HOME, a temp store and git helpers."""
 

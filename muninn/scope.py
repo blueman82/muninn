@@ -284,14 +284,6 @@ def _global(conn: sqlite3.Connection) -> int | None:
     return row[0] if row else None
 
 
-def global_scope_id(conn: sqlite3.Connection) -> int:
-    """Return the singleton 'global' scope id, creating it if needed."""
-    found = _global(conn)
-    return (
-        found if found is not None else _new_scope(conn, GLOBAL_KEY, "global")
-    )
-
-
 def scope_ids_for_read(conn: sqlite3.Connection, cwd: str) -> list[int]:
     """Return the [repo scope, global scope] ids that exist for a cwd.
 

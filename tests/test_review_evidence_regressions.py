@@ -15,6 +15,7 @@ from muninn.review_evidence_models import (
     EvidenceWindow,
     SourceRef,
 )
+from tests import review_support
 from tests import test_review_evidence as evidence_tests
 
 
@@ -112,7 +113,7 @@ class ReviewEvidenceRegressionTests(unittest.TestCase):
             source=source, line=2, part=1, line_sha256=digest
         )
         selector = EvidenceSelector(json_pointer="/text", start=None, end=None)
-        record = review_evidence.select_evidence(case.home, locator, selector)
+        record = review_support.select_evidence(case.home, locator, selector)
         self.assertEqual(
             (record.line, record.excerpt), (2, "Please keep Python.")
         )
@@ -127,7 +128,7 @@ class ReviewEvidenceRegressionTests(unittest.TestCase):
         initial = review_evidence.initial_evidence(case.home, window, 100_000)
         self.assertEqual([e.line for e in initial.excerpts], [2])
         with self.assertRaises(ValueError):
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 case.home,
                 locator.model_copy(
                     update={

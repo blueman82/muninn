@@ -8,8 +8,9 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
-from muninn import knowledge_erase, review_requests, store
+from muninn import review_requests, store
 from muninn.review_models import ReviewContext
+from tests import review_support
 from tests.policy_patch import reserve_call
 from tests.test_cli_learning import CliLearningCase
 
@@ -78,7 +79,7 @@ class CliLearningProposalTests(CliLearningCase):
     def test_intervening_erasure_wins(self) -> None:
         def erase() -> None:
             self.transaction(
-                lambda: knowledge_erase.erase_review_support(
+                lambda: review_support.erase_review_support(
                     self.conn, self.context.evidence_ids, 21.0
                 )
             )

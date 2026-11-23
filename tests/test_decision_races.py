@@ -26,6 +26,7 @@ from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_json import canonical_json
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests.ingest_support import line
 from tests.test_classify import user_msg
 from tests.test_decision_resolution import ResolutionCase
@@ -379,7 +380,7 @@ class DecisionRaceTests(ResolutionCase):
             json_pointer="/payload/content/0/text", start=None, end=None
         )
         records = tuple(
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 self.home,
                 EvidenceLocator(
                     source=self.window().source,
