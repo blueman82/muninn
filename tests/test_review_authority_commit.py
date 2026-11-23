@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from muninn import review_evidence
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
+from tests import review_support
 from tests.ingest_support import fc_output, rollout
 from tests.test_classify import function_call, reply, user_msg
 from tests.test_review_commit import CommitCase
@@ -29,7 +30,7 @@ class OwnerCommitCase(CommitCase):
         window = self.window(2, 2)
         start = text.index(passage) if passage is not None else None
         end = start + len(passage) if start is not None and passage else None
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             EvidenceLocator(
                 source=window.source,
@@ -163,7 +164,7 @@ class ReviewAuthorityCommitTests(OwnerCommitCase):
         self.path = self.write(rollout(), self.records)
         self.run_ingest(full=True)
         window = self.window(4, 4)
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             EvidenceLocator(
                 source=window.source,

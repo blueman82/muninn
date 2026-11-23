@@ -10,7 +10,7 @@ from contextlib import closing
 from typing import Any
 from unittest import mock
 
-from muninn import review_evidence, store
+from muninn import store
 from muninn.review_binding import adjacent_gap, owner_supported
 from muninn.review_evidence_models import (
     EvidenceLocator,
@@ -19,6 +19,7 @@ from muninn.review_evidence_models import (
     SourceRef,
 )
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests.classify_claude_support import claude_rec, text_block
 from tests.ingest_support import IngestCase, line
 
@@ -68,7 +69,7 @@ class ClaudeAgreementTests(IngestCase):
             digest = hashlib.sha256(
                 line(records[number - 1]).rstrip(b"\r\n")
             ).hexdigest()
-            return review_evidence.select_evidence(
+            return review_support.select_evidence(
                 self.home,
                 EvidenceLocator(
                     source=source, line=number, part=1, line_sha256=digest

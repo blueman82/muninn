@@ -24,6 +24,7 @@ from muninn.review_json import canonical_json
 from muninn.review_models import RequestView
 from muninn.review_progress import digest
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests import test_review_window_boundary as boundary_tests
 from tests.policy_patch import use_policy
 
@@ -47,7 +48,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
             part=1,
             line_sha256=self.window.boundary_hash,
         )
-        self.record = review_evidence.select_evidence(
+        self.record = review_support.select_evidence(
             self.case.home, self.locator, self.selector
         )
         self.case.persist(self.record)
@@ -209,7 +210,7 @@ class NativeConsumerReadBudgetTests(unittest.TestCase):
                 "UPDATE cursorDiskKV SET key=replace(key,':chat',':other')"
             )
         cursor_import.run(self.case.home, other, str(self.case.tmp), 0.0)
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.case.home,
             self.locator.model_copy(
                 update={

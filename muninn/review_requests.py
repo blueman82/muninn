@@ -25,13 +25,9 @@ from muninn.review_progress import (
     checked_policy,
     digest,
     mark_eligible,
-    reconciliation_sources,
-    reconciliation_windows,
     require_transaction,
-    source_admission,
     source_progress,
     source_row,
-    unsuppressed_window,
 )
 from muninn.review_read_budget import ReadBudget
 from muninn.review_request_views import attempt_view, request_row, request_view
@@ -116,52 +112,6 @@ def enqueue_review(
     )
     mark_eligible(conn, window, now)
     return request_view(request_row(conn, ident))
-
-
-def reconcile_sources(
-    conn: sqlite3.Connection,
-    policy: ReviewPolicy,
-    now: float,
-) -> tuple[RequestId, ...]:
-    """Admit complete new intervals without reviving cancellation."""
-    require_transaction(conn, now)
-    policy = checked_policy(policy)
-    if (
-        conn.execute("SELECT activated_at FROM review_control").fetchone()[0]
-        is None
-    ):
-        return ()
-    sources = reconciliation_sources(conn)
-    if not sources:
-        return ()
-    shares: tuple[ReadBudget, ...] = ()
-    with source_admission(conn, now):
-        shares = ReadBudget(policy.max_input_bytes).partition(len(sources))
-    if not shares:
-        return ()
-    output: list[RequestId] = []
-    for source, budget in zip(sources, shares, strict=True):
-        with source_admission(conn, now) as admitted:
-            for window, scope in reconciliation_windows(
-                conn, policy, now, source, budget=budget
-            ):
-                permitted = unsuppressed_window(conn, window)
-                if permitted is None:
-                    mark_eligible(conn, window, now)
-                    continue
-                request = enqueue_review(
-                    conn,
-                    permitted,
-                    scope,
-                    policy,
-                    "reconcile",
-                    now,
-                    budget=budget,
-                )
-                if request.state == "pending":
-                    admitted.append(request.id)
-        output.extend(admitted)
-    return tuple(output)
 
 
 def claim_attempt(

@@ -32,15 +32,6 @@ class ErasureSummary:
     retained_archives: int
 
 
-def erase_review_support(
-    conn: sqlite3.Connection, evidence_ids: tuple[EvidenceId, ...], now: float
-) -> ErasureSummary:
-    """Erase selected evidence and every associated governed derivation."""
-    return erase_support_closure(
-        conn, support_closure(conn, evidence_ids), now
-    )
-
-
 def erase_support_closure(
     conn: sqlite3.Connection, plan: SupportClosure, now: float
 ) -> ErasureSummary:

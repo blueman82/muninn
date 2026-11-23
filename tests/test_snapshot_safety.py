@@ -12,10 +12,20 @@ from pathlib import Path
 from typing import BinaryIO
 from unittest import mock
 
-from install import snapshot
+from install import snapshot_io
 from muninn import cli_rebuild, platform_io, platform_rebuild, store
 from tests.cli_support import CliCase
 from tests.home_support import initialize
+
+
+def read_version(path: Path) -> int:
+    """Read the version through the installer's validated read-only open."""
+    with (
+        snapshot_io.validated(path) as revalidate,
+        closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as conn,
+    ):
+        revalidate()
+        return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
 class SnapshotSafetyTests(unittest.TestCase):
@@ -68,10 +78,10 @@ class SnapshotSafetyTests(unittest.TestCase):
             mock.patch.object(platform_io, "open_regular", opening),
             mock.patch.object(sqlite3, "connect", connect),
         ):
-            self.assertEqual(snapshot.store_version(self.live), 2)
+            self.assertEqual(read_version(self.live), 2)
 
     def test_source_identity_change_refuses_after_sqlite_read(self) -> None:
-        real = snapshot.snapshot_io._unchanged
+        real = snapshot_io._unchanged
         calls = 0
 
         def changed(identities: list[tuple[Path, os.stat_result]]) -> None:
@@ -82,17 +92,17 @@ class SnapshotSafetyTests(unittest.TestCase):
                 raise OSError("SQLite source changed identity")
 
         with (
-            mock.patch.object(snapshot.snapshot_io, "_unchanged", changed),
+            mock.patch.object(snapshot_io, "_unchanged", changed),
             self.assertRaisesRegex(OSError, "changed identity"),
         ):
-            snapshot.store_version(self.live)
+            read_version(self.live)
         self.assertEqual(calls, 2)
 
     def test_foreign_or_public_source_metadata_is_not_repaired(self) -> None:
         before = self.live.stat()
         self.live.chmod(0o644)
         with self.assertRaises(PermissionError):
-            snapshot.store_version(self.live)
+            read_version(self.live)
         self.assertEqual(self.live.stat().st_mode & 0o777, 0o644)
         self.live.chmod(0o600)
         self.assertEqual(self.live.stat().st_ino, before.st_ino)

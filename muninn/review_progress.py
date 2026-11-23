@@ -183,19 +183,6 @@ def source_progress(
     ).fetchone()
 
 
-def reconciliation_sources(
-    conn: sqlite3.Connection,
-) -> tuple[sqlite3.Row, ...]:
-    """List verified primary sources without holding an active SQL cursor."""
-    return tuple(
-        conn.execute(
-            "SELECT * FROM source WHERE status='active' "
-            "AND thread_class='primary'"
-            " AND replay_mode!='unverified'"
-        )
-    )
-
-
 @contextmanager
 def source_admission(
     conn: sqlite3.Connection, now: float

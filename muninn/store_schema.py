@@ -15,46 +15,7 @@ CREATE TABLE scope (id INTEGER PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('git','dir','global')));
 """
 
-KNOWLEDGE_TABLE = r"""CREATE TABLE {name} (
-  id INTEGER PRIMARY KEY,    -- shown as K<id>
-  scope_id INTEGER NOT NULL REFERENCES scope(id),  -- repo, loop or 'global'
-  kind TEXT NOT NULL CHECK (kind IN
-    ('decision','fact','preference','procedure','lesson','constraint')),
-  text TEXT,                 -- 1..500 chars, redacted; NULL only when erased
-  status TEXT NOT NULL
-    CHECK (status IN ('current','superseded','retracted','erased')),
-  supersedes INTEGER REFERENCES knowledge(id),
-  superseded_by INTEGER REFERENCES knowledge(id),
-  retract_reason TEXT,       -- <=200 chars; NULL when erased
-  actor TEXT NOT NULL,       -- 'user' | 'claude:<root12>' | 'codex:<root12>'
-  created_at REAL NOT NULL,
-  confidence TEXT            -- NULL: not stated
-    CHECK (confidence IS NULL OR confidence IN
-      ('observed','reported','inferred')),
-  valid_until REAL,          -- epoch seconds; NULL never expires
-  sensitivity TEXT NOT NULL DEFAULT 'normal'
-    CHECK (sensitivity IN ('normal','restricted')),
-  contradicts INTEGER REFERENCES knowledge(id),  -- informational only
-  tags TEXT,                 -- comma-joined [a-z0-9_-]; data, not in FTS
-  CHECK (status = 'erased' OR text IS NOT NULL))"""
-
 # Order matters: knowledge_ai/ad/au, recreated after a knowledge rebuild.
-KNOWLEDGE_TRIGGERS = (
-    r"""
-CREATE TRIGGER knowledge_ai AFTER INSERT ON knowledge BEGIN
-  INSERT INTO knowledge_fts(rowid, text)
-    SELECT new.id, new.text WHERE new.text IS NOT NULL; END""",
-    r"""
-CREATE TRIGGER knowledge_ad AFTER DELETE ON knowledge BEGIN
-  INSERT INTO knowledge_fts(knowledge_fts, rowid, text)
-    SELECT 'delete', old.id, old.text WHERE old.text IS NOT NULL; END""",
-    r"""
-CREATE TRIGGER knowledge_au AFTER UPDATE ON knowledge BEGIN
-  INSERT INTO knowledge_fts(knowledge_fts, rowid, text)
-    SELECT 'delete', old.id, old.text WHERE old.text IS NOT NULL;
-  INSERT INTO knowledge_fts(rowid, text)
-    SELECT new.id, new.text WHERE new.text IS NOT NULL; END""",
-)
 
 _SOURCES_SQL = r"""
 CREATE TABLE scope_path (cwd TEXT PRIMARY KEY,
@@ -134,26 +95,6 @@ CREATE TRIGGER event_immutable BEFORE UPDATE ON event BEGIN
   SELECT RAISE(ABORT, 'event is immutable'); END;
 """
 
-_FTS_SQL = r"""
-CREATE VIRTUAL TABLE knowledge_fts USING fts5(text,
-  content='knowledge', content_rowid='id');
-INSERT INTO knowledge_fts(knowledge_fts, rank) VALUES ('secure-delete', 1);
-"""
-
-_CITATION_SQL = r"""
-CREATE TABLE citation (id INTEGER PRIMARY KEY,
-  knowledge_id INTEGER NOT NULL REFERENCES knowledge(id),
-  provider TEXT NOT NULL, thread_id TEXT NOT NULL,
-  line INTEGER NOT NULL, part INTEGER NOT NULL,
-  line_sha256 TEXT NOT NULL,  -- identity copied at write time: survives
-                              -- re-parse (event ids do not)
-  role TEXT NOT NULL, kind TEXT NOT NULL, ts TEXT,
-  quote TEXT, span_start INTEGER, span_end INTEGER,  -- verbatim 12..300-char
-                                                     -- span; NULL when erased
-  state TEXT NOT NULL DEFAULT 'live' CHECK (state IN ('live','erased')));
-CREATE INDEX citation_target ON citation(provider, thread_id, line, part);
-"""
-
 _TOMBSTONE_SQL = r"""
 CREATE TABLE tombstone (id INTEGER PRIMARY KEY,
   created_at REAL NOT NULL, provider TEXT NOT NULL,
@@ -165,18 +106,6 @@ CREATE TABLE tombstone (id INTEGER PRIMARY KEY,
           AND line_sha256 IS NOT NULL)));
 CREATE INDEX tombstone_session ON tombstone(provider, session_root);
 CREATE INDEX tombstone_thread ON tombstone(provider, thread_id);
-"""
-
-_LOG_SQL = r"""
-CREATE TABLE knowledge_log (id INTEGER PRIMARY KEY,
-  knowledge_id INTEGER NOT NULL,  -- append-only, no free text
-  action TEXT NOT NULL CHECK (action IN
-    ('add','supersede','superseded','retract','erase')),
-  actor TEXT NOT NULL, at REAL NOT NULL);
-CREATE TRIGGER knowledge_log_no_update BEFORE UPDATE ON knowledge_log BEGIN
-  SELECT RAISE(ABORT, 'append-only'); END;
-CREATE TRIGGER knowledge_log_no_delete BEFORE DELETE ON knowledge_log BEGIN
-  SELECT RAISE(ABORT, 'append-only'); END;
 """
 
 SCHEMA_SQL = (

@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import obs, obs_stats, review_evidence, review_requests, store
+from muninn import obs, obs_stats, review_evidence, store
 from muninn.query.index_age import ALIVE_AT, freshness
+from tests import review_support
 from tests.ingest_support import rollout
 from tests.store_support import assert_private, public_read
 from tests.test_classify import reply, user_msg
@@ -358,19 +359,11 @@ class ReviewProvenanceTests(ReviewReceiptCase):
         self.write(rollout(), self.records)
         self.assertEqual(self.path.stat().st_size, size)
         self.run_ingest()
-        with mock.patch("muninn.review_progress.log_call") as log:
-            ids = self.transaction(
-                lambda: review_requests.reconcile_sources(
-                    self.conn, self.policy, 18.0
-                )
-            )
-        self.assertEqual(ids, ())
-        self.assertTrue(
-            any(
-                call.args[1].get("error_code") == "rejected_evidence"
-                for call in log.call_args_list
-            )
+        # The rewrite adds no line, so catch-up gives this source no turn.
+        ids = self.transaction(
+            lambda: review_support.catch_up(self.conn, self.policy, 18.0)
         )
+        self.assertEqual(ids, ())
         self.assertEqual(self.counts(), (2, 0))
         for key in ("review_capture_gaps", "review_coverage_gaps"):
             self.assertIs(self.gaps()[key]["ok"], False)

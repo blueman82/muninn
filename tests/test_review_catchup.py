@@ -11,11 +11,11 @@ from muninn import (
     review_progress,
     review_read_budget,
     review_requests,
-    scope,
 )
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import TID, line, rollout
 from tests.policy_patch import use_policy
+from tests.scope_support import global_scope
 from tests.test_classify import codex_meta, turn_context, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -342,7 +342,7 @@ class ReviewCatchupTests(RequestCase):
         self.transaction(
             lambda: review_progress.activate_sources(self.conn, 10.0)
         )
-        global_id = scope.global_scope_id(self.conn)
+        global_id = global_scope(self.conn)
         self.conn.execute(
             "INSERT INTO scope_path(cwd,scope_id,method) VALUES('',?,'alias')",
             (global_id,),

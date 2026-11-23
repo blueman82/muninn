@@ -8,7 +8,6 @@ from typing import Any
 from unittest import mock
 
 from muninn import (
-    knowledge_erase,
     review_evidence,
     review_originals,
     review_requests,
@@ -17,6 +16,7 @@ from muninn import (
 )
 from muninn.knowledge_models import Scope
 from muninn.review_models import ReviewContext
+from tests import review_support
 from tests.ingest_support import line, rollout
 from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
@@ -149,7 +149,7 @@ class ReviewReadTests(ScopeCommitCase):
         )
         self.assertEqual(self.save(self.result([])).outcome, "no_change")
         self.transaction(
-            lambda: knowledge_erase.erase_review_support(
+            lambda: review_support.erase_review_support(
                 self.conn, (self.evidence[1].id,), 30.0
             )
         )
@@ -309,7 +309,7 @@ class ReviewReadTests(ScopeCommitCase):
         )
         self.save(self.result([]))
         self.transaction(
-            lambda: knowledge_erase.erase_review_support(
+            lambda: review_support.erase_review_support(
                 self.conn, (self.evidence[1].id,), 30.0
             )
         )

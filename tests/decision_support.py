@@ -21,7 +21,6 @@ from muninn.decision_models import (
     VerifiedDecision,
 )
 from muninn.decision_proof import verify_decision
-from muninn.decision_requests import admit_application
 from muninn.decision_write import accept_decision, submit_intent
 from muninn.knowledge_models import ReviewResult
 from muninn.review_commit import CommitContext
@@ -35,6 +34,7 @@ from muninn.review_models import Receipt
 from muninn.review_read_budget import ReadBudget
 from tests.ingest_support import TID, line, rollout
 from tests.policy_patch import use_policy
+from tests.review_support import admit_application
 from tests.test_classify import reply, user_msg
 from tests.test_review_commit import CommitCase
 

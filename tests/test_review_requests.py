@@ -14,6 +14,7 @@ from muninn.knowledge_models import RequestId, Scope
 from muninn.review_evidence_models import EvidenceWindow, SourceRef
 from muninn.review_json import canonical_json
 from muninn.review_models import RequestView, ReviewPolicy
+from tests import review_support
 from tests.ingest_support import TID, IngestCase, line, primary, rollout
 from tests.policy_patch import use_policy
 from tests.test_classify import PARENT, codex_meta, reply, user_msg
@@ -147,9 +148,7 @@ class ReviewRequestTests(RequestCase):
         self.append(self.path, [], line(user_msg(4, "Use partial"))[:-1])
         self.run_ingest()
         ids = self.transaction(
-            lambda: review_requests.reconcile_sources(
-                self.conn, self.policy, 12.0
-            )
+            lambda: review_support.catch_up(self.conn, self.policy, 12.0)
         )
         self.assertEqual(ids, ())
         self.assertEqual(
@@ -276,9 +275,7 @@ class ReviewRequestTests(RequestCase):
         )
         self.assertEqual(
             self.transaction(
-                lambda: review_requests.reconcile_sources(
-                    self.conn, self.policy, 11.0
-                )
+                lambda: review_support.catch_up(self.conn, self.policy, 11.0)
             ),
             (),
         )
@@ -286,9 +283,7 @@ class ReviewRequestTests(RequestCase):
         self.append(self.path, [self.records[-1]])
         self.run_ingest()
         ids = self.transaction(
-            lambda: review_requests.reconcile_sources(
-                self.conn, self.policy, 12.0
-            )
+            lambda: review_support.catch_up(self.conn, self.policy, 12.0)
         )
         self.assertEqual(len(ids), 1)
         self.assertEqual(

@@ -120,18 +120,6 @@ def validate_cursor_boundary(
     return records[first - window.from_line]
 
 
-def select_evidence(
-    home: Path, locator: EvidenceLocator, selector: EvidenceSelector
-) -> EvidenceRecord:
-    """Select a permitted original field; the caller checks admission."""
-    with closing(store.connect_ro(store.db_path(home))) as conn:
-        source = _source(conn, locator.source)
-        _, raw, original = originals(conn, source, locator.line, locator.line)[
-            0
-        ]
-        return build_record(conn, source, locator, selector, raw, original)
-
-
 def initial_evidence(
     home: Path, window: EvidenceWindow, max_bytes: int
 ) -> InitialEvidence:

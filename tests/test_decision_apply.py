@@ -11,7 +11,6 @@ from unittest import mock
 from muninn import (
     cursor_import,
     decision_proof,
-    decision_requests,
     review_commit,
     review_commit_state,
     review_evidence,
@@ -29,6 +28,7 @@ from muninn.review_evidence_models import (
 )
 from muninn.review_json import canonical_json
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests.decision_support import DecisionCase
 from tests.ingest_support import line
 from tests.policy_patch import use_policy
@@ -44,7 +44,7 @@ class ApplicationCase(DecisionCase):
         draft = draft or self.stage()
         self.proof = self.approve(self.intent(draft.id))
         request = self.transaction(
-            lambda: decision_requests.admit_application(
+            lambda: review_support.admit_application(
                 self.conn, self.home, draft.id, 1, 21.0
             )
         )
@@ -319,7 +319,7 @@ class DecisionApplicationTests(ApplicationCase):
             )
         cwd = self.row("SELECT cwd FROM event LIMIT 1")[0]
         cursor_import.run(self.home, path, cwd, 0.0)
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             EvidenceLocator(
                 source=SourceRef(provider="cursor", thread_id="chat"),

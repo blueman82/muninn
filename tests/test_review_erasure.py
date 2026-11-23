@@ -20,6 +20,7 @@ from muninn import (
     tombstones,
 )
 from muninn.knowledge_models import UnresolvedProposal
+from tests import review_support
 from tests.ingest_support import TID
 from tests.test_review_commit import CommitCase
 
@@ -71,7 +72,7 @@ class ReviewErasureTests(CommitCase):
         )
         self.assertIsNotNone(view.body)
         summary = self.transaction(
-            lambda: knowledge_erase.erase_review_support(
+            lambda: review_support.erase_review_support(
                 self.conn, (self.evidence[0].id,), 15.0
             )
         )
@@ -146,7 +147,7 @@ class ReviewErasureTests(CommitCase):
         )
         receipt = self.save(no_change)
         summary = self.transaction(
-            lambda: knowledge_erase.erase_review_support(
+            lambda: review_support.erase_review_support(
                 self.conn, (self.evidence[0].id,), 15.0
             )
         )
@@ -306,7 +307,7 @@ class ReviewErasureTests(CommitCase):
             "UPDATE knowledge_version SET expiry_json=?", (expiry,)
         )
         summary = self.transaction(
-            lambda: knowledge_erase.erase_review_support(
+            lambda: review_support.erase_review_support(
                 self.conn, (self.evidence[1].id,), 15.0
             )
         )
@@ -395,11 +396,11 @@ class ReviewErasureTests(CommitCase):
     def test_support_erasure_obeys_caller_transaction(self) -> None:
         self.save(self.result([self.note(content=MARKER)]))
         with self.assertRaisesRegex(ValueError, "caller_transaction_required"):
-            knowledge_erase.erase_review_support(
+            review_support.erase_review_support(
                 self.conn, (self.evidence[0].id,), 15.0
             )
         self.conn.execute("BEGIN IMMEDIATE")
-        knowledge_erase.erase_review_support(
+        review_support.erase_review_support(
             self.conn, (self.evidence[0].id,), 15.0
         )
         self.conn.rollback()

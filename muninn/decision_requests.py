@@ -186,40 +186,6 @@ def _admit(
     return request_view(existing)
 
 
-def admit_application(
-    conn: sqlite3.Connection,
-    home: Path,
-    ident: DecisionId,
-    revision: int,
-    now: float,
-) -> RequestView:
-    """Admit one active approval using the caller's writer transaction.
-
-    Args:
-        conn: Caller-owned write connection and transaction.
-        home: Private store home for current evidence checks.
-        ident: Exact immutable candidate identity.
-        revision: Positive current accepted approval revision.
-        now: Finite nonnegative timestamp.
-
-    Returns:
-        The unique application request, with no execution attempt or receipt.
-
-    Raises:
-        ValueError: If approval, current policy or evidence is unavailable.
-    """
-    require_transaction(conn, now)
-    _approval(conn, ident, revision)
-    return _admit(
-        conn,
-        home,
-        decision_view(conn, ident),
-        now,
-        POLICY,
-        ReadBudget(POLICY.max_input_bytes),
-    )
-
-
 def _code(exc: ValueError) -> DecisionCode:
     """Expose only known refusal codes and preserve precise budget causes."""
     value = exc.code if isinstance(exc, EvidenceLimitError) else str(exc)

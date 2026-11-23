@@ -3,56 +3,10 @@
 from __future__ import annotations
 
 import functools
-import os
-import sqlite3
-from collections.abc import Generator
-from contextlib import closing, contextmanager
-from pathlib import Path
 
-from install import snapshot_io
 from install.context import Ctx, StepFailedError, job, must, wait
 from install.cutover import prepare_store
-from install.preflight import SCHEMA_FILE as SCHEMA_FILE
-from install.preflight import VERSION_PATTERN
-from install.preflight import release_schema as release_schema
 from install.record import Record
-
-_VERSION = VERSION_PATTERN
-
-
-@contextmanager
-def _readonly(path: Path) -> Generator[sqlite3.Connection]:
-    """Hold the validated source while SQLite opens its read-only pathname."""
-    with (
-        snapshot_io.validated(path) as revalidate,
-        closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as conn,
-    ):
-        revalidate()
-        yield conn
-
-
-def store_version(path: Path) -> int | None:
-    """Read a store's ``user_version`` without writing anything.
-
-    Args:
-        path: The store file.
-
-    Returns:
-        The version, or None when there is no store.
-
-    Raises:
-        StepFailedError: If the file exists but cannot be read as a store.
-    """
-    if not os.path.lexists(path):
-        return None
-    try:
-        with _readonly(path) as conn:
-            return int(conn.execute("PRAGMA user_version").fetchone()[0])
-    except sqlite3.Error as exc:
-        raise StepFailedError(
-            f"cannot read the store's schema version ({type(exc).__name__}); "
-            "an upgrade could not come back"
-        ) from exc
 
 
 def discard(ctx: Ctx, rec: Record) -> bool:

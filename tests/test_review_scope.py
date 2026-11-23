@@ -9,6 +9,7 @@ from muninn.knowledge_models import Scope
 from muninn.knowledge_scope import scope_applies
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_json import canonical_json
+from tests import review_support
 from tests.ingest_support import rollout
 from tests.policy_patch import use_policy
 from tests.test_classify import user_msg
@@ -31,7 +32,7 @@ class ScopeCommitCase(CommitCase):
         selected = []
         for number in (2, 3):
             window = self.window(number, number)
-            record = review_evidence.select_evidence(
+            record = review_support.select_evidence(
                 self.home,
                 EvidenceLocator(
                     source=window.source,

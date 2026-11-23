@@ -17,6 +17,7 @@ from muninn.review_evidence_models import (
     SourceRef,
 )
 from muninn.review_read_budget import ReadBudget
+from tests import review_support
 from tests import test_review_evidence as evidence_tests
 from tests.ingest_support import line, rollout
 from tests.test_classify import user_msg
@@ -63,7 +64,7 @@ class EvidenceReuseTests(unittest.TestCase):
             locator = self.case.locator(2)
             pointer = "/payload/content/0/text"
         records = tuple(
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 self.case.home,
                 locator,
                 EvidenceSelector(json_pointer=pointer, start=start, end=end),
@@ -186,7 +187,7 @@ class EvidenceReuseTests(unittest.TestCase):
         self.case.path = self.case.write(rollout(), self.case.records)
         self.case.run_ingest(full=True)
         records = tuple(
-            review_evidence.select_evidence(
+            review_support.select_evidence(
                 self.case.home,
                 self.case.locator(2),
                 EvidenceSelector(

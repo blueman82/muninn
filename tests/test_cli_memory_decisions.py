@@ -16,11 +16,11 @@ from muninn import (
     review_requests,
 )
 from muninn.decision_models import CandidateInput
-from muninn.decision_requests import admit_application, request_application
-from muninn.knowledge_erase import erase_review_support
+from muninn.decision_requests import request_application
 from muninn.review_models import Receipt
 from tests.decision_support import DecisionCase
 from tests.policy_patch import use_policy
+from tests.review_support import admit_application, erase_review_support
 from tests.test_cli_learning import CliLearningCase
 
 

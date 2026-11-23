@@ -52,36 +52,6 @@ class ReadBudgetTests(unittest.TestCase):
         self.assertEqual(budget.sqlite_progress(), 1)
         self.assertEqual(budget.sql_steps_left, 0)
 
-    def test_partition_transfers_remaining_once_without_refunds(self) -> None:
-        budget = ReadBudget(11)
-        budget.consume_bytes(1)
-        budget.consume_record()
-        budget.sqlite_progress()
-        shares = budget.partition(3)
-        self.assertEqual([s.bytes_left for s in shares], [4, 3, 3])
-        self.assertEqual(sum(s.records_left for s in shares), 4095)
-        self.assertEqual(sum(s.sql_steps_left for s in shares), 99_999)
-        self.assertEqual(budget.bytes_left, 0)
-        self.assertEqual(budget.records_left, 0)
-        self.assertEqual(budget.sql_steps_left, 0)
-        for account in (budget, shares[0]):
-            with self.assertRaises(ValueError):
-                account.partition(1)
-        with self.assertRaises(ValueError):
-            budget.consume_bytes(1)
-        shares[0].consume_bytes(4)
-        with self.assertRaises(ValueError):
-            shares[0].consume_bytes(1)
-        self.assertEqual(shares[1].bytes_left, 3)
-
-    def test_invalid_partition_preserves_funding(self) -> None:
-        budget = ReadBudget(2)
-        for count in (0, -1, True, 3):
-            with self.subTest(count=count), self.assertRaises(ValueError):
-                budget.partition(count)
-            self.assertEqual(budget.bytes_left, 2)
-        self.assertEqual(len(budget.partition(2)), 2)
-
 
 class SharedReaderTests(unittest.TestCase):
     """Run production readers over disposable physical and native sources."""

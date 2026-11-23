@@ -6,8 +6,9 @@ import json
 import time
 from typing import Any
 
-from muninn import knowledge_write, scope
+from muninn import knowledge_write
 from tests.query_support import NOTICE, QueryCase
+from tests.scope_support import global_scope
 
 
 class SearchComposeTests(QueryCase):
@@ -210,7 +211,7 @@ class SearchAroundTests(QueryCase):
         self.beta = self.add_scope("/proj/beta")
 
     def test_knowledge_hits_first(self) -> None:
-        wide = scope.global_scope_id(self.rw)
+        wide = global_scope(self.rw)
         k1 = self.add_note(self.repo, "use zebra caching for lookups")
         self.add_note(wide, "global zebra preference", kind="fact")
         old = self.add_note(self.repo, "old zebra decision")

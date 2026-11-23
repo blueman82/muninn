@@ -10,6 +10,7 @@ from muninn.review_candidates import ProposalRejectedError
 from muninn.review_evidence_models import EvidenceLocator, EvidenceSelector
 from muninn.review_models import ReviewPolicy
 from muninn.review_read_budget import EvidenceLimitError
+from tests import review_support
 from tests.classify_support import item
 from tests.ingest_support import fc_output, rollout
 from tests.policy_patch import use_policy
@@ -99,7 +100,7 @@ class OwnerMessageTests(BindingCase):
     def test_partial_span_gives_no_owner_support(self) -> None:
         self.conversation(user_msg(1, "Never use pytest. Use Python."))
         window = self.window(2, 2)
-        record = review_evidence.select_evidence(
+        record = review_support.select_evidence(
             self.home,
             EvidenceLocator(
                 source=window.source,
