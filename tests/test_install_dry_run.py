@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import functools
 import io
 import tempfile
 import unittest
@@ -25,12 +24,7 @@ def _main(*argv: str) -> tuple[int, str]:
         The exit status and the printed text.
     """
     out = io.StringIO()
-    with (
-        contextlib.redirect_stdout(out),
-        mock.patch.object(
-            co, "Ctx", functools.partial(co.Ctx, platform="darwin")
-        ),
-    ):
+    with contextlib.redirect_stdout(out):
         status = co.main(list(argv))
     return status, out.getvalue()
 
@@ -141,7 +135,7 @@ class DryRunWritesNothingTest(unittest.TestCase):
                 tmp,
             )
             self.assertEqual(status, 0)
-            self.assertEqual(context.call_args.kwargs["platform"], "darwin")
+            context.assert_called_once()
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
     def test_fresh_dry_run_into_an_empty_home_creates_nothing(self) -> None:

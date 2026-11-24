@@ -292,8 +292,6 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     if rec.get("failed", {}).get("step") in {"pause", "snapshot_store"}:
         return problems
     j = job(ctx)
-    if ctx.platform != "darwin" and rec.get("upgrade"):
-        lifecycle.stop(ctx)
     if rec.get("fresh"):
         _undo_fresh(ctx, j, rec)
     _undo_config(ctx, rec)
@@ -302,7 +300,7 @@ def rollback_owned(ctx: Ctx, rec: Record) -> list[str]:
     # After the relink and before any restart: the old release must find a
     # store it can open, and nothing may be writing while it is swapped.
     stopped = undo_store(ctx, rec)
-    if stopped or (rec.get("upgrade") and ctx.platform != "darwin"):
+    if stopped:
         _act(ctx, "start the job on the old release", lambda: start_again(ctx))
     elif rec.get("upgrade") and job(ctx):  # back onto the old release
         kick = ["launchctl", "kickstart", "-k", ctx.target]

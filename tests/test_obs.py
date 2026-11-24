@@ -7,7 +7,6 @@ writes, and no transcript text is ever written anywhere.
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 import time
 import unittest
@@ -15,11 +14,11 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from muninn import obs, obs_stats, review_evidence, store
+from muninn import obs, obs_stats, review_evidence
 from muninn.query.index_age import ALIVE_AT, freshness
 from tests import review_support
 from tests.ingest_support import rollout
-from tests.store_support import assert_private, public_read
+from tests.store_support import assert_private
 from tests.test_classify import reply, user_msg
 from tests.test_review_requests import RequestCase
 
@@ -132,17 +131,9 @@ class CallLogTests(ObsCase):
         )
 
     def test_logged_false_when_append_is_unsafe_or_denied(self) -> None:
-        if sys.platform == "win32":
-            self.assertTrue(obs.log_call(self.home, {"cmd": "stats"}))
-            original = self.log.read_bytes()
-            with public_read(self, self.log):
-                self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
-                self.assertEqual(self.log.read_bytes(), original)
-            assert_private(self, self.log)
-        else:
-            self.home.chmod(0o500)  # the Codex sandbox denies the append
-            self.addCleanup(self.home.chmod, 0o700)
-            self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
+        self.home.chmod(0o500)  # the Codex sandbox denies the append
+        self.addCleanup(self.home.chmod, 0o700)
+        self.assertFalse(obs.log_call(self.home, {"cmd": "search"}))
 
     def test_no_calllog_env(self) -> None:
         env = {"MUNINN_NO_CALLLOG": "1"}
@@ -223,30 +214,10 @@ class StatusTests(ObsCase):
         home = Path(tempfile.mkdtemp(dir=self.home))
         env = {"HOME": str(home), "USERPROFILE": str(home)}
         self.assertIsNone(obs.install_sha(env))
-        if sys.platform == "win32":
-            sha = "a" * 40
-            base = home / "AppData" / "Local" / "Muninn"
-            lib = base / "lib"
-            store.ensure_private_dir(lib / sha)
-            interpreter = base / "absent-python.exe"
-            self.assertFalse(interpreter.exists())
-            manifest = lib / "selection.json"
-            store.write_json_atomic(
-                manifest, {"sha": sha, "python": str(interpreter)}
-            )
-            original = manifest.read_bytes()
-            self.assertEqual(obs.install_sha(env), sha)
-            with public_read(self, manifest):
-                self.assertIsNone(obs.install_sha(env))
-                self.assertEqual(manifest.read_bytes(), original)
-            self.assertEqual(obs.install_sha(env), sha)
-            self.assertFalse(interpreter.exists())
-            assert_private(self, manifest)
-        else:
-            lib = home / ".local/lib/muninn"
-            (lib / "abc1234").mkdir(parents=True)
-            (lib / "current").symlink_to(lib / "abc1234")
-            self.assertEqual(obs.install_sha(env), "abc1234")
+        lib = home / ".local/lib/muninn"
+        (lib / "abc1234").mkdir(parents=True)
+        (lib / "current").symlink_to(lib / "abc1234")
+        self.assertEqual(obs.install_sha(env), "abc1234")
         self.assertEqual(
             obs.install_sha(env | {"MUNINN_INSTALL_SHA": "fff0000"}), "fff0000"
         )

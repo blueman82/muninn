@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import sys
 import tempfile
 import unittest
 from contextlib import closing
@@ -191,13 +190,10 @@ class RebuildSnapshotSafetyTests(CliCase):
         ) as observed:
             code, out, _ = self.muninn("rebuild")
         self.assertEqual(code, 0, out)
-        if sys.platform == "win32":
-            observed.assert_not_called()
-        else:
-            self.assertEqual(
-                observed.call_args_list,
-                [mock.call(self.home), mock.call(self.home)],
-            )
+        self.assertEqual(
+            observed.call_args_list,
+            [mock.call(self.home), mock.call(self.home)],
+        )
 
     def test_success_publishes_candidate_and_retains_fenced_original(
         self,

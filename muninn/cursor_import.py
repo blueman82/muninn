@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -37,8 +36,6 @@ def default_database(
         if not path.is_absolute() or "\0" in explicit:
             raise ValueError("MUNINN_CURSOR_DB must be a native absolute path")
         return path
-    if sys.platform != "darwin":
-        return None
     return home / (
         "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
     )

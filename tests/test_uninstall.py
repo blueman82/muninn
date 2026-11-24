@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import functools
 import io
 import json
 import os
@@ -258,9 +257,6 @@ class RefusalTest(UninstallCase):
         with (
             mock.patch.dict(os.environ, env),
             mock.patch.object(un, "run_real", self.w.fake.run),
-            mock.patch.object(
-                un, "Ctx", functools.partial(co.Ctx, platform="darwin")
-            ),
             contextlib.redirect_stdout(out),
         ):
             rc = un.main(argv)

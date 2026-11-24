@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import unittest
 from contextlib import closing
 from pathlib import Path
 
@@ -50,7 +49,6 @@ raise SystemExit(cli.main(['rebuild']))
 """
 
 
-@unittest.skipIf(sys.platform == "win32", "POSIX process publication cuts")
 class RebuildCrashTests(CliCase):
     """Never infer restoration or admission authority from an absent answer."""
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import unittest
 from collections.abc import Callable
 from contextlib import closing
 from pathlib import Path
@@ -201,7 +200,6 @@ class RebuildPreparationTests(CliCase):
         publish.assert_not_called()
         self.assertTrue((home / cli_rebuild.REBUILD).exists())
 
-    @unittest.skipIf(os.name == "nt", "POSIX fchmod ctime behavior")
     def test_ctime_only_change_across_gap_still_refuses(self) -> None:
         def change(home: Path) -> None:
             path = store.db_path(home)

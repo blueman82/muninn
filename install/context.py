@@ -11,7 +11,6 @@ import dataclasses
 import os
 import re
 import subprocess
-import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -52,7 +51,6 @@ class Ctx:
         home: The HOME being installed into.
         run: Command runner; every external effect goes through it.
         ts: UTC timestamp that names this run's directories.
-        platform: Native platform, overridden only by isolated tests.
         default_home: Use native environment paths when HOME was omitted.
         log_path: Optional CLI log activated only after successful preflight.
         uid: User id for launchd's per-user ``gui/<uid>`` domain.
@@ -82,8 +80,7 @@ class Ctx:
     home: Path
     run: Runner
     ts: str
-    uid: int = getattr(os, "getuid", lambda: 0)()
-    platform: str = sys.platform
+    uid: int = os.getuid()
     default_home: bool = False
     log_path: Path | None = None
     dry_run: bool = False

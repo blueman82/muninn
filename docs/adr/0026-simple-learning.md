@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. The owner must accept or change this record.
+Accepted 2026-11-24.
 It replaces ADRs 0015, 0016, 0017, 0019, 0020, 0024 and 0025.
 It changes ADR 0018 (owner decisions only) and ADR 0023.
 
@@ -16,8 +16,7 @@ one owner on one machine does not meet. It cost much code and many documents.
 
 ## Decision
 
-- **macOS only.** Learning runs on macOS. Other systems keep search,
-  recall and the knowledge ledger, and do not learn.
+- **macOS only.** Muninn runs only on macOS.
 - **Switch.** `muninn learn on` and `muninn learn off` set `enabled` in
   `learning.json` in the Muninn home.
 - **Settings file.** `learning.json` holds `enabled`, `provider` (`claude`,

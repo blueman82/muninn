@@ -106,18 +106,16 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(proc.stdout, VERSION_LINE)
 
 
-if sys.platform != "win32":
+class PosixSymlinkTests(unittest.TestCase):
+    """The POSIX launcher accepts a launcher symlink from another cwd."""
 
-    class PosixSymlinkTests(unittest.TestCase):
-        """The POSIX launcher accepts a launcher symlink from another cwd."""
-
-        def test_version_via_symlink(self) -> None:
-            with tempfile.TemporaryDirectory() as tmp:
-                link = Path(tmp) / "muninn-link"
-                link.symlink_to(LAUNCHER)
-                proc = run([str(link), "--version"], cwd=tmp)
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(proc.stdout, VERSION_LINE)
+    def test_version_via_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            link = Path(tmp) / "muninn-link"
+            link.symlink_to(LAUNCHER)
+            proc = run([str(link), "--version"], cwd=tmp)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout, VERSION_LINE)
 
 
 if __name__ == "__main__":

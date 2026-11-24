@@ -36,8 +36,7 @@ class RequestCase(IngestCase):
         )
         patch.start()
         self.addCleanup(patch.stop)
-        cwd = str(self.tmp / "repo") if os.name == "nt" else None
-        self.records = primary(cwd=cwd)
+        self.records = primary()
         self.path = self.write(rollout(), self.records)
         self.run_ingest()
         data = policy_data()
