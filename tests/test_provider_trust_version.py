@@ -91,7 +91,6 @@ class ProviderVersionTest(unittest.TestCase):
             Path("/synthetic"),
             mock.Mock(),
             "test",
-            platform="darwin",
             say=messages.append,
         )
         rec = {

@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import fcntl
 import os
-import sys
 from pathlib import Path
 
 
 def _full_fsync(fd: int) -> bool:
     """Try macOS's drive-cache flush; report when fsync is still needed."""
-    if sys.platform != "darwin":
-        return False
     try:
         fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
     except OSError:

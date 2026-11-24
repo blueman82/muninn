@@ -53,9 +53,7 @@ class AppDetectionTest(unittest.TestCase):
         self,
     ) -> None:
         (self.w.home / "Applications/Codex.app").rmdir()
-        binary = (
-            self.w.home / "bin" / ("codex.exe" if os.name == "nt" else "codex")
-        )
+        binary = self.w.home / "bin" / "codex"
         binary.parent.mkdir()
         binary.write_text("#!/bin/sh\nexit 99\n")
         binary.chmod(0o700)
@@ -77,16 +75,13 @@ class AppDetectionTest(unittest.TestCase):
 
     def test_macos_codex_cli_requires_executable_file(self) -> None:
         (self.w.home / "Applications/Codex.app").rmdir()
-        binary = (
-            self.w.home / "bin" / ("codex.exe" if os.name == "nt" else "codex")
-        )
+        binary = self.w.home / "bin" / "codex"
         binary.parent.mkdir()
         with mock.patch.dict(os.environ, {"PATH": str(binary.parent)}):
             self.assertFalse(installed(self.w.ctx(), "codex"))
             binary.write_text("synthetic")
-            if os.name != "nt":
-                binary.chmod(0o600)
-                self.assertFalse(installed(self.w.ctx(), "codex"))
+            binary.chmod(0o600)
+            self.assertFalse(installed(self.w.ctx(), "codex"))
             binary.chmod(0o700)
             self.assertTrue(installed(self.w.ctx(), "codex"))
             binary.unlink()

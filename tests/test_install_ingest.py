@@ -202,9 +202,6 @@ class FreshIngestTests(unittest.TestCase):
         ):
             cutover.ingest_transcripts(self.ctx)
 
-    @unittest.skipIf(
-        os.name == "nt", "Windows prevents replacing an open SQLite file"
-    )
     def test_replacement_during_open_refuses_before_material_access(
         self,
     ) -> None:

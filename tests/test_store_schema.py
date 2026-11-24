@@ -8,7 +8,6 @@ from __future__ import annotations
 import contextlib
 import os
 import sqlite3
-import sys
 import unittest
 
 from muninn import store
@@ -18,7 +17,6 @@ from tests.store_support import (
     insert_event,
     insert_scope,
     insert_source,
-    public_read,
 )
 
 
@@ -204,21 +202,9 @@ class SchemaTests(StoreCase):
 
     def test_lax_existing_db_is_handled_before_writing(self) -> None:
         store.ensure_private_dir(self.home)
-        if sys.platform == "win32":
-            self.rw().close()
-            original = self.db.read_bytes()
-            with public_read(self, self.db):
-                with self.assertRaises(PermissionError):
-                    self.rw()
-                self.assertEqual(self.db.read_bytes(), original)
-                self.assertEqual(
-                    sorted(p.name for p in self.home.iterdir()),
-                    ["muninn.sqlite"],
-                )
-        else:
-            self.db.touch()
-            self.db.chmod(0o644)
-            self.rw()
+        self.db.touch()
+        self.db.chmod(0o644)
+        self.rw()
         assert_private(self, self.db)
 
     def test_missing_home_is_created_private_by_lock_and_connect(self) -> None:

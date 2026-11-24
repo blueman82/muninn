@@ -55,19 +55,11 @@ class InstallLogTest(unittest.TestCase):
             parent.mkdir(mode=0o700)
             path = parent / "install.log"
             path.write_bytes(b"original")
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["icacls", str(path), "/grant", "*S-1-1-0:(R)"],
-                    check=True,
-                    capture_output=True,
-                )
-            else:
-                path.chmod(0o666)
+            path.chmod(0o666)
             with self.assertRaises(OSError):
                 co.install_log(path)
             self.assertEqual(path.read_bytes(), b"original")
-            if sys.platform != "win32":
-                self.assertEqual(path.stat().st_mode & 0o777, 0o666)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o666)
 
     def test_symlink_log_parent_is_refused_before_effects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -75,14 +67,7 @@ class InstallLogTest(unittest.TestCase):
             outside = root / "outside"
             outside.mkdir(mode=0o700)
             link = root / "link"
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                    check=True,
-                    capture_output=True,
-                )
-            else:
-                link.symlink_to(outside, target_is_directory=True)
+            link.symlink_to(outside, target_is_directory=True)
             with self.assertRaises(OSError):
                 co.install_log(link / "install.log")
             self.assertEqual(list(outside.iterdir()), [])

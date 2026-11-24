@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,7 +29,7 @@ class ProviderPathsTest(unittest.TestCase):
         )
 
     def test_foreign_absolute_cwd_never_uses_commit_hint(self) -> None:
-        foreign = "/home/foreign" if os.name == "nt" else "C:\\Users\\foreign"
+        foreign = "C:\\Users\\foreign"
         with mock.patch.object(scope, "_has_commit") as probe:
             self.assertEqual(
                 scope.resolve_key(foreign, "a" * 40, repos=["fake"]),
@@ -60,9 +59,3 @@ class ProviderPathsTest(unittest.TestCase):
                 cursor_import.default_database(
                     home, env={"MUNINN_CURSOR_DB": "relative/state.vscdb"}
                 )
-
-    def test_non_mac_cursor_requires_explicit_input(self) -> None:
-        with mock.patch("muninn.cursor_import.sys.platform", "linux"):
-            self.assertIsNone(
-                cursor_import.default_database(Path("/home/temp"), env={})
-            )

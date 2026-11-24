@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import multiprocessing
-import sys
 from contextlib import closing
+from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from unittest import mock
@@ -31,11 +31,6 @@ from tests.ingest_support import line
 from tests.test_classify import user_msg
 from tests.test_decision_resolution import ResolutionCase
 from tests.test_review_commit import LostResponseConnection
-
-if sys.platform == "win32":
-    from multiprocessing.connection import PipeConnection as Connection
-else:
-    from multiprocessing.connection import Connection
 
 
 def await_writer_start(home: Path, channel: Connection) -> None:

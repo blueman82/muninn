@@ -187,14 +187,10 @@ class OpenTests(OpenCase):
         self.assertEqual(got["text"], open_specs()[6][0])  # text survives
 
     def test_open_does_not_block_on_a_native_pipe(self) -> None:
-        source, ids, _, _ = self.write_source("thr-fifo", open_specs()[:1])
+        _, ids, _, _ = self.write_source("thr-fifo", open_specs()[:1])
         path = self.sessions / "thr-fifo.jsonl"
         path.unlink()
-        with nonregular(path) as pipe:
-            if sys.platform == "win32":
-                self.rw.execute(
-                    "UPDATE source SET path = ? WHERE id = ?", (pipe, source)
-                )
+        with nonregular(path):
             code = (
                 "import json,sys;sys.path.insert(0,sys.argv[1]);"
                 "from pathlib import Path;from muninn import query,store;"

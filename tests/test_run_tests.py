@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import os
 import signal
 import subprocess
 import sys
@@ -206,9 +205,7 @@ class DeadlineTest(unittest.TestCase):
         self.assertIn(module, output.getvalue())
 
     def test_timeout_kills_child_with_inherited_output(self) -> None:
-        marker = self.root / (
-            "survived" if os.name == "nt" else r"C:\Users\survived"
-        )
+        marker = self.root / r"C:\Users\survived"
         ready = self.root / "ready"
         child_code = (
             f"import time,pathlib; pathlib.Path({str(ready)!r}).touch(); "
@@ -232,9 +229,7 @@ class DeadlineTest(unittest.TestCase):
     def test_finished_module_cleans_child_without_changing_success(
         self,
     ) -> None:
-        marker = self.root / (
-            "survived_success" if os.name == "nt" else r"C:\Users\success"
-        )
+        marker = self.root / r"C:\Users\success"
         ready = self.root / "ready_success"
         child_code = (
             f"import time,pathlib; pathlib.Path({str(ready)!r}).touch(); "
@@ -381,7 +376,6 @@ class DeadlineTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 run_tests.run_all([], 1, self.root, timeout=value)
 
-    @unittest.skipIf(os.name == "nt", "SIGINT delivery is POSIX-specific")
     def test_interrupt_cancels_running_and_queued_modules(self) -> None:
         ready = self.root / "ready"
         queued = self.root / "queued"

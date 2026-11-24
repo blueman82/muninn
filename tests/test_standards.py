@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,11 +43,6 @@ class GateCannotBeRemovedTest(unittest.TestCase):
         self.assertNotIn("exit 0", text)
 
     def test_git_hooks_prefer_checkout_venv(self) -> None:
-        if sys.platform == "win32":
-            for name in ("pre-commit", "pre-merge-commit"):
-                text = (ROOT / ".githooks" / name).read_text(encoding="utf-8")
-                self.assertIn(".venv/Scripts/python.exe", text)
-            return
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -67,10 +60,6 @@ class GateCannotBeRemovedTest(unittest.TestCase):
             for name in ("pre-commit", "pre-merge-commit"):
                 with self.subTest(hook=name):
                     command = [str(ROOT / ".githooks" / name)]
-                    if sys.platform == "win32":
-                        shell = shutil.which("sh")
-                        self.assertIsNotNone(shell)
-                        command = [shell or "sh", *command]
                     subprocess.run(
                         command,
                         cwd=root,

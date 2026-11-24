@@ -56,11 +56,7 @@ def install_main(argv: Sequence[str] | None = None) -> int:
     args = ap.parse_args(argv)
     default_home = args.home is None
     args.home = args.home or Path.home()
-    if (
-        sys.platform == "darwin"
-        and args.home.resolve() != Path.home().resolve()
-        and not args.dry_run
-    ):
+    if args.home.resolve() != Path.home().resolve() and not args.dry_run:
         ap.error(
             "--home is dry-run only: launchctl acts on the real gui domain"
         )

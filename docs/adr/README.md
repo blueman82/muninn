@@ -29,4 +29,4 @@ Each `exception` or deferred decision has an explicit status.
 | [0023](0023-no-read-limit-before-the-window.md) | Lines before the window start do not count against the source read limits. Accepted 2026-11-16, changed by ADR 0026. |
 | [0024](0024-leave-unfinished-start.md) | Leave an unfinished first-policy upgrade start with one record mark. Replaced by ADR 0026. |
 | [0025](0025-own-budget-for-each-window.md) | Each window gets its own read budget. Replaced by ADR 0026. |
-| [0026](0026-simple-learning.md) | Simple learning: macOS only, `muninn learn on/off`, one settings file, one learner, one constant policy, one sentence per failure. Proposed. ADR 0021 was never used. |
+| [0026](0026-simple-learning.md) | Simple learning: macOS only, `muninn learn on/off`, one settings file, one learner, one constant policy, one sentence per failure. Accepted 2026-11-24. ADR 0021 was never used. |

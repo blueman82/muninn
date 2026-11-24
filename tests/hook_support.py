@@ -10,7 +10,6 @@ import io
 import json
 import re
 import subprocess
-import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -42,7 +41,7 @@ HOOKS_JSON = LAUNCHER.parent.parent / "integrations/codex/hooks/hooks.json"
 
 
 def launcher_args(*arguments: str) -> list[str]:
-    """Keep POSIX launcher coverage and use isolated Python for Windows cases.
+    """Return the launcher command for a behavioral hook test.
 
     Args:
         *arguments: Exact CLI arguments for a behavioral hook test.
@@ -50,23 +49,7 @@ def launcher_args(*arguments: str) -> list[str]:
     Returns:
         An executable vector; native bootstrap contracts have separate tests.
     """
-    if sys.platform != "win32":
-        return [str(LAUNCHER), *arguments]
-    program = (
-        "import sys; sys.path.insert(0,sys.argv.pop(1)); "
-        "from muninn.cli import main; raise SystemExit(main(sys.argv[1:]))"
-    )
-    return [
-        sys.executable,
-        "-I",
-        "-B",
-        "-X",
-        "utf8",
-        "-c",
-        program,
-        str(LAUNCHER.parent.parent),
-        *arguments,
-    ]
+    return [str(LAUNCHER), *arguments]
 
 
 def notice(code: str, event: str = "SessionStart") -> dict[str, object]:

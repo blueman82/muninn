@@ -31,7 +31,7 @@ Apart from `serve` and the hooks, all answers also include these fields:
 `MUNINN_HOOK_DISABLE=1` hooks print `{}`.
 `CLAUDE_CODE_SESSION_ID`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID` identify the calling session, which search leaves out unless told not to.
 
-The managed poller and learning run on macOS only (ADR 0026).
+Muninn runs only on macOS (ADR 0026).
 
 ## Reading memory
 

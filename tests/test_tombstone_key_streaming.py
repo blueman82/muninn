@@ -5,7 +5,6 @@ from __future__ import annotations
 import gc
 import io
 import os
-import sys
 import tempfile
 import tracemalloc
 import unittest
@@ -240,7 +239,6 @@ class KeyScanTests(unittest.TestCase):
             self.assertTrue(tombstone_key.log_has_keyed(self.home))
         self.assertEqual(self.path.read_bytes(), b"replacement")
 
-    @unittest.skipIf(sys.platform == "win32", "POSIX nofollow contract")
     def test_actual_symlink_is_not_followed(self) -> None:
         target = self.home / "target"
         target.write_bytes(b"unkeyed")
