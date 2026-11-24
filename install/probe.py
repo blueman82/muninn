@@ -75,7 +75,6 @@ def codex_probe(ctx: Ctx, timeout: float = 60) -> list[dict[str, Any]]:
         os.environ,
         CODEX_HOME=str(ctx.codex_home),
         HOME=str(ctx.home),
-        USERPROFILE=str(ctx.home),
     )
     p = subprocess.Popen(
         codex_argv(ctx, "app-server"),

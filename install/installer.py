@@ -277,7 +277,18 @@ def _run_step(
     maintenance: ExitStack,
     check: OperationCheck,
 ) -> None:
-    """Apply one existing step while retaining or releasing its owner scope."""
+    """Run one step after a check that the install lock is unchanged.
+
+    Before a service start it closes the open store preparation, so the
+    store writer lock is free when the service starts.
+
+    Args:
+        ctx: The run context.
+        rec: The run record.
+        step: The step to run.
+        maintenance: The open store preparation.
+        check: The install lock check.
+    """
     check()
     if step in (start_new, restart):
         maintenance.close()

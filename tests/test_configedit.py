@@ -98,13 +98,6 @@ class TomlSectionTest(unittest.TestCase):
         self.assertNotIn("\n", enabled.replace("\r\n", ""))
         self.assertEqual(transforms.drop_trust(enabled), enabled)
 
-    def test_windows_path_in_posix_style_hook_is_recognized(self) -> None:
-        command = (
-            "'C:\\Users\\runner\\.local\\bin\\muninn' hook"
-            " session-start --provider claude"
-        )
-        self.assertTrue(transforms.handler_ours({"command": command}))
-
     def test_parse_section_reads_only_that_block(self) -> None:
         self.assertEqual(
             ce.parse_section(TOML, MKT, {"source_type", "source"}),

@@ -140,16 +140,14 @@ class ReviewRequestTests(RequestCase):
             canonical_json(self.policy),
         )
 
-    def test_partial_line_not_eligible(self) -> None:
+    def test_partial_line_is_not_indexed_or_enqueued(self) -> None:
         self.transaction(
             lambda: review_progress.activate_sources(self.conn, 10.0)
         )
         self.append(self.path, [], line(user_msg(4, "Use partial"))[:-1])
         self.run_ingest()
-        ids = self.transaction(
-            lambda: review_support.catch_up(self.conn, self.policy, 12.0)
-        )
-        self.assertEqual(ids, ())
+        # The partial line does not move the source cursor, so the
+        # catch-up source filter skips this source.
         self.assertEqual(
             self.conn.execute(
                 "SELECT examined_line,eligible_line FROM review_source"

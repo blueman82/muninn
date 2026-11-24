@@ -136,9 +136,7 @@ class WrapperTest(WrapperFixture):
         selected = self.lib / "python"
         selected.write_text(
             '#!/bin/sh\nwhile [ "${1:-}" = -E ] || [ "${1:-}" = -s ] || '
-            '[ "${1:-}" = -B ]; do shift; done\n'
-            'if [ "$2" = "import sys; print(sys.platform)" ]; '
-            "then echo linux; exit 0; fi\nexit 1\n"
+            '[ "${1:-}" = -B ]; do shift; done\nexit 1\n'
         )
         selected.chmod(0o755)
         env_python = root / ".venv/bin/python3"
@@ -166,13 +164,7 @@ class WrapperTest(WrapperFixture):
         target.write_text(
             '#!/bin/sh\nwhile [ "${1:-}" = -E ] || [ "${1:-}" = -s ] || '
             '[ "${1:-}" = -B ]; do shift; done\n'
-            'if [ "$2" = "import sys; print(sys.platform)" ]; '
-            "then echo linux; exit 0; fi\n"
-            'expected=$EXPECTED_VENV_PY\ncase "$expected" in [A-Za-z]:/*) '
-            'expected=$(cygpath -u "$expected") && [ -n "$expected" ] || { '
-            'echo "alias expected path conversion failed" >> '
-            f"{shlex.quote(self.log.as_posix())}; "
-            "exit 1; }; esac\n"
+            "expected=$EXPECTED_VENV_PY\n"
             '[ "$0" = "$expected" ] || { '
             'printf "alias target mismatch: actual=%s expected=%s\\n" '
             f'"$0" "$expected" >> {shlex.quote(self.log.as_posix())}; '

@@ -37,10 +37,10 @@ Check = Callable[[str, bool | None, str], None]
 
 
 def health_report_command(ctx: Ctx) -> str:
-    """Format a copyable health-report command for the active shell.
+    """Format a copyable health-report command.
 
     Args:
-        ctx: Installer paths and target platform.
+        ctx: Installer paths.
 
     Returns:
         A command that runs doctor from the installed executable.

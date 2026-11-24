@@ -290,7 +290,6 @@ def _codex_observation(ctx: Ctx) -> tuple[str, tuple[str, ...]]:
         env = dict(
             os.environ,
             HOME=str(ctx.home),
-            USERPROFILE=str(ctx.home),
             CODEX_HOME=str(ctx.codex_home),
         )
         done = ctx.run(codex_argv(ctx, "--version"), env=env)

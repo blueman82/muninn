@@ -172,7 +172,7 @@ A single typed view keeps its fields at this JSON object's root, with the same n
 | `muninn learn retry R_ID` | Explicit restart of the same `request`, with cancelled `requests` when current guards permit. Completed `requests` keep their receipt/`state` without a different commit. |
 `REF` for learning is an indexed `provider:thread_id` or an unambiguous session root.
 `Request` creation is admission, not completed `review`.
-Missing or invalid installed frozen policy refuses with `review_policy_required`.
+While learning is off, `muninn learn request` refuses with `review_policy_required`. Run `muninn learn on` first.
 
 
 `ProposalInput` contains only `request_id` and `result`.
@@ -180,7 +180,7 @@ Missing or invalid installed frozen policy refuses with `review_policy_required`
 Use `evidence` IDs from this request's admitted information.
 IDs, claims and local files confer no owner authority.
 
-Proposal claims and fences the request's current `attempt` without taking supervisor ownership.
+Proposal claims and fences the request's current `attempt`.
 It checks physical `evidence`, revision, and generation again before atomic commit.
 Claim and commit use different writer roots: intervening erasure or cancellation can refuse the commit.
 A correct receipt records `request_id`, `attempt_id`, `applied` revision pairs, `unresolved_ids`, `committed_at`, `outcome` and nullable `no_change_reason`.
@@ -432,8 +432,6 @@ A later read over its allowance fails the request with `evidence_limit`.
 |---|---|
 | `deadline` | The review exceeded its time limit. Muninn retries within the attempt limit. |
 | `unavailable` | The model program did not finish. Muninn retries within the attempt limit. |
-| `auth` | The model program is not signed in. Sign in, then run `muninn learn retry R_ID`. |
-| `budget` | The review budget was used up. |
 | `config` | Muninn has no safe cause for this failure. Run `muninn doctor --pretty`. |
 | `source_unavailable` | The source transcript is no longer an indexed active primary source. Index it again. Do not retry unchanged. |
 | `review_policy_required` | The review policy changed while the request waited. Do not retry unchanged. |
@@ -619,7 +617,8 @@ Each check has four fields:
 | `detail` | A short string with the meaning given below. Empty when there is nothing to add. |
 
 A null `launchd_job` result does not prove that the service runs.
-It reports constant codes when observation fails: `launchctl_unavailable`, `launchctl_timeout`, `launchctl_failed`, `launchctl_pid_unavailable`, `process_inspection_unavailable`, `process_inspection_timeout`, `process_inspection_failed` and `process_pid_unverified`.
+It reports constant codes when observation fails: `launchctl_unavailable`, `launchctl_pid_unavailable`, `process_inspection_unavailable`, `process_inspection_timeout`, `process_inspection_failed` and `process_pid_unverified`.
+When `launchctl print` times out or fails, the result is `false` at error level, with `launchctl_timeout` or `launchctl_failed`.
 Each native command has a 60 second limit, and no native message or command line is reported.
 Exit 0 means only that no error-level check is `false`.
 If doctor reports a stopped service, start it with the system service manager.
@@ -805,7 +804,7 @@ The status's content is not logged.
 Prompt recall adds a human-facing line only when a 50-`delivery` `review` is due.
 
 End/PreCompact capture admission is different from startup refresh.
-An installed learning policy is necessary.
+Learning must be on. While it is off, the hook stores no window; run `muninn learn on` to turn it on.
 Muninn acknowledges only a durable `request`.
 If SQLite is busy, the hook reports an empty response and logs `review_enqueue_busy` without content.
 
@@ -841,7 +840,7 @@ A new service start is not necessary.
 These mode files control prompt recall only.
 They do not block SessionEnd or PreCompact capture.
 They do not block an approved learning runner.
-Experimental learning needs its policy, host, `capability` and admission checks.
+Learning runs only while it is on (`muninn learn on`) and its admission checks pass.
 
 If no mode file exists, automatic prompt previews stay on.
 Learning can continue when its checks pass.

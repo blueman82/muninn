@@ -96,7 +96,7 @@ def run(argv: Sequence[object]) -> subprocess.CompletedProcess[bytes]:
     """
     args = [str(a) for a in argv]
     try:
-        # A backstop for a hung tool; a cold PowerShell start can be slow.
+        # A backstop for a hung tool.
         return subprocess.run(args, capture_output=True, timeout=60)
     except (FileNotFoundError, subprocess.TimeoutExpired) as error:
         code = 127 if isinstance(error, FileNotFoundError) else 124

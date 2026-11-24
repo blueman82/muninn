@@ -1068,7 +1068,7 @@ Muninn also distinguishes the agent's own report from that `evidence`.
 
 Muninn's offline replay and learning `evaluation` have `independent` labels and different test families.
 They also have unchanged tests withheld from design work.
-The current procedural-paraphrase fixture includes literal, reworded, and omitted exposure to advice.
+The procedural-paraphrase fixture (removed; see the pinned link below) included literal, reworded, and omitted exposure to advice.
 Do not report these controls as missing.
 
 Add tests for a procedure that depends on condition A for success.
@@ -1091,7 +1091,7 @@ This adds test coverage.
 It does not prove a runtime defect or measured benefit.
 Keep the current terse extraction prompt unless controlled `evaluation` finds a repeatable quality problem.
 
-Muninn sources used to compare: [content models](../muninn/knowledge_models.py), [recall `review`](../muninn/cli_recall_review.py), [learning `evaluation`](../tools/learning_eval/pilot.py), and [procedural-paraphrase fixture](../tests/fixtures/learning/procedural-paraphrase.json).
+Muninn sources used to compare: [content models](../muninn/knowledge_models.py), [recall `review`](../muninn/cli_recall_review.py), [learning `evaluation`](https://github.com/blueman82/muninn/blob/a6a9a158c692e6efbd61af471b07de91b7b3ab1a/tools/learning_eval/pilot.py), and [procedural-paraphrase fixture](https://github.com/blueman82/muninn/blob/bd034b3139701145b2ad2e5f93350681a07fbf33/tests/fixtures/learning/procedural-paraphrase.json).
 
 HyperSkill sources, pinned to the inspected checkout:
 

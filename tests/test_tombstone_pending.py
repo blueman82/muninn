@@ -295,7 +295,7 @@ class PendingTombstoneTests(unittest.TestCase):
         with self.assertRaises(NotADirectoryError):
             tombstones.require_current_tombstones(self.conn, parent)
 
-    def test_windows_missing_child_under_file_never_means_absent(self) -> None:
+    def test_missing_child_under_file_never_means_absent(self) -> None:
         parent = self.home / "invalid-parent"
         parent.write_bytes(b"synthetic")
         journal = parent / TOMBSTONE_FILE
@@ -304,7 +304,7 @@ class PendingTombstoneTests(unittest.TestCase):
 
         def missing(path: Path) -> os.stat_result:
             if path == journal:
-                raise FileNotFoundError("Windows invalid-parent result")
+                raise FileNotFoundError("synthetic missing journal")
             return original(path)
 
         for operation in (

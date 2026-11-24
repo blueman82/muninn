@@ -15,7 +15,7 @@ def installed(ctx: Ctx, provider: str) -> bool:
     """Check native apps, including a standalone Codex CLI on macOS.
 
     Args:
-        ctx: Installation home and native platform.
+        ctx: Installation home.
         provider: Claude, Codex or Cursor's lowercase provider name.
 
     Returns:

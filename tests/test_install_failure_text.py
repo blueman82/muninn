@@ -58,19 +58,28 @@ def first_text(node: ast.Call) -> str:
 
 
 def installer_codes() -> set[str]:
-    """Collect the constant refusal codes that install/ can raise.
+    """Collect the constant refusal codes that the installer can print.
+
+    ``install/current_store.py`` passes on the code of each
+    ``StoreUnavailableError`` from the store modules, so those count too.
 
     Returns:
-        The code of each ``StepFailedError`` call with a constant first
-        argument, without the detail after the first colon.
+        The code of each ``StepFailedError`` or ``StoreUnavailableError``
+        call with a constant first argument, without the detail after the
+        first colon.
     """
     codes: set[str] = set()
-    for path in sorted((ROOT / "install").glob("*.py")):
+    paths = sorted((ROOT / "install").glob("*.py"))
+    paths += [ROOT / "muninn/store.py", ROOT / "muninn/store_copy.py"]
+    for path in paths:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            if call_name(node) != "StepFailedError":
+            if call_name(node) not in {
+                "StepFailedError",
+                "StoreUnavailableError",
+            }:
                 continue
             code = first_text(node).split(":")[0].strip()
             if CODE.fullmatch(code):

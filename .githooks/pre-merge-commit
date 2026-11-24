@@ -13,8 +13,7 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX \
 cd "$root"
 python=${MUNINN_PYTHON:-}
 if [ -z "$python" ]; then
-  for candidate in "$root/.venv/bin/python3.13" \
-    "$root/.venv/Scripts/python.exe"; do
+  for candidate in "$root/.venv/bin/python3.13"; do
     if [ -x "$candidate" ]; then
       python=$candidate
       break

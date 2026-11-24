@@ -249,7 +249,6 @@ class RefusalTest(UninstallCase):
         self.addCleanup(os.umask, os.umask(PRIVATE_UMASK))
         env = {
             "HOME": str(self.w.home),
-            "USERPROFILE": str(self.w.home),
             "CODEX_HOME": str(self.w.home / ".codex"),
             "CLAUDE_CONFIG_DIR": str(self.w.home / ".claude"),
         }

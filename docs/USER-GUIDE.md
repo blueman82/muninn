@@ -59,7 +59,7 @@ To upgrade, do these steps:
 6. Run `bin/muninn-install`.
 7. Run `muninn doctor --pretty`, and make sure that it shows no error.
 
-If the installer tells you to start the computer again, do that. Then run the same command again. If the installer prints `FAILED:` and a code, find the code in [Fix a problem](#fix-a-problem).
+If the installer prints `FAILED:` and a code, do the steps under `What to do:` that the installer prints after the code.
 
 ## Fix a problem
 

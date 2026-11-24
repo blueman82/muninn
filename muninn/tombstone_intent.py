@@ -171,7 +171,7 @@ def read_journal(home: Path) -> Generator[IntentRow]:
     try:
         discovered = path.lstat()
     except FileNotFoundError:
-        # Windows also reports a missing child when its parent is a file.
+        # A missing journal is valid only inside a data directory.
         if not stat.S_ISDIR(home.stat().st_mode):
             raise NotADirectoryError("erasure_journal_parent") from None
         return
