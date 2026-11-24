@@ -16,7 +16,6 @@ from unittest import mock
 
 from muninn import obs, obs_stats, review_evidence
 from muninn.query.index_age import ALIVE_AT, freshness
-from tests import review_support
 from tests.ingest_support import rollout
 from tests.store_support import assert_private
 from tests.test_classify import reply, user_msg
@@ -212,7 +211,7 @@ class StatusTests(ObsCase):
 
     def test_install_sha(self) -> None:
         home = Path(tempfile.mkdtemp(dir=self.home))
-        env = {"HOME": str(home), "USERPROFILE": str(home)}
+        env = {"HOME": str(home)}
         self.assertIsNone(obs.install_sha(env))
         lib = home / ".local/lib/muninn"
         (lib / "abc1234").mkdir(parents=True)
@@ -330,11 +329,8 @@ class ReviewProvenanceTests(ReviewReceiptCase):
         self.write(rollout(), self.records)
         self.assertEqual(self.path.stat().st_size, size)
         self.run_ingest()
-        # The rewrite adds no line, so catch-up gives this source no turn.
-        ids = self.transaction(
-            lambda: review_support.catch_up(self.conn, self.policy, 18.0)
-        )
-        self.assertEqual(ids, ())
+        # The rewrite adds no line, so the catch-up source filter skips
+        # this source. The receipt stays, and the coverage is lost.
         self.assertEqual(self.counts(), (2, 0))
         for key in ("review_capture_gaps", "review_coverage_gaps"):
             self.assertIs(self.gaps()[key]["ok"], False)

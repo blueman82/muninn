@@ -35,10 +35,7 @@ class FreshIngestTests(unittest.TestCase):
         self.source("b", self.gone)
         env = mock.patch.dict(
             os.environ,
-            {
-                "HOME": str(self.world.home),
-                "USERPROFILE": str(self.world.home),
-            },
+            {"HOME": str(self.world.home)},
         )
         env.start()
         self.addCleanup(env.stop)

@@ -71,7 +71,7 @@ class AgentPathTests(CliLearningCase):
             "UPDATE knowledge_version SET expiry_json=? WHERE knowledge_id=?",
             (json.dumps(expiry), ids[0]),
         )
-        # Long temporary paths (Windows) do not fit the default test cap.
+        # Long temporary paths do not fit the default test cap.
         self.policy = self.policy.model_copy(update={"context_bytes": 12000})
         use_policy(self, self.policy)
         return ids[0], ids[1]

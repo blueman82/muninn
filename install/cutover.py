@@ -1,4 +1,4 @@
-"""Prepare governed stores without inferring legacy containment authority."""
+"""Make the store of a fresh install, or check the current store."""
 
 from __future__ import annotations
 
@@ -140,7 +140,6 @@ def ingest_transcripts(ctx: Ctx) -> ingest.PassStats:
     roots = ingest.default_roots(
         {
             "HOME": str(ctx.home),
-            "USERPROFILE": str(ctx.home),
             "CODEX_HOME": str(ctx.codex_home),
             "CLAUDE_CONFIG_DIR": str(ctx.settings.parent),
         }

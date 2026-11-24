@@ -93,7 +93,7 @@ is flagged in the hook block; every CLI answer carries the poller's state.
   then at most 3 earlier prompt/reply events from this repo, excluding the caller's session. UTF-8 caps:
   1,500 bytes (Codex 900). Prompts with fewer than 3 query terms or starting `/` are skipped.
 - SessionEnd and PreCompact (`muninn hook session-end|pre-compact --provider claude|codex|cursor`) enqueue bounded
-  windows under installed policy. A busy enqueue returns a safe envelope, with a content-free diagnostic;
+  windows while learning is on (`muninn learn on`). A busy enqueue returns a safe envelope, with a content-free diagnostic;
   recovery cannot prove the exact missed cutoff. Cursor resume/postcompact injection remains unproven:
   explicitly run `muninn know context` to refresh. Already injected context cannot be retracted.
 

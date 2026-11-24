@@ -258,7 +258,7 @@ Cursor has individual native `sessionStart`, `sessionEnd` and `preCompact` handl
 
 Startup refresh binds the native workspace independently of history capture.
 sessionEnd imports the specified ended conversation without `message_count` as a prerequisite.
-End/precompact enqueue bounded learning windows only with an admitted frozen policy.
+End/precompact enqueue bounded learning windows only while learning is on (`muninn learn on`).
 Busy or unavailable capture gets no acknowledgment of durable storage.
 Recovery cannot prove the specified missed notification or cutoff.
 

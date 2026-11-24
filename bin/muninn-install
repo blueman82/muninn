@@ -208,7 +208,7 @@ HELP
     fi
     exit 0
     ;;
-  --check | "" | --learning-scope | --enable-learning) ;;
+  --check | "") ;;
   *)
     ensure_runtime "$check_mode"
     if [ "$check_mode" != --check ]; then

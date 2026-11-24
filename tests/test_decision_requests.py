@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from muninn import decision_requests
+from muninn import decision_requests, review_requests
 from muninn.decision_write import submit_intent
-from muninn.review_progress import advance_completed
+from muninn.review_progress import advance_completed, unsuppressed_window
 from tests import review_support
 from tests.decision_support import DecisionCase
 from tests.test_classify import user_msg
@@ -119,6 +119,32 @@ class DecisionRequestTests(DecisionCase):
                 (candidate.id,),
             )[0]
         )
+
+    def test_cancelled_application_does_not_suppress_its_window(
+        self,
+    ) -> None:
+        candidate = self.stage()
+        self.approve(self.intent(candidate.id))
+        application = self.application(candidate.id)
+        window = self.row(
+            "SELECT from_line,through_line FROM review_request WHERE id=?",
+            (application,),
+        )
+        owner_window = self.window(window[0], window[1])
+        progress = tuple(self.row("SELECT * FROM review_source"))
+        self.transaction(
+            lambda: review_requests.cancel_request(
+                self.conn, application, 26.0
+            )
+        )
+        self.assertEqual(
+            unsuppressed_window(self.conn, owner_window), owner_window
+        )
+        self.transaction(
+            lambda: advance_completed(self.conn, owner_window.source, 27.0)
+        )
+        after = self.row("SELECT * FROM review_source")
+        self.assertEqual(tuple(after)[:-1], progress[:-1])
 
     def test_approval_revisions_have_separate_requests(self) -> None:
         candidate = self.stage()

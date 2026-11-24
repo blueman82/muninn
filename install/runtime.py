@@ -94,7 +94,7 @@ def prepare_runtime(ctx: Ctx, release: Path) -> Path:
         # Cached releases are immutable, including a failed partial candidate.
         verify_runtime(python, release)
         return python
-    env = dict(os.environ, HOME=str(ctx.home), USERPROFILE=str(ctx.home))
+    env = dict(os.environ, HOME=str(ctx.home))
     commands = (
         [sys.executable, "-I", "-B", "-m", "venv", release / ".venv"],
         [

@@ -44,7 +44,7 @@ def render_pinned(ctx: Ctx, relative: str, data: bytes) -> bytes:
     """Render a pinned template without substituting raw bytes into JSON.
 
     Args:
-        ctx: Explicit installation home and platform.
+        ctx: Installation home.
         relative: Repository-relative template path.
         data: Original committed template bytes.
 

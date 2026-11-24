@@ -134,7 +134,7 @@ Update `owner_instructions` (decision_words.py:19-33) and both `skills/muninn-kn
 
 ## Test impact
 
-- tests/fixtures/learning/cases.json: 0 flip (verified, script; its 51 `untrusted` are non-owner).
+- `a1816d4e^1:tests/fixtures/learning/cases.json` (removed): 0 flip (verified, script; its 51 `untrusted` are non-owner).
 - tests/test_review_authority.py: 2 of 4 tests, 61 subtests flip (verified by reading :49-108).
 - tests/test_review_authority_commit.py:74-127: full-field cases (passage `None`) flip to
   saved; partial-span cases stay rejected (inferred).

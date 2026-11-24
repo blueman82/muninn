@@ -155,7 +155,6 @@ class AsideFileTests(EraseCase):
         argv = ["/bin/sh", "-c", command]
         env = os.environ | {
             "HOME": str(self.tmp),
-            "USERPROFILE": str(self.tmp),
             "CODEX_HOME": str(self.tmp / "codex"),
             "MUNINN_HOME": str(self.home),
         }

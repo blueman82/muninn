@@ -60,7 +60,6 @@ Use its admitted `evidence` IDs and the strict note/`guide` change shape from `d
 
 Files and claimed IDs cannot grant owner authority.
 Proposal claims and fences the current local `attempt` with the current generation.
-It does not change supervisor ownership.
 It checks `evidence` and revisions again, then reports a checked receipt.
 
 It invokes no model.
@@ -79,7 +78,7 @@ The proof is the full cited messages. Context, search, and recall show the proof
 List and show print the full proof (`proofs`, `proof`) beside the claim text.
 
 `know add`, `know check`, previous tags/confidence/contradiction/loop flags, and ID coercion have no active interface.
-A missing installed admitted frozen policy refuses with `review_policy_required`.
+While learning is off, learning requests refuse with `review_policy_required`. Run `muninn learn on` first.
 Do not invent runner or model settings.
 Writer exit 3 means busy.
 

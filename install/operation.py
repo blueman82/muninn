@@ -25,7 +25,23 @@ def _unsafe(info: os.stat_result) -> bool:
 
 @contextmanager
 def operation(ctx: Ctx) -> Generator[OperationCheck]:
-    """Serialize mutating installer entries behind one private lock."""
+    """Hold the private install lock for one mutating installer entry.
+
+    A dry run takes no lock.
+
+    Args:
+        ctx: The run context.
+
+    Yields:
+        A check that refuses when the lock file was replaced.
+
+    Raises:
+        StepFailedError: ``install_root_unsafe`` if the release folder is
+            not a private real folder of this user,
+            ``install_lock_unsafe`` if the lock file is not private, not a
+            plain file, or has more than one link, and
+            ``install_lock_changed`` if the lock file changes.
+    """
     if ctx.dry_run:
         yield lambda: (0, 0)
         return
@@ -59,7 +75,20 @@ def operation(ctx: Ctx) -> Generator[OperationCheck]:
 
 
 def check_lock(path: Path, identity: tuple[int, int]) -> tuple[int, int]:
-    """Refuse a substituted lock pathname while retaining the original fd."""
+    """Check that the lock path still names the locked file.
+
+    Args:
+        path: The lock file path.
+        identity: The device and inode of the locked file.
+
+    Returns:
+        The unchanged identity.
+
+    Raises:
+        StepFailedError: ``install_lock_changed`` if the path now names
+            another file, or the file is not private or not a plain
+            single-link file.
+    """
     found = path.lstat()
     if (
         _unsafe(found)

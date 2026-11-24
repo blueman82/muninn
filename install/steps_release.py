@@ -409,7 +409,6 @@ def installed_env(ctx: Ctx, **extra: str) -> dict[str, str]:
     return muninn_env(
         ctx.data,
         HOME=str(ctx.home),
-        USERPROFILE=str(ctx.home),
         CODEX_HOME=str(ctx.codex_home),
         CLAUDE_CONFIG_DIR=str(ctx.settings.parent),
         **extra,

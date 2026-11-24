@@ -1,4 +1,4 @@
-"""Observe terminal POSIX group membership without releasing its leader."""
+"""Observe terminal Darwin group membership without releasing its leader."""
 
 from __future__ import annotations
 

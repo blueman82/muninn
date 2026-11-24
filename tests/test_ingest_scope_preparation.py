@@ -28,9 +28,7 @@ class PreparationTests(IngestCase, ScopeCase):
 
     def setUp(self) -> None:
         super().setUp()
-        patcher = mock.patch.dict(
-            os.environ, {"HOME": str(self.home), "USERPROFILE": str(self.home)}
-        )
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.repo = self.tmp / "repo"

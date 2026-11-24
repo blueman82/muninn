@@ -1,4 +1,4 @@
-"""Publish a verified install and retire superseded recovery records."""
+"""Finish a verified install and write its install record."""
 
 from __future__ import annotations
 
@@ -12,7 +12,22 @@ from install.steps_release import sweep
 
 
 def complete(ctx: Ctx, rec: Record) -> Record:
-    """Retain recovery authority and publish the verified final outcome."""
+    """Finish a verified install and write the ``ok`` install record.
+
+    It deletes the release folders that ``prune`` moved aside, keeps each
+    store archive, and on an upgrade removes the run record folder.
+
+    Args:
+        ctx: The run context.
+        rec: The run record.
+
+    Returns:
+        The run record, marked complete.
+
+    Raises:
+        OSError: If the run record folder cannot be removed or the record
+            cannot be written.
+    """
     rec["sweep_failed"] = sweep(ctx)
     discard(ctx, rec)
     if ctx.upgrade and not ctx.dry_run:

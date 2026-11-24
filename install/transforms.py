@@ -32,21 +32,7 @@ def ours(group: Mapping[str, Any]) -> bool:
 def handler_ours(handler: Mapping[str, Any]) -> bool:
     """Recognize an installed Muninn handler without taking a foreign one."""
     command = handler.get("command", "")
-    if re.search(
-        r"/\.local/bin/muninn['\"]? hook ", command.replace("\\", "/")
-    ):
-        return True
-    arguments = handler.get("args", [])
-    return (
-        any(
-            str(argument)
-            .replace("\\", "/")
-            .casefold()
-            .endswith("/muninn/bin/muninn.ps1")
-            for argument in arguments
-        )
-        and "hook" in arguments
-    )
+    return bool(re.search(r"/\.local/bin/muninn['\"]? hook ", command))
 
 
 def foreign_groups(
