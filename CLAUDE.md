@@ -97,6 +97,6 @@ Changes must satisfy these rules. A change to the policy needs an ADR. These rul
 
 - Installer tests use the fakes in `tests/test_installer.py`. The fakes stop changes to the HOME of the user, native services and provider config.
 
-- `.claude/skills/muninn-*` and `.codex/skills/muninn-*` mirror the CLI commands. Keep them equal to `docs/REFERENCE.md`.
+- `.codex/skills/muninn-*` mirror the CLI commands. Keep them equal to `docs/REFERENCE.md`. Each `.claude/skills/muninn-*` is a symbolic link to its `.codex` folder, except `muninn-erase`, which has two copies.
 
 - The frame text of SessionStart and UserPromptSubmit stays minimal and does not name the skills.
