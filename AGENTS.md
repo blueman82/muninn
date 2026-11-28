@@ -34,9 +34,9 @@ These are instructions for coding agents that work in this repository. Also use 
 
 - `integrations/` and `launchd/` hold templates with a literal `@HOME@`. `install/lifecycle.py` makes the launchd service.
 
-- `.codex/skills/muninn-*` hold one skill for each user command. Each `.claude/skills/muninn-*` is a symbolic link to the `.codex` folder, so one copy exists. `muninn-erase` is the one exception: its front matter differs, so it has two copies.
+- `.codex/skills/muninn-*` hold one skill for each user command. Each `.claude/skills/muninn-*` is a symbolic link to the `.codex` folder, so one copy exists. `muninn-erase` has two copies, because its first lines are different for each tool.
 
-- A command, flag or answer field can change. Then update the `.codex` skill and `docs/REFERENCE.md` together. Update both `muninn-erase` copies.
+- A command, flag or answer field can change. Then update the `.codex` skill and `docs/REFERENCE.md` together. Update the two `muninn-erase` copies.
 
 - `docs/` holds the manual, the start guide, troubleshooting, architecture and `adr/` (the decisions).
 
